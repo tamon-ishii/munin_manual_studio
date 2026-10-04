@@ -92,6 +92,7 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
         "editor-read",
         "editor-save",
         "editor-preview",
+        "page-tasks",
         "create-folder",
         "save-asset",
         "scenario-run",
@@ -262,6 +263,11 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
             page_opt.ok_or("editor-preview requires --page")?,
             body_opt.ok_or("editor-preview requires --body")?,
         ),
+        "page-tasks" => serde_json::to_string(&task::tasks_for_page(
+            root,
+            page_opt.ok_or("page-tasks requires --page")?,
+        )?)
+        .map_err(|error| error.to_string()),
         "create-folder" => Ok(editor::create_folder(
             root,
             path_opt.ok_or("create-folder requires --path")?,
@@ -983,6 +989,91 @@ mod tests {
     }
 
     #[test]
+    fn page_tasks_reads_case_sensitive_root_readme_outside_targets() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(
+            root.join("Readme.md"),
+            "# Keep this\n\n<!-- ai:task id=readme-task kind=text\nSummarize\n-->\n",
+        )
+        .unwrap();
+        fs::write(root.join("docs/index.md"), "# Docs\n").unwrap();
+        save_settings(
+            root,
+            "docs",
+            "manual",
+            "",
+            "codex",
+            "",
+            "mkdocs",
+            "",
+            Some(&["docs".to_string()]),
+        )
+        .unwrap();
+
+        assert!(task::tasks_for_config(root, &read_config(root))
+            .unwrap()
+            .is_empty());
+        let direct = task::tasks_for_page(root, "Readme.md").unwrap();
+        assert_eq!(direct.len(), 1);
+        assert_eq!(direct[0].page, "Readme.md");
+        let through_action: Vec<task::Task> =
+            serde_json::from_str(&run(root, "page-tasks", &[("--page", "Readme.md")]).unwrap())
+                .unwrap();
+        assert_eq!(through_action, direct);
+
+        let task = direct[0].clone();
+        update_task_in_docs(&root.join("docs"), &task, "Generated body", None).unwrap();
+        let updated = fs::read_to_string(root.join("Readme.md")).unwrap();
+        assert!(updated.starts_with("# Keep this\n\n<!-- ai:task"));
+        assert!(updated.contains("Generated body"));
+    }
+
+    #[test]
+    fn page_tasks_rejects_duplicate_and_malformed_explicit_ids() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        save_settings(
+            root,
+            "docs",
+            "manual",
+            "",
+            "codex",
+            "",
+            "mkdocs",
+            "",
+            Some(&["docs".to_string()]),
+        )
+        .unwrap();
+
+        let page = root.join("Readme.md");
+        fs::write(
+            &page,
+            "<!-- ai:task id=same kind=text\nOne\n-->\n<!-- ai:task id=same kind=text\nTwo\n-->\n",
+        )
+        .unwrap();
+        assert!(task::tasks_for_page(root, "Readme.md")
+            .unwrap_err()
+            .contains("Duplicate task ID"));
+
+        fs::write(&page, "<!-- ai:task id=BAD kind=text\nPrompt\n-->\n").unwrap();
+        assert!(task::tasks_for_page(root, "Readme.md")
+            .unwrap_err()
+            .contains("Invalid task ID"));
+
+        fs::write(
+            &page,
+            "<!-- ai:generated kind=text -->\nBody\n<!-- /ai:generated -->\n",
+        )
+        .unwrap();
+        assert!(task::tasks_for_page(root, "Readme.md")
+            .unwrap_err()
+            .contains("Missing id"));
+    }
+
+    #[test]
     fn test_init_template_manual() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
@@ -1511,26 +1602,45 @@ mod tests {
         let docs = root.join("docs");
         fs::create_dir_all(docs.join("assets")).unwrap();
         let old_asset = docs.join("assets/marked.png");
-        let old_background = image::RgbaImage::from_pixel(100, 80, image::Rgba([255, 255, 255, 255]));
+        let old_background =
+            image::RgbaImage::from_pixel(100, 80, image::Rgba([255, 255, 255, 255]));
         let mut old_png = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(old_background).write_to(&mut old_png, image::ImageFormat::Png).unwrap();
+        image::DynamicImage::ImageRgba8(old_background)
+            .write_to(&mut old_png, image::ImageFormat::Png)
+            .unwrap();
         let scene = r#"{"canvas":{"width":100,"height":80},"annotations":[{"type":"rect","target":[10,10,30,20],"style":"danger"}]}"#;
         let marked = markits::raster::render_composed_png_bytes(scene, old_png.get_ref()).unwrap();
-        let marked = markits::raster::embed_png_text_chunk(&marked, "markits:annotations", scene).unwrap();
+        let marked =
+            markits::raster::embed_png_text_chunk(&marked, "markits:annotations", scene).unwrap();
         fs::write(&old_asset, marked).unwrap();
         fs::write(docs.join("index.md"), "<!-- ai:generated id=top-shot kind=screenshot -->\n![画面](assets/marked.png)\n<!-- /ai:generated -->\n").unwrap();
         let new_capture = root.join("capture.png");
-        let fresh_background = image::RgbaImage::from_pixel(100, 80, image::Rgba([255, 255, 255, 255]));
-        image::DynamicImage::ImageRgba8(fresh_background).save(&new_capture).unwrap();
+        let fresh_background =
+            image::RgbaImage::from_pixel(100, 80, image::Rgba([255, 255, 255, 255]));
+        image::DynamicImage::ImageRgba8(fresh_background)
+            .save(&new_capture)
+            .unwrap();
 
         author::record_screenshot(root, "top-shot", &new_capture).unwrap();
 
         let output = fs::read(docs.join("assets/capture.png")).unwrap();
-        let annotations = markits::raster::read_png_text_chunk(&output, "markits:annotations").unwrap().unwrap();
+        let annotations = markits::raster::read_png_text_chunk(&output, "markits:annotations")
+            .unwrap()
+            .unwrap();
         let annotations: serde_json::Value = serde_json::from_str(&annotations).unwrap();
         let target = annotations["annotations"][0]["target"].as_array().unwrap();
-        assert_eq!(target.iter().map(|value| value.as_f64().unwrap()).collect::<Vec<_>>(), vec![10.0, 10.0, 30.0, 20.0]);
-        assert!(markits::raster::read_png_text_chunk(&output, "markits:source_image").unwrap().is_some());
+        assert_eq!(
+            target
+                .iter()
+                .map(|value| value.as_f64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![10.0, 10.0, 30.0, 20.0]
+        );
+        assert!(
+            markits::raster::read_png_text_chunk(&output, "markits:source_image")
+                .unwrap()
+                .is_some()
+        );
         let pixels = image::load_from_memory(&output).unwrap().to_rgba8();
         assert_ne!(pixels.get_pixel(15, 15), &image::Rgba([255, 255, 255, 255]));
         let markdown = fs::read_to_string(docs.join("index.md")).unwrap();
@@ -2315,5 +2425,58 @@ mod tests {
             parsed.views[0].elements[0].selector,
             "button[name=\"送信\"]"
         );
+    }
+
+    #[test]
+    fn test_clean_generated_body_unwraps_tags() {
+        assert_eq!(
+            task::clean_generated_body("普通の文章です。"),
+            "普通の文章です。"
+        );
+        assert_eq!(
+            task::clean_generated_body(
+                "<!-- ai:generated id=foo kind=text -->\n生成された本文\n<!-- /ai:generated -->"
+            ),
+            "生成された本文"
+        );
+        assert_eq!(
+            task::clean_generated_body(
+                "<!-- ai:task id=foo kind=text\n指示内の本文\n-->"
+            ),
+            "指示内の本文"
+        );
+        // Nested unwrapping
+        assert_eq!(
+            task::clean_generated_body(
+                "<!-- ai:generated id=foo -->\n<!-- ai:task id=foo -->\n二重の本文\n<!-- /ai:generated -->"
+            ),
+            "二重の本文"
+        );
+    }
+
+    #[test]
+    fn test_update_task_in_docs_unwraps_wrapped_ai_answers() {
+        let tmp = tempdir().unwrap();
+        let docs = tmp.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        let page = docs.join("guide.md");
+        fs::write(
+            &page,
+            "# ガイド\n\n<!-- ai:task id=guide-text kind=text\nガイドの説明文\n-->\n",
+        )
+        .unwrap();
+        let target_task = task::find_task(&docs, "guide-text").unwrap();
+
+        // AI accidentally wraps its answer in <!-- ai:generated -->
+        let wrapped_answer = "<!-- ai:generated id=guide-text kind=text -->\nAIが作成した可視のガイド本文です。\n<!-- /ai:generated -->";
+        update_task_in_docs(&docs, &target_task, wrapped_answer, None).unwrap();
+
+        let updated = fs::read_to_string(&page).unwrap();
+        // The visible text must NOT be nested inside duplicate comment tags
+        assert!(updated.contains("<!-- ai:generated id=guide-text"));
+        assert!(updated.contains("AIが作成した可視のガイド本文です。"));
+        // Check that there is only one <!-- ai:generated tag and one closing tag
+        assert_eq!(updated.matches("<!-- ai:generated").count(), 1);
+        assert_eq!(updated.matches("<!-- /ai:generated -->").count(), 1);
     }
 }

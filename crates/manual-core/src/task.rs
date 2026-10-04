@@ -146,6 +146,37 @@ pub fn generated_regex() -> Regex {
     ).expect("valid generated regex")
 }
 
+fn validate_generated_markers(
+    page_rel: &str,
+    content: &str,
+    code_blocks: &[std::ops::Range<usize>],
+    task_ranges: &[std::ops::Range<usize>],
+) -> Result<(), String> {
+    let marker_re = Regex::new(r"<!--\s*(?P<close>/)?ai:generated\b[^>]*-->").unwrap();
+    let mut open: Option<usize> = None;
+    for marker in marker_re.find_iter(content) {
+        let range = marker.start()..marker.end();
+        if is_inside_ranges(&range, code_blocks) || is_inside_ranges(&range, task_ranges) {
+            continue;
+        }
+        let is_close = marker_re
+            .captures(marker.as_str())
+            .and_then(|captures| captures.name("close"))
+            .is_some();
+        if is_close {
+            if open.take().is_none() {
+                return Err(format!("Unmatched ai:generated closing tag in page: {page_rel}"));
+            }
+        } else if open.replace(marker.start()).is_some() {
+            return Err(format!("Nested ai:generated tags in page: {page_rel}"));
+        }
+    }
+    if open.is_some() {
+        return Err(format!("Unclosed ai:generated tag in page: {page_rel}"));
+    }
+    Ok(())
+}
+
 pub fn answer_regex() -> Regex {
     Regex::new(
         r"(?s)\A<!-- ai:answer id=(?P<id>[a-z][a-z0-9_-]*) source-sha256=(?P<hash>[a-f0-9]{64}) created-at=(?P<created>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)(?: approved-at=(?P<approved>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z))? -->\n(?P<body>.*)\z",
@@ -298,6 +329,13 @@ pub fn parse_page_tags(
             prompt,
         });
     }
+
+    validate_generated_markers(
+        page_rel,
+        content,
+        &code_blocks,
+        &raw_tasks.iter().map(|task| task.range.clone()).collect::<Vec<_>>(),
+    )?;
 
     let mut raw_gens = Vec::new();
     for cap in g_re.captures_iter(content) {
@@ -478,6 +516,32 @@ pub fn tasks_for_config(root: &Path, config: &ManualConfig) -> Result<Vec<Task>,
     Ok(found)
 }
 
+/// Read AI tasks from one Markdown page, even when the page is not a configured target.
+/// The returned page path is relative to the docs directory when the file lives there,
+/// and project-relative otherwise, matching the paths used by task updates.
+pub fn tasks_for_page(root: &Path, page: &str) -> Result<Vec<Task>, String> {
+    let path = super::editor::document_path(root, page)?;
+    let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let config = read_config(root);
+    let docs = super::config::project_path(root, &config.docs)?;
+    let page_rel = path
+        .strip_prefix(&docs)
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        .or_else(|_| {
+            path.strip_prefix(root)
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut ids = HashSet::new();
+    parse_page_tags(&page_rel, &content, &mut ids).map(|tags| {
+        tags.into_iter()
+            .map(|tag| match tag {
+                PageTag::Task { task, .. } | PageTag::Generated { task, .. } => task,
+            })
+            .collect()
+    })
+}
+
 pub fn tasks(templates: &Path) -> Result<Vec<Task>, String> {
     if let Some(parent) = templates.parent() {
         if parent.join("manual_setting.json").is_file()
@@ -633,6 +697,44 @@ pub fn update_task_prompt(templates: &Path, task_id: &str, prompt: &str) -> Resu
     fs::write(&page_path, updated).map_err(|e| e.to_string())
 }
 
+pub fn clean_generated_body(body: &str) -> String {
+    let mut cleaned = body.trim().to_string();
+    let gen_wrap = Regex::new(
+        r"(?s)\A<!--\s*ai:generated\b[^>]*-->\r?\n?(?P<body>.*?)\r?\n?<!--\s*/ai:generated\s*-->\z",
+    )
+    .unwrap();
+    let task_wrap =
+        Regex::new(r"(?s)\A<!--\s*ai:task\b[^\r\n]*\r?\n?(?P<body>.*?)\r?\n?-->\z").unwrap();
+    let leading_task = Regex::new(r"(?s)\A<!--\s*ai:task\b.*?-->\r?\n?").unwrap();
+    let leading_gen = Regex::new(r"(?s)\A<!--\s*ai:generated\b[^>]*-->\r?\n?").unwrap();
+    let trailing_gen = Regex::new(r"(?s)\r?\n?<!--\s*/ai:generated\s*-->\z").unwrap();
+
+    loop {
+        if let Some(caps) = gen_wrap.captures(&cleaned) {
+            cleaned = caps.name("body").unwrap().as_str().trim().to_string();
+            continue;
+        }
+        if let Some(caps) = task_wrap.captures(&cleaned) {
+            cleaned = caps.name("body").unwrap().as_str().trim().to_string();
+            continue;
+        }
+        if let Some(m) = leading_task.find(&cleaned) {
+            cleaned = cleaned[m.end()..].trim().to_string();
+            continue;
+        }
+        if let Some(m) = leading_gen.find(&cleaned) {
+            cleaned = cleaned[m.end()..].trim().to_string();
+            continue;
+        }
+        if let Some(m) = trailing_gen.find(&cleaned) {
+            cleaned = cleaned[..m.start()].trim().to_string();
+            continue;
+        }
+        break;
+    }
+    cleaned
+}
+
 pub fn update_task_in_docs(
     templates: &Path,
     task: &Task,
@@ -667,10 +769,11 @@ pub fn update_task_in_docs(
         String::new()
     };
     let prompt_attr = format!(" prompt-b64={}", encode_prompt(&task.prompt));
+    let clean_body = clean_generated_body(body);
 
     let replacement = format!(
         "<!-- ai:generated id={task_id} kind={kind} created-at={created}{hash_attr}{prompt_attr}{approved_attr} -->\n{}\n<!-- /ai:generated -->",
-        body.trim()
+        clean_body.trim()
     );
 
     let page_rel = task.page.replace('\\', "/");
@@ -722,7 +825,8 @@ pub fn update_task_in_docs(
 }
 
 pub fn save_answer(generated: &Path, task: &Task, body: &str) -> Result<(), String> {
-    let body = body.trim();
+    let clean_body = clean_generated_body(body);
+    let body = clean_body.trim();
     if body.is_empty() {
         return Err("Answer body is empty".to_string());
     }

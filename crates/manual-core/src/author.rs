@@ -13,7 +13,7 @@ use super::agent::{agent_json, log_progress};
 use super::builder::build;
 use super::config::{project_path, read_config, DEFAULT_BRIEF};
 use super::task::{
-    collect_markdown_files, find_task, parse_page_tags, read_answer, save_answer, tasks_for_config,
+    collect_markdown_files, find_task, parse_page_tags, read_answer, save_answer, tasks_for_page,
     update_task_in_docs, utc_now,
 };
 
@@ -225,7 +225,7 @@ pub fn generate_task(root: &Path, task_id: &str, cli: &str, feedback: &str) -> R
     let mut prompt = format!(
         "Answer this manual task in concise, professional Japanese Markdown. \
         Read {page_hint} as the primary context. Inspect only the source files needed to verify concrete claims; avoid repository-wide exploration unless the instruction requires it. \
-        Verify UI names from source. Return only the pure documentation content. \
+        Verify UI names from source. Return only the pure documentation content. Do not wrap your answer in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. \
         For concrete UI or source claims, add a compact HTML comment immediately after the claim in the form <!-- ai:fact {{\"claim\":\"...\",\"ui\":\"#actual-id\"}} --> or <!-- ai:fact {{\"claim\":\"...\",\"file\":\"relative/path\",\"contains\":\"actual source text\"}} -->. Use only evidence you verified; omit the comment when there is no evidence. \
         Do not include meta notes, disclaimers, notes about AI generation, or source attributions.\n\
         Task ID: {task_id}\nInstruction: {}",
@@ -290,17 +290,8 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
     let generated = root.join("manual").join("ai");
-    let docs_prefix = format!(
-        "{}/",
-        config.docs.trim_matches('/').trim_start_matches("./")
-    );
-    let page_relative = page
-        .strip_prefix(&docs_prefix)
-        .unwrap_or(page)
-        .trim_start_matches("./");
-    let page_tasks: Vec<_> = tasks_for_config(root, &config)?
+    let page_tasks: Vec<_> = tasks_for_page(root, page)?
         .into_iter()
-        .filter(|task| task.page == page || task.page == page_relative)
         .filter(|task| {
             task.status != "approved"
                 && (task.kind == "text" || task.kind == "diagram" || task.kind == "screenshot")
@@ -334,6 +325,7 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
             "Answer the following tasks for the same Markdown page in one pass, in concise professional Japanese Markdown. \
             Read {page} as the primary context. Inspect only source files needed to verify concrete claims; avoid repository-wide exploration unless a task requires it. \
             Return one answer for every ID, with no extra IDs. Verify UI names from source. \
+            Do not wrap answers in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. \
             For concrete UI or source claims, add a compact HTML comment immediately after the claim in the form \
             <!-- ai:fact {{\"claim\":\"...\",\"file\":\"relative/path\",\"contains\":\"actual source text\"}} -->. \
             Use only evidence you verified. Return only documentation content in each markdown field.\nTasks: {}",
@@ -408,7 +400,7 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
             root,
             &format!("{page} の依存図 {} を作成しています", task.id),
         );
-        record_diagram(&templates, &generated, &task.id, cli, root)?;
+        record_diagram_task(&templates, &generated, &task, cli, root)?;
         updated.push(task.id.clone());
     }
     let mut captured = Vec::new();
@@ -474,7 +466,7 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
                 continue;
             }
             log_progress(root, &format!("{} の画面を撮影しています", task.id));
-            match super::capture_source::recapture(root, &task.id) {
+            match super::capture_source::recapture_task(root, &task) {
                 Ok(_) => {
                     captured.push(task.id);
                 }
@@ -500,8 +492,18 @@ pub fn record_screenshot(root: &Path, task_id: &str, image: &Path) -> Result<(),
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
     let task = find_task(&templates, task_id)?;
+    record_screenshot_task(root, &task, image)
+}
+
+pub(crate) fn record_screenshot_task(
+    root: &Path,
+    task: &super::task::Task,
+    image: &Path,
+) -> Result<(), String> {
+    let config = read_config(root);
+    let templates = project_path(root, &config.docs)?;
     if task.kind != "screenshot" {
-        return Err(format!("Task is not a screenshot: {task_id}"));
+        return Err(format!("Task is not a screenshot: {}", task.id));
     }
 
     let abs_image = if image.is_absolute() {
@@ -563,7 +565,10 @@ pub fn record_screenshot(root: &Path, task_id: &str, image: &Path) -> Result<(),
             fs::write(&dest_image, rendered).map_err(|e| e.to_string())?;
             log_progress(
                 root,
-                &format!("{task_id} の前回のMarkIts注釈を新しい撮影画像へ再適用しました"),
+                &format!(
+                    "{} の前回のMarkIts注釈を新しい撮影画像へ再適用しました",
+                    task.id
+                ),
             );
         } else {
             fs::copy(&abs_image, &dest_image).map_err(|e| e.to_string())?;
@@ -721,8 +726,18 @@ pub fn record_diagram(
     project: &Path,
 ) -> Result<(), String> {
     let task = find_task(templates, task_id)?;
+    record_diagram_task(templates, generated, &task, cli, project)
+}
+
+pub(crate) fn record_diagram_task(
+    templates: &Path,
+    generated: &Path,
+    task: &super::task::Task,
+    cli: &str,
+    project: &Path,
+) -> Result<(), String> {
     if task.kind != "diagram" {
-        return Err(format!("Task is not a diagram: {task_id}"));
+        return Err(format!("Task is not a diagram: {}", task.id));
     }
     if !project.is_dir() {
         return Err(format!("Diagram project is missing: {}", project.display()));
