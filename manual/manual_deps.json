@@ -1,0 +1,128 @@
+{
+  "version": "1.1",
+  "updated_at": "2026-10-04T21:12:52Z",
+  "pages": {
+    "README.md": {
+      "path": "README.md",
+      "title": "Munin Manual Studio",
+      "symbols": [
+        "start_manual_studio",
+        "main"
+      ],
+      "ui_elements": [
+        "#build-final",
+        "#build-draft",
+        "#map-refresh",
+        "#ai-agent",
+        "#undo-edit",
+        "#button",
+        "#code",
+        "#generate-page"
+      ],
+      "files": [],
+      "configs": [],
+      "assets": [
+        "assets/image-20261004-225742.png"
+      ],
+      "tasks": [
+        "task-readme-text-1",
+        "task-readme-text-2"
+      ],
+      "evidence": [
+        {
+          "reference": "symbol:start_manual_studio",
+          "origin": "text-match"
+        },
+        {
+          "reference": "symbol:main",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#button",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#build-draft",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#generate-page",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#undo-edit",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#map-refresh",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#build-final",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#code",
+          "origin": "text-match"
+        },
+        {
+          "reference": "ui:#ai-agent",
+          "origin": "text-match"
+        }
+      ]
+    }
+  },
+  "symbol_to_pages": {
+    "main": [
+      "README.md"
+    ],
+    "start_manual_studio": [
+      "README.md"
+    ]
+  },
+  "ui_to_pages": {
+    "#code": [
+      "README.md"
+    ],
+    "#ai-agent": [
+      "README.md"
+    ],
+    "#generate-page": [
+      "README.md"
+    ],
+    "#build-draft": [
+      "README.md"
+    ],
+    "#map-refresh": [
+      "README.md"
+    ],
+    "#button": [
+      "README.md"
+    ],
+    "#build-final": [
+      "README.md"
+    ],
+    "#undo-edit": [
+      "README.md"
+    ]
+  },
+  "file_to_pages": {},
+  "task_dependencies": {
+    "task-readme-text-1": {
+      "id": "task-readme-text-1",
+      "page": "README.md",
+      "kind": "text",
+      "symbols": [],
+      "ui_elements": [],
+      "files": []
+    },
+    "task-readme-text-2": {
+      "id": "task-readme-text-2",
+      "page": "README.md",
+      "kind": "text",
+      "symbols": [],
+      "ui_elements": [],
+      "files": []
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "task-readme-screenshot-1": {
+    "kind": "scenario",
+    "input": "manual/scenarios/recorded-task-readme-screenshot-1.json"
+  }
+}

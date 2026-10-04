@@ -8,6 +8,7 @@ Munin Manual StudioはAIとの連携を目指したマークダウンエディ�
 
 これらの困ったを解決します。
 
+![image-20261005-081514](assets/image-20261005-081514.png)
 
 <!-- ai:task id=task-readme-text-1 kind=text
 Readme.mdの続きを書いてください

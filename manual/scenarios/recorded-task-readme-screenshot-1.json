@@ -1,0 +1,27 @@
+{
+  "platform": "desktop",
+  "steps": [
+    {
+      "launch": {
+        "args": [],
+        "program": "/usr/bin/gnome-calendar"
+      }
+    },
+    {
+      "window": "カレンダー"
+    },
+    {
+      "click": {
+        "x": 99,
+        "y": 222
+      }
+    },
+    {
+      "screenshot": {
+        "task": "task-readme-screenshot-1"
+      }
+    }
+  ],
+  "version": 1,
+  "window": "カレンダー"
+}
