@@ -825,11 +825,12 @@ fn checked_generated_body(root: &Path, body: &str) -> Result<String, String> {
     if cleaned.is_empty() {
         return Err("AI agent returned an empty answer".into());
     }
-    let fences = super::task::get_code_block_ranges(&cleaned);
+    let mut ignored = super::task::get_code_block_ranges(&cleaned);
+    ignored.extend(super::fact::comment_ranges(&cleaned)?);
     let marker = regex::Regex::new(r"<!--\s*/?ai:(?:task|generated)\b").unwrap();
     if marker
         .find_iter(&cleaned)
-        .any(|found| !super::task::is_inside_ranges(&(found.start()..found.end()), &fences))
+        .any(|found| !super::task::is_inside_ranges(&(found.start()..found.end()), &ignored))
     {
         return Err("AI returned multiple task/generated sections. Return only the requested task's Markdown body; existing document content was preserved.".into());
     }
@@ -857,5 +858,11 @@ mod answer_regressions {
             checked_generated_body(root.path(), example).unwrap(),
             example
         );
+        std::fs::write(root.path().join("source.html"), "<!-- ai:generated -->").unwrap();
+        let evidence = r#"<!-- ai:fact {"claim":"example","file":"source.html","contains":"<!-- ai:generated -->"} -->"#;
+        let body_with_fact = format!("Supported by source. {evidence}");
+        let checked = checked_generated_body(root.path(), &body_with_fact).unwrap();
+        assert!(checked.contains("ai:generated"));
+        assert!(checked.contains("\\u003c!-- ai:generated --\\u003e"));
     }
 }
