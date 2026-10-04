@@ -136,9 +136,18 @@ pub fn run(dir: &Path) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     let response = match operation {
         Operation::Request(value) => manual_core::request(value),
-        Operation::WindowProcesses => serde_json::to_string(
-            &markits::ui_elements::capture_desktop_windows(0, 0),
-        ).map_err(|e| e.to_string()),
+        Operation::WindowProcesses => {
+            #[cfg(target_os = "linux")]
+            let windows = markits::ui_elements::capture_desktop_windows(0, 0);
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            let windows = manual_core::window_capture::window_process_ids()?.into_iter().map(|(id, pid)| {
+                markits::ui_elements::DetectedUiElement {
+                    role: "window".into(), name: None, window_id: Some(id), pid: Some(pid),
+                    x: 0.0, y: 0.0, width: 0.0, height: 0.0,
+                }
+            }).collect::<Vec<_>>();
+            serde_json::to_string(&windows).map_err(|e| e.to_string())
+        },
         Operation::Capture {
             window,
             destination,

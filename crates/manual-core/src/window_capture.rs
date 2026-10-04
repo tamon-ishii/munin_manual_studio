@@ -75,10 +75,9 @@ pub(crate) fn save_image_with_uimap(
     };
     let final_bytes = if !detected.is_empty() {
         let ui_elements: Vec<markits::UiElement> = if let Some((bx, by, bw, bh)) = bounds {
-            markits::ui_elements::filter_elements_for_crop(&detected, bx, by, bw, bh)
-                .into_iter()
-                .map(Into::into)
-                .collect()
+            let mut elements = markits::ui_elements::filter_elements_for_crop(&detected, bx, by, bw, bh);
+            scale_capture_elements(&mut elements, img.width(), img.height(), bw, bh);
+            elements.into_iter().map(Into::into).collect()
         } else {
             detected.into_iter().map(Into::into).collect()
         };
@@ -793,18 +792,9 @@ mod native {
         }
         #[cfg(target_os = "macos")]
         {
-            let pid = window.pid().map_err(|error| error.to_string())?;
-            let script = format!("tell application \"System Events\" to set frontmost of (first process whose unix id is {pid}) to true");
-            let output = std::process::Command::new("osascript")
-                .args(["-e", &script])
-                .output()
-                .map_err(|error| format!("Could not activate window: {error}"))?;
-            if !output.status.success() {
-                return Err(format!(
-                    "Could not activate window: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ));
-            }
+            accessible_window(&window)?.activate().map_err(|error| {
+                format!("Could not activate selected window; grant Accessibility permission: {error}")
+            })?;
         }
         thread::sleep(Duration::from_millis(150));
         info(&window)
@@ -847,10 +837,10 @@ mod native {
         super::save_image_with_uimap(
             &image::DynamicImage::ImageRgba8(cropped),
             Some((
-                details.x as f64,
-                details.y as f64,
-                width as f64,
-                height as f64,
+                details.x as f64 + inset as f64 * details.width as f64 / image.width() as f64,
+                details.y as f64 + inset as f64 * details.height as f64 / image.height() as f64,
+                width as f64 * details.width as f64 / image.width() as f64,
+                height as f64 * details.height as f64 / image.height() as f64,
             )),
             destination,
             include_uimap,
@@ -858,15 +848,58 @@ mod native {
         )?;
         Ok(details)
     }
+    pub fn window_process_ids() -> Result<Vec<(String, u32)>, String> {
+        Ok(Window::all().map_err(|e| e.to_string())?.into_iter().filter_map(|window| {
+            Some((window.id().ok()?.to_string(), window.pid().ok()?))
+        }).collect())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn accessible_window(window: &Window) -> Result<xa11y::Element, String> {
+        use xa11y::{App, AppExt};
+        let pid = window.pid().map_err(|e| e.to_string())?;
+        let details = info(window)?;
+        let mut matches = Vec::new();
+        for app in App::list().map_err(|e| e.to_string())? {
+            if app.pid != Some(pid) { continue; }
+            for candidate in app.windows().map_err(|e| e.to_string())? {
+                if candidate.bounds.is_some_and(|bounds| {
+                    (bounds.x - details.x).abs() <= 2 && (bounds.y - details.y).abs() <= 2
+                        && (bounds.width as i64 - details.width as i64).abs() <= 2
+                        && (bounds.height as i64 - details.height as i64).abs() <= 2
+                }) { matches.push(candidate); }
+            }
+        }
+        if matches.len() != 1 {
+            return Err("Cannot uniquely identify the selected window; grant Accessibility permission".into());
+        }
+        Ok(matches.remove(0))
+    }
+
+    pub fn close_window(window_id: &str) -> Result<(), String> {
+        let id = u32::from_str_radix(window_id.trim_start_matches("0x"), 16)
+            .map_err(|_| format!("Invalid window ID: {window_id}"))?;
+        let window = Window::all().map_err(|e| e.to_string())?.into_iter()
+            .find(|window| window.id().is_ok_and(|candidate| candidate == id))
+            .ok_or("Selected window is no longer open")?;
+        #[cfg(target_os = "windows")]
+        {
+            #[link(name = "user32")]
+            unsafe extern "system" { fn PostMessageW(window: isize, message: u32, wparam: usize, lparam: isize) -> i32; }
+            let _ = window;
+            if unsafe { PostMessageW((id as i32) as isize, 0x0010, 0, 0) } == 0 {
+                return Err("Windows denied closing the selected window".into());
+            }
+            Ok(())
+        }
+        #[cfg(target_os = "macos")]
+        { accessible_window(&window)?.close().map_err(|e| format!("Could not close selected window: {e}")) }
+    }
+
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub use native::{activate_window, capture_window as platform_capture_window, list_windows};
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn close_window(_window_id: &str) -> Result<(), String> {
-    Ok(())
-}
+pub use native::{activate_window, capture_window as platform_capture_window, close_window, list_windows, window_process_ids};
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
@@ -911,4 +944,30 @@ pub fn capture_window(
         include_uimap,
         target_window_id,
     )
+}
+
+fn scale_capture_elements(elements: &mut [markits::ui_elements::DetectedUiElement], pixel_width: u32, pixel_height: u32, width: f64, height: f64) {
+    if width <= 0.0 || height <= 0.0 { return; }
+    let scale_x = pixel_width as f64 / width;
+    let scale_y = pixel_height as f64 / height;
+    for element in elements {
+        element.x *= scale_x;
+        element.y *= scale_y;
+        element.width *= scale_x;
+        element.height *= scale_y;
+    }
+}
+
+#[cfg(test)]
+mod capture_scale_tests {
+    use super::*;
+    #[test]
+    fn logical_coordinates_are_scaled_to_capture_pixels() {
+        let mut elements = vec![markits::ui_elements::DetectedUiElement {
+            role: "button".into(), name: None, window_id: None, pid: None,
+            x: 10.0, y: 20.0, width: 30.0, height: 40.0,
+        }];
+        scale_capture_elements(&mut elements, 1600, 900, 800.0, 600.0);
+        assert_eq!((elements[0].x, elements[0].y, elements[0].width, elements[0].height), (20.0, 30.0, 60.0, 60.0));
+    }
 }

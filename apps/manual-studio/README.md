@@ -2,16 +2,21 @@
 
 ドキュメント生成専用のデスクトップアプリです。ModuleLoom本体を起動せず、Markdownの編集、撮影、UI Map、シナリオ、HTML公開を扱えます。
 
-## Linuxの配布版
+## 配布版
 
-Debian/Ubuntuでは、作成した `.deb` をインストールするとアプリ一覧に **Manual Studio** が表示されます。
+GitHub ReleasesのZIPを展開して起動します。補助実行ファイルは移動せず、配布時の配置を保持してください。
 
-```sh
-sudo apt install "./Manual Studio_0.1.0_amd64.deb"
-manual-studio
-```
+| OS | 起動するファイル | 実行時の要件 |
+| --- | --- | --- |
+| Windows x64 | `manual-studio.exe` | Microsoft Edge WebView2 Runtime |
+| macOS Intel / Apple Silicon | `Munin Manual Studio.app` | 撮影には画面収録、操作記録・ウィンドウ操作にはアクセシビリティの許可 |
+| Linux x64 | `manual-studio` | WebKitGTK 4.1、GTK 3。操作記録はX11セッションで利用 |
 
-Markdown編集と撮影にはNode.jsやRust、ModuleLoom本体は不要です。HTML生成やAI生成には、下記の外部ツールが必要です。
+macOS版はアドホック署名した `.app` で、開発者証明書による署名・公証はしていません。起動時にOSに拒否された場合は、システム設定の「プライバシーとセキュリティ」から起動を許可してください。撮影対象アプリには `.app` または実行ファイルを指定できます。
+
+Markdown編集と撮影にはNode.jsやRust、ModuleLoom本体は不要です。HTML生成やAI生成には、下記の外部ツールが必要です。MkDocsはプロジェクトの `.venv/Scripts/mkdocs.exe`（Windows）または `.venv/bin/mkdocs`（Linux/macOS）を優先して探索します。
+
+各OSのCIでビルドとRustテストを実行します。画面撮影・操作記録・高DPI・権限ダイアログのGUI動作は実機での確認が必要です。
 
 ## 開発環境から起動
 

@@ -14,6 +14,7 @@ mod desktop_scenario;
 pub mod editor;
 pub mod fact;
 pub mod preview;
+pub mod platform;
 pub mod scenario;
 pub mod task;
 pub mod template;

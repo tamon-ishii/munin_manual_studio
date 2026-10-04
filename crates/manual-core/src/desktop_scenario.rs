@@ -600,7 +600,8 @@ pub fn run(
                         .and_then(Value::as_array)
                         .map(|items| items.iter().filter_map(Value::as_str).collect())
                         .unwrap_or_default();
-                    Command::new(program)
+                    let executable = super::platform::application_executable_in(root, program)?;
+                    Command::new(executable)
                         .args(args)
                         .current_dir(root)
                         .stdin(Stdio::null())

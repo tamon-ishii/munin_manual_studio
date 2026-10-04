@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use tauri::{Manager, State};
 
+mod clipboard_paths;
 mod native_worker;
 mod recorder;
 
@@ -376,17 +377,7 @@ async fn paste_clipboard_image(
         if let Ok(text) = clipboard.get_text() {
             for raw_line in text.lines() {
                 let line = raw_line.trim();
-                let path_str = if let Some(stripped) = line.strip_prefix("file://") {
-                    stripped
-                } else if line.starts_with('/')
-                    || line.starts_with('\\')
-                    || (line.len() >= 3 && &line[1..3] == ":\\")
-                {
-                    line
-                } else {
-                    continue;
-                };
-                let src_path = std::path::Path::new(path_str);
+                let Some(src_path) = clipboard_paths::image_path(line) else { continue; };
                 if src_path.is_file() {
                     let ext = src_path
                         .extension()
@@ -398,7 +389,7 @@ async fn paste_clipboard_image(
                             return Err(format!("画像保存先フォルダーの作成に失敗しました: {e}"));
                         }
                         let (filename, dest_path) = find_filename(&ext);
-                        if std::fs::copy(src_path, &dest_path).is_ok() {
+                        if std::fs::copy(&src_path, &dest_path).is_ok() {
                             let full_asset_path = format!("{folder}/{filename}");
                             let alt = filename
                                 .rsplit_once('.')
@@ -461,17 +452,7 @@ async fn read_clipboard_image() -> Result<Option<String>, String> {
         if let Ok(text) = clipboard.get_text() {
             for raw_line in text.lines() {
                 let line = raw_line.trim();
-                let path_str = if let Some(stripped) = line.strip_prefix("file://") {
-                    stripped
-                } else if line.starts_with('/')
-                    || line.starts_with('\\')
-                    || (line.len() >= 3 && &line[1..3] == ":\\")
-                {
-                    line
-                } else {
-                    continue;
-                };
-                let path = std::path::Path::new(path_str);
+                let Some(path) = clipboard_paths::image_path(line) else { continue; };
                 if path.is_file() {
                     let ext = path
                         .extension()
@@ -479,7 +460,7 @@ async fn read_clipboard_image() -> Result<Option<String>, String> {
                         .unwrap_or("")
                         .to_lowercase();
                     if ["png", "jpg", "jpeg", "gif", "webp", "svg"].contains(&ext.as_str()) {
-                        if let Ok(bytes) = std::fs::read(path) {
+                        if let Ok(bytes) = std::fs::read(&path) {
                             use base64::Engine;
                             let mime = if ext == "svg" {
                                 "image/svg+xml"
@@ -593,7 +574,11 @@ async fn finish_operation_recording(
     let control_bounds = app.get_webview_window("recording-control").and_then(|window| {
         let position = window.outer_position().ok()?;
         let size = window.outer_size().ok()?;
-        Some((position.x as f64, position.y as f64, size.width as f64, size.height as f64))
+        #[cfg(target_os = "macos")]
+        let scale = window.scale_factor().ok()?;
+        #[cfg(not(target_os = "macos"))]
+        let scale = 1.0;
+        Some((position.x as f64 / scale, position.y as f64 / scale, size.width as f64 / scale, size.height as f64 / scale))
     });
     let state = state.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || recorder::finish_excluding_control(&state, control_bounds))

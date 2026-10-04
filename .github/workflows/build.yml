@@ -65,6 +65,10 @@ jobs:
           npm run manual:build
           npm run manual:build-markits
           npm run manual:test-workflow
+      - name: Test native Rust code and release layouts
+        run: |
+          cargo test --locked -p manual-core -p manual-studio
+          python -m unittest discover -s scripts -p "test_package_release.py"
       - name: Build Manual Studio and CLI
         run: cargo build --locked --release --target ${{ matrix.target }} -p manual-studio -p manual-core
       - name: Build MarkIts Desktop

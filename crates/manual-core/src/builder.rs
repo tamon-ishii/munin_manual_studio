@@ -371,12 +371,12 @@ fn build_inner(
 
     // 外部 mkdocs CLI の探索
     let mut mkdocs_cmd: Option<Vec<String>> = None;
-    if let Some(bin) = which_binary("mkdocs") {
-        mkdocs_cmd = Some(vec![bin.to_string_lossy().into_owned()]);
-    } else if let Some(r) = root {
-        let venv_mkdocs = r.join(".venv").join("bin").join("mkdocs");
-        if venv_mkdocs.is_file() {
-            mkdocs_cmd = Some(vec![venv_mkdocs.to_string_lossy().into_owned()]);
+    if let Some(r) = root {
+        mkdocs_cmd = project_mkdocs(r, cfg!(windows));
+    }
+    if mkdocs_cmd.is_none() {
+        if let Some(bin) = which_binary("mkdocs") {
+            mkdocs_cmd = Some(vec![bin.to_string_lossy().into_owned()]);
         }
     }
 
@@ -571,5 +571,28 @@ mod site_tests {
         assert!(err.contains("Symbolic links are not supported"));
         assert_eq!(fs::read_to_string(outside).unwrap(), "Outside data");
         assert!(!output.join(SITE_MANIFEST).exists());
+    }
+}
+
+fn project_mkdocs(root: &Path, windows: bool) -> Option<Vec<String>> {
+    let directory = root.join(".venv").join(if windows { "Scripts" } else { "bin" });
+    let executable = directory.join(if windows { "mkdocs.exe" } else { "mkdocs" });
+    executable.is_file().then(|| vec![executable.to_string_lossy().into_owned()])
+}
+
+#[cfg(test)]
+mod portability_tests {
+    use super::*;
+    #[test]
+    fn mkdocs_is_found_in_each_platform_virtual_environment() {
+        for (windows, directory, filename) in [(true, "Scripts", "mkdocs.exe"), (false, "bin", "mkdocs")] {
+            let root = tempfile::tempdir().unwrap();
+            let bin = root.path().join(".venv").join(directory);
+            std::fs::create_dir_all(&bin).unwrap();
+            let executable = bin.join(filename);
+            std::fs::write(&executable, "test").unwrap();
+            assert_eq!(project_mkdocs(root.path(), windows).unwrap()[0], executable.to_string_lossy());
+            assert!(project_mkdocs(root.path(), !windows).is_none());
+        }
     }
 }

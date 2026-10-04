@@ -422,7 +422,8 @@ pub fn start(
         .iter()
         .filter_map(|window| window["id"].as_str().map(str::to_owned))
         .collect();
-    let mut app = Command::new(&program)
+    let executable = manual_core::platform::application_executable_in(&root_path, &program)?;
+    let mut app = Command::new(&executable)
         .args(&args)
         .current_dir(&root_path)
         .stdin(Stdio::null())
@@ -466,7 +467,7 @@ pub fn start(
             {
                 if status.success() {
                     let processes = crate::native_worker::window_processes()?;
-                    if let Some(found) = select_existing_app_window(&windows, &processes, &program) {
+                    if let Some(found) = select_existing_app_window(&windows, &processes, &executable.to_string_lossy()) {
                         reused_window = true;
                         return Ok((
                             WindowBounds {
@@ -480,7 +481,12 @@ pub fn start(
                         ));
                     }
                 }
-                return Err(format!("起動アプリがウィンドウを開く前に終了しました ({status})。起動コマンドと引数を確認してください。"));
+                if !status.success() {
+                    return Err(format!("起動アプリがウィンドウを開く前に終了しました ({status})。起動コマンドと引数を確認してください。"));
+                }
+                // Single-instance launchers can exit before their existing window
+                // is ready. Keep polling until the original deadline.
+
             }
             thread::sleep(Duration::from_millis(500));
         }
@@ -624,33 +630,21 @@ fn select_existing_app_window<'a>(
     processes: &[markits::ui_elements::DetectedUiElement],
     program: &str,
 ) -> Option<&'a Value> {
-    #[cfg(target_os = "linux")]
-    {
-        let executable = if Path::new(program).is_absolute() {
-            PathBuf::from(program)
-        } else {
-            manual_core::agent::which_binary(program)?
-        }.canonicalize().ok()?;
-        let matching_ids: HashSet<String> = processes.iter().filter_map(|window| {
-            let pid = window.pid?;
-            let process_executable = fs::read_link(format!("/proc/{pid}/exe")).ok()?;
-            if process_executable != executable { return None; }
-            let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
-            Some(format!("0x{id:x}"))
-        }).collect();
-        return windows.iter().filter(|window| {
-            window["id"].as_str().is_some_and(|id| matching_ids.contains(id))
-                && window["width"].as_u64().unwrap_or(0) >= 120
-                && window["height"].as_u64().unwrap_or(0) >= 80
-        }).max_by_key(|window| {
-            window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
-        });
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (windows, processes, program);
-        None
-    }
+    let executable = manual_core::platform::application_executable(program).ok()?.canonicalize().ok()?;
+    let matching_ids: HashSet<String> = processes.iter().filter_map(|window| {
+        let pid = window.pid?;
+        let process_executable = manual_core::platform::process_executable(pid)?.canonicalize().ok()?;
+        if process_executable != executable { return None; }
+        let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
+        Some(format!("0x{id:x}"))
+    }).collect();
+    windows.iter().filter(|window| {
+        window["id"].as_str().is_some_and(|id| matching_ids.contains(id))
+            && window["width"].as_u64().unwrap_or(0) >= 120
+            && window["height"].as_u64().unwrap_or(0) >= 80
+    }).max_by_key(|window| {
+        window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
+    })
 }
 
 pub fn is_running(state: &RecorderState) -> Result<bool, String> {
@@ -978,13 +972,14 @@ pub fn preserve_annotated_capture(
         .open(&temporary)
         .map_err(|e| format!("一時画像を作成できません: {e}"))?;
     if let Err(error) = staged.write_all(&bytes).and_then(|_| staged.sync_all()) {
+        drop(staged);
         let _ = fs::remove_file(&temporary);
         return Err(format!("MarkIts画像を一時保存できません: {error}"));
     }
     drop(staged);
     loop {
         let asset_path = asset_dir.join(&filename);
-        match fs::hard_link(&temporary, &asset_path) {
+        match publish_image(&temporary, &asset_path, &bytes, |source, destination| fs::hard_link(source, destination)) {
             Ok(()) => break,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let existing = match fs::read(&asset_path) {
@@ -1015,6 +1010,26 @@ pub fn preserve_annotated_capture(
     let prompt_attr = manual_core::task::encode_prompt(prompt);
     let block = format!("<!-- ai:generated id={task_id} kind=screenshot prompt-b64={prompt_attr} -->\n![撮影画面]({relative_image})\n<!-- /ai:generated -->");
     Ok(block)
+}
+
+/// Filesystems such as exFAT do not support hard links. create_new preserves
+/// the no-overwrite guarantee there, and incomplete copies are removed.
+fn publish_image(
+    source: &Path,
+    destination: &Path,
+    bytes: &[u8],
+    link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match link(source, destination) {
+        Ok(()) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err(error),
+        Err(_) => {}
+    }
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(destination)?;
+    let result = file.write_all(bytes).and_then(|_| file.sync_all());
+    drop(file);
+    if result.is_err() { let _ = fs::remove_file(destination); }
+    result
 }
 
 pub fn normalize_annotation_spec(raw: &str) -> Result<String, String> {
@@ -1078,6 +1093,21 @@ mod tests {
         ));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn capture_publication_without_hard_links_preserves_existing_images() {
+        let dir = test_dir("image-copy-fallback");
+        let source = dir.join("source.png");
+        let destination = dir.join("capture.png");
+        fs::write(&source, b"new image").unwrap();
+        let unsupported = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+        publish_image(&source, &destination, b"new image", unsupported).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"new image");
+        let error = publish_image(&source, &destination, b"replacement", unsupported).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&destination).unwrap(), b"new image");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]
@@ -1510,7 +1540,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
     fn existing_window_requires_the_launched_executable() {
         let executable = std::env::current_exe().unwrap();
         let windows = vec![
@@ -1532,6 +1561,6 @@ mod tests {
                 .unwrap()["id"],
             "0x10"
         );
-        assert!(select_existing_app_window(&windows, &detected, "/bin/false").is_none());
+        assert!(select_existing_app_window(&windows, &detected, "manual-studio-missing-test-executable").is_none());
     }
 }
