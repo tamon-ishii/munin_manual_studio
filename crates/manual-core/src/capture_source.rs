@@ -89,23 +89,16 @@ pub fn auto_assign_page(root: &Path, page: &str) -> Result<String, String> {
 fn auto_assign_scoped(root: &Path, page: Option<&str>) -> Result<String, String> {
     let config = read_config(root);
     let docs = project_path(root, &config.docs)?;
-    let docs_prefix = format!(
-        "{}/",
-        config.docs.trim_matches('/').trim_start_matches("./")
-    );
-    let page_relative = page.map(|path| {
-        path.strip_prefix(&docs_prefix)
-            .unwrap_or(path)
-            .trim_start_matches("./")
-    });
     let sources = read(root)?;
-    let scoped_tasks: Vec<_> = task::tasks(&docs)?
-        .into_iter()
-        .filter(|task| {
-            task.kind == "screenshot"
-                && task.status != "approved"
-                && page_relative.is_none_or(|page| task.page == page)
-        })
+    let selected = if let Some(page) = page {
+        task::tasks_for_page(root, page)?
+    } else {
+        task::tasks(&docs)?
+    };
+    let scoped_tasks: Vec<_> = selected
+        .iter()
+        .filter(|task| task.kind == "screenshot" && task.status != "approved")
+        .cloned()
         .collect();
     let invalid_sources: Vec<_> = scoped_tasks
         .iter()
@@ -347,7 +340,7 @@ fn apply_auto_assignments(
             {
                 steps.push(json!({ "screenshot": { "task": task_id } }));
                 let definition = json!({ "version": 1, "platform": "desktop", "window": window.title, "steps": steps }).to_string();
-                match scenario::validate_json(root, &definition) {
+                match scenario::validate_json_with_tasks(root, &definition, tasks) {
                     Ok(()) => {
                         let path = format!("manual/scenarios/ai-{task_id}-{}-{}.json", chrono::Utc::now().timestamp_millis(), std::process::id());
                         if project_path(root, &path)?.exists() {
@@ -377,7 +370,7 @@ fn apply_auto_assignments(
         .collect();
     let mut saved_scenarios = Vec::new();
     for (path, definition) in pending_scenarios {
-        if let Err(error) = scenario::save(root, &path, &definition) {
+        if let Err(error) = scenario::save_with_tasks(root, &path, &definition, tasks) {
             for saved in saved_scenarios {
                 let _ = fs::remove_file(root.join(saved));
             }
@@ -405,7 +398,21 @@ fn screenshot_task(root: &Path, id: &str) -> Result<(), String> {
 }
 
 pub fn capture(root: &Path, id: &str, window_id: &str, inset: u32) -> Result<String, String> {
-    screenshot_task(root, id)?;
+    let docs = project_path(root, &read_config(root).docs)?;
+    let selected = task::find_task(&docs, id)?;
+    capture_task(root, &selected, window_id, inset)
+}
+
+fn capture_task(
+    root: &Path,
+    selected: &task::Task,
+    window_id: &str,
+    inset: u32,
+) -> Result<String, String> {
+    let id = selected.id.as_str();
+    if selected.kind != "screenshot" {
+        return Err(format!("Task is not a screenshot: {id}"));
+    }
     if inset > 64 {
         return Err("Inset cannot exceed 64 pixels".into());
     }
@@ -415,7 +422,7 @@ pub fn capture(root: &Path, id: &str, window_id: &str, inset: u32) -> Result<Str
     let temporary = tempfile::tempdir_in(root).map_err(|error| error.to_string())?;
     let image = super::config::project_path(temporary.path(), &format!("{id}.png"))?;
     let window = window_capture::capture_window(window_id, inset, &image, true, None)?;
-    author::record_screenshot(root, id, &image)?;
+    author::record_screenshot_task(root, selected, &image)?;
     save(
         root,
         id,
@@ -453,7 +460,16 @@ fn resolve_window<'a>(
 }
 
 pub fn recapture(root: &Path, id: &str) -> Result<String, String> {
-    screenshot_task(root, id)?;
+    let docs = project_path(root, &read_config(root).docs)?;
+    let selected = task::find_task(&docs, id)?;
+    recapture_task(root, &selected)
+}
+
+pub(crate) fn recapture_task(root: &Path, selected: &task::Task) -> Result<String, String> {
+    let id = selected.id.as_str();
+    if selected.kind != "screenshot" {
+        return Err(format!("Task is not a screenshot: {id}"));
+    }
     let source = read(root)?
         .remove(id)
         .ok_or("撮影元が未設定です。対象アプリを開き、「撮影元を選ぶ」で登録してください。Manual Studio自身は自動撮影元にできません。")?;
@@ -461,11 +477,16 @@ pub fn recapture(root: &Path, id: &str) -> Result<String, String> {
         CaptureSource::Window { inset, .. } => {
             let windows = window_capture::list_windows()?;
             let window = resolve_window(&source, &windows)?;
-            capture(root, id, &window.id, inset)
+            capture_task(root, selected, &window.id, inset)
         }
         CaptureSource::Scenario { input } => {
-            scenario::validate_capture_task(root, &input, id)?;
-            scenario::run(root, &input)
+            scenario::validate_capture_task_with_tasks(
+                root,
+                &input,
+                id,
+                std::slice::from_ref(selected),
+            )?;
+            scenario::run_with_tasks(root, &input, std::slice::from_ref(selected))
         }
     }
 }

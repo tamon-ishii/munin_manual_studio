@@ -41,18 +41,33 @@ pub(crate) fn save_image_with_uimap(
 
     // Attempt UI element detection and embed UIMap metadata via MarkIts
     let detected = if let Some(window_id) = target_window_id {
-        let decimal_id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16).ok().map(|id| id.to_string());
+        let decimal_id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16)
+            .ok()
+            .map(|id| id.to_string());
         let windows = markits::ui_elements::capture_desktop_windows(0, 0);
         // Prefer the exact ID: several maximized windows can share the same bounds.
-        let target = windows.iter().find(|window| {
-            decimal_id.as_deref().is_some_and(|id| window.window_id.as_deref() == Some(id))
-        }).or_else(|| windows.iter().find(|window| {
-            bounds.is_some_and(|(x, y, width, height)| {
-                    (window.x - x).abs() < 3.0 && (window.y - y).abs() < 3.0
-                        && (window.width - width).abs() < 3.0 && (window.height - height).abs() < 3.0
+        let target = windows
+            .iter()
+            .find(|window| {
+                decimal_id
+                    .as_deref()
+                    .is_some_and(|id| window.window_id.as_deref() == Some(id))
+            })
+            .or_else(|| {
+                windows.iter().find(|window| {
+                    bounds.is_some_and(|(x, y, width, height)| {
+                        (window.x - x).abs() < 3.0
+                            && (window.y - y).abs() < 3.0
+                            && (window.width - width).abs() < 3.0
+                            && (window.height - height).abs() < 3.0
+                    })
                 })
-        }));
-        target.map(|window| markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, window)).unwrap_or_default()
+            });
+        target
+            .map(|window| {
+                markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, window)
+            })
+            .unwrap_or_default()
     } else if include_uimap {
         markits::ui_elements::capture_desktop_detailed_elements(0, 0, bounds)
     } else {
@@ -111,7 +126,11 @@ mod linux {
         previous.map_or(0, |handler| handler(display, event))
     }
 
-    fn capture_portal(inset: u32, destination: &Path, include_uimap: bool) -> Result<WindowInfo, String> {
+    fn capture_portal(
+        inset: u32,
+        destination: &Path,
+        include_uimap: bool,
+    ) -> Result<WindowInfo, String> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -402,13 +421,21 @@ mod linux {
         x: usize,
         y: usize,
     ) -> Option<u64> {
-        if !(1..=4).contains(&bytes_per_pixel) { return None; }
-        let start = y.checked_mul(stride)?.checked_add(x.checked_mul(bytes_per_pixel)?)?;
+        if !(1..=4).contains(&bytes_per_pixel) {
+            return None;
+        }
+        let start = y
+            .checked_mul(stride)?
+            .checked_add(x.checked_mul(bytes_per_pixel)?)?;
         let bytes = data.get(start..start.checked_add(bytes_per_pixel)?)?;
         Some(if byte_order == xlib::LSBFirst {
-            bytes.iter().enumerate().fold(0u64, |value, (index, byte)| value | (u64::from(*byte) << (index * 8)))
+            bytes.iter().enumerate().fold(0u64, |value, (index, byte)| {
+                value | (u64::from(*byte) << (index * 8))
+            })
         } else if byte_order == xlib::MSBFirst {
-            bytes.iter().fold(0u64, |value, byte| (value << 8) | u64::from(*byte))
+            bytes
+                .iter()
+                .fold(0u64, |value, byte| (value << 8) | u64::from(*byte))
         } else {
             return None;
         })
@@ -453,9 +480,12 @@ mod linux {
     }
 
     pub fn close_window(window_id: &str) -> Result<(), String> {
-        if is_wayland_session() { return Ok(()); }
+        if is_wayland_session() {
+            return Ok(());
+        }
         let id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16)
-            .map_err(|_| format!("Invalid X11 window ID: {window_id}"))? as xlib::Window;
+            .map_err(|_| format!("Invalid X11 window ID: {window_id}"))?
+            as xlib::Window;
         let conn = DisplayConnection::open()?;
         if conn.client_windows()?.contains(&id) {
             conn.send_message(id, "_NET_CLOSE_WINDOW", [0, 2, 0, 0, 0]);
@@ -501,7 +531,14 @@ mod linux {
         }
         conn.activate(id);
         thread::sleep(Duration::from_millis(400));
-        let result = capture_visible(&conn, id, inset, destination, include_uimap, target_window_id);
+        let result = capture_visible(
+            &conn,
+            id,
+            inset,
+            destination,
+            include_uimap,
+            target_window_id,
+        );
         if !already_above {
             conn.set_above(id, false);
         }
@@ -562,22 +599,32 @@ mod linux {
         };
         let raw_layout = unsafe {
             let stride = usize::try_from((*raw).bytes_per_line).ok();
-            let bytes_per_pixel = usize::try_from((*raw).bits_per_pixel).ok()
+            let bytes_per_pixel = usize::try_from((*raw).bits_per_pixel)
+                .ok()
                 .filter(|bits| *bits > 0 && *bits % 8 == 0)
                 .map(|bits| bits / 8);
             stride.zip(bytes_per_pixel).and_then(|(stride, bytes)| {
                 stride.checked_mul(height as usize).and_then(|len| {
                     (!(*raw).data.is_null()).then(|| {
-                        (std::slice::from_raw_parts((*raw).data.cast::<u8>(), len), stride, bytes, (*raw).byte_order)
+                        (
+                            std::slice::from_raw_parts((*raw).data.cast::<u8>(), len),
+                            stride,
+                            bytes,
+                            (*raw).byte_order,
+                        )
                     })
                 })
             })
         };
         for row in 0..height {
             for col in 0..width {
-                let pixel = raw_layout.and_then(|(data, stride, bytes, order)| {
-                    raw_ximage_pixel(data, stride, bytes, order, col as usize, row as usize)
-                }).unwrap_or_else(|| unsafe { (conn.api.XGetPixel)(raw, col as c_int, row as c_int) } as u64);
+                let pixel = raw_layout
+                    .and_then(|(data, stride, bytes, order)| {
+                        raw_ximage_pixel(data, stride, bytes, order, col as usize, row as usize)
+                    })
+                    .unwrap_or_else(|| unsafe {
+                        (conn.api.XGetPixel)(raw, col as c_int, row as c_int)
+                    } as u64);
                 pixels.extend([
                     channel(pixel, masks.0),
                     channel(pixel, masks.1),
@@ -603,16 +650,26 @@ mod linux {
     #[cfg(test)]
     mod tests {
         use super::{
-            channel, handle_error, raw_ximage_pixel, xlib, DisplayConnection, CONNECTION_LOCK, ERROR_HANDLER,
+            channel, handle_error, raw_ximage_pixel, xlib, DisplayConnection, CONNECTION_LOCK,
+            ERROR_HANDLER,
         };
 
         #[test]
         fn raw_pixel_reader_respects_x11_byte_order_and_stride() {
             let little_endian = [0x33, 0x22, 0x11, 0, 0xaa, 0xbb, 0xcc, 0];
-            assert_eq!(raw_ximage_pixel(&little_endian, 8, 4, xlib::LSBFirst, 0, 0), Some(0x0011_2233));
-            assert_eq!(raw_ximage_pixel(&little_endian, 8, 4, xlib::LSBFirst, 1, 0), Some(0x00cc_bbaa));
+            assert_eq!(
+                raw_ximage_pixel(&little_endian, 8, 4, xlib::LSBFirst, 0, 0),
+                Some(0x0011_2233)
+            );
+            assert_eq!(
+                raw_ximage_pixel(&little_endian, 8, 4, xlib::LSBFirst, 1, 0),
+                Some(0x00cc_bbaa)
+            );
             let big_endian = [0, 0x11, 0x22, 0x33];
-            assert_eq!(raw_ximage_pixel(&big_endian, 4, 4, xlib::MSBFirst, 0, 0), Some(0x0011_2233));
+            assert_eq!(
+                raw_ximage_pixel(&big_endian, 4, 4, xlib::MSBFirst, 0, 0),
+                Some(0x0011_2233)
+            );
         }
 
         #[test]
@@ -676,7 +733,9 @@ mod linux {
 }
 
 #[cfg(target_os = "linux")]
-pub use linux::{activate_window, capture_window as platform_capture_window, close_window, list_windows};
+pub use linux::{
+    activate_window, capture_window as platform_capture_window, close_window, list_windows,
+};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod native {
@@ -805,7 +864,9 @@ mod native {
 pub use native::{activate_window, capture_window as platform_capture_window, list_windows};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn close_window(_window_id: &str) -> Result<(), String> { Ok(()) }
+pub fn close_window(_window_id: &str) -> Result<(), String> {
+    Ok(())
+}
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
@@ -824,7 +885,9 @@ pub fn platform_capture_window(
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-pub fn close_window(_window_id: &str) -> Result<(), String> { Ok(()) }
+pub fn close_window(_window_id: &str) -> Result<(), String> {
+    Ok(())
+}
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub fn activate_window(_window_id: &str) -> Result<WindowInfo, String> {
@@ -841,5 +904,11 @@ pub fn capture_window(
     target_window_id: Option<&str>,
 ) -> Result<WindowInfo, String> {
     crate::capture_lifecycle::run_pre_capture_hook()?;
-    platform_capture_window(window_id, inset, destination, include_uimap, target_window_id)
+    platform_capture_window(
+        window_id,
+        inset,
+        destination,
+        include_uimap,
+        target_window_id,
+    )
 }

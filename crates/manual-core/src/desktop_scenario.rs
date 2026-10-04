@@ -59,6 +59,14 @@ fn parse_keys(value: &str) -> Result<Vec<Key>, String> {
 }
 
 pub fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
+    validate_with_tasks(steps, docs, &[])
+}
+
+pub(crate) fn validate_with_tasks(
+    steps: &[Value],
+    docs: &Path,
+    selected: &[super::task::Task],
+) -> Result<(), String> {
     for (index, step) in steps.iter().enumerate() {
         let number = index + 1;
         let object = step
@@ -133,8 +141,14 @@ pub fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
                 parse_keys(keys)?;
             }
             "scroll" => {
-                if value.get("x").and_then(Value::as_u64).is_none_or(|x| x > i32::MAX as u64)
-                    || value.get("y").and_then(Value::as_u64).is_none_or(|y| y > i32::MAX as u64)
+                if value
+                    .get("x")
+                    .and_then(Value::as_u64)
+                    .is_none_or(|x| x > i32::MAX as u64)
+                    || value
+                        .get("y")
+                        .and_then(Value::as_u64)
+                        .is_none_or(|y| y > i32::MAX as u64)
                     || value.get("dx").and_then(Value::as_i64).is_none()
                     || value.get("dy").and_then(Value::as_i64).is_none()
                 {
@@ -176,7 +190,15 @@ pub fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
                 {
                     return Err(format!("Invalid screenshot task ID: {task_id}"));
                 }
-                if find_task(docs, task_id)?.kind != "screenshot" {
+                if selected
+                    .iter()
+                    .find(|task| task.id == task_id)
+                    .cloned()
+                    .map(Ok)
+                    .unwrap_or_else(|| find_task(docs, task_id))?
+                    .kind
+                    != "screenshot"
+                {
                     return Err(format!("Scenario task is not a screenshot: {task_id}"));
                 }
                 if value
@@ -520,13 +542,7 @@ fn capture(
     }
     if selector.is_none() {
         if let Ok(window) = selected.native() {
-            window_capture::capture_window(
-                &window.id,
-                inset,
-                destination,
-                true,
-                Some(&window.id),
-            )?;
+            window_capture::capture_window(&window.id, inset, destination, true, Some(&window.id))?;
             return Ok(());
         }
     }
@@ -702,14 +718,37 @@ pub fn run(
                     let bounds = selected.bounds_for_input()?;
                     let x = value["x"].as_u64().unwrap() as u32;
                     let y = value["y"].as_u64().unwrap() as u32;
-                    if x >= bounds.width || y >= bounds.height { return Err("Scroll is outside the selected window".into()); }
-                    if !window_capture::is_wayland_session() { activate(&selected)?; }
-                    let screen_x = bounds.x.checked_add(x as i32).ok_or("Scroll x coordinate exceeds screen bounds")?;
-                    let screen_y = bounds.y.checked_add(y as i32).ok_or("Scroll y coordinate exceeds screen bounds")?;
-                    let dx = value["dx"].as_i64().unwrap().clamp(i32::MIN as i64, i32::MAX as i64) as i32;
-                    let dy = value["dy"].as_i64().unwrap().clamp(i32::MIN as i64, i32::MAX as i64) as i32;
-                    xa11y::input_sim().map_err(|error| error.to_string())?.mouse()
-                        .scroll(Point::new(screen_x, screen_y), xa11y::ScrollDelta::new(dx, dy))
+                    if x >= bounds.width || y >= bounds.height {
+                        return Err("Scroll is outside the selected window".into());
+                    }
+                    if !window_capture::is_wayland_session() {
+                        activate(&selected)?;
+                    }
+                    let screen_x = bounds
+                        .x
+                        .checked_add(x as i32)
+                        .ok_or("Scroll x coordinate exceeds screen bounds")?;
+                    let screen_y = bounds
+                        .y
+                        .checked_add(y as i32)
+                        .ok_or("Scroll y coordinate exceeds screen bounds")?;
+                    let dx = value["dx"]
+                        .as_i64()
+                        .unwrap()
+                        .clamp(i32::MIN as i64, i32::MAX as i64)
+                        as i32;
+                    let dy = value["dy"]
+                        .as_i64()
+                        .unwrap()
+                        .clamp(i32::MIN as i64, i32::MAX as i64)
+                        as i32;
+                    xa11y::input_sim()
+                        .map_err(|error| error.to_string())?
+                        .mouse()
+                        .scroll(
+                            Point::new(screen_x, screen_y),
+                            xa11y::ScrollDelta::new(dx, dy),
+                        )
                         .map_err(|error| error.to_string())?;
                 }
                 "click" => {

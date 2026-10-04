@@ -29,14 +29,27 @@ pub(super) struct RunResult {
 }
 
 pub fn run(root: &Path, input: &str) -> Result<String, String> {
-    run_mode(root, input, true)
+    run_mode(root, input, true, &[])
 }
 
 pub fn test(root: &Path, input: &str) -> Result<String, String> {
-    run_mode(root, input, false)
+    run_mode(root, input, false, &[])
 }
 
-fn run_mode(root: &Path, input: &str, record: bool) -> Result<String, String> {
+pub(crate) fn run_with_tasks(
+    root: &Path,
+    input: &str,
+    selected: &[super::task::Task],
+) -> Result<String, String> {
+    run_mode(root, input, true, selected)
+}
+
+fn run_mode(
+    root: &Path,
+    input: &str,
+    record: bool,
+    selected: &[super::task::Task],
+) -> Result<String, String> {
     let input_path = if Path::new(input).is_absolute() {
         PathBuf::from(input)
     } else {
@@ -47,7 +60,7 @@ fn run_mode(root: &Path, input: &str, record: bool) -> Result<String, String> {
     let scenario: Scenario =
         serde_json::from_str(&raw).map_err(|error| format!("Invalid scenario JSON: {error}"))?;
     let docs = project_path(root, &read_config(root).docs)?;
-    validate_scenario(&scenario, &docs)?;
+    validate_scenario_with_tasks(&scenario, &docs, selected)?;
 
     let temporary = tempdir_in(root).map_err(|error| error.to_string())?;
     let captured_dir = temporary.path().join("captured");
@@ -78,18 +91,31 @@ fn run_mode(root: &Path, input: &str, record: bool) -> Result<String, String> {
     }
     if record {
         for task_id in &completed.captured {
-            author::record_screenshot(root, task_id, &captured_dir.join(format!("{task_id}.png")))?;
+            let image = captured_dir.join(format!("{task_id}.png"));
+            if let Some(task) = selected.iter().find(|task| task.id == *task_id) {
+                author::record_screenshot_task(root, task, &image)?;
+            } else {
+                author::record_screenshot(root, task_id, &image)?;
+            }
         }
     }
     serde_json::to_string(&completed).map_err(|error| error.to_string())
 }
 
 fn validate_scenario(scenario: &Scenario, docs: &Path) -> Result<(), String> {
+    validate_scenario_with_tasks(scenario, docs, &[])
+}
+
+fn validate_scenario_with_tasks(
+    scenario: &Scenario,
+    docs: &Path,
+    selected: &[super::task::Task],
+) -> Result<(), String> {
     if scenario.version != 1 || scenario.steps.is_empty() {
         return Err("Scenario requires version 1 and at least one step".into());
     }
     if scenario.platform.as_deref() == Some("desktop") {
-        return desktop_scenario::validate(&scenario.steps, docs);
+        return desktop_scenario::validate_with_tasks(&scenario.steps, docs, selected);
     }
     if scenario
         .platform
@@ -126,7 +152,12 @@ fn validate_scenario(scenario: &Scenario, docs: &Path) -> Result<(), String> {
             if !id_pattern.is_match(task_id) {
                 return Err(format!("Invalid scenario screenshot task ID: {task_id}"));
             }
-            let task = find_task(&docs, task_id)?;
+            let task = selected
+                .iter()
+                .find(|task| task.id == task_id)
+                .cloned()
+                .map(Ok)
+                .unwrap_or_else(|| find_task(docs, task_id))?;
             if task.kind != "screenshot" {
                 return Err(format!("Scenario task is not a screenshot: {task_id}"));
             }
@@ -169,6 +200,15 @@ fn validate_scenario(scenario: &Scenario, docs: &Path) -> Result<(), String> {
 }
 
 pub fn save(root: &Path, input: &str, json: &str) -> Result<String, String> {
+    save_with_tasks(root, input, json, &[])
+}
+
+pub(crate) fn save_with_tasks(
+    root: &Path,
+    input: &str,
+    json: &str,
+    selected: &[super::task::Task],
+) -> Result<String, String> {
     if !input.starts_with("manual/scenarios/") || !input.ends_with(".json") {
         return Err("Scenario files must be under manual/scenarios/ with a .json extension".into());
     }
@@ -176,7 +216,7 @@ pub fn save(root: &Path, input: &str, json: &str) -> Result<String, String> {
     let scenario: Scenario =
         serde_json::from_str(json).map_err(|error| format!("Invalid scenario JSON: {error}"))?;
     let docs = project_path(root, &read_config(root).docs)?;
-    validate_scenario(&scenario, &docs)?;
+    validate_scenario_with_tasks(&scenario, &docs, selected)?;
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -188,10 +228,18 @@ pub fn save(root: &Path, input: &str, json: &str) -> Result<String, String> {
 }
 
 pub(crate) fn validate_json(root: &Path, json: &str) -> Result<(), String> {
+    validate_json_with_tasks(root, json, &[])
+}
+
+pub(crate) fn validate_json_with_tasks(
+    root: &Path,
+    json: &str,
+    selected: &[super::task::Task],
+) -> Result<(), String> {
     let scenario: Scenario =
         serde_json::from_str(json).map_err(|error| format!("Invalid scenario JSON: {error}"))?;
     let docs = project_path(root, &read_config(root).docs)?;
-    validate_scenario(&scenario, &docs)
+    validate_scenario_with_tasks(&scenario, &docs, selected)
 }
 
 pub fn load(root: &Path, input: &str) -> Result<String, String> {
@@ -204,11 +252,20 @@ pub fn load(root: &Path, input: &str) -> Result<String, String> {
 }
 
 pub(super) fn validate_capture_task(root: &Path, input: &str, id: &str) -> Result<(), String> {
+    validate_capture_task_with_tasks(root, input, id, &[])
+}
+
+pub(crate) fn validate_capture_task_with_tasks(
+    root: &Path,
+    input: &str,
+    id: &str,
+    selected: &[super::task::Task],
+) -> Result<(), String> {
     let raw = load(root, input)?;
     let scenario: Scenario =
         serde_json::from_str(&raw).map_err(|error| format!("Invalid scenario JSON: {error}"))?;
     let docs = project_path(root, &read_config(root).docs)?;
-    validate_scenario(&scenario, &docs)?;
+    validate_scenario_with_tasks(&scenario, &docs, selected)?;
     if !scenario.steps.iter().any(|step| {
         step.get("screenshot")
             .and_then(|shot| shot.get("task"))
