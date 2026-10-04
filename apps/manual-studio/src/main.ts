@@ -1631,10 +1631,10 @@ element("image-save-form").addEventListener("submit", (event) => {
 });
 let lastPastedTimestamp = "";
 let pasteCounter = 0;
-editor.addEventListener("paste", (event: ClipboardEvent) => {
-  if (!documentState) return;
-  const items = event.clipboardData?.items;
-  const files = event.clipboardData?.files;
+function handleImagePaste(clipboardData: DataTransfer | null): boolean {
+  if (!documentState || !clipboardData) return false;
+  const items = clipboardData.items;
+  const files = clipboardData.files;
   let targetFile: File | null = null;
   let fileType = "";
 
@@ -1663,9 +1663,8 @@ editor.addEventListener("paste", (event: ClipboardEvent) => {
     }
   }
 
-  if (!targetFile) return;
+  if (!targetFile) return false;
 
-  event.preventDefault();
   const reader = new FileReader();
   reader.onload = () => {
     if (typeof reader.result === "string") {
@@ -1705,6 +1704,26 @@ editor.addEventListener("paste", (event: ClipboardEvent) => {
     }
   };
   reader.readAsDataURL(targetFile);
+  return true;
+}
+
+editor.addEventListener("paste", (event: ClipboardEvent) => {
+  if (handleImagePaste(event.clipboardData)) {
+    event.preventDefault();
+  }
+});
+
+document.addEventListener("paste", (event: ClipboardEvent) => {
+  if (event.defaultPrevented) return;
+  const active = document.activeElement;
+  if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
+    return;
+  }
+  if (!element("panel-editor").hidden && documentState) {
+    if (handleImagePaste(event.clipboardData)) {
+      event.preventDefault();
+    }
+  }
 });
 const editorColumn = document.querySelector<HTMLElement>(".editor-column");
 if (editorColumn) {
