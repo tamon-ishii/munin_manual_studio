@@ -12,6 +12,11 @@ import { renderFileTree } from "./fileTree";
 import { setupPreviewTheme } from "./themePreview";
 import { setupMarkdownTableEditor } from "./markdownTable";
 import { setupDocumentTagsPane } from "./documentTagsPane";
+import { jumpToSource } from "./editorNavigation";
+import { setupWorkspaceWizard } from "./workspaceWizard";
+import { showGenerationReview } from "./generationReview";
+import { showUnsavedChangesDialog } from "./unsavedChangesDialog";
+import { loadWorkspaceHistory, recordWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
 import { changeHeadingLevel, toggleStrikethrough, toggleTaskList, changeIndent, continueMarkdownList, type MarkdownEdit } from "./markdownAssists";
 import { applyTheme, currentTheme, initializeTheme, isThemeId, type ThemeId } from "./theme";
 import { emit } from "@tauri-apps/api/event";
@@ -50,6 +55,9 @@ let progressAgentTotal = 0;
 let manualStudioHiddenForCapture = false;
 let previewTimer: ReturnType<typeof setTimeout>;
 const expandedFolders = new Set<string>();
+interface AiReviewSnapshot { before: Document; after: Document; id?: string; updated: string[] }
+const aiReviews = new Map<string, AiReviewSnapshot>();
+const aiReviewKey = (page: string) => JSON.stringify([projectRoot, page]);
 const editHistory = new EditorHistory();
 let replayingHistory = false;
 let operationRecording = false;
@@ -324,8 +332,11 @@ async function work(operation: () => Promise<void>): Promise<void> {
   try { await operation(); } catch (error) { status(String(error), true); }
   finally { setBusy(captureNeedsUiLock()); }
 }
-function confirmDiscard(): boolean {
-  return !dirty || window.confirm("未保存の編集を破棄して移動しますか？ 編集を残す場合はキャンセルして保存してください。");
+async function confirmDiscard(): Promise<boolean> {
+  return !dirty || showUnsavedChangesDialog(documentState?.page || "原稿", async () => {
+    await saveDocument();
+    if (dirty) throw new Error("原稿を保存できなかったため、移動を中止しました。");
+  });
 }
 function chooseTab(name: string): void {
   document.querySelectorAll<HTMLElement>(".panel").forEach((panel) => { panel.hidden = panel.id !== `panel-${name}`; });
@@ -367,7 +378,7 @@ let documentRequestVersion = 0;
 let workspaceRequestVersion = 0;
 async function openPage(page: string, check = true): Promise<void> {
   assertNoActiveCaptureSession();
-  if (check && !confirmDiscard()) return;
+  if (check && !await confirmDiscard()) return;
   const root = projectRoot;
   const version = ++documentRequestVersion;
   const opened = JSON.parse(await rpc("editor-read", { page }, root)) as Document;
@@ -421,6 +432,11 @@ function tagAttribute(attrs: string, name: string): string | null {
 }
 function renderDocumentTags(): void {
   const list = element<HTMLElement>("document-tag-list");
+  const pageTasks = workspace && documentState ? tasksForPage(documentState.page) : [];
+  const allApproved = !dirty && pageTasks.length > 0 && pageTasks.every(task => task.status === "approved");
+  setButtonDisabled(element<HTMLButtonElement>("generate-page"), !documentState || allApproved);
+  element("generate-page").title = allApproved ? "すべて確定済みです。更新するタグの確定を解除してください。" : "この文書のAI指示を実行し、文章・図・撮影結果を更新";
+  element<HTMLButtonElement>("review-ai-update").hidden = !documentState || !aiReviews.has(aiReviewKey(documentState.page));
   if (!documentState) { list.innerHTML = '<span class="muted">原稿を開くとタグが表示されます。</span>'; return; }
   const content = editor.value;
   const masked = content.split("");
@@ -462,8 +478,13 @@ function updateAiSettingsVisibility(): void {
   const endpointLabel = element<HTMLElement>("ai-endpoint-url-label");
   const apiKeyLabel = element<HTMLElement>("ai-api-key-label");
   const endpointInput = input("ai-endpoint-url");
+  element("ai-model-label").style.display = connectionType === "none" ? "none" : "";
 
-  if (connectionType === "cli") {
+  if (connectionType === "none") {
+    agentLabel.style.display = "none";
+    endpointLabel.style.display = "none";
+    apiKeyLabel.style.display = "none";
+  } else if (connectionType === "cli") {
     agentLabel.style.display = "";
     endpointLabel.style.display = "none";
     apiKeyLabel.style.display = "none";
@@ -485,11 +506,14 @@ function renderSettings(): void {
   input("output-path").value = workspace.config.output;
   input("site-name").value = workspace.config.mkdocs.site_name;
   input("assets-path").value = workspace.config.assets || `${workspace.config.docs || "docs"}/assets`;
+  element("workspace-settings-root").textContent = projectRoot;
+  setButtonDisabled(element<HTMLButtonElement>("save-workspace-settings"), false);
+  setButtonDisabled(element<HTMLButtonElement>("open-workspace-settings"), false);
+  element("workspace-save-state").textContent = "";
   input("ai-model").value = workspace.config.model;
   element<HTMLTextAreaElement>("manual-brief").value = workspace.brief;
   element("ai-agent").innerHTML = workspace.agents.map((agent) => `<option value="${escape(agent.id)}"${agent.available ? "" : " disabled"}>${escape(agent.label)}${agent.available ? "" : "（CLI未検出）"}</option>`).join("");
-  const configuredAvailable = workspace.agents.some((agent) => agent.id === workspace!.config.agent && agent.available);
-  const preferred = workspace.has_config && configuredAvailable ? workspace.config.agent : workspace.agents.find((agent) => agent.available)?.id || workspace.config.agent;
+  const preferred = workspace.has_config ? workspace.config.agent : workspace.agents.find((agent) => agent.available)?.id || workspace.config.agent;
   element<HTMLSelectElement>("ai-agent").value = preferred;
   if (preferred !== workspace.config.agent) input("ai-model").value = "";
 
@@ -498,35 +522,78 @@ function renderSettings(): void {
   input("ai-endpoint-url").value = workspace.config.endpoint_url || "";
   input("ai-api-key").value = localStorage.getItem("manual-studio-ai-api-key") || "";
   updateAiSettingsVisibility();
+  updateAiAvailability();
+  setAiSaveState(workspace.has_config ? "保存済み" : "AI設定を変更すると自動保存します");
 }
-function settingsOptions(): Record<string, unknown> {
-  const apiKey = input("ai-api-key").value.trim();
-  if (apiKey) {
-    localStorage.setItem("manual-studio-ai-api-key", apiKey);
-  } else {
-    localStorage.removeItem("manual-studio-ai-api-key");
-  }
-  const docs = input("docs-path").value.trim();
-  const assets = input("assets-path").value.trim() || `${docs || "docs"}/assets`;
-  return {
-    docs,
-    output: input("output-path").value.trim(),
-    assets,
+let aiSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let aiSaveQueue: Promise<void> = Promise.resolve();
+let aiEditVersion = 0;
+let aiSavePending = false;
+function setAiSaveState(message: string, failed = false): void {
+  element("ai-save-state").textContent = message;
+  element("ai-save-retry").hidden = !failed;
+}
+function updateAiAvailability(): void {
+  const selected = workspace?.agents.find(agent => agent.id === element<HTMLSelectElement>("ai-agent").value);
+  element("ai-cli-status").textContent = element<HTMLSelectElement>("ai-connection-type").value === "cli" && selected && !selected.available
+    ? `${selected.label}のCLIが見つかりません。インストールとPATHを確認してください。選択は保持されます。` : "";
+}
+function saveAiSettings(): Promise<void> {
+  clearTimeout(aiSaveTimer);
+  if (!workspace || !aiSavePending) return aiSaveQueue;
+  const root = projectRoot;
+  const version = aiEditVersion;
+  const options = {
+    mkdocs_settings: workspace.config.mkdocs,
     agent: element<HTMLSelectElement>("ai-agent").value,
     model: input("ai-model").value.trim(),
     connection_type: element<HTMLSelectElement>("ai-connection-type").value,
     endpoint_url: input("ai-endpoint-url").value.trim(),
-    api_key: apiKey,
-    brief: element<HTMLTextAreaElement>("manual-brief").value,
-    mkdocs_settings: { ...workspace!.config.mkdocs, site_name: input("site-name").value.trim() },
   };
+  const apiKey = input("ai-api-key").value.trim();
+  aiSavePending = false;
+  const operation = aiSaveQueue.catch(() => {}).then(async () => {
+    if (projectRoot === root && aiEditVersion === version) setAiSaveState("保存中…");
+    try {
+      // AI-only options preserve other settings and unfinished form edits.
+      const saved = JSON.parse(await rpc("save", options, root)) as State;
+      if (apiKey) localStorage.setItem("manual-studio-ai-api-key", apiKey);
+      else localStorage.removeItem("manual-studio-ai-api-key");
+      if (projectRoot === root) {
+        workspace!.config = saved.config;
+        workspace!.has_config = saved.has_config;
+        if (aiEditVersion === version) setAiSaveState("保存済み");
+      }
+    } catch (error) {
+      if (projectRoot === root && aiEditVersion === version) {
+        aiSavePending = true;
+        setAiSaveState(`保存失敗: ${String(error)}`, true);
+      }
+      throw error;
+    }
+  });
+  aiSaveQueue = operation;
+  return operation;
+}
+function scheduleAiSave(): void {
+  aiEditVersion++;
+  aiSavePending = true;
+  setAiSaveState("未保存（自動保存待ち）");
+  updateAiAvailability();
+  clearTimeout(aiSaveTimer);
+  aiSaveTimer = setTimeout(() => { void saveAiSettings().catch(() => {}); }, 400);
 }
 async function ensureAiSettings(): Promise<void> {
   if (!workspace) throw new Error("先にプロジェクトを開いてください。");
+  await saveAiSettings();
   const connectionType = element<HTMLSelectElement>("ai-connection-type").value;
   const agentId = element<HTMLSelectElement>("ai-agent").value;
   const model = input("ai-model").value.trim();
   const endpointUrl = input("ai-endpoint-url").value.trim();
+  if (connectionType === "none") {
+    chooseTab("publish");
+    throw new Error("AI接続は未設定です。接続方式を選択してから実行してください。");
+  }
 
   if (connectionType === "cli") {
     const selected = workspace.agents.find((agent) => agent.id === agentId && agent.available);
@@ -550,14 +617,18 @@ async function ensureAiSettings(): Promise<void> {
     workspace.config.agent !== agentId ||
     workspace.config.model !== model
   ) {
-    await rpc("save", settingsOptions());
+    await rpc("save", {
+      agent: agentId, model, connection_type: connectionType,
+      endpoint_url: endpointUrl, mkdocs_settings: workspace.config.mkdocs,
+    });
     await refreshWorkspace();
     renderSettings();
   }
 }
-async function openProject(root: string): Promise<void> {
+async function openProject(root: string, check = true): Promise<void> {
   assertNoActiveCaptureSession();
-  if (!confirmDiscard()) return;
+  if (check && !await confirmDiscard()) return;
+  await saveAiSettings();
   status("プロジェクトを開いています…");
   const version = ++projectRequestVersion;
   const loaded = JSON.parse(await rpc("state", {}, root)) as State;
@@ -574,6 +645,15 @@ async function openProject(root: string): Promise<void> {
   updateSaveState(); updateCursor(); renderDocumentTags();
   input("project-root").value = root;
   localStorage.setItem("manual-studio-project", root);
+  try { await recordWorkspaceHistory(native, root); }
+  catch (error) { status(`ワークスペース履歴を保存できません: ${String(error)}`, true); }
+  if (params.get("root") !== root) {
+    params.set("root", root);
+    params.delete("page");
+    const url = new URL(location.href);
+    url.search = params.toString();
+    history.replaceState(null, "", url);
+  }
   element("workspace-name").textContent = root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
   element<HTMLDialogElement>("workspace-dialog").close();
   await refreshWorkspace(); renderSettings();
@@ -621,7 +701,7 @@ function renderTasks(): void {
   }
 }
 async function editTaskPage(task: Task, edit: (content: string) => string): Promise<void> {
-  if (!confirmDiscard()) return;
+  if (!await confirmDiscard()) return;
   const root = projectRoot;
   const page = JSON.parse(await rpc("editor-read", { page: task.page }, root)) as Document;
   if (projectRoot !== root) return;
@@ -680,6 +760,58 @@ async function generateCurrentPage(): Promise<void> {
   if (!documentState || !workspace) throw new Error("先にMarkdown原稿を開いてください。");
   await generateDocument(documentState.page);
 }
+async function generateReviewed(page: string, id?: string, initialFeedback = ""): Promise<boolean> {
+  savedBeforeOperation();
+  await ensureAiSettings();
+  const root = projectRoot;
+  let feedback = initialFeedback;
+  for (;;) {
+    if (!progressRunning) {
+      try { await rpc("agent-progress-clear", {}, root); } catch { /* Optional progress logs. */ }
+      startAiProgress(id ? "generate-task" : "generate-page");
+    }
+    logProgress(`${page} の生成候補を準備しています。`);
+    let candidate: { before: Document; content: string; updated: string[] };
+    try {
+      candidate = JSON.parse(await rpc("generate-review", { page, id, feedback }, root));
+      await pollAgentProgress();
+      await stopAiProgress(true);
+    } catch (error) {
+      await stopAiProgress(false);
+      throw error;
+    }
+    if (projectRoot !== root) throw new Error("ワークスペースが切り替わったため、生成候補の反映を中止しました。");
+    if (candidate.before.content === candidate.content) { status("AI生成による変更はありません。"); return true; }
+    const decision = await showGenerationReview(page, candidate.before.content, candidate.content);
+    if (decision.action === "restore") { status("生成候補を破棄し、現在の原稿を保持しました。"); return false; }
+    if (decision.action === "retry") { feedback = decision.feedback; continue; }
+    const after = JSON.parse(await rpc("editor-save", { page, json: { content: candidate.content, revision: candidate.before.revision } }, root)) as Document;
+    aiReviews.set(aiReviewKey(page), { before: candidate.before, after, id, updated: candidate.updated });
+    await refreshWorkspace(documentState?.page === page);
+    renderDocumentTags();
+    status(`${page}の生成結果を採用して保存しました。`);
+    return true;
+  }
+}
+element("review-ai-update").addEventListener("click", () => { void work(async () => {
+  savedBeforeOperation();
+  if (!documentState) return;
+  const page = documentState.page;
+  const key = aiReviewKey(page);
+  const snapshot = aiReviews.get(key);
+  if (!snapshot) return;
+  const current = JSON.parse(await rpc("editor-read", { page })) as Document;
+  if (current.content !== snapshot.after.content) throw new Error("採用後に原稿が変更されています。編集を保護するため、以前の結果への復元を中止しました。");
+  const decision = await showGenerationReview(page, snapshot.before.content, snapshot.after.content, true);
+  if (decision.action === "retry") { await generateReviewed(page, snapshot.id, decision.feedback); return; }
+  if (decision.action === "restore") {
+    await rpc("editor-save", { page, json: { content: snapshot.before.content, revision: current.revision } });
+    aiReviews.delete(key);
+    await refreshWorkspace(true);
+    renderDocumentTags();
+    status("AI更新前の原稿に戻して保存しました。");
+  }
+}); });
 function tasksForPage(page: string): Task[] {
   const docsFolder = workspace!.config.docs.replace(/^[.\\/]+|[\\/]+$/g, "");
   const relative = page.startsWith(`${docsFolder}/`) ? page.slice(docsFolder.length + 1) : page;
@@ -704,7 +836,11 @@ async function generateDocument(page: string): Promise<number> {
   logProgress(`${page} のAI指示 ${tasks.length} 件（撮影を含む）を実行します。`);
   let succeeded = false;
   try {
-    const result = JSON.parse(await rpc("generate-page", { page })) as { updated: string[]; captured?: string[]; capture_errors?: Array<{ id: string; reason: string }> };
+    const generatedTasks = tasks.filter(task => task.kind !== "screenshot");
+    if (generatedTasks.length && !await generateReviewed(page)) { succeeded = true; return 0; }
+    const result = tasks.some(task => task.kind === "screenshot")
+      ? JSON.parse(await rpc("generate-page-captures", { page })) as { updated: string[]; captured?: string[]; capture_errors?: Array<{ id: string; reason: string }> }
+      : { updated: generatedTasks.map(task => task.id), captured: [], capture_errors: [] };
     await pollAgentProgress();
     const captureErrors = result.capture_errors ?? [];
     succeeded = captureErrors.length === 0;
@@ -816,11 +952,70 @@ function taskControl<T extends HTMLElement>(card: HTMLElement, attribute: string
 }
 document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => button.addEventListener("click", () => chooseTab(button.dataset.tab!)));
 element("open-workspace-settings").addEventListener("click", () => {
+  if (!workspace) return;
+  input("docs-path").value = workspace.config.docs;
+  input("output-path").value = workspace.config.output;
+  input("site-name").value = workspace.config.mkdocs.site_name;
+  input("assets-path").value = workspace.config.assets || `${workspace.config.docs}/assets`;
+  element("workspace-save-state").textContent = "";
+  element<HTMLDialogElement>("workspace-settings-dialog").showModal();
+});
+element("open-existing-workspace").addEventListener("click", () => {
   input("project-root").value = projectRoot;
   element<HTMLDialogElement>("workspace-dialog").showModal();
   input("project-root").focus();
 });
-element("cancel-workspace-settings").addEventListener("click", () => element<HTMLDialogElement>("workspace-dialog").close());
+setupWorkspaceWizard({
+  validate: async (root, options) => { await rpc("validate-workspace", options, root); },
+  chooseParent: async () => {
+    if (!native) throw new Error("ブラウザー版では親フォルダーのパスを入力してください。");
+    return invoke<string | null>("choose_project");
+  },
+  create: async (root, options) => {
+    if (busy) throw new Error("現在の処理が完了してから作成してください。");
+    assertNoActiveCaptureSession();
+    if (!await confirmDiscard()) throw new Error("作成を中止しました。現在の原稿を保存してからやり直してください。");
+    setBusy(true);
+    try {
+      await saveAiSettings();
+      await rpc("create-workspace", options, root);
+      await openProject(root, false);
+      status("ワークスペースを作成しました。最初の原稿から編集を始められます。");
+    } finally { setBusy(captureNeedsUiLock()); }
+  },
+});
+element("cancel-open-workspace").addEventListener("click", () => element<HTMLDialogElement>("workspace-dialog").close());
+element("cancel-workspace-settings").addEventListener("click", () => element<HTMLDialogElement>("workspace-settings-dialog").close());
+element("workspace-settings-form").addEventListener("submit", event => {
+  event.preventDefault();
+  void work(async () => {
+    if (!workspace) throw new Error("先にワークスペースを開いてください。");
+    savedBeforeOperation();
+    await saveAiSettings();
+    const root = projectRoot;
+    element("workspace-save-state").textContent = "保存中…";
+    try {
+      const docs = input("docs-path").value.trim();
+      await rpc("save", {
+        docs, output: input("output-path").value.trim(),
+        assets: input("assets-path").value.trim() || `${docs || "docs"}/assets`,
+        mkdocs_settings: { ...workspace.config.mkdocs, site_name: input("site-name").value.trim() },
+      }, root);
+      await refreshWorkspace();
+      element("workspace-save-state").textContent = "保存済み";
+      status("ワークスペース設定を保存しました。");
+    } catch (error) {
+      element("workspace-save-state").textContent = `保存失敗: ${String(error)}`;
+      throw error;
+    }
+  });
+});
+element("workspace-name").addEventListener("click", () => {
+  void work(async () => {
+    const history = await loadWorkspaceHistory(native);
+    showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)));
+  });
+});
 element("project-form").addEventListener("submit", (event) => { event.preventDefault(); void work(() => openProject(input("project-root").value.trim())); });
 element("browse-project").addEventListener("click", () => { void work(async () => {
   if (!native) { status("ブラウザーでの開発表示では、プロジェクトのパスを入力して「開く」を押してください。"); input("project-root").focus(); return; }
@@ -838,7 +1033,7 @@ element("page-list").addEventListener("click", (event) => {
     void work(async () => {
       const page = generateButton.dataset.generatePage!;
       if (documentState?.page !== page) {
-        if (!confirmDiscard()) return;
+        if (!await confirmDiscard()) return;
         await openPage(page, false);
       }
       await generateCurrentPage();
@@ -909,14 +1104,9 @@ element("document-tag-list").addEventListener("click", (event) => {
   if (!target.closest("[data-tag-jump]")) return;
   const start = Number(row.dataset.tagStart);
   const end = Number(row.dataset.tagEnd);
-  editor.focus();
-  editor.setSelectionRange(start, end);
-  const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight) || 26;
-  const lineNumber = editor.value.slice(0, start).split("\n").length - 1;
-  editor.scrollTop = Math.max(0, lineNumber * lineHeight - editor.clientHeight * 0.35);
+  jumpToSource(editor, start, end);
   updateCursor();
 });
-document.querySelector("[data-open-all-tags]")?.addEventListener("click", () => chooseTab("tasks"));
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
   previewScrollWindow?.removeEventListener("scroll", onPreviewScroll);
@@ -1012,8 +1202,18 @@ editor.addEventListener("keydown", (event) => {
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void work(saveDocument); }
 });
-window.addEventListener("beforeunload", (event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
-if (native) void getCurrentWindow().onCloseRequested((event) => { if (!confirmDiscard()) event.preventDefault(); });
+let closingApproved = false;
+window.addEventListener("beforeunload", (event) => { if (dirty && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
+if (native) void getCurrentWindow().onCloseRequested(event => {
+  if (closingApproved || !dirty) return;
+  event.preventDefault();
+  void work(async () => {
+    if (!await confirmDiscard()) return;
+    closingApproved = true;
+    try { await getCurrentWindow().destroy(); }
+    catch (error) { closingApproved = false; throw error; }
+  });
+});
 function resetRecordingControls(): void {
   operationRecording = false;
   recordingPollGeneration++;
@@ -1494,7 +1694,7 @@ element("cancel-new-page").addEventListener("click", () => element<HTMLDialogEle
 element("new-page-form").addEventListener("submit", (event) => {
   event.preventDefault();
   void work(async () => {
-    if (!confirmDiscard()) return;
+    if (!await confirmDiscard()) return;
     const page = input("new-page-path").value.trim();
     await rpc("editor-save", { page, json: { content: `# ${input("new-page-title").value.trim()}\n\n`, revision: null } });
     element<HTMLDialogElement>("new-page-dialog").close();
@@ -1935,7 +2135,11 @@ element("task-list").addEventListener("click", (event) => {
       finally { await restoreManualStudioAfterCapture(); }
       return;
     }
-    if (button.dataset.generate) { await runAction("generate-task", { id }); return; }
+    if (button.dataset.generate) {
+      const page = workspace!.project_entries.some(entry => entry.path === task.page) ? task.page : `${workspace!.config.docs}/${task.page}`;
+      await generateReviewed(page, id);
+      return;
+    }
     if (button.dataset.registerImage) {
       if (!native) throw new Error("PNGのファイル選択はデスクトップアプリで利用できます。");
       const image = await invoke<string | null>("choose_image");
@@ -1950,10 +2154,23 @@ actionButton("map-refresh", "ui-map", () => ({ refresh: true }));
 actionButton("explore-web", "ui-explore", () => ({ url: input("explore-url").value.trim(), max_pages: "10" }));
 actionButton("import-map", "ui-map-import", () => ({ input: input("observation-path").value.trim() }));
 element("save-settings").addEventListener("click", () => { void work(async () => {
-  await runAction("save", settingsOptions());
-  renderSettings();
+  await saveAiSettings();
+  await runAction("save", {
+    brief: element<HTMLTextAreaElement>("manual-brief").value,
+    mkdocs_settings: workspace!.config.mkdocs,
+  });
 }); });
 element("ai-connection-type").addEventListener("change", updateAiSettingsVisibility);
+element("ai-agent").addEventListener("change", () => {
+  input("ai-model").value = "";
+  scheduleAiSave();
+});
+element("ai-connection-type").addEventListener("change", scheduleAiSave);
+for (const id of ["ai-model", "ai-endpoint-url", "ai-api-key"]) {
+  element(id).addEventListener("input", scheduleAiSave);
+  element(id).addEventListener("change", scheduleAiSave);
+}
+element("ai-save-retry").addEventListener("click", () => { void saveAiSettings().catch(() => {}); });
 themePicker.addEventListener("change", () => {
   if (!isThemeId(themePicker.value)) return;
   applyTheme(themePicker.value);

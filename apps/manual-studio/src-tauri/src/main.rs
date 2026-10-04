@@ -8,6 +8,40 @@ use tauri::{Manager, State};
 mod native_worker;
 mod recorder;
 
+static WORKSPACE_HISTORY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn workspace_history_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_config_dir().map_err(|error| error.to_string())?.join("workspace_history.json"))
+}
+
+fn read_workspace_history(path: &std::path::Path) -> Result<Vec<String>, String> {
+    if !path.exists() { return Ok(Vec::new()); }
+    serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("ワークスペース履歴を読み込めません: {error}"))
+}
+
+#[tauri::command]
+fn load_workspace_history(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let _guard = WORKSPACE_HISTORY_LOCK.lock().map_err(|error| error.to_string())?;
+    read_workspace_history(&workspace_history_path(&app)?)
+}
+
+#[tauri::command]
+fn record_workspace_history(app: tauri::AppHandle, root: String) -> Result<Vec<String>, String> {
+    let _guard = WORKSPACE_HISTORY_LOCK.lock().map_err(|error| error.to_string())?;
+    let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    if !root.is_dir() { return Err("ワークスペースのフォルダーがありません。".into()); }
+    let root = root.to_string_lossy().into_owned();
+    let path = workspace_history_path(&app)?;
+    let mut history = read_workspace_history(&path)?;
+    history.retain(|entry| entry != &root);
+    history.insert(0, root);
+    history.truncate(20);
+    fs::create_dir_all(path.parent().ok_or("設定フォルダーを取得できません。")?).map_err(|error| error.to_string())?;
+    fs::write(&path, serde_json::to_vec_pretty(&history).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+    Ok(history)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchCommand {
@@ -672,6 +706,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             manual_request,
             load_launch_commands,
+            load_workspace_history,
+            record_workspace_history,
             save_launch_commands,
             show_recording_control,
             close_recording_control,

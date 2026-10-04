@@ -1,5 +1,5 @@
 type Position = 'right' | 'left' | 'floating';
-interface PaneSettings { position: Position; width: number; collapsed: boolean; x: number; y: number }
+interface PaneSettings { position: Position; width: number; x: number; y: number }
 const storageKey = 'manual-studio-document-tags-pane';
 export function setupDocumentTagsPane(): void {
   const workspace = document.getElementById('editor-workspace');
@@ -7,14 +7,12 @@ export function setupDocumentTagsPane(): void {
   const handle = document.getElementById('document-tags-handle');
   const resizer = document.getElementById('document-tags-resizer');
   const picker = document.getElementById('document-tags-position') as HTMLSelectElement | null;
-  const collapse = document.getElementById('document-tags-collapse') as HTMLButtonElement | null;
-  if (!workspace || !pane || !handle || !resizer || !picker || !collapse) return;
-  let settings: PaneSettings = { position: 'right', width: 270, collapsed: false, x: Math.max(0, innerWidth - 320), y: 130 };
+  if (!workspace || !pane || !handle || !resizer || !picker) return;
+  let settings: PaneSettings = { position: 'right', width: 270, x: Math.max(0, innerWidth - 320), y: 130 };
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
     if (['right', 'left', 'floating'].includes(saved.position)) settings.position = saved.position;
     for (const key of ['width', 'x', 'y'] as const) if (typeof saved[key] === 'number' && Number.isFinite(saved[key])) settings[key] = saved[key];
-    if (typeof saved.collapsed === 'boolean') settings.collapsed = saved.collapsed;
   } catch { /* A damaged preference should not block editing. */ }
   const save = () => { try { localStorage.setItem(storageKey, JSON.stringify(settings)); } catch { /* Optional preference. */ } };
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
@@ -23,24 +21,20 @@ export function setupDocumentTagsPane(): void {
     const maxWidth = settings.position === 'floating' ? innerWidth - 20 : workspace.clientWidth * 0.45;
     settings.width = clamp(settings.width, Math.min(180, Math.max(100, maxWidth)), Math.min(520, Math.max(100, maxWidth)));
     workspace.dataset.tagPosition = settings.position;
-    workspace.style.setProperty('--document-tags-width', `${settings.collapsed ? 40 : settings.width}px`);
-    pane.dataset.collapsed = String(settings.collapsed);
+    workspace.style.setProperty('--document-tags-width', `${settings.width}px`);
+    pane.dataset.collapsed = 'false';
     pane.classList.toggle('document-tags-floating', settings.position === 'floating');
     picker.value = settings.position;
-    collapse.textContent = settings.collapsed ? '展開' : '折りたたむ';
-    collapse.setAttribute('aria-expanded', String(!settings.collapsed));
-    collapse.title = settings.collapsed ? 'AIタグを表示' : 'AIタグを折りたたむ';
     resizer.setAttribute('aria-valuenow', String(Math.round(settings.width)));
     resizer.setAttribute('aria-valuemin', '100'); resizer.setAttribute('aria-valuemax', '520');
     if (settings.position === 'floating') {
-      pane.style.width = `${settings.collapsed ? 40 : settings.width}px`;
+      pane.style.width = `${settings.width}px`;
       settings.x = clamp(settings.x, 0, innerWidth - pane.offsetWidth);
       settings.y = clamp(settings.y, 0, innerHeight - Math.min(pane.offsetHeight || 80, innerHeight));
       pane.style.left = `${settings.x}px`; pane.style.top = `${settings.y}px`;
     } else { pane.style.removeProperty('left'); pane.style.removeProperty('top'); pane.style.removeProperty('width'); }
   };
   picker.addEventListener('change', () => { settings.position = picker.value as Position; apply(); save(); });
-  collapse.addEventListener('click', () => { settings.collapsed = !settings.collapsed; apply(); save(); });
   let drag: { id: number; x: number; y: number; left: number; top: number; started: boolean } | null = null;
   handle.addEventListener('pointerdown', event => {
     if ((event.target as HTMLElement).closest('button,select,input') || event.button !== 0) return;
@@ -58,7 +52,7 @@ export function setupDocumentTagsPane(): void {
   handle.addEventListener('pointerup', finishDrag); handle.addEventListener('pointercancel', finishDrag); handle.addEventListener('lostpointercapture', finishDrag);
   let resize: { id: number; x: number; width: number } | null = null;
   resizer.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || settings.collapsed) return;
+    if (event.button !== 0) return;
     resize = { id: event.pointerId, x: event.clientX, width: settings.width };
     resizer.setPointerCapture(event.pointerId); document.body.classList.add('pane-resizing'); event.preventDefault();
   });

@@ -214,3 +214,17 @@ button[data-toggle-approved].is-approved::before,
 .card-approved {
   border-color: var(--accent);
 }
+#new-workspace-dialog{width:min(640px,94vw);max-height:90vh;overflow:auto}#new-workspace-dialog p{line-height:1.7}#new-workspace-dialog .actions{justify-content:flex-end}#wizard-review{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px}#wizard-review dt{font-weight:600}#wizard-review dd{margin:0;overflow-wrap:anywhere}#wizard-error{color:#b33a35}.header-workspace{flex-wrap:wrap}.header-workspace button{padding:7px 9px}
+
+#workspace-settings-dialog{width:min(560px,92vw);max-height:90vh;overflow:auto}#workspace-settings-dialog form{display:block}#workspace-settings-dialog .actions{justify-content:flex-end}#workspace-settings-root{overflow-wrap:anywhere}
+#new-workspace-dialog [hidden]{display:none!important}
+
+#generation-review-dialog{width:min(1100px,94vw);max-height:92vh;overflow:auto}#generation-review-dialog .actions{justify-content:flex-end}.generation-diff{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);max-height:48vh;overflow:auto;border:1px solid var(--border-color);border-radius:6px;margin-bottom:18px}.generation-diff-heading{padding:8px 12px;font-weight:600;background:var(--surface-bg)}#generation-diff-before,#generation-diff-after{min-width:0;overflow-x:auto}.generation-diff-line{display:flex;min-height:24px;font:12px/24px ui-monospace,monospace;white-space:pre}.generation-diff-line code{font:inherit}.diff-line-number{flex:none;width:44px;text-align:right;padding-right:10px;opacity:.65;user-select:none}.diff-remove{background:#fce1de;color:#7c241c}.diff-add{background:#d7f0df;color:#194d2a}.diff-blank{background:var(--app-bg)}#review-ai-update[hidden]{display:none}
+
+#unsaved-changes-dialog{width:min(520px,92vw);max-height:90vh;overflow:auto}#unsaved-changes-dialog .actions{justify-content:flex-end}#unsaved-changes-message{overflow-wrap:anywhere}#unsaved-changes-error{color:#b33a35;overflow-wrap:anywhere}
+
+#workspace-name { text-align: left; cursor: pointer; }
+#workspace-history-dialog { width: min(620px, 90vw); max-height: 80vh; overflow: auto; }
+.workspace-history-list { display: grid; gap: 8px; margin: 16px 0; }
+.workspace-history-entry { display: grid; gap: 4px; text-align: left; padding: 12px; }
+.workspace-history-entry span { font-size: 12px; opacity: .75; overflow-wrap: anywhere; }

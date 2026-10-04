@@ -20,6 +20,8 @@ pub mod template;
 pub mod ui_explore;
 pub mod uimap;
 pub mod window_capture;
+mod workspace;
+mod generation_review;
 
 use std::collections::HashSet;
 use std::fs;
@@ -60,6 +62,8 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
         "init-template",
         "generate-task",
         "generate-page",
+        "generate-review",
+        "generate-page-captures",
         "update-task",
         "generate-text-all",
         "generate-diagram-all",
@@ -416,6 +420,11 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
             )?;
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
+        }
+        "generate-review" => generation_review::generate(root, page_opt.ok_or("generate-review requires --page")?, id_opt, feedback_opt.unwrap_or("")),
+        "generate-page-captures" => {
+            let page = page_opt.ok_or("generate-page-captures requires --page")?;
+            Ok(author::generate_page_at(root, page, "", &templates_path, &generated_path, true, false, "")?.to_string())
         }
         "generate-task" => {
             let task_id = id_opt.ok_or("generate-task requires --id")?;
@@ -833,6 +842,12 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         .get("action")
         .and_then(serde_json::Value::as_str)
         .ok_or("Action is required")?;
+    if action == "create-workspace" {
+        return workspace::create(Path::new(root), &request["options"]);
+    }
+    if action == "validate-workspace" {
+        return workspace::validate(Path::new(root), &request["options"]);
+    }
     let mut owned = Vec::new();
     if let Some(options) = request
         .get("options")

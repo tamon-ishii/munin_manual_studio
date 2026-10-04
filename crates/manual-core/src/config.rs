@@ -145,7 +145,7 @@ pub fn read_config(root: &Path) -> ManualConfig {
     }
 
     if let Some(ct) = value.get("connection_type").and_then(|v| v.as_str()) {
-        if ["cli", "local_llm", "api"].contains(&ct) {
+        if ["none", "cli", "local_llm", "api"].contains(&ct) {
             config.connection_type = ct.to_string();
         }
     }
@@ -243,7 +243,7 @@ pub fn save_settings(
         brief.to_string()
     };
     let conn_type = connection_type.unwrap_or("cli");
-    if !["cli", "local_llm", "api"].contains(&conn_type) {
+    if !["none", "cli", "local_llm", "api"].contains(&conn_type) {
         return Err(format!("Unsupported AI connection type: {conn_type}"));
     }
     if conn_type == "cli" && !["codex", "claude", "gemini", "grok", "agy"].contains(&agent) {

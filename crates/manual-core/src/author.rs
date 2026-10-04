@@ -191,30 +191,42 @@ pub fn draft(root: &Path) -> Result<(), String> {
 }
 
 pub fn generate_task(root: &Path, task_id: &str, cli: &str, feedback: &str) -> Result<(), String> {
-    log_progress(
-        root,
-        &format!("タスク {task_id} の原稿と指示を読み込んでいます"),
-    );
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
     let generated = root.join("manual").join("ai");
     let task = find_task(&templates, task_id)?;
+    let body = generate_task_body(root, &task, cli, feedback)?;
+    update_task_in_docs(&templates, &task, &body, None)?;
+    save_answer(&generated, &task, &body)?;
+    log_progress(
+        root,
+        &format!("タスク {task_id} の回答を原稿へ保存しました"),
+    );
+    Ok(())
+}
 
+pub(crate) fn generate_task_body(
+    root: &Path,
+    task: &super::task::Task,
+    cli: &str,
+    feedback: &str,
+) -> Result<String, String> {
+    let task_id = &task.id;
+    let config = read_config(root);
+    let templates = project_path(root, &config.docs)?;
+    let generated = root.join("manual").join("ai");
     if task.kind == "screenshot" {
         return Err("Screenshot tasks require a real captured image; use the manual skill in an interactive agent".to_string());
-    }
-
-    if task.kind == "diagram" {
-        log_progress(root, &format!("タスク {task_id} の依存図を作成しています"));
-        record_diagram(&templates, &generated, task_id, cli, root)?;
-        log_progress(root, &format!("タスク {task_id} の依存図を保存しました"));
-        return Ok(());
     }
 
     if task.status == "approved" && feedback.trim().is_empty() {
         return Err(format!(
             "Approved task is locked: {task_id}. Edit the markdown file directly or provide feedback to revise it"
         ));
+    }
+    if task.kind == "diagram" {
+        log_progress(root, &format!("タスク {task_id} の依存図を作成しています"));
+        return diagram_body(task, cli, root);
     }
 
     let page_hint = if templates.join(&task.page).is_file() {
@@ -277,19 +289,27 @@ pub fn generate_task(root: &Path, task_id: &str, cli: &str, feedback: &str) -> R
     }
 
     super::fact::verify_generated_body(root, body)?;
-    update_task_in_docs(&templates, &task, body, None)?;
-    save_answer(&generated, &task, body)?;
-    log_progress(
-        root,
-        &format!("タスク {task_id} の回答を原稿へ保存しました"),
-    );
-    Ok(())
+    Ok(body.to_string())
 }
 
 pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::Value, String> {
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
     let generated = root.join("manual").join("ai");
+    generate_page_at(root, page, cli, &templates, &generated, true, true, "")
+}
+
+pub(crate) fn generate_page_at(
+    root: &Path,
+    page: &str,
+    cli: &str,
+    templates: &Path,
+    generated: &Path,
+    capture: bool,
+    include_generated: bool,
+    feedback: &str,
+) -> Result<Value, String> {
+    let config = read_config(root);
     let page_tasks: Vec<_> = tasks_for_page(root, page)?
         .into_iter()
         .filter(|task| {
@@ -299,7 +319,7 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
         .collect();
     let selected: Vec<_> = page_tasks
         .iter()
-        .filter(|task| task.kind == "text" || task.kind == "diagram")
+        .filter(|task| include_generated && (task.kind == "text" || task.kind == "diagram"))
         .cloned()
         .collect();
     let screenshot_tasks: Vec<_> = page_tasks
@@ -321,7 +341,7 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
             .iter()
             .map(|task| json!({ "id": task.id, "instruction": task.prompt }))
             .collect();
-        let prompt = format!(
+        let mut prompt = format!(
             "Answer the following tasks for the same Markdown page in one pass, in concise professional Japanese Markdown. \
             Read {page} as the primary context. Inspect only source files needed to verify concrete claims; avoid repository-wide exploration unless a task requires it. \
             Return one answer for every ID, with no extra IDs. Verify UI names from source. \
@@ -331,6 +351,9 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
             Use only evidence you verified. Return only documentation content in each markdown field.\nTasks: {}",
             serde_json::to_string(&instructions).map_err(|error| error.to_string())?
         );
+        if !feedback.trim().is_empty() {
+            prompt.push_str(&format!("\nUser revision instruction: {}", feedback.trim()));
+        }
         let schema = json!({
             "type": "object",
             "properties": { "answers": { "type": "array", "items": {
@@ -405,7 +428,7 @@ pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::V
     }
     let mut captured = Vec::new();
     let mut capture_errors = Vec::new();
-    if !screenshot_tasks.is_empty() {
+    if capture && !screenshot_tasks.is_empty() {
         log_progress(
             root,
             &format!(
@@ -736,6 +759,13 @@ pub(crate) fn record_diagram_task(
     cli: &str,
     project: &Path,
 ) -> Result<(), String> {
+    let body = diagram_body(task, cli, project)?;
+    update_task_in_docs(templates, task, &body, None)?;
+    save_answer(generated, task, &body)?;
+    Ok(())
+}
+
+fn diagram_body(task: &super::task::Task, cli: &str, project: &Path) -> Result<String, String> {
     if task.kind != "diagram" {
         return Err(format!("Task is not a diagram: {}", task.id));
     }
@@ -786,7 +816,5 @@ pub(crate) fn record_diagram_task(
     let diagram = lines.join("\n");
     let body = format!("```mermaid\n{diagram}\n```");
 
-    update_task_in_docs(templates, &task, &body, None)?;
-    save_answer(generated, &task, &body)?;
-    Ok(())
+    Ok(body)
 }

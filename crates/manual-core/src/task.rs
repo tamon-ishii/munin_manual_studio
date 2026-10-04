@@ -289,10 +289,9 @@ pub fn parse_page_tags(
 
     let id_re = Regex::new(r#"(?:^|\s)id=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
     let kind_re = Regex::new(r#"(?:^|\s)kind=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
-    let source_hash_re = Regex::new(r#"\bsource-sha256=([a-f0-9]{64})"#).unwrap();
-    let prompt_re = Regex::new(r#"\bprompt-b64=([A-Za-z0-9+/=]+)"#).unwrap();
-    let approved_re =
-        Regex::new(r#"\bapproved-at=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)"#).unwrap();
+    let source_hash_re = Regex::new(r#"(?:^|\s)source-sha256=(?:"([a-f0-9]{64})"|'([a-f0-9]{64})'|([a-f0-9]{64}))"#).unwrap();
+    let prompt_re = Regex::new(r#"(?:^|\s)prompt-b64=(?:"([A-Za-z0-9+/=]+)"|'([A-Za-z0-9+/=]+)'|([A-Za-z0-9+/=]+))"#).unwrap();
+    let approved_re = Regex::new(r#"(?:^|\s)approved-at=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
     let valid_id_re = Regex::new(r#"^[a-z][a-z0-9_-]*$"#).unwrap();
 
     struct RawTask {
@@ -452,15 +451,12 @@ pub fn parse_page_tags(
             "text".to_string()
         };
         let approved = approved_re.is_match(&g.attrs);
-        let hash = source_hash_re
-            .captures(&g.attrs)
-            .map(|c| c.get(1).unwrap().as_str().to_string())
-            .unwrap_or_default();
+        let hash = extract_attr(&source_hash_re, &g.attrs).unwrap_or_default().to_string();
         let prompt = if let Some(source_prompt) = paired_prompts.get(&gen_index) {
             source_prompt.clone()
-        } else if let Some(encoded) = prompt_re.captures(&g.attrs) {
+        } else if let Some(encoded) = extract_attr(&prompt_re, &g.attrs) {
             let bytes = base64::engine::general_purpose::STANDARD
-                .decode(encoded.get(1).unwrap().as_str())
+                .decode(encoded)
                 .map_err(|e| format!("Invalid prompt-b64 in page {page_rel}: {e}"))?;
             String::from_utf8(bytes)
                 .map_err(|e| format!("Invalid prompt-b64 in page {page_rel}: {e}"))?
@@ -469,10 +465,10 @@ pub fn parse_page_tags(
         };
 
         let current_hash = source_hash(&kind, &prompt);
-        let status = if !hash.is_empty() && hash != current_hash {
-            "stale".to_string()
-        } else if approved {
+        let status = if approved {
             "approved".to_string()
+        } else if !hash.is_empty() && hash != current_hash {
+            "stale".to_string()
         } else {
             "current".to_string()
         };
@@ -898,4 +894,27 @@ pub fn approve_task(templates: &Path, generated: &Path, task_id: &str) -> Result
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod approval_regressions {
+    use super::*;
+
+    #[test]
+    fn quoted_metadata_preserves_prompt_and_approval_over_hash_mismatch() {
+        use base64::Engine;
+        for kind in ["text", "diagram", "screenshot"] {
+            let prompt = "この指示文は変更しない";
+            let encoded = base64::engine::general_purpose::STANDARD.encode(prompt);
+            let content = format!("<!-- ai:generated id=confirmed kind={kind} prompt-b64=\"{encoded}\" source-sha256=\"{}\" approved-at=\"2026-10-05T12:00:00.000Z\" -->\n確定済み本文\n<!-- /ai:generated -->", "0".repeat(64));
+            let tags = parse_page_tags("index.md", &content, &mut HashSet::new()).unwrap();
+            let PageTag::Generated { task, .. } = &tags[0] else { panic!("generated tag expected") };
+            assert_eq!(task.prompt, prompt);
+            assert_eq!(task.status, "approved");
+            let unapproved = content.replace(" approved-at=\"2026-10-05T12:00:00.000Z\"", "");
+            let tags = parse_page_tags("index.md", &unapproved, &mut HashSet::new()).unwrap();
+            let PageTag::Generated { task, .. } = &tags[0] else { panic!("generated tag expected") };
+            assert_eq!(task.status, "stale");
+        }
+    }
 }

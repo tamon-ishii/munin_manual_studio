@@ -353,6 +353,9 @@ pub fn agent_json(
     model: &str,
 ) -> Result<Value, String> {
     let config = crate::config::read_config(root);
+    if config.connection_type == "none" {
+        return Err("AI接続は未設定です。「AI設定・出力」で接続方式を選択してください。".into());
+    }
     if config.connection_type == "local_llm" || config.connection_type == "api" {
         let effective_model = if !model.is_empty() {
             model
