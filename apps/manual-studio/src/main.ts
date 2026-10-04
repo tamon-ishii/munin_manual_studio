@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { EditorHistory, type EditorSnapshot } from "./editorHistory";
 import { completeMarkitsCapture } from "./markitsWorkflow";
@@ -275,8 +276,7 @@ function setBusy(value: boolean): void {
   editor.readOnly = value;
   editor.disabled = !documentState;
   updateHistoryButtons();
-  updateGeneratedDeleteButton();
-  updateConfirmGeneratedButton();
+  renderDocumentTags();
 }
 function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
   if (busyButtonStates?.has(button)) busyButtonStates.set(button, disabled);
@@ -328,32 +328,6 @@ async function renderPreview(): Promise<void> {
 function updateCursor(): void {
   const lines = editor.value.slice(0, editor.selectionStart).split("\n");
   element("cursor-position").textContent = `${lines.length}:${lines.at(-1)!.length + 1}`;
-  updateGeneratedDeleteButton();
-  updateConfirmGeneratedButton();
-}
-function generatedBlockAtCursor(): { start: number; end: number; headerEnd: number; approved: boolean } | null {
-  const cursor = editor.selectionStart;
-  const generated = /<!--\s*ai:generated\b[^>]*-->[\s\S]*?<!--\s*\/ai:generated\s*-->/g;
-  for (const match of editor.value.matchAll(generated)) {
-    const start = match.index!;
-    const end = start + match[0].length;
-    if (cursor >= start && cursor <= end) {
-      const headerEnd = start + match[0].indexOf("-->") + 3;
-      return { start, end, headerEnd, approved: /\bapproved-at=[^\s>]+/.test(match[0].slice(0, headerEnd - start)) };
-    }
-  }
-  return null;
-}
-function updateGeneratedDeleteButton(): void {
-  element<HTMLButtonElement>("delete-generated").disabled = busy || !documentState || !generatedBlockAtCursor();
-}
-function updateConfirmGeneratedButton(): void {
-  const button = element<HTMLButtonElement>("confirm-generated");
-  const block = generatedBlockAtCursor();
-  button.disabled = busy || !documentState || !block;
-  button.textContent = block?.approved ? "確定解除" : "確定";
-  button.title = block?.approved ? "確定を解除し、AI出力で更新可能にする" : "カーソル上の生成結果を確定し、以後のAI出力で保護";
-  button.setAttribute("aria-label", block?.approved ? "生成結果の確定を解除" : "生成結果を確定");
 }
 function previewScrollElement(): Element | null {
   try { return element<HTMLIFrameElement>("markdown-preview").contentDocument?.scrollingElement || null; }
@@ -391,7 +365,7 @@ async function openPage(page: string, check = true): Promise<void> {
   dirty = false;
   element("editor-title").textContent = page;
   document.title = `${page} — Manual Studio`;
-  updateSaveState(); updateCursor(); renderPages();
+  updateSaveState(); updateCursor(); renderPages(); renderDocumentTags();
   await renderPreview();
   chooseTab("editor");
 }
@@ -421,8 +395,49 @@ async function refreshWorkspace(reloadPage = false): Promise<void> {
     if (documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
     const opened = JSON.parse(await rpc("editor-read", { page: current.page }, root)) as Document;
     if (root !== projectRoot || documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
-    documentState = opened; editor.value = opened.content; resetEditHistory(); dirty = false; updateSaveState(); await renderPreview();
+    documentState = opened; editor.value = opened.content; resetEditHistory(); dirty = false; updateSaveState(); renderDocumentTags(); await renderPreview();
   }
+}
+function tagAttribute(attrs: string, name: string): string | null {
+  const match = new RegExp(`(?:^|\\s)${name}=(?:"([^"]+)"|'([^']+)'|([^\\s>]+))`).exec(attrs);
+  return match?.[1] || match?.[2] || match?.[3] || null;
+}
+function renderDocumentTags(): void {
+  const list = element<HTMLElement>("document-tag-list");
+  if (!documentState) { list.innerHTML = '<span class="muted">原稿を開くとタグが表示されます。</span>'; return; }
+  const content = editor.value;
+  const masked = content.split("");
+  const codeRanges = [...content.matchAll(/^\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\s*\1[^\n]*$/gm)];
+  for (const range of codeRanges) for (let i = range.index!; i < range.index! + range[0].length; i++) if (masked[i] !== "\n") masked[i] = " ";
+  const source = masked.join("");
+  const tags = new Map<string, { id: string; kind: string; status: string; start: number; end: number; generatedStart?: number; generatedEnd?: number; generatedHeaderEnd?: number; approved?: boolean }>();
+  const collect = (pattern: RegExp, generated: boolean) => {
+    for (const match of source.matchAll(pattern)) {
+      const attrs = match.groups?.attrs || "";
+      const id = tagAttribute(attrs, "id");
+      if (!id) continue;
+      const raw = content.slice(match.index!, match.index! + match[0].length);
+      const actualAttrs = generated ? /^<!--\s*ai:generated\b([^>]*)-->/.exec(raw)?.[1] || "" : /^<!--\s*ai:task([^\r\n]*)/.exec(raw)?.[1] || "";
+      const existing = tags.get(id);
+      const headerEnd = generated ? match.index! + raw.indexOf("-->") + 3 : undefined;
+      const approved = generated && Boolean(tagAttribute(actualAttrs, "approved-at"));
+      tags.set(id, {
+        id,
+        kind: tagAttribute(actualAttrs, "kind") || existing?.kind || "text",
+        status: generated ? (approved ? "確定済み" : "未確定") : existing?.status || "未生成",
+        start: existing?.start ?? match.index!,
+        end: existing?.end ?? match.index! + match[0].length,
+        generatedStart: generated ? match.index! : existing?.generatedStart,
+        generatedEnd: generated ? match.index! + match[0].length : existing?.generatedEnd,
+        generatedHeaderEnd: headerEnd ?? existing?.generatedHeaderEnd,
+        approved: generated ? approved : existing?.approved,
+      });
+    }
+  };
+  collect(/<!--\s*ai:task\b(?<attrs>[^\r\n]*)\r?\n[\s\S]*?\r?\n-->/g, false);
+  collect(/<!--\s*ai:generated\b(?<attrs>[^>]*)-->[\s\S]*?<!--\s*\/ai:generated\s*-->/g, true);
+  const kinds: Record<string, string> = { screenshot: "画像", text: "文章", diagram: "図" };
+  list.innerHTML = tags.size ? [...tags.values()].map((tag) => `<div class="document-tag-row" data-tag-start="${tag.start}" data-tag-end="${tag.end}"${tag.generatedStart === undefined ? "" : ` data-generated-start="${tag.generatedStart}" data-generated-end="${tag.generatedEnd}" data-generated-header-end="${tag.generatedHeaderEnd}" data-approved="${tag.approved}"`}><button type="button" class="document-tag-jump" data-tag-jump><code>${escape(tag.id)}</code><span>${kinds[tag.kind] || escape(tag.kind)}</span><span class="document-tag-status">${tag.status}</span></button>${tag.generatedStart === undefined ? "" : `<span class="document-tag-actions"><button type="button" data-tag-confirm${busy || !documentState ? " disabled" : ""}>${tag.approved ? "確定解除" : "確定"}</button><button type="button" data-tag-delete${busy || !documentState ? " disabled" : ""}>生成結果を削除</button></span>`}</div>`).join("") : '<span class="muted">この文書にAIタグはありません。</span>';
 }
 function renderSettings(): void {
   if (!workspace) return;
@@ -472,7 +487,7 @@ async function openProject(root: string): Promise<void> {
   element<HTMLIFrameElement>("markdown-preview").srcdoc = "";
   element("editor-title").textContent = "Markdownを編集する";
   document.title = "Manual Studio";
-  updateSaveState(); updateCursor();
+  updateSaveState(); updateCursor(); renderDocumentTags();
   input("project-root").value = root;
   localStorage.setItem("manual-studio-project", root);
   element("workspace-name").textContent = root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
@@ -503,14 +518,14 @@ async function saveDocument(refresh = true): Promise<void> {
 function renderTasks(): void {
   if (!workspace) return;
   const kindLabel: Record<string, string> = { screenshot: "画像", text: "AI文章", diagram: "依存図" };
-  const statusLabel: Record<string, string> = { missing: "未作成", stale: "更新待ち", current: "準備完了", approved: "承認済み" };
+  const statusLabel: Record<string, string> = { missing: "未作成", stale: "更新待ち", current: "準備完了", approved: "確定済み" };
   element("task-list").innerHTML = workspace.tasks.length ? workspace.tasks.map((task) => {
     const source = workspace!.capture_sources[task.id];
     const description = source?.kind === "window" ? `${escape(source.title)} · 外枠 ${source.inset}px` : source?.kind === "scenario" ? "撮影元と撮影前の操作を設定済み" : "撮影元はまだ設定されていません。文書のAI出力で自動設定できます。";
-    return `<article class="card" data-task="${escape(task.id)}"><div class="task-header"><h2>${escape(task.id)} <small>${escape(task.page)}</small></h2><span class="badge">${kindLabel[task.kind]} · ${statusLabel[task.status] || escape(task.status)}</span></div><p>${escape(task.prompt)}</p>${task.kind === "screenshot" ? `
+    return `<article class="card" data-task="${escape(task.id)}"><div class="task-header"><h2>${escape(task.id)} <small>${escape(task.page)}</small></h2><span class="badge">${kindLabel[task.kind]} · ${statusLabel[task.status] || escape(task.status)}</span></div><label class="task-prompt-label">AIへの指示<textarea data-prompt="${escape(task.id)}" rows="3">${escape(task.prompt)}</textarea></label><div class="actions"><button data-save-prompt="${escape(task.id)}">指示を保存</button><button data-toggle-approved="${escape(task.id)}"${task.status === "missing" ? " disabled title=\"生成結果がある場合に確定できます\"" : ""}>${task.status === "approved" ? "確定解除" : "確定"}</button>${task.kind !== "screenshot" ? `<button data-generate="${escape(task.id)}" class="primary">${task.kind === "diagram" ? "依存図を更新" : "AIで文章を更新"}</button>` : ""}</div>${task.kind === "screenshot" ? `
       <p class="muted">${description}</p><img class="task-image" data-thumb="${escape(task.id)}" alt="${escape(task.id)}の登録画像" hidden />
       <div class="actions">${source ? `<button class="primary" data-recapture="${escape(task.id)}">${source.kind === "scenario" ? "設定した手順で更新" : "同じ撮影元で更新"}</button>` : ""}<button data-source-config="${escape(task.id)}">${source ? "撮影元を変更" : "撮影元を選ぶ"}</button><button data-register-image="${escape(task.id)}">既存のPNGを登録</button></div>
-      <details class="capture-settings"><summary>撮影元の設定</summary><p class="muted">アプリの対象画面を開いて一覧を更新してください。タイトルで記憶するので、アプリを再起動しても使えます。同じタイトルが複数ある場合は自動で選びません。Waylandでは毎回OSの撮影ダイアログで対象を選びます。</p><div class="actions"><select data-window-select="${escape(task.id)}"><option value="">一覧を更新してください</option></select><button data-window-list="${escape(task.id)}">一覧を更新</button></div><div class="actions"><label>外枠を除く（px）<input type="number" min="0" max="64" data-inset="${escape(task.id)}" value="${source?.kind === "window" ? source.inset : 0}" /></label><button data-capture="${escape(task.id)}" class="primary">撮影元を保存して撮影</button></div></details>` : `<div class="actions"><button data-generate="${escape(task.id)}" class="primary">${task.kind === "diagram" ? "依存図を更新" : "AIで文章を更新"}</button></div>`}<button class="edit-task" data-edit-page="${escape(task.page)}">この指示を原稿で編集</button></article>`;
+      <details class="capture-settings"><summary>撮影元の設定</summary><p class="muted">アプリの対象画面を開いて一覧を更新してください。タイトルで記憶するので、アプリを再起動しても使えます。同じタイトルが複数ある場合は自動で選びません。Waylandでは毎回OSの撮影ダイアログで対象を選びます。</p><div class="actions"><select data-window-select="${escape(task.id)}"><option value="">一覧を更新してください</option></select><button data-window-list="${escape(task.id)}">一覧を更新</button></div><div class="actions"><label>外枠を除く（px）<input type="number" min="0" max="64" data-inset="${escape(task.id)}" value="${source?.kind === "window" ? source.inset : 0}" /></label><button data-capture="${escape(task.id)}" class="primary">撮影元を保存して撮影</button></div></details>` : ""}<button class="edit-task" data-edit-page="${escape(task.page)}">原稿を開く</button></article>`;
   }).join("") : '<div class="card"><h2>更新する画像・文章・図を追加する</h2><p>原稿の編集画面で「撮影の指示」「AI文章の指示」「依存図の指示」を追加して保存してください。この一覧に表示されます。</p></div>';
   const generationRoot = projectRoot;
   for (const task of workspace.tasks.filter((item) => item.kind === "screenshot")) {
@@ -520,6 +535,57 @@ function renderTasks(): void {
       if (img) { img.src = src; img.hidden = false; }
     }).catch(() => { /* An unregistered screenshot has no image yet. */ });
   }
+}
+async function editTaskPage(task: Task, edit: (content: string) => string): Promise<void> {
+  if (!confirmDiscard()) return;
+  const root = projectRoot;
+  const page = JSON.parse(await rpc("editor-read", { page: task.page }, root)) as Document;
+  if (projectRoot !== root) return;
+  const content = edit(page.content);
+  if (content === page.content) return;
+  await rpc("editor-save", { page: task.page, json: { content, revision: page.revision } }, root);
+  if (projectRoot !== root) return;
+  await refreshWorkspace(documentState?.page === task.page);
+  status(`${task.id}を保存しました。`);
+}
+function updateTaskPrompt(content: string, task: Task, prompt: string): string {
+  if (prompt.includes("-->")) throw new Error("AIへの指示にコメント終端「-->」は入力できません。");
+  const safeId = task.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hasId = (attrs: string) => new RegExp(`(?:^|\\s)id=["']?${safeId}(?:["']|\\s|$)`).test(attrs);
+  const taskTag = /<!--\s*ai:task(?<attrs>[^\r\n]*)\r?\n(?<prompt>.*?)\r?\n-->/gs;
+  const taskMatches = [...content.matchAll(taskTag)].filter((match) => hasId(match.groups?.attrs || ""));
+  if (taskMatches.length === 1) {
+    const match = taskMatches[0];
+    const replacement = `<!-- ai:task${match.groups!.attrs}\n${prompt.trim()}\n-->`;
+    return content.slice(0, match.index) + replacement + content.slice(match.index! + match[0].length);
+  }
+  if (taskMatches.length > 1) throw new Error(`${task.id}の指示タグが複数あります。`);
+
+  const generatedTag = /<!--\s*ai:generated\b(?<attrs>[^>]*)-->[\s\S]*?<!--\s*\/ai:generated\s*-->/g;
+  const generatedMatches = [...content.matchAll(generatedTag)].filter((match) => hasId(match.groups?.attrs || ""));
+  if (generatedMatches.length !== 1) throw new Error(`${task.id}の指示タグを原稿から特定できません。`);
+  const match = generatedMatches[0];
+  const attrs = match.groups!.attrs;
+  const bytes = new TextEncoder().encode(prompt.trim());
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const encodedPrompt = btoa(binary);
+  const nextAttrs = /\bprompt-b64=[A-Za-z0-9+/=]+/.test(attrs)
+    ? attrs.replace(/\bprompt-b64=[A-Za-z0-9+/=]+/, `prompt-b64=${encodedPrompt}`)
+    : `${attrs} prompt-b64=${encodedPrompt}`;
+  return content.slice(0, match.index) + match[0].replace(attrs, nextAttrs) + content.slice(match.index! + match[0].length);
+}
+function toggleTaskApproval(content: string, task: Task): string {
+  const tag = new RegExp(`<!--\\s*ai:generated\\b(?<attrs>[^>]*)-->[\\s\\S]*?<!--\\s*\\/ai:generated\\s*-->`, "g");
+  const safeId = task.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = [...content.matchAll(tag)].filter((match) => new RegExp(`(?:^|\\s)id=["']?${safeId}(?:["']|\\s|$)`).test(match.groups?.attrs || ""));
+  if (matches.length !== 1) throw new Error(`${task.id}の生成結果が原稿にありません。`);
+  const match = matches[0];
+  const attrs = match.groups!.attrs;
+  const nextAttrs = /\bapproved-at=[^\s>]+/.test(attrs)
+    ? attrs.replace(/\s+approved-at=[^\s>]+/, "")
+    : `${attrs} approved-at=${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}`;
+  return content.slice(0, match.index) + match[0].replace(attrs, nextAttrs) + content.slice(match.index! + match[0].length);
 }
 function renderMap(): void {
   const map = workspace?.ui_map;
@@ -703,34 +769,6 @@ element("generate-page").addEventListener("click", () => { void work(generateCur
 element("reload-page").addEventListener("click", () => { if (documentState) void work(() => openPage(documentState!.page)); });
 element("undo-edit").addEventListener("click", () => stepEditHistory(-1));
 element("redo-edit").addEventListener("click", () => stepEditHistory(1));
-element("delete-generated").addEventListener("click", () => {
-  if (busy) return;
-  const block = generatedBlockAtCursor();
-  if (!block) { updateGeneratedDeleteButton(); return; }
-  let end = block.end;
-  if (editor.value[end] === "\r" && editor.value[end + 1] === "\n") end += 2;
-  else if (editor.value[end] === "\n") end++;
-  replaceMarkdown(block.start, end, "", 0);
-  status("カーソル位置の ai:generated ブロックを削除しました。Undo で戻せます。");
-});
-element("confirm-generated").addEventListener("click", () => {
-  if (busy) return;
-  const block = generatedBlockAtCursor();
-  if (!block) { updateConfirmGeneratedButton(); return; }
-  const oldHeader = editor.value.slice(block.start, block.headerEnd);
-  const newHeader = block.approved
-    ? oldHeader.replace(/\s+approved-at=[^\s>]+(?=\s*-->)/, "")
-    : oldHeader.replace(/\s*-->$/, ` approved-at=${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")} -->`);
-  if (oldHeader === newHeader) return;
-  const cursorOffset = editor.selectionStart - block.start;
-  const nextOffset = cursorOffset >= oldHeader.length
-    ? cursorOffset + newHeader.length - oldHeader.length
-    : Math.min(cursorOffset, newHeader.length);
-  replaceMarkdown(block.start, block.headerEnd, newHeader, nextOffset);
-  status(block.approved
-    ? "確定印を解除しました。この生成結果は次回の文書単位AI出力で更新できます。Undo で戻せます。"
-    : "生成結果に確定印を付けました。保存後、文書単位AI出力で更新されません。Undo で戻せます。");
-});
 element("detach-editor").addEventListener("click", () => { void work(async () => {
   savedBeforeOperation();
   if (!documentState) throw new Error("原稿を選択してください。");
@@ -746,8 +784,49 @@ editor.addEventListener("beforeinput", (event) => {
 editor.addEventListener("input", (event) => {
   recordEditHistory(event);
   dirty = editor.value !== documentState?.content; updateSaveState(); updateCursor();
+  renderDocumentTags();
   clearTimeout(previewTimer); previewTimer = setTimeout(() => { void renderPreview(); }, 250);
 });
+element("document-tag-list").addEventListener("click", (event) => {
+  const target = event.target as HTMLElement;
+  const row = target.closest<HTMLElement>(".document-tag-row");
+  if (!row) return;
+  if (target.closest("[data-tag-confirm]")) {
+    if (busy || row.dataset.generatedStart === undefined || row.dataset.generatedHeaderEnd === undefined || !documentState) return;
+    const start = Number(row.dataset.generatedStart);
+    const headerEnd = Number(row.dataset.generatedHeaderEnd);
+    const oldHeader = editor.value.slice(start, headerEnd);
+    const approved = row.dataset.approved === "true";
+    const newHeader = approved
+      ? oldHeader.replace(/\s+approved-at=[^\s>]+/, "")
+      : oldHeader.replace(/\s*-->$/, ` approved-at=${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")} -->`);
+    if (oldHeader !== newHeader) {
+      replaceMarkdown(start, headerEnd, newHeader, 0, newHeader.length);
+      status(approved ? "確定を解除しました。Undo で戻せます。" : "生成結果を確定しました。Undo で戻せます。");
+    }
+    return;
+  }
+  if (target.closest("[data-tag-delete]")) {
+    if (busy || row.dataset.generatedStart === undefined || row.dataset.generatedEnd === undefined || !documentState) return;
+    const start = Number(row.dataset.generatedStart);
+    let end = Number(row.dataset.generatedEnd);
+    if (editor.value[end] === "\r" && editor.value[end + 1] === "\n") end += 2;
+    else if (editor.value[end] === "\n") end++;
+    replaceMarkdown(start, end, "", 0);
+    status(`${row.querySelector("code")?.textContent || "生成結果"}を削除しました。Undo で戻せます。`);
+    return;
+  }
+  if (!target.closest("[data-tag-jump]")) return;
+  const start = Number(row.dataset.tagStart);
+  const end = Number(row.dataset.tagEnd);
+  editor.focus();
+  editor.setSelectionRange(start, end);
+  const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight) || 26;
+  const lineNumber = editor.value.slice(0, start).split("\n").length - 1;
+  editor.scrollTop = Math.max(0, lineNumber * lineHeight - editor.clientHeight * 0.35);
+  updateCursor();
+});
+document.querySelector("[data-open-all-tags]")?.addEventListener("click", () => chooseTab("tasks"));
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
   previewScrollWindow?.removeEventListener("scroll", onPreviewScroll);
@@ -1519,6 +1598,16 @@ element("task-list").addEventListener("click", (event) => {
   if (!button || !card) return;
   const id = card.dataset.task!;
   void work(async () => {
+    const task = workspace!.tasks.find((item) => item.id === id)!;
+    if (button.dataset.savePrompt) {
+      const prompt = taskControl<HTMLTextAreaElement>(card, "data-prompt").value;
+      await editTaskPage(task, (content) => updateTaskPrompt(content, task, prompt));
+      return;
+    }
+    if (button.dataset.toggleApproved) {
+      await editTaskPage(task, (content) => toggleTaskApproval(content, task));
+      return;
+    }
     if (button.dataset.editPage) { await openPage(button.dataset.editPage); return; }
     if (button.dataset.sourceConfig || button.dataset.windowList) {
       card.querySelector<HTMLDetailsElement>("details")!.open = true;
@@ -1640,6 +1729,15 @@ if (recordingControlMode) {
     }
   });
   document.body.append(control);
+  if (native) {
+    void (async () => {
+      await document.fonts.ready;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const width = Math.min(310, window.innerWidth);
+      const height = Math.ceil(control.getBoundingClientRect().height);
+      await getCurrentWindow().setSize(new LogicalSize(width, height));
+    })().catch((error) => status(`撮影ウィンドウのサイズを調整できません: ${String(error)}`, true));
+  }
 }
 if (!recordingControlMode) {
   void loadLaunchCommands().catch((error) => status(`共通起動コマンドを読み込めません: ${String(error)}`, true));

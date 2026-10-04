@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use tauri::{Manager, State};
 
+mod native_worker;
 mod recorder;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,23 +63,33 @@ fn save_launch_commands(app: tauri::AppHandle, commands: Vec<LaunchCommand>) -> 
 #[tauri::command]
 fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("recording-control") {
+        window.show().map_err(|error| error.to_string())?;
+        window.unminimize().map_err(|error| error.to_string())?;
+        window
+            .set_always_on_top(true)
+            .map_err(|error| error.to_string())?;
         return window.set_focus().map_err(|error| error.to_string());
     }
-    tauri::WebviewWindowBuilder::new(
+    let window = tauri::WebviewWindowBuilder::new(
         &app,
         "recording-control",
         tauri::WebviewUrl::App("index.html?recordingControl=1".into()),
     )
     .title("Manual Studio — 撮影")
     .inner_size(310.0, 100.0)
-    .resizable(false)
+    .min_inner_size(1.0, 1.0)
+    // GTK locks an unresizable WebView at its initial minimum (200px).
+    // Allow the content-driven resize to shrink the native popup.
+    .resizable(true)
     .decorations(false)
     .always_on_top(true)
     .skip_taskbar(true)
     .center()
     .build()
-    .map(|_| ())
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.unminimize().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -183,7 +194,19 @@ async fn manual_request(
                     std::thread::sleep(std::time::Duration::from_millis(350));
                     Ok(())
                 },
-                || manual_core::request(request),
+                || {
+                    let action = request["action"].as_str().unwrap_or_default();
+                    if native_worker::requires_worker(action) {
+                        if native_worker::requires_hiding(action) {
+                            attempted_capture.store(true, std::sync::atomic::Ordering::Relaxed);
+                            hide_manual_studio(app.clone(), app.state::<HiddenStudioWindows>())?;
+                            std::thread::sleep(std::time::Duration::from_millis(350));
+                        }
+                        native_worker::request(request)
+                    } else {
+                        manual_core::request(request)
+                    }
+                },
             )
         }))
         .unwrap_or_else(|_| {
@@ -316,12 +339,35 @@ fn operation_recording_running(state: State<'_, recorder::RecorderState>) -> Res
 
 #[tauri::command]
 async fn finish_operation_recording(
+    app: tauri::AppHandle,
     state: State<'_, recorder::RecorderState>,
 ) -> Result<recorder::RecordingResult, String> {
+    let control_bounds = app.get_webview_window("recording-control").and_then(|window| {
+        let position = window.outer_position().ok()?;
+        let size = window.outer_size().ok()?;
+        Some((position.x as f64, position.y as f64, size.width as f64, size.height as f64))
+    });
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || recorder::finish(&state))
+    let result = tauri::async_runtime::spawn_blocking(move || recorder::finish_excluding_control(&state, control_bounds))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())??;
+    if result.markits_started {
+        let completion = PathBuf::from(&result.completion_file);
+        let source = PathBuf::from(&result.source_file);
+        std::thread::spawn(move || {
+            // Hidden WebKit views can suspend JS timers. Restore natively so
+            // an editor crash cannot leave the main window waiting invisibly.
+            loop {
+                if completion.is_file() || completion.with_extension("exit").is_file() {
+                    let _ = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
+                    break;
+                }
+                if !source.is_file() || app.get_webview_window("main").is_none() { break; }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -382,7 +428,20 @@ async fn cleanup_markits_capture(image_file: String) -> Result<(), String> {
 fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
-    if args.next().as_deref() == Some(std::ffi::OsStr::new("--manual-studio-record-input")) {
+    let mode = args.next();
+    if mode.as_deref() == Some(std::ffi::OsStr::new(native_worker::FLAG)) {
+        let result = args
+            .next()
+            .map(PathBuf::from)
+            .ok_or_else(|| "native worker directory is required".to_string())
+            .and_then(|dir| native_worker::run(&dir));
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+        return;
+    }
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--manual-studio-record-input")) {
         let output = args
             .next()
             .map(PathBuf::from)

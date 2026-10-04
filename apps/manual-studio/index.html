@@ -7,7 +7,7 @@
     <div class="header-workspace"><span id="workspace-name">プロジェクト未選択</span><button type="button" id="open-workspace-settings" aria-haspopup="dialog">⚙ ワークスペース</button></div>
   </header>
   <div class="app-layout" id="app-layout">
-    <nav class="workspace-tabs" aria-label="作業"><button data-tab="editor" class="active">原稿を編集</button><button data-tab="tasks">画像・文章・図 <span id="task-count">0</span></button><button data-tab="uimap">画面一覧 / UI Map</button><button data-tab="publish">AI設定・出力</button></nav>
+    <nav class="workspace-tabs" aria-label="作業"><button data-tab="editor" class="active">原稿を編集</button><button data-tab="tasks">AIタグ一覧 <span id="task-count">0</span></button><button data-tab="uimap">画面一覧 / UI Map</button><button data-tab="publish">AI設定・出力</button></nav>
     <aside class="sidebar">
       <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><div class="tree-create-actions"><button type="button" id="new-page" title="Markdownページを作る">＋ MD</button><button type="button" id="new-folder" title="原稿フォルダー内にフォルダーを作る">＋ フォルダー</button></div></div>
       <button type="button" id="generate-all-pages" class="primary tree-generate-all" title="ファイルツリー内のMarkdown文書のAI指示を順番に実行">すべての文書をAI出力</button>
@@ -28,8 +28,6 @@
             <button type="button" data-format="link" title="リンク (Ctrl/Cmd+K)" aria-label="リンクを挿入">🔗 リンク</button>
             <button type="button" id="insert-image" title="画像ファイルを選んで挿入" aria-label="画像を挿入">▧ 画像</button>
             <input id="toolbar-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" hidden aria-label="挿入する画像ファイル" />
-            <button type="button" id="confirm-generated" title="カーソル上の生成結果を確定し、以後のAI出力で保護" aria-label="生成結果を確定" disabled>確定</button>
-            <button type="button" id="delete-generated" title="カーソルがある ai:generated ブロックを削除" aria-label="生成結果を削除" disabled>生成結果を削除</button>
             <button type="button" data-format="bullet" title="箇条書き" aria-label="箇条書き">• リスト</button>
             <button type="button" data-format="numbered" title="番号付きリスト" aria-label="番号付きリスト">1. リスト</button>
             <button type="button" data-format="quote" title="引用" aria-label="引用">❞ 引用</button>
@@ -38,13 +36,14 @@
             <button type="button" data-format="table" title="表を挿入" aria-label="表を挿入">▦ 表</button>
             <button type="button" data-format="rule" title="区切り線" aria-label="区切り線">―</button>
           </div>
-          <div class="instruction-toolbar"><span>原稿に追加</span><button data-insert="text">AI文章の指示</button><button data-insert="screenshot">撮影の指示</button><button data-insert="diagram">依存図の指示</button><span class="muted">追加した指示は「画像・文章・図」に表示されます。</span></div>
+          <div class="instruction-toolbar"><span>原稿に追加</span><button data-insert="text">AI文章の指示</button><button data-insert="screenshot">撮影の指示</button><button data-insert="diagram">依存図の指示</button><span class="muted">追加した指示は「AIタグ一覧」に表示されます。</span></div>
         </div>
         <div class="editor-split"><div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div><div id="editor-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="Markdownとプレビューの幅を変更" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="ドラッグしてMarkdownとプレビューの幅を変更"></div><div class="preview-column"><div class="column-label">入力中のプレビュー <span>保存前の変更も表示・スクロール同期</span></div><iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe></div></div>
         <p class="editor-note">このプレビューはMarkdownの見た目です。MermaidやMkDocs固有の表示は「出力・設定」の下書きビルドで確認できます。</p>
+        <section class="document-tags" aria-label="この文書のAIタグ"><div class="document-tags-heading"><strong>この文書のAIタグ</strong><button type="button" data-open-all-tags>全AIタグ一覧</button></div><div id="document-tag-list" class="document-tag-list"></div></section>
       </section>
       <section id="panel-tasks" class="panel" hidden>
-        <div class="panel-header"><div><p class="eyebrow">ASSETS</p><h1>画像・文章・図を更新する</h1></div><button id="refresh-tasks">一覧を更新</button></div>
+        <div class="panel-header"><div><p class="eyebrow">AI TAGS</p><h1>AIタグ一覧</h1><p class="muted">指示の編集と生成結果の確定をここで行えます。</p></div><button id="refresh-tasks">一覧を更新</button></div>
         <div class="callout"><strong>画像ごとの調整が必要な場合</strong><p>AIが設定できなかった画像や撮影元を変えたい画像は、「撮影元を選ぶ」から対象ウィンドウを指定してください。撮影前の操作は原稿の撮影指示に自然文で記入します。</p></div>
         <div id="task-list" class="task-list"></div>
       </section>

@@ -388,6 +388,34 @@ impl SelectedWindow {
         }
         wait_window(&self.query)
     }
+
+    fn bounds_for_input(&self) -> Result<Rect, String> {
+        #[cfg(target_os = "linux")]
+        if !window_capture::is_wayland_session() {
+            if let Ok(window) = self.native() {
+                return Ok(Rect {
+                    x: window.x,
+                    y: window.y,
+                    width: window.width,
+                    height: window.height,
+                });
+            }
+        }
+
+        if let Ok(window) = self.accessible() {
+            return window
+                .bounds
+                .ok_or("Selected window has no accessibility bounds".into());
+        }
+
+        let window = self.wait_native()?;
+        Ok(Rect {
+            x: window.x,
+            y: window.y,
+            width: window.width,
+            height: window.height,
+        })
+    }
 }
 
 fn selected_a11y_window(selected: &str) -> Result<Element, String> {
@@ -432,6 +460,11 @@ fn activate(selected: &SelectedWindow) -> Result<(), String> {
 }
 
 fn activate_for_input(selected: &SelectedWindow) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if !window_capture::is_wayland_session() && selected.native().is_ok() {
+        return activate(selected);
+    }
+
     if a11y_window(&selected.query).is_ok_and(|window| window.states.active) {
         return Ok(());
     }
@@ -485,6 +518,18 @@ fn capture(
         window_capture::capture_window("portal", inset, destination, true, None)?;
         return Ok(());
     }
+    if selector.is_none() {
+        if let Ok(window) = selected.native() {
+            window_capture::capture_window(
+                &window.id,
+                inset,
+                destination,
+                true,
+                Some(&window.id),
+            )?;
+            return Ok(());
+        }
+    }
     let accessible = if selector.is_some() {
         Some(selected.accessible()?)
     } else {
@@ -526,6 +571,7 @@ pub fn run(
 ) -> Result<RunResult, String> {
     fs::create_dir_all(captured_dir).map_err(|error| error.to_string())?;
     let mut selected = SelectedWindow::new(initial_window);
+    let mut launched_window = false;
     let mut captured = Vec::new();
     for (index, step) in steps.iter().enumerate() {
         let (action, value) = step.as_object().unwrap().iter().next().unwrap();
@@ -545,16 +591,28 @@ pub fn run(
                         .stdout(Stdio::null())
                         .spawn()
                         .map_err(|error| format!("Could not launch {program}: {error}"))?;
+                    launched_window = true;
                 }
                 "window" => {
                     let query = value.as_str().unwrap();
                     if query == "portal" && window_capture::is_wayland_session() {
                         selected = SelectedWindow::new(query);
                     } else {
-                        match wait_any_window(query)? {
+                        // A freshly launched native window may not exist yet. Poll
+                        // for it instead of scanning every app's accessibility tree.
+                        let located = if launched_window
+                            && !window_capture::is_wayland_session()
+                            && !query.starts_with("pid:")
+                            && !query.starts_with("app:")
+                        {
+                            LocatedWindow::Native(wait_window(query)?)
+                        } else {
+                            wait_any_window(query)?
+                        };
+                        match located {
                             LocatedWindow::Native(window) => {
                                 selected = SelectedWindow {
-                                    accessible: a11y_window(&window.title).ok(),
+                                    accessible: None,
                                     query: window.title,
                                     native_id: Some(window.id),
                                 };
@@ -578,6 +636,7 @@ pub fn run(
                             }
                         }
                     }
+                    launched_window = false;
                 }
                 "expect_window" => {
                     wait_any_window(value.as_str().unwrap())?;
@@ -640,12 +699,7 @@ pub fn run(
                     }
                 }
                 "scroll" => {
-                    let bounds = if let Ok(window) = selected.accessible() {
-                        window.bounds.ok_or("Selected window has no accessibility bounds")?
-                    } else {
-                        let window = selected.wait_native()?;
-                        Rect { x: window.x, y: window.y, width: window.width, height: window.height }
-                    };
+                    let bounds = selected.bounds_for_input()?;
                     let x = value["x"].as_u64().unwrap() as u32;
                     let y = value["y"].as_u64().unwrap() as u32;
                     if x >= bounds.width || y >= bounds.height { return Err("Scroll is outside the selected window".into()); }
@@ -659,19 +713,7 @@ pub fn run(
                         .map_err(|error| error.to_string())?;
                 }
                 "click" => {
-                    let bounds = if let Ok(window) = selected.accessible() {
-                        window
-                            .bounds
-                            .ok_or("Selected window has no accessibility bounds")?
-                    } else {
-                        let window = selected.wait_native()?;
-                        Rect {
-                            x: window.x,
-                            y: window.y,
-                            width: window.width,
-                            height: window.height,
-                        }
-                    };
+                    let bounds = selected.bounds_for_input()?;
                     let x = value["x"].as_u64().unwrap() as u32;
                     let y = value["y"].as_u64().unwrap() as u32;
                     if x >= bounds.width || y >= bounds.height {

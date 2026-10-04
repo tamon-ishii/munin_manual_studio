@@ -344,10 +344,24 @@ try {
   assert.match(await readFile(path.join(root, 'empty/docs/new.md'), 'utf8'), /# New guide/);
   const project = path.join(root, 'empty');
 
-  const generatedExample = '# New guide\n\n<!-- ai:generated id=smoke-generated -->\nGenerated text\n<!-- /ai:generated -->\n';
+  const generatedPrompt = '画面を開いてからボタンを押す';
+  const generatedPromptB64 = Buffer.from(generatedPrompt, 'utf8').toString('base64');
+  const generatedExample = `# New guide\n\n<!-- ai:generated id=smoke-generated kind=screenshot prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n`;
+  await page.locator('#markdown-editor').fill(generatedExample);
+  const documentTags = page.locator('#document-tag-list [data-tag-start]');
+  assert.equal(await documentTags.count(), 1, 'the document list includes generated-only tags from unsaved editor text');
+  const middleContent = Array.from({ length: 80 }, (_, index) => `Paragraph ${index}`).join('\n');
+  await page.locator('#markdown-editor').fill(`# New guide\n\n${middleContent}\n\n<!-- ai:task id=smoke-generated kind=screenshot\n${generatedPrompt}\n-->\n<!-- ai:generated id=smoke-generated kind=screenshot prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n\n<!-- ai:task id=unsaved-text kind=text\nUnsaved instruction\n-->\n`);
+  assert.equal(await documentTags.count(), 2, 'task and generated tags with the same id are merged while unsaved instructions appear');
+  assert.match(await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'smoke-generated' }).innerText(), /未確定/);
+  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'unsaved-text' }).click();
+  assert.ok(await page.locator('#markdown-editor').evaluate(node => node.scrollTop > 0), 'selecting a tag lower in the document scrolls the editor to it');
+  assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart).startsWith('<!-- ai:task id=unsaved-text')), true);
+  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'smoke-generated' }).click();
+  assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart).startsWith('<!-- ai:task id=smoke-generated')), true, 'selecting a document tag jumps to its Markdown comment');
   await page.locator('#markdown-editor').fill(generatedExample);
   await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(0, 0));
-  assert.equal(await page.locator('#delete-generated').isDisabled(), true, 'delete stays disabled when the cursor is outside a generated block');
+  assert.equal(await page.locator('#confirm-generated').count(), 0, 'generated controls have moved out of the editor toolbar');
   let delayedSaveSeen = false;
   await page.route('**/__manual/rpc', async route => {
     const request = route.request().postDataJSON();
@@ -359,12 +373,57 @@ try {
   });
   await page.locator('#save-page').click();
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'true');
-  assert.equal(await page.locator('#delete-generated').isDisabled(), true, 'busy state must preserve the disabled selection-sensitive action');
+  assert.equal(await page.locator('#document-tag-list [data-tag-confirm]').isDisabled(), true, 'tag controls are disabled while saving');
   await idle();
   assert.equal(delayedSaveSeen, true);
-  assert.equal(await page.locator('#delete-generated').isDisabled(), true, 'saving must not enable deletion outside a generated block');
+  assert.equal(await page.locator('#document-tag-list [data-tag-confirm]').isEnabled(), true, 'tag controls are enabled again after saving');
   assert.equal(await page.locator('#undo-edit').isEnabled(), true, 'saving must preserve undo history');
   await page.unroute('**/__manual/rpc');
+
+  await page.locator('[data-tab="tasks"]').click();
+  const generatedOnlyCard = page.locator('[data-task="smoke-generated"]');
+  await generatedOnlyCard.waitFor();
+  assert.equal(await generatedOnlyCard.locator('[data-prompt]').inputValue(), generatedPrompt);
+  const revisedGeneratedPrompt = '設定画面を開き、保存を押す';
+  await generatedOnlyCard.locator('[data-prompt]').fill(revisedGeneratedPrompt);
+  await generatedOnlyCard.locator('[data-save-prompt]').click();
+  await idle();
+  let generatedOnlyMarkdown = await readFile(path.join(project, 'docs/new.md'), 'utf8');
+  assert.doesNotMatch(generatedOnlyMarkdown, /ai:task/);
+  const savedPromptB64 = generatedOnlyMarkdown.match(/prompt-b64=([A-Za-z0-9+/=]+)/)?.[1];
+  assert.equal(Buffer.from(savedPromptB64, 'base64').toString('utf8'), revisedGeneratedPrompt);
+  await generatedOnlyCard.locator('[data-toggle-approved]').click();
+  await idle();
+  generatedOnlyMarkdown = await readFile(path.join(project, 'docs/new.md'), 'utf8');
+  assert.match(generatedOnlyMarkdown, /approved-at=\d{4}-\d\d-\d\dT/);
+  await generatedOnlyCard.locator('[data-toggle-approved]').click();
+  await idle();
+  generatedOnlyMarkdown = await readFile(path.join(project, 'docs/new.md'), 'utf8');
+  assert.doesNotMatch(generatedOnlyMarkdown, /approved-at=/);
+  await page.locator('[data-tab="editor"]').click();
+
+  const otherGenerated = '<!-- ai:generated id=other-generated kind=text -->\nOther generated text\n<!-- /ai:generated -->\n';
+  await page.locator('#markdown-editor').fill(`${generatedExample}\n${otherGenerated}`);
+  await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(0, 0));
+  const otherTag = page.locator('#document-tag-list .document-tag-row').filter({ hasText: 'other-generated' });
+  await otherTag.locator('[data-tag-confirm]').click();
+  let editedTags = await page.locator('#markdown-editor').inputValue();
+  assert.match(editedTags, /id=other-generated[^>]*approved-at=/, 'confirmation targets the clicked tag even with the caret elsewhere');
+  assert.doesNotMatch(editedTags.match(/<!-- ai:generated id=smoke-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'confirmation leaves the other generated tag untouched');
+  await page.locator('#document-tag-list .document-tag-row').filter({ hasText: 'other-generated' }).locator('[data-tag-confirm]').click();
+  editedTags = await page.locator('#markdown-editor').inputValue();
+  assert.doesNotMatch(editedTags.match(/<!-- ai:generated id=other-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'local confirmation can be removed from the same tag');
+  await page.locator('#markdown-editor').press('Control+z');
+  assert.match((await page.locator('#markdown-editor').inputValue()).match(/<!-- ai:generated id=other-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'Undo restores local confirmation removal');
+  await page.locator('#markdown-editor').press('Control+z');
+  editedTags = await page.locator('#markdown-editor').inputValue();
+  assert.doesNotMatch(editedTags.match(/<!-- ai:generated id=other-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'Undo removes the confirmation');
+  await page.locator('#document-tag-list .document-tag-row').filter({ hasText: 'other-generated' }).locator('[data-tag-delete]').click();
+  editedTags = await page.locator('#markdown-editor').inputValue();
+  assert.doesNotMatch(editedTags, /id=other-generated/, 'deletion targets only the clicked generated tag');
+  assert.match(editedTags, /id=smoke-generated/, 'deletion keeps the other generated tag');
+  await page.locator('#markdown-editor').press('Control+z');
+  assert.match(await page.locator('#markdown-editor').inputValue(), /id=other-generated/, 'Undo restores the deleted result');
 
   await page.locator('#markdown-editor').fill('# New guide\n\n');
 

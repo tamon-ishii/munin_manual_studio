@@ -1,4 +1,5 @@
 use rdev::{listen, Button, Event, EventType, Key};
+use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -109,6 +110,89 @@ fn reap_child_in_background(mut child: Child) {
     let _ = thread::spawn(move || {
         let _ = child.wait();
     });
+}
+
+const MARKITS_STARTUP_GRACE: Duration = Duration::from_millis(500);
+const MARKITS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const MARKITS_STDERR_TAIL_BYTES: u64 = 4096;
+
+fn launch_markits(mut command: Command, log_path: &Path) -> Result<(), String> {
+    let completion_file = command.get_args().collect::<Vec<_>>()
+        .windows(2).find(|args| args[0] == "--manual-studio-completion")
+        .map(|args| PathBuf::from(args[1]));
+    let log = File::create(log_path).map_err(|error| {
+        format!(
+            "MarkIts の起動ログを作成できません: {} ({error})",
+            log_path.display()
+        )
+    })?;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(log))
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "MarkIts Desktop を起動できませんでした: {error}。ログ: {}",
+                log_path.display()
+            )
+        })?;
+
+    let deadline = Instant::now() + MARKITS_STARTUP_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let tail = read_file_tail(log_path, MARKITS_STDERR_TAIL_BYTES);
+                let detail = if tail.trim().is_empty() {
+                    "標準エラー出力はありません".to_string()
+                } else {
+                    format!("標準エラー出力（末尾）:\n{tail}")
+                };
+                return Err(format!(
+                    "MarkIts Desktop が起動直後に終了しました（終了状態: {status}）。{detail}。ログ: {}",
+                    log_path.display()
+                ));
+            }
+            Ok(None) if Instant::now() < deadline => thread::sleep(MARKITS_POLL_INTERVAL),
+            Ok(None) => {
+                let log_path = log_path.to_path_buf();
+                thread::spawn(move || {
+                    let status = child.wait();
+                    if let Some(completion_file) = completion_file.filter(|path| !path.is_file()) {
+                        let message = format!("MarkIts Desktop が編集完了前に終了しました（{status:?}）。撮影画像と入力は保持しています。ログ: {}", log_path.display());
+                        let _ = fs::write(completion_file.with_extension("exit"), message);
+                    }
+                });
+                return Ok(());
+            }
+            Err(error) => {
+                stop_child(child);
+                return Err(format!(
+                    "MarkIts Desktop の起動状態を確認できません: {error}。ログ: {}",
+                    log_path.display()
+                ));
+            }
+        }
+    }
+}
+
+fn read_file_tail(path: &Path, max_bytes: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = File::open(path) else {
+        return String::new();
+    };
+    let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
+        return String::new();
+    };
+    let start = length.saturating_sub(max_bytes);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return String::new();
+    }
+    let mut bytes = Vec::with_capacity((length - start) as usize);
+    if file.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 #[derive(Clone)]
@@ -330,7 +414,8 @@ pub fn start(
     if !root_path.is_dir() {
         return Err("プロジェクトフォルダーが見つかりません。".into());
     }
-    let before_raw = manual_core::request(json!({"root": root.clone(), "action": "list-windows"}))?;
+    let before_raw =
+        crate::native_worker::request(json!({"root": root.clone(), "action": "list-windows"}))?;
     let before_windows: Vec<Value> =
         serde_json::from_str(&before_raw).map_err(|error| error.to_string())?;
     let existing_ids: HashSet<String> = before_windows
@@ -344,17 +429,19 @@ pub fn start(
         .spawn()
         .map_err(|error| format!("アプリを起動できません: {error}"))?;
     let deadline = Instant::now() + Duration::from_secs(30);
+    let mut reused_window = false;
     let window_result = (|| -> Result<(WindowBounds, String), String> {
         loop {
-            let raw =
-                match manual_core::request(json!({"root": root.clone(), "action": "list-windows"}))
-                {
-                    Ok(raw) => raw,
-                    Err(error) => return Err(format!("起動ウィンドウを確認できません: {error}")),
-                };
+            let raw = match crate::native_worker::request(
+                json!({"root": root.clone(), "action": "list-windows"}),
+            ) {
+                Ok(raw) => raw,
+                Err(error) => return Err(format!("起動ウィンドウを確認できません: {error}")),
+            };
             let windows: Vec<Value> = serde_json::from_str(&raw)
                 .map_err(|error| format!("ウィンドウ一覧を読み取れません: {error}"))?;
             if let Some(found) = select_launched_window(&windows, &existing_ids, &window_title) {
+                reused_window = found["id"].as_str().is_some_and(|id| existing_ids.contains(id));
                 return Ok((
                     WindowBounds {
                         id: found["id"].as_str().unwrap_or_default().to_string(),
@@ -377,6 +464,22 @@ pub fn start(
                 .try_wait()
                 .map_err(|error| format!("起動アプリの状態を確認できません: {error}"))?
             {
+                if status.success() {
+                    let processes = crate::native_worker::window_processes()?;
+                    if let Some(found) = select_existing_app_window(&windows, &processes, &program) {
+                        reused_window = true;
+                        return Ok((
+                            WindowBounds {
+                                id: found["id"].as_str().unwrap_or_default().to_string(),
+                                x: found["x"].as_i64().unwrap_or(0) as i32,
+                                y: found["y"].as_i64().unwrap_or(0) as i32,
+                                width: found["width"].as_u64().unwrap_or(0) as u32,
+                                height: found["height"].as_u64().unwrap_or(0) as u32,
+                            },
+                            found["title"].as_str().unwrap_or_default().to_string(),
+                        ));
+                    }
+                }
                 return Err(format!("起動アプリがウィンドウを開く前に終了しました ({status})。起動コマンドと引数を確認してください。"));
             }
             thread::sleep(Duration::from_millis(500));
@@ -455,9 +558,15 @@ pub fn start(
         stop_child(app);
         return Err("別の操作記録が先に開始されました。".into());
     }
+    let app_child = if reused_window {
+        reap_child_in_background(app);
+        None
+    } else {
+        Some(app)
+    };
     lock.session = Some(Session {
         recorder: Some(child),
-        app_child: Some(app),
+        app_child,
         event_file,
         root: root_path,
         program,
@@ -510,6 +619,40 @@ fn select_launched_window<'a>(
         })
 }
 
+fn select_existing_app_window<'a>(
+    windows: &'a [Value],
+    processes: &[markits::ui_elements::DetectedUiElement],
+    program: &str,
+) -> Option<&'a Value> {
+    #[cfg(target_os = "linux")]
+    {
+        let executable = if Path::new(program).is_absolute() {
+            PathBuf::from(program)
+        } else {
+            manual_core::agent::which_binary(program)?
+        }.canonicalize().ok()?;
+        let matching_ids: HashSet<String> = processes.iter().filter_map(|window| {
+            let pid = window.pid?;
+            let process_executable = fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+            if process_executable != executable { return None; }
+            let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
+            Some(format!("0x{id:x}"))
+        }).collect();
+        return windows.iter().filter(|window| {
+            window["id"].as_str().is_some_and(|id| matching_ids.contains(id))
+                && window["width"].as_u64().unwrap_or(0) >= 120
+                && window["height"].as_u64().unwrap_or(0) >= 80
+        }).max_by_key(|window| {
+            window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
+        });
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (windows, processes, program);
+        None
+    }
+}
+
 pub fn is_running(state: &RecorderState) -> Result<bool, String> {
     let mut lock = state.0.lock().map_err(|e| e.to_string())?;
     let Some(session) = lock.session.as_mut() else {
@@ -524,7 +667,12 @@ pub fn is_running(state: &RecorderState) -> Result<bool, String> {
         .is_none())
 }
 
+#[cfg(test)]
 pub fn finish(state: &RecorderState) -> Result<RecordingResult, String> {
+    finish_excluding_control(state, None)
+}
+
+pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f64, f64, f64, f64)>) -> Result<RecordingResult, String> {
     let mut session = state
         .0
         .lock()
@@ -535,9 +683,13 @@ pub fn finish(state: &RecorderState) -> Result<RecordingResult, String> {
     if let Some(child) = session.recorder.take() {
         stop_child(child);
     }
-    let events = read_events(&session.event_file)?;
+    let mut events = read_events(&session.event_file)?;
     if events.is_empty() {
         return Err("記録された操作がありません。".into());
+    }
+    if let Some((left, top, width, height)) = control_bounds {
+        events.retain(|event| !matches!(event, RecordedEvent::Click { x, y, .. }
+            if *x >= left && *x < left + width && *y >= top && *y < top + height));
     }
     let scenario = build_scenario(&session, &events);
     let operation_text = events_to_text(&events, &session.window);
@@ -560,37 +712,27 @@ pub fn finish(state: &RecorderState) -> Result<RecordingResult, String> {
     let annotation_path = handoff_dir.join(format!("{}-{nonce}-annotated.png", session.task_id));
     let completion_path = handoff_dir.join(format!("{}-{nonce}.done", session.task_id));
     // Attach accessibility data from the selected app only; avoid scanning unrelated windows.
-    manual_core::window_capture::capture_window(
+    crate::native_worker::capture_window(
         &session.window.id,
-        0,
         &screenshot_path,
-        false,
-        Some(&session.window.id),
+        session.app_child.is_some(),
     )?;
-    let _ = manual_core::window_capture::close_window(&session.window.id);
     if let Some(child) = session.app_child.take() {
         stop_child(child);
     }
-    let markits_result = Command::new(&session.markits_program)
+    let log_path = handoff_dir.join(format!("{}-{nonce}-markits.log", session.task_id));
+    let mut command = Command::new(&session.markits_program);
+    command
         .arg("--manual-studio-input")
         .arg(&screenshot_path)
         .arg("--manual-studio-output")
         .arg(&annotation_path)
         .arg("--manual-studio-completion")
-        .arg(&completion_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+        .arg(&completion_path);
+    let markits_result = launch_markits(command, &log_path);
     let (markits_started, message) = match markits_result {
-        Ok(child) => {
-            reap_child_in_background(child);
-            (true, "操作シナリオを保存し、撮影画像をMarkIts Desktopで開きました。注釈を保存するとAIタグへ自動で取り込みます。".into())
-        }
-        Err(error) => (
-            false,
-            format!("操作シナリオは保存しましたが、MarkIts Desktop を起動できませんでした。実行ファイル「{}」を確認してください: {error}", session.markits_program),
-        ),
+        Ok(()) => (true, "操作シナリオを保存し、撮影画像をMarkIts Desktopで開きました。注釈を保存するとAIタグへ自動で取り込みます。".into()),
+        Err(error) => (false, format!("操作シナリオと撮影画像は保存しましたが、MarkIts Desktop を起動できませんでした。{error}")),
     };
     Ok(RecordingResult {
         scenario_file: format!("manual/scenarios/{file_name}"),
@@ -642,10 +784,8 @@ fn read_events(path: &Path) -> Result<Vec<RecordedEvent>, String> {
 fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
     let mut steps = vec![
         json!({"launch": {"program": session.program, "args": session.args}}),
-        json!({"wait_ms": 1000}),
         json!({"window": session.window_title}),
     ];
-    let mut last_ms = 0;
     let mut text_buffer = String::new();
     let flush_text = |steps: &mut Vec<Value>, text: &mut String| {
         if !text.is_empty() {
@@ -654,24 +794,6 @@ fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
         }
     };
     for event in events {
-        let elapsed = match event {
-            RecordedEvent::Click { elapsed_ms, .. }
-            | RecordedEvent::Text { elapsed_ms, .. }
-            | RecordedEvent::Key { elapsed_ms, .. }
-            | RecordedEvent::Scroll { elapsed_ms, .. } => *elapsed_ms,
-        };
-        if elapsed > last_ms + 700 {
-            flush_text(&mut steps, &mut text_buffer);
-            let mut wait = elapsed - last_ms;
-            while wait > 30_000 {
-                steps.push(json!({"wait_ms":30000}));
-                wait -= 30_000;
-            }
-            if wait > 0 {
-                steps.push(json!({"wait_ms":wait}));
-            }
-        }
-        last_ms = elapsed;
         match event {
             RecordedEvent::Text { value, .. } => text_buffer.push_str(value),
             RecordedEvent::Key { value, .. } => {
@@ -787,6 +909,10 @@ pub fn annotation_if_complete(
 ) -> Result<Option<String>, String> {
     let marker = Path::new(completion_file);
     if !marker.is_file() {
+        let exit_marker = marker.with_extension("exit");
+        if exit_marker.is_file() {
+            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| "MarkIts Desktop が編集完了前に終了しました。撮影画像と入力は保持しています。".into()));
+        }
         return Ok(None);
     }
     let annotation = read_annotation_file(Path::new(annotation_file))?;
@@ -795,6 +921,7 @@ pub fn annotation_if_complete(
     // where an empty spec is almost certainly an accidental selection.
     let normalized = normalize_annotation_spec_for_capture(&annotation)?;
     let _ = fs::remove_file(marker);
+    let _ = fs::remove_file(marker.with_extension("exit"));
     let _ = fs::remove_file(source_file);
     Ok(Some(normalized))
 }
@@ -816,17 +943,8 @@ pub fn preserve_annotated_capture(
     {
         return Err("撮影指示IDが不正です。".into());
     }
-    let page = Path::new(page);
-    if page.is_absolute()
-        || page
-            .components()
-            .any(|part| !matches!(part, std::path::Component::Normal(_)))
-        || page.extension().is_none_or(|ext| ext != "md")
-    {
-        return Err("Markdown原稿のパスが不正です。".into());
-    }
     let root = Path::new(root);
-    let page_path = root.join(page);
+    let page_path = manual_core::editor::document_path(root, page)?;
     if !page_path.is_file() {
         return Err(format!("原稿が見つかりません: {}", page_path.display()));
     }
@@ -837,45 +955,53 @@ pub fn preserve_annotated_capture(
     }
     let asset_dir = page_path.parent().unwrap_or(root).join("assets");
     fs::create_dir_all(&asset_dir).map_err(|e| e.to_string())?;
-    let filename = format!("markits-{task_id}.png");
-    let asset_path = asset_dir.join(&filename);
-    if asset_path.exists() {
-        let existing = fs::read(&asset_path).map_err(|e| e.to_string())?;
-        if existing != bytes {
-            return Err(format!(
-                "同じ撮影IDの別画像がすでにあります: {}",
-                asset_path.display()
-            ));
-        }
-    } else {
-        // Use a unique, exclusively-created temporary file and an atomic
-        // no-replace link. A plain rename could overwrite another capture
-        // that raced this request (Unix rename replaces its destination).
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_nanos();
-        let temporary = asset_dir.join(format!(".{filename}.tmp-{}-{nonce}", std::process::id()));
-        let mut staged = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(|e| format!("一時画像を作成できません: {e}"))?;
-        if let Err(error) = staged.write_all(&bytes).and_then(|_| staged.sync_all()) {
-            let _ = fs::remove_file(&temporary);
-            return Err(format!("MarkIts画像を一時保存できません: {error}"));
-        }
-        drop(staged);
+    let base_filename = format!("markits-{task_id}.png");
+    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let base_path = asset_dir.join(&base_filename);
+    let mut filename = match fs::read(&base_path) {
+        Ok(existing) if existing != bytes => format!("markits-{task_id}-{digest}.png"),
+        Ok(_) => base_filename.clone(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => base_filename.clone(),
+        Err(error) => return Err(error.to_string()),
+    };
+
+    // Stage once, then publish with an atomic no-replace hard link. If a
+    // different capture wins the base-name race, retry under the content hash.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let temporary = asset_dir.join(format!(".{base_filename}.tmp-{}-{nonce}", std::process::id()));
+    let mut staged = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|e| format!("一時画像を作成できません: {e}"))?;
+    if let Err(error) = staged.write_all(&bytes).and_then(|_| staged.sync_all()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("MarkIts画像を一時保存できません: {error}"));
+    }
+    drop(staged);
+    loop {
+        let asset_path = asset_dir.join(&filename);
         match fs::hard_link(&temporary, &asset_path) {
-            Ok(()) => {}
+            Ok(()) => break,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let existing = fs::read(&asset_path).map_err(|e| e.to_string())?;
-                if existing != bytes {
+                let existing = match fs::read(&asset_path) {
+                    Ok(existing) => existing,
+                    Err(read_error) => {
+                        let _ = fs::remove_file(&temporary);
+                        return Err(read_error.to_string());
+                    }
+                };
+                if existing == bytes {
+                    break;
+                }
+                if filename == base_filename {
+                    filename = format!("markits-{task_id}-{digest}.png");
+                } else {
                     let _ = fs::remove_file(&temporary);
-                    return Err(format!(
-                        "同じ撮影IDの別画像がすでにあります: {}",
-                        asset_path.display()
-                    ));
+                    return Err(format!("撮影画像のハッシュ名が既存画像と衝突しました: {}", asset_path.display()));
                 }
             }
             Err(error) => {
@@ -883,8 +1009,8 @@ pub fn preserve_annotated_capture(
                 return Err(format!("撮影画像を確定できません: {error}"));
             }
         }
-        fs::remove_file(&temporary).map_err(|e| format!("一時画像を削除できません: {e}"))?;
     }
+    fs::remove_file(&temporary).map_err(|e| format!("一時画像を削除できません: {e}"))?;
     let relative_image = format!("assets/{filename}");
     let prompt_attr = manual_core::task::encode_prompt(prompt);
     let block = format!("<!-- ai:generated id={task_id} kind=screenshot prompt-b64={prompt_attr} -->\n![撮影画面]({relative_image})\n<!-- /ai:generated -->");
@@ -954,6 +1080,69 @@ mod tests {
         path
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn markits_early_exit_reports_status_stderr_and_keeps_log() {
+        let dir = test_dir("markits-early-exit");
+        let log = dir.join("markits.log");
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "echo startup-failure >&2; exit 17"]);
+        let error = launch_markits(command, &log).unwrap_err();
+        assert!(error.contains("17"), "{error}");
+        assert!(error.contains("startup-failure"), "{error}");
+        assert!(error.contains(log.to_str().unwrap()), "{error}");
+        assert!(log.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markits_late_exit_stops_annotation_wait_and_preserves_capture() {
+        let dir = test_dir("markits-late-exit");
+        let source = dir.join("source.png");
+        fs::write(&source, b"original capture").unwrap();
+        let completion = dir.join("capture.done");
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 0.7; exit 19", "--manual-studio-completion"]);
+        command.arg(&completion);
+        launch_markits(command, &dir.join("markits.log")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match annotation_if_complete(source.to_str().unwrap(), dir.join("annotated.png").to_str().unwrap(), completion.to_str().unwrap()) {
+                Err(error) => { assert!(error.contains("編集完了前")); break; }
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+                other => panic!("missing exit notification: {other:?}"),
+            }
+        }
+        assert_eq!(fs::read(source).unwrap(), b"original capture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markits_running_child_is_reaped_after_exit() {
+        let dir = test_dir("markits-reap");
+        let log = dir.join("markits.log");
+        let pid_file = dir.join("pid");
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            &format!("echo $$ > '{}'; sleep 0.7", pid_file.display()),
+        ]);
+        launch_markits(command, &log).unwrap();
+        let pid: u32 = fs::read_to_string(pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Path::new(&format!("/proc/{pid}")).exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !Path::new(&format!("/proc/{pid}")).exists(),
+            "child {pid} was not reaped"
+        );
+    }
+
     #[test]
     fn markits_capture_import_is_retryable_and_preserves_source_until_completion() {
         let root = test_dir("capture-retry");
@@ -993,14 +1182,64 @@ mod tests {
 
         let different = root.join("different.png");
         fs::write(&different, b"\x89PNG\r\n\x1a\ndifferent").unwrap();
-        assert!(preserve_annotated_capture(
+        let different_block = preserve_annotated_capture(
             root.to_str().unwrap(),
             "docs/guide.md",
             "screen-one",
             different.to_str().unwrap(),
             "annotated"
         )
-        .is_err());
+        .unwrap();
+        let different_retry = preserve_annotated_capture(
+            root.to_str().unwrap(),
+            "docs/guide.md",
+            "screen-one",
+            different.to_str().unwrap(),
+            "annotated",
+        )
+        .unwrap();
+        assert_eq!(different_block, different_retry);
+        assert!(different_block.contains("assets/markits-screen-one-"));
+        assert_ne!(different_block, first);
+        assert_eq!(
+            fs::read(root.join("docs/assets/markits-screen-one.png")).unwrap(),
+            bytes,
+            "the original capture must remain unchanged"
+        );
+        let hashed_asset = different_block
+            .split("![撮影画面](")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap();
+        assert_eq!(
+            fs::read(root.join("docs").join(hashed_asset)).unwrap(),
+            b"\x89PNG\r\n\x1a\ndifferent"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn markits_capture_resolves_docs_relative_page_from_editor() {
+        let root = test_dir("capture-docs-relative");
+        let docs = root.join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(docs.join("index.md"), "# Guide\n").unwrap();
+        let source = root.join("capture.png");
+        let bytes = b"\x89PNG\r\n\x1a\nimage";
+        fs::write(&source, bytes).unwrap();
+
+        let block = preserve_annotated_capture(
+            root.to_str().unwrap(),
+            "index.md",
+            "index-shot",
+            source.to_str().unwrap(),
+            "capture",
+        )
+        .unwrap();
+        assert!(block.contains("assets/markits-index-shot.png"));
+        assert_eq!(fs::read(docs.join("assets/markits-index-shot.png")).unwrap(), bytes);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1219,16 +1458,26 @@ mod tests {
                     elapsed_ms: 900,
                     value: "hello".into(),
                 },
+                RecordedEvent::Text {
+                    elapsed_ms: 60_900,
+                    value: " world".into(),
+                },
             ],
         );
         assert_eq!(scenario["steps"][0]["launch"]["program"], "demo");
-        assert_eq!(scenario["steps"][3]["click"]["x"], 20);
-        assert_eq!(scenario["steps"][4]["text"], "hello");
+        assert_eq!(scenario["steps"][1]["window"], "Demo");
+        assert_eq!(scenario["steps"][2]["click"]["x"], 20);
+        assert_eq!(scenario["steps"][3]["text"], "hello world");
         assert_eq!(
             scenario["steps"][scenario["steps"].as_array().unwrap().len() - 1]["screenshot"]
                 ["task"],
             "demo-shot"
         );
+        assert!(scenario["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|step| step.get("wait_ms").is_none()));
         assert!(scenario.get("annotations").is_none());
     }
     #[test]
@@ -1258,5 +1507,31 @@ mod tests {
             select_launched_window(&windows, &existing, "Manual Studio").unwrap()["id"],
             "manual-studio-window"
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn existing_window_requires_the_launched_executable() {
+        let executable = std::env::current_exe().unwrap();
+        let windows = vec![
+            json!({"id":"0x10","title":"Existing app","width":800,"height":600}),
+            json!({"id":"0x20","title":"Other app","width":1400,"height":900}),
+        ];
+        let detected = vec![markits::ui_elements::DetectedUiElement {
+            role: "window".into(),
+            name: Some("Existing app".into()),
+            window_id: Some("16".into()),
+            pid: Some(std::process::id()),
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        }];
+        assert_eq!(
+            select_existing_app_window(&windows, &detected, executable.to_str().unwrap())
+                .unwrap()["id"],
+            "0x10"
+        );
+        assert!(select_existing_app_window(&windows, &detected, "/bin/false").is_none());
     }
 }

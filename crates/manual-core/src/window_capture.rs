@@ -42,14 +42,17 @@ pub(crate) fn save_image_with_uimap(
     // Attempt UI element detection and embed UIMap metadata via MarkIts
     let detected = if let Some(window_id) = target_window_id {
         let decimal_id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16).ok().map(|id| id.to_string());
-        let target = markits::ui_elements::capture_desktop_windows(0, 0).into_iter().find(|window| {
+        let windows = markits::ui_elements::capture_desktop_windows(0, 0);
+        // Prefer the exact ID: several maximized windows can share the same bounds.
+        let target = windows.iter().find(|window| {
             decimal_id.as_deref().is_some_and(|id| window.window_id.as_deref() == Some(id))
-                || bounds.is_some_and(|(x, y, width, height)| {
+        }).or_else(|| windows.iter().find(|window| {
+            bounds.is_some_and(|(x, y, width, height)| {
                     (window.x - x).abs() < 3.0 && (window.y - y).abs() < 3.0
                         && (window.width - width).abs() < 3.0 && (window.height - height).abs() < 3.0
                 })
-        });
-        target.map(|window| markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &window)).unwrap_or_default()
+        }));
+        target.map(|window| markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, window)).unwrap_or_default()
     } else if include_uimap {
         markits::ui_elements::capture_desktop_detailed_elements(0, 0, bounds)
     } else {

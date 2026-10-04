@@ -22,3 +22,16 @@ Use `./start-manual-studio.sh --dev` to launch Tauri's development mode. It prep
 The root npm package only contains dependencies for Manual Studio and its checks. MarkIts's own frontend dependencies and lockfile are kept under `crates/markits/apps/desktop`.
 
 See `openspec/specs/manual-authoring/spec.md` and `crates/markits/openspec/specs/` for the retained feature specifications. See [UPSTREAM.md](UPSTREAM.md) for source provenance.
+
+## Cross-platform builds and releases
+
+GitHub Actions builds portable ZIP packages for Linux x64, Windows x64, macOS
+Intel, and macOS Apple Silicon on pushes to `main` and pull requests. Each ZIP
+contains `manual-studio`, `manualctl`, and the customized `markits-desktop` as
+sibling executables. Extract the whole archive before starting Manual Studio.
+
+Pushing a version tag matching the app version (for example `0.1.0`) builds all
+four packages and publishes them to GitHub Releases after every build succeeds.
+The executables are unsigned. Linux requires GTK 3 and WebKitGTK 4.1; Windows
+requires WebView2. On macOS, grant screen recording and accessibility permissions
+when using desktop capture.

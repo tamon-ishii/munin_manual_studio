@@ -28,7 +28,8 @@ fn revision(content: &[u8]) -> String {
     format!("{:x}", Sha256::digest(content))
 }
 
-pub(crate) fn document_path(root: &Path, page: &str) -> Result<PathBuf, String> {
+/// Resolve a page using the same project/docs paths used by the editor.
+pub fn document_path(root: &Path, page: &str) -> Result<PathBuf, String> {
     if page.trim().is_empty()
         || Path::new(page).is_absolute()
         || Path::new(page)

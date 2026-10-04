@@ -7,3 +7,7 @@
 **/__pycache__/
 *.py[cod]
 /crates/markits/manual/
+/release/
+/.idea/
+/sample_project/manual/ai/
+/sample_project/docs/assets/

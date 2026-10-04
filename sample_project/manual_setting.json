@@ -1,0 +1,10 @@
+{
+  "docs": "docs",
+  "output": "manual",
+  "targets": [
+    "README.md"
+  ],
+  "format": "mkdocs",
+  "agent": "codex",
+  "model": ""
+}

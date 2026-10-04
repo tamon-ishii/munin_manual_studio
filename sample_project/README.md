@@ -1,0 +1,11 @@
+# カレンダー撮影の動作確認
+
+カレンダーを起動して撮影し、MarkItsで注釈を付けて原稿へ保存するサンプルです。
+
+
+
+
+
+<!-- ai:generated id=task-readme-screenshot-1 kind=screenshot created-at=2026-10-04T11:01:30Z source-sha256=c997807cc09a1ce759724cc714ee01cf25c44a1e8c0015f960739100dd813719 prompt-b64=6LW35YuV44Ki44OX44OqOiAvdXNyL2Jpbi9nbm9tZS1jYWxlbmRhcgoK6KiY6Yyy44GX44Gf5pON5L2cOgoxLiDjgq/jg6rjg4Pjgq86ICgzNTUsIDIyKQoKTWFya0l0cyDjgqLjg47jg4bjg7zjgrfjg6fjg7Pku5Xmp5g6CmBgYGpzb24KewogICJjYW52YXMiOiB7CiAgICAiaGVpZ2h0IjogMTA0MCwKICAgICJ3aWR0aCI6IDE5MjAKICB9LAogICJhbm5vdGF0aW9ucyI6IFsKICAgIHsKICAgICAgInN0eWxlIjogInByaW1hcnkiLAogICAgICAidGFyZ2V0IjogWwogICAgICAgIDI4OSwKICAgICAgICA1NCwKICAgICAgICAyMjAsCiAgICAgICAgMTk1CiAgICAgIF0sCiAgICAgICJ0eXBlIjogInJlY3QiCiAgICB9CiAgXQp9CmBgYA==-->
+![task-readme-screenshot-1](manual/assets/task-readme-screenshot-1.png)
+<!-- /ai:generated -->
