@@ -1634,52 +1634,77 @@ let pasteCounter = 0;
 editor.addEventListener("paste", (event: ClipboardEvent) => {
   if (!documentState) return;
   const items = event.clipboardData?.items;
-  if (!items) return;
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (item.type.startsWith("image/")) {
-      event.preventDefault();
-      const file = item.getAsFile();
-      if (!file) continue;
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          const dataUrl = reader.result;
-          const ext = item.type.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "") || "png";
-          const now = new Date();
-          const pad = (n: number) => String(n).padStart(2, "0");
-          const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-          let filename = `image-${stamp}.${ext}`;
-          if (stamp === lastPastedTimestamp) {
-            pasteCounter++;
-            filename = `image-${stamp}-${pasteCounter}.${ext}`;
-          } else {
-            lastPastedTimestamp = stamp;
-            pasteCounter = 0;
-          }
-          const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
-          const fullAssetPath = folder ? `${folder}/${filename}` : filename;
-          void work(async () => {
-            await rpc("save-asset", { path: fullAssetPath, data: dataUrl });
-            const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
-            const alt = filename.replace(/\.[^.]+$/, "");
-            const markdownCode = `![${alt}](${relPath})`;
-            const start = editor.selectionStart;
-            const end = editor.selectionEnd;
-            rememberCurrentSelection(start, end);
-            editor.setRangeText(markdownCode, start, end, "end");
-            dirty = true;
-            updateSaveState();
-            editor.dispatchEvent(new Event("input"));
-            editor.focus();
-            status(`画像を ${fullAssetPath} に保存し、貼り付けました。`);
-          });
+  const files = event.clipboardData?.files;
+  let targetFile: File | null = null;
+  let fileType = "";
+
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith("image/")) {
+        const f = item.getAsFile();
+        if (f) {
+          targetFile = f;
+          fileType = item.type;
+          break;
         }
-      };
-      reader.readAsDataURL(file);
-      return;
+      }
     }
   }
+
+  if (!targetFile && files && files.length > 0) {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (f.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name)) {
+        targetFile = f;
+        fileType = f.type || `image/${f.name.split(".").pop()?.toLowerCase() || "png"}`;
+        break;
+      }
+    }
+  }
+
+  if (!targetFile) return;
+
+  event.preventDefault();
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === "string") {
+      const dataUrl = reader.result;
+      const rawExt = fileType.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "")
+        || targetFile!.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "")
+        || "png";
+      const ext = rawExt.toLowerCase() === "jpeg" ? "jpg" : rawExt.toLowerCase();
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      let filename = `image-${stamp}.${ext}`;
+      if (stamp === lastPastedTimestamp) {
+        pasteCounter++;
+        filename = `image-${stamp}-${pasteCounter}.${ext}`;
+      } else {
+        lastPastedTimestamp = stamp;
+        pasteCounter = 0;
+      }
+      const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
+      const fullAssetPath = folder ? `${folder}/${filename}` : filename;
+      void work(async () => {
+        await rpc("save-asset", { path: fullAssetPath, data: dataUrl });
+        const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
+        const alt = filename.replace(/\.[^.]+$/, "");
+        const markdownCode = `![${alt}](${relPath})`;
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        rememberCurrentSelection(start, end);
+        editor.setRangeText(markdownCode, start, end, "end");
+        dirty = true;
+        updateSaveState();
+        editor.dispatchEvent(new Event("input"));
+        editor.focus();
+        status(`画像を ${fullAssetPath} に保存し、貼り付けました。`);
+      });
+    }
+  };
+  reader.readAsDataURL(targetFile);
 });
 const editorColumn = document.querySelector<HTMLElement>(".editor-column");
 if (editorColumn) {
