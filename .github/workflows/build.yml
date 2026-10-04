@@ -97,6 +97,6 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --title "Manual Studio $RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" --verify-tag --title "Munin Manual Studio $RELEASE_TAG" --generate-notes
           fi
           gh release upload "$RELEASE_TAG" release/*.zip --clobber

@@ -9,6 +9,12 @@ import { collectAiTagIds } from "./markdownTags";
 import { setupPaneResizers } from "./paneResizers";
 import { sendManualRequest } from "./manualTransport";
 import { renderFileTree } from "./fileTree";
+import { setupPreviewTheme } from "./themePreview";
+import { setupMarkdownTableEditor } from "./markdownTable";
+import { setupDocumentTagsPane } from "./documentTagsPane";
+import { changeHeadingLevel, toggleStrikethrough, toggleTaskList, changeIndent, continueMarkdownList, type MarkdownEdit } from "./markdownAssists";
+import { applyTheme, currentTheme, initializeTheme, isThemeId, type ThemeId } from "./theme";
+import { emit } from "@tauri-apps/api/event";
 import "./style.css";
 
 import type { Task, State, Document, NativeWindow, RecordingResult, LaunchCommand } from "./types";
@@ -16,10 +22,16 @@ import type { Task, State, Document, NativeWindow, RecordingResult, LaunchComman
 const element = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const input = (id: string): HTMLInputElement => element(id);
 const editor = element<HTMLTextAreaElement>("markdown-editor");
+setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 const params = new URLSearchParams(location.search);
 const recordingControlMode = params.get("recordingControl") === "1";
 const detached = params.get("editor") === "1";
+initializeTheme();
+const themePicker = element<HTMLSelectElement>("ui-theme");
+themePicker.value = currentTheme();
+window.addEventListener("manual-studio-theme-change", () => { themePicker.value = currentTheme(); });
+if (native) void listen<ThemeId>("manual-studio-theme-changed", ({ payload }) => { if (isThemeId(payload)) applyTheme(payload, false); });
 let projectRoot = "";
 let workspace: State | null = null;
 let documentState: Document | null = null;
@@ -364,7 +376,7 @@ async function openPage(page: string, check = true): Promise<void> {
   editor.disabled = false;
   dirty = false;
   element("editor-title").textContent = page;
-  document.title = `${page} — Manual Studio`;
+  document.title = `${page} — Munin Manual Studio`;
   updateSaveState(); updateCursor(); renderPages(); renderDocumentTags();
   await renderPreview();
   chooseTab("editor");
@@ -486,7 +498,7 @@ async function openProject(root: string): Promise<void> {
   resetEditHistory();
   element<HTMLIFrameElement>("markdown-preview").srcdoc = "";
   element("editor-title").textContent = "Markdownを編集する";
-  document.title = "Manual Studio";
+  document.title = "Munin Manual Studio";
   updateSaveState(); updateCursor(); renderDocumentTags();
   input("project-root").value = root;
   localStorage.setItem("manual-studio-project", root);
@@ -603,9 +615,15 @@ function tasksForPage(page: string): Task[] {
 }
 async function generateDocument(page: string): Promise<number> {
   if (!workspace) throw new Error("先にプロジェクトを開いてください。");
-  const tasks = tasksForPage(page).filter((task) => (task.kind === "text" || task.kind === "diagram" || task.kind === "screenshot") && task.status !== "approved");
+  const root = projectRoot;
+  const allTasks = JSON.parse(await rpc("page-tasks", { page }, root)) as Task[];
+  if (root !== projectRoot) throw new Error("プロジェクトが切り替わったため、AIタグの更新を中止しました。");
+  const supported = allTasks.filter((task) => task.kind === "text" || task.kind === "diagram" || task.kind === "screenshot");
+  const tasks = supported.filter((task) => task.status !== "approved");
   if (!tasks.length) {
-    status(`${page}に実行できるAI文章・図・撮影の指示がありません。`, true);
+    status(supported.length
+      ? `${page}のAIタグはすべて確定済みです。更新するタグの「確定解除」を押して保存してください。`
+      : `${page}にAI文章・図・撮影のタグがありません。タグがコードブロック内にないか、記法を確認してください。`, true);
     return 0;
   }
   await ensureAiSettings();
@@ -842,12 +860,21 @@ function replaceMarkdown(start: number, end: number, replacement: string, select
   editor.setSelectionRange(start + selectStart, start + selectEnd);
   editor.dispatchEvent(new Event("input", { bubbles: true }));
 }
+const openTableEditor = setupMarkdownTableEditor({ editor, canEdit: () => !busy && Boolean(documentState), replace: replaceMarkdown, report: message => status(message, true) });
+setupDocumentTagsPane();
+function applyAssist(edit: MarkdownEdit): void {
+  replaceMarkdown(edit.start, edit.end, edit.text, edit.selectionStart - edit.start, edit.selectionEnd - edit.start);
+}
 function applyMarkdownFormat(format: string): void {
   if (busy) return;
   if (!documentState) { status("先に原稿を開いてください。", true); return; }
   const start = editor.selectionStart;
   const end = editor.selectionEnd;
   const selected = editor.value.slice(start, end);
+  if (format === "table") { openTableEditor(); return; }
+  if (format === "strike") { applyAssist(toggleStrikethrough(editor.value, start, end)); return; }
+  if (format === "task-list") { applyAssist(toggleTaskList(editor.value, start, end)); return; }
+  if (format === "indent" || format === "unindent") { applyAssist(changeIndent(editor.value, start, end, format)); return; }
   if (format === "bold" || format === "italic" || format === "inline-code") {
     const marker = format === "bold" ? "**" : format === "italic" ? "*" : "`";
     const placeholder = format === "bold" ? "太字" : format === "italic" ? "斜体" : "コード";
@@ -860,8 +887,7 @@ function applyMarkdownFormat(format: string): void {
     const focusStart = selected ? label.length + 3 : 1;
     replaceMarkdown(start, end, replacement, focusStart, focusStart + (selected ? url.length : label.length));
   } else if (format === "heading") {
-    const lineStart = editor.value.lastIndexOf("\n", start - 1) + 1;
-    replaceMarkdown(lineStart, lineStart, "## ", start - lineStart + 3, end - lineStart + 3);
+    applyAssist(changeHeadingLevel(editor.value, start, end, Number(element<HTMLSelectElement>("heading-level").value)));
   } else if (format === "bullet" || format === "numbered" || format === "quote") {
     const lineStart = editor.value.lastIndexOf("\n", start - 1) + 1;
     const nextNewline = editor.value.indexOf("\n", end);
@@ -902,7 +928,14 @@ editor.addEventListener("keydown", (event) => {
     applyMarkdownFormat(({ b: "bold", i: "italic", k: "link" } as Record<string, string>)[event.key.toLowerCase()]);
     return;
   }
-  if (event.key === "Tab") { event.preventDefault(); rememberCurrentSelection(); editor.setRangeText("  ", editor.selectionStart, editor.selectionEnd, "end"); editor.dispatchEvent(new Event("input")); }
+  if (event.key === "Enter" && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && editor.selectionStart === editor.selectionEnd) {
+    event.preventDefault(); applyAssist(continueMarkdownList(editor.value, editor.selectionStart)); return;
+  }
+  if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    if (event.shiftKey || editor.selectionStart !== editor.selectionEnd) applyAssist(changeIndent(editor.value, editor.selectionStart, editor.selectionEnd, event.shiftKey ? "unindent" : "indent"));
+    else replaceMarkdown(editor.selectionStart, editor.selectionEnd, "  ", 2);
+  }
 });
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void work(saveDocument); }
@@ -1146,6 +1179,7 @@ function insertAiTask(kind: string, custom?: { id: string; prompt: string }, sel
 }
 document.querySelectorAll<HTMLElement>("[data-insert]").forEach((button) => button.addEventListener("click", () => {
   const kind = button.dataset.insert!;
+  element("panel-editor").querySelector<HTMLDetailsElement>(".instruction-toolbar")!.open = false;
   if (kind !== "screenshot") { insertAiTask(kind); return; }
   if (!documentState) { status("先に原稿を開いてください。", true); return; }
   if (pendingAnnotatedImageFile) {
@@ -1646,6 +1680,11 @@ element("save-settings").addEventListener("click", () => { void work(async () =>
   await runAction("save", settingsOptions());
   renderSettings();
 }); });
+themePicker.addEventListener("change", () => {
+  if (!isThemeId(themePicker.value)) return;
+  applyTheme(themePicker.value);
+  if (native) void emit("manual-studio-theme-changed", themePicker.value);
+});
 element("add-launch-command").addEventListener("click", () => {
   launchCommands.push({ name: "", program: "", args: [] }); renderLaunchCommands();
   document.querySelector<HTMLInputElement>(`[data-launch-name="${launchCommands.length - 1}"]`)?.focus();
@@ -1717,12 +1756,12 @@ if (recordingControlMode) {
       const message = `撮影に失敗しました: ${String(error)}`;
       const notice = document.createElement("span");
       notice.className = "recording-control-error";
-      notice.textContent = "撮影に失敗しました。Manual Studioに戻って詳細を確認してください。";
+      notice.textContent = "撮影に失敗しました。Munin Manual Studioに戻って詳細を確認してください。";
       notice.title = message;
       const returnButton = document.createElement("button");
       returnButton.type = "button";
       returnButton.className = "recording-control-return";
-      returnButton.textContent = "閉じてManual Studioに戻る";
+      returnButton.textContent = "閉じてMunin Manual Studioに戻る";
       returnButton.addEventListener("click", () => { void invoke("return_to_manual_studio"); });
       control.replaceChildren(notice, returnButton);
       await emitTo("main", "manual-studio-screenshot-failed", message).catch(() => {});

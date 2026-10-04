@@ -74,8 +74,17 @@ try {
   await page.waitForFunction(() => document.querySelector('#markdown-editor')?.value.includes('docs/guide.md'));
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
 
+  const openInstructionToolbar = async () => {
+    const toolbar = page.locator('.instruction-toolbar');
+    if (!await toolbar.evaluate(node => node.open)) {
+      await page.locator('.instruction-toolbar summary').click();
+    }
+  };
+
+  await openInstructionToolbar();
   await page.locator('[data-insert="text"]').click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /ai:task id=task-docs-guide-text-1 kind=text/, 'ordinary AI task insertion still works');
+  await openInstructionToolbar();
   await page.locator('[data-insert="screenshot"]').click();
   await page.locator('#screenshot-launch-command').selectOption('__custom__');
   await page.locator('#screenshot-task-form button[type="submit"]').click();
@@ -93,6 +102,7 @@ try {
   await page.waitForFunction(() => window.__captureMock.calls.some(call => call.command === 'manual_request' && call.args.request.action === 'editor-save' && call.args.request.options.page === 'docs/guide.md'));
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
 
+  await openInstructionToolbar();
   await page.locator('[data-insert="screenshot"]').click();
   await page.locator('#screenshot-launch-command').selectOption('__custom__');
   await page.locator('#screenshot-launch-program').fill('/usr/bin/mock-app');
@@ -114,6 +124,7 @@ try {
   await page.locator('#cancel-screenshot-task').click();
   await page.locator('[data-page="docs/other.md"]').click();
   await page.waitForFunction(() => document.querySelector('#markdown-editor')?.value.includes('docs/other.md'));
+  await openInstructionToolbar();
   await page.locator('[data-insert="screenshot"]').click();
 
   await page.evaluate(() => window.__captureMock.resolveAnnotation(JSON.stringify({ annotations: [{ id: 'late' }] })));

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the three sibling executables required by Manual Studio."""
+"""Package the three sibling executables required by Munin Manual Studio."""
 import argparse
 import json
 import os
@@ -31,9 +31,9 @@ def main():
         for binary in binaries:
             shutil.copy2(binary, package / binary.name)
         (package / 'README.txt').write_text(
-            'Manual Studio ' + version + '\n\n'
+            'Munin Manual Studio ' + version + '\n\n'
             'Extract the entire ZIP and run manual-studio' + extension + '.\n'
-            'Keep markits-desktop and manualctl beside Manual Studio.\n'
+            'Keep markits-desktop and manualctl beside Munin Manual Studio.\n'
             'Linux requires WebKitGTK 4.1 and GTK 3 (Ubuntu 22.04 or newer).\n'
             'Windows requires Microsoft Edge WebView2 Runtime.\n'
             'macOS screen recording and accessibility permissions may be required.\n'

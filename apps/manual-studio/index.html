@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="ja">
-<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Manual Studio</title></head>
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Munin Manual Studio</title></head>
 <body>
   <header class="app-header">
-    <div class="brand"><span class="brand-icon">M</span><div><strong>Manual Studio</strong><small>原稿・画面画像・公開まで</small></div></div>
+    <div class="brand"><span class="brand-icon">M</span><div><strong>Munin Manual Studio</strong><small>原稿・画面画像・公開まで</small></div></div>
     <div class="header-workspace"><span id="workspace-name">プロジェクト未選択</span><button type="button" id="open-workspace-settings" aria-haspopup="dialog">⚙ ワークスペース</button></div>
   </header>
   <div class="app-layout" id="app-layout">
-    <nav class="workspace-tabs" aria-label="作業"><button data-tab="editor" class="active">原稿を編集</button><button data-tab="tasks">AIタグ一覧 <span id="task-count">0</span></button><button data-tab="uimap">画面一覧 / UI Map</button><button data-tab="publish">AI設定・出力</button></nav>
+    <nav class="workspace-tabs" aria-label="作業"><button data-tab="editor" class="active">原稿を編集</button><button data-tab="tasks">AIタグ一覧 <span id="task-count">0</span></button><button data-tab="uimap">画面一覧 / UI Map</button><button data-tab="publish">AI設定・出力</button><button data-tab="appearance">外観設定</button></nav>
     <aside class="sidebar">
       <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><div class="tree-create-actions"><button type="button" id="new-page" title="Markdownページを作る">＋ MD</button><button type="button" id="new-folder" title="原稿フォルダー内にフォルダーを作る">＋ フォルダー</button></div></div>
       <button type="button" id="generate-all-pages" class="primary tree-generate-all" title="ファイルツリー内のMarkdown文書のAI指示を順番に実行">すべての文書をAI出力</button>
@@ -16,15 +16,18 @@
     <div id="sidebar-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="ファイルツリーの幅を変更" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="760" tabindex="0" title="ドラッグしてファイルツリーの幅を変更"></div>
     <main>
       <section id="panel-editor" class="panel">
-        <div class="panel-header"><div><p class="eyebrow">WRITE & REVIEW</p><h1 id="editor-title">Markdownを編集する</h1></div><div class="actions"><span id="save-state" class="muted">原稿を選択してください</span><button id="generate-page" title="この文書のAI文章・図の指示を実行">この文書をAI出力</button><button id="reload-page">読み直す</button><button id="detach-editor">別ウィンドウで編集</button><button id="save-page" class="primary">保存 <kbd>⌘ / Ctrl S</kbd></button></div></div>
+        <div class="panel-header"><div><p class="eyebrow">WRITE & REVIEW</p><h1 id="editor-title">Markdownを編集する</h1></div><div class="actions"><span id="save-state" class="muted">原稿を選択してください</span><button id="generate-page" title="この文書のAI指示を実行し、文章・図・撮影結果を更新">この文書のAIタグを更新</button><button id="reload-page">読み直す</button><button id="detach-editor">別ウィンドウで編集</button><button id="save-page" class="primary">保存 <kbd>⌘ / Ctrl S</kbd></button></div></div>
         <div class="editor-tools">
           <div class="formatting-toolbar" role="toolbar" aria-label="Markdown書式">
             <span>書式</span>
             <button type="button" id="undo-edit" title="元に戻す (Ctrl/Cmd+Z)" aria-label="元に戻す" disabled>↶ Undo</button>
             <button type="button" id="redo-edit" title="やり直す (Ctrl/Cmd+Shift+Z / Ctrl+Y)" aria-label="やり直す" disabled>↷ Redo</button>
-            <button type="button" data-format="heading" title="見出しを追加" aria-label="見出しを追加">見出し</button>
+            <label class="heading-level-control" for="heading-level">見出し<select id="heading-level" aria-label="見出しレベル"><option value="1">H1</option><option value="2" selected>H2</option><option value="3">H3</option><option value="4">H4</option><option value="5">H5</option><option value="6">H6</option></select></label>
+            <button type="button" data-format="heading" title="選択行に見出しレベルを適用">適用</button>
             <button type="button" data-format="bold" title="太字 (Ctrl/Cmd+B)" aria-label="太字"><strong>B</strong></button>
             <button type="button" data-format="italic" title="斜体 (Ctrl/Cmd+I)" aria-label="斜体"><em>I</em></button>
+            <button type="button" data-format="strike" title="取り消し線" aria-label="取り消し線"><s>S</s></button>
+            <button type="button" data-format="table" title="表を作成・編集" aria-label="表を作成・編集">▦ 表を作成・編集</button>
             <button type="button" data-format="link" title="リンク (Ctrl/Cmd+K)" aria-label="リンクを挿入">🔗 リンク</button>
             <button type="button" id="insert-image" title="画像ファイルを選んで挿入" aria-label="画像を挿入">▧ 画像</button>
             <input id="toolbar-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" hidden aria-label="挿入する画像ファイル" />
@@ -33,14 +36,21 @@
             <button type="button" data-format="quote" title="引用" aria-label="引用">❞ 引用</button>
             <button type="button" data-format="inline-code" title="インラインコード" aria-label="インラインコード">`code`</button>
             <button type="button" data-format="code-block" title="コードブロック" aria-label="コードブロック">コード枠</button>
-            <button type="button" data-format="table" title="表を挿入" aria-label="表を挿入">▦ 表</button>
+            <button type="button" data-format="task-list" title="タスクリスト" aria-label="タスクリスト">☑ タスク</button>
+            <button type="button" data-format="indent" title="選択行をインデント" aria-label="インデント">→ インデント</button>
+            <button type="button" data-format="unindent" title="選択行のインデントを解除" aria-label="インデント解除">← 解除</button>
             <button type="button" data-format="rule" title="区切り線" aria-label="区切り線">―</button>
           </div>
-          <div class="instruction-toolbar"><span>原稿に追加</span><button data-insert="text">AI文章の指示</button><button data-insert="screenshot">撮影の指示</button><button data-insert="diagram">依存図の指示</button><span class="muted">追加した指示は「AIタグ一覧」に表示されます。</span></div>
+          <details class="instruction-toolbar"><summary>AI指示を追加</summary><div class="instruction-actions"><button type="button" data-insert="text">AI文章の指示</button><button type="button" data-insert="screenshot">撮影の指示</button><button type="button" data-insert="diagram">依存図の指示</button><span class="muted">追加した指示は「AIタグ一覧」に表示されます。</span></div></details>
         </div>
-        <div class="editor-split"><div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div><div id="editor-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="Markdownとプレビューの幅を変更" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="ドラッグしてMarkdownとプレビューの幅を変更"></div><div class="preview-column"><div class="column-label">入力中のプレビュー <span>保存前の変更も表示・スクロール同期</span></div><iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe></div></div>
-        <p class="editor-note">このプレビューはMarkdownの見た目です。MermaidやMkDocs固有の表示は「出力・設定」の下書きビルドで確認できます。</p>
-        <section class="document-tags" aria-label="この文書のAIタグ"><div class="document-tags-heading"><strong>この文書のAIタグ</strong><button type="button" data-open-all-tags>全AIタグ一覧</button></div><div id="document-tag-list" class="document-tag-list"></div></section>
+        <div id="editor-workspace" class="editor-workspace" data-tag-position="right">
+          <div class="editor-split"><div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div><div id="editor-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="Markdownとプレビューの幅を変更" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="ドラッグしてMarkdownとプレビューの幅を変更"></div><div class="preview-column"><div class="column-label">入力中のプレビュー <span title="MermaidやMkDocs固有の表示は出力・設定の下書きビルドで確認できます">保存前の変更も表示・スクロール同期</span></div><iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe></div></div>
+          <div id="document-tags-resizer" class="pane-resizer vertical-resizer document-tags-resizer" role="separator" aria-label="AIタグペインの幅を変更" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="620" aria-valuenow="320" tabindex="0" title="ドラッグしてAIタグペインの幅を変更"></div>
+          <section id="document-tags-pane" class="document-tags document-tags-pane" aria-label="この文書のAIタグ" data-tag-position="right">
+            <div id="document-tags-handle" class="document-tags-header document-tags-handle" tabindex="0" aria-label="ドラッグしてAIタグペインを移動"><strong>この文書のAIタグ</strong><div class="document-tags-controls"><select id="document-tags-position" aria-label="AIタグペインの位置"><option value="right">右</option><option value="left">左</option><option value="floating">自由配置</option></select><button type="button" id="document-tags-collapse" aria-expanded="true" title="AIタグペインを折りたたむ">−</button><button type="button" data-open-all-tags>全AIタグ一覧</button></div></div>
+            <div id="document-tag-list" class="document-tag-list"></div>
+          </section>
+        </div>
       </section>
       <section id="panel-tasks" class="panel" hidden>
         <div class="panel-header"><div><p class="eyebrow">AI TAGS</p><h1>AIタグ一覧</h1><p class="muted">指示の編集と生成結果の確定をここで行えます。</p></div><button id="refresh-tasks">一覧を更新</button></div>
@@ -55,9 +65,14 @@
         <details class="card"><summary>起動中のWebアプリを調べる</summary><p>アプリを起動してURLを入力します。探索にはNode.jsとPlaywrightが必要です。</p><div class="actions"><input id="explore-url" type="url" placeholder="http://localhost:3000/" /><button id="explore-web">探索して一覧に追加</button></div></details>
         <details class="card"><summary>デスクトップなどの観測JSONを取り込む</summary><p>画面名と操作要素を記録したJSONを指定します。形式は専用アプリのマニュアルに記載しています。</p><div class="actions"><input id="observation-path" placeholder="manual/observations/settings.json" /><button id="import-map">取り込む</button></div></details>
       </section>
+      <section id="panel-appearance" class="panel" hidden>
+        <div class="panel-header"><div><p class="eyebrow">APPEARANCE</p><h1>外観設定</h1></div></div>
+        <div class="card display-settings"><h2>表示設定</h2><label for="ui-theme">カラーテーマ<select id="ui-theme"><optgroup label="白ベース"><option value="forest">フォレスト</option><option value="blue">ブルー</option><option value="warm">ウォーム</option></optgroup><optgroup label="黒ベース"><option value="charcoal">チャコール</option><option value="midnight">ミッドナイト</option><option value="dark-forest">ダークフォレスト</option></optgroup></select></label><p class="muted">選ぶとすぐに反映され、この端末のほかのMunin Manual Studioウィンドウにも同期します。</p></div>
+      </section>
       <section id="panel-publish" class="panel" hidden>
         <div class="panel-header"><div><p class="eyebrow">PUBLISH</p><h1>原稿を確認して、マニュアルを出力する</h1></div></div>
         <div class="card"><h2>設定</h2><div class="settings-grid"><label>Markdown原稿のフォルダー<input id="docs-path" value="docs" /></label><label>HTML出力先<input id="output-path" value="manual" /></label><label>サイト名<input id="site-name" value="マニュアル" /></label><label>AIエージェント<select id="ai-agent"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="grok">Grok Build</option><option value="agy">Agy</option></select></label><label>AIモデル（省略可）<input id="ai-model" /></label></div><label>AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label><button id="save-settings">設定を保存</button></div>
+
         <div class="card"><h2>共通のアプリ起動コマンド</h2><p>ここで登録したコマンドは、すべてのワークスペースで共有されます。撮影AIタグの作成時に選択できます。</p><div id="launch-command-list" class="launch-command-list"></div><div class="actions"><button type="button" id="add-launch-command">＋ コマンドを追加</button><button type="button" id="save-launch-commands" class="primary">共通コマンドを保存</button></div></div>
         <div class="card"><h2>下書きとHTML出力</h2><p>MarkdownはAIなしで編集できます。AIに章立てを作らせる場合は、設定したエージェントのCLIが必要です。HTML出力にはMkDocs Materialが必要です。</p><div class="actions"><button id="generate-draft">AIで原稿の下書きを作る</button><button id="build-draft" class="primary">下書きビルド</button><button id="build-final">完成版ビルド</button><button id="open-output">出力フォルダーを開く</button></div></div>
         <div class="card"><h2>変更と根拠を確認する</h2><div class="actions"><input id="git-ref" value="HEAD" aria-label="比較するGit参照" /><button id="impact-plan">変更による更新候補</button><button id="fact-check">原稿の根拠を確認</button></div><pre id="publish-result" class="result" aria-live="polite"></pre></div>

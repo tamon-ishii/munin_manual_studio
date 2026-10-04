@@ -73,6 +73,31 @@ try {
   }));
   assert.ok(Number.isFinite(initialPaneValues.sidebarWidth), 'invalid saved sidebar width must use a finite default');
   assert.ok(Number.isFinite(initialPaneValues.editorRatio), 'invalid saved editor ratio must use a finite default');
+  assert.equal(await page.locator('#generate-page').innerText(), 'この文書のAIタグを更新');
+  const editorHeight = await page.locator('#markdown-editor').evaluate(node => node.clientHeight);
+  assert.ok(editorHeight > 400, `editor must preserve vertical room: ${editorHeight}px`);
+  await page.locator('#document-tags-position').selectOption('left');
+  let paneBounds = await page.locator('#document-tags-pane').boundingBox();
+  let splitBounds = await page.locator('.editor-split').boundingBox();
+  assert.ok(paneBounds.x < splitBounds.x, 'left dock places tags before editor');
+  await page.locator('#document-tags-position').selectOption('right');
+  paneBounds = await page.locator('#document-tags-pane').boundingBox();
+  splitBounds = await page.locator('.editor-split').boundingBox();
+  assert.ok(paneBounds.x >= splitBounds.x + splitBounds.width, 'right dock places tags after editor');
+  const tagHandle = page.locator('#document-tags-handle strong');
+  const tagHandleBounds = await tagHandle.boundingBox();
+  await page.mouse.move(tagHandleBounds.x + 15, tagHandleBounds.y + 7);
+  await page.mouse.down();
+  await page.mouse.move(tagHandleBounds.x - 90, tagHandleBounds.y + 90, { steps: 5 });
+  await page.mouse.up();
+  assert.equal(await page.locator('#document-tags-position').inputValue(), 'floating', 'drag detaches the tags pane');
+  assert.equal(await page.locator('#document-tags-pane').evaluate(node => getComputedStyle(node).position), 'fixed');
+  await page.locator('#document-tags-position').selectOption('right');
+  await page.locator('#document-tags-collapse').click();
+  assert.ok((await page.locator('#document-tags-pane').boundingBox()).width <= 50, 'collapsed pane gives width back to editor');
+  await page.locator('#document-tags-collapse').click();
+  await page.screenshot({ path: '/tmp/munin-editor-layout.png' });
+
   for (const handleId of ['sidebar-resizer', 'editor-resizer']) {
     const handle = page.locator(`#${handleId}`);
     await handle.evaluate(node => {
@@ -127,8 +152,28 @@ try {
   await page.locator('#markdown-editor').fill(originalMarkdown);
   await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(node.value.length, node.value.length));
   await page.locator('[data-format="table"]').click();
-  assert.match(await page.locator('#markdown-editor').inputValue(), /\| 項目 \| 内容 \|\n\| --- \| --- \|/);
+  const tableDialog = page.locator('#markdown-table-dialog');
+  await tableDialog.waitFor({ state: 'visible' });
+  await tableDialog.getByRole('textbox', { name: '行1・列1', exact: true }).fill('名前 | 種別');
+  await tableDialog.getByRole('textbox', { name: '行1・列2', exact: true }).fill('説明');
+  await tableDialog.getByRole('combobox', { name: '列2の配置' }).selectOption('center');
+  await tableDialog.locator('[data-table-add-row]').click();
+  await tableDialog.locator('[data-table-add-column]').click();
+  await tableDialog.getByRole('textbox', { name: '見出し・列3', exact: true }).fill('備考');
+  await tableDialog.locator('button[type="submit"]').click();
+  assert.match(await page.locator('#markdown-editor').inputValue(), /\| 項目 \| 内容 \| 備考 \|\n\| --- \| :---: \| --- \|/);
   await page.frameLocator('#markdown-preview').locator('table').waitFor();
+  await page.locator('#markdown-editor').evaluate(node => { const start = node.value.indexOf('| 項目'); node.setSelectionRange(start, start); });
+  await page.locator('[data-format="table"]').click();
+  assert.equal(await tableDialog.getByRole('textbox', { name: '行1・列1', exact: true }).inputValue(), '名前 | 種別');
+  await tableDialog.getByRole('button', { name: '行3を削除', exact: true }).click();
+  await tableDialog.getByRole('button', { name: '列3を削除', exact: true }).click();
+  await tableDialog.locator('button[type="submit"]').click();
+  assert.equal((await page.locator('#markdown-editor').inputValue()).includes('備考'), false);
+  await page.locator('#undo-edit').click();
+  assert.equal((await page.locator('#markdown-editor').inputValue()).includes('備考'), true);
+  await page.locator('[data-format="table"]').click();
+  await tableDialog.locator('[data-table-cancel]').click();
   await page.locator('#markdown-editor').fill(originalMarkdown);
   assert.equal(await page.locator('#page-list [data-page="docs/index.md"]').count(), 1);
   assert.equal(await page.locator('#page-list .tree-static[title="project.txt"]').count(), 1);
@@ -354,10 +399,10 @@ try {
   await page.locator('#markdown-editor').fill(`# New guide\n\n${middleContent}\n\n<!-- ai:task id=smoke-generated kind=screenshot\n${generatedPrompt}\n-->\n<!-- ai:generated id=smoke-generated kind=screenshot prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n\n<!-- ai:task id=unsaved-text kind=text\nUnsaved instruction\n-->\n`);
   assert.equal(await documentTags.count(), 2, 'task and generated tags with the same id are merged while unsaved instructions appear');
   assert.match(await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'smoke-generated' }).innerText(), /未確定/);
-  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'unsaved-text' }).click();
+  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'unsaved-text' }).locator('[data-tag-jump]').click();
   assert.ok(await page.locator('#markdown-editor').evaluate(node => node.scrollTop > 0), 'selecting a tag lower in the document scrolls the editor to it');
   assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart).startsWith('<!-- ai:task id=unsaved-text')), true);
-  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'smoke-generated' }).click();
+  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'smoke-generated' }).locator('[data-tag-jump]').click();
   assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart).startsWith('<!-- ai:task id=smoke-generated')), true, 'selecting a document tag jumps to its Markdown comment');
   await page.locator('#markdown-editor').fill(generatedExample);
   await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(0, 0));
@@ -489,6 +534,7 @@ try {
   assert.equal(droppedFile.subarray(1, 4).toString(), 'PNG');
   await page.frameLocator('#markdown-preview').locator('img[alt="dropped-shot"]').waitFor();
 
+  await page.locator('.instruction-toolbar summary').click();
   await page.locator('[data-insert="screenshot"]').click();
   await page.locator('#screenshot-task-dialog').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#start-operation-recording').isVisible(), true);
@@ -536,6 +582,42 @@ try {
   await page.locator('#progress-open').click();
   assert.equal(await page.locator('#operation-progress').isVisible(), true);
   await page.unroute('**/__manual/rpc');
+  await page.locator('[data-tab="appearance"]').click();
+  assert.equal(await page.locator('#panel-appearance').isVisible(), true);
+  assert.equal(await page.locator('#panel-publish #ui-theme').count(), 0);
+  const themePicker = page.locator('#ui-theme');
+  await themePicker.selectOption('midnight');
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'midnight');
+  assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).getPropertyValue('--app-bg').trim()), '#171d29');
+  assert.equal(await page.evaluate(() => localStorage.getItem('manual-studio-theme')), 'midnight');
+  const assertPreviewTheme = async () => {
+    await page.waitForFunction(() => {
+      const preview = document.querySelector('#markdown-preview').contentDocument;
+      if (!preview?.body) return false;
+      const normalize = (value, property) => {
+        const probe = document.createElement('span');
+        probe.style[property] = value;
+        document.body.append(probe);
+        const color = getComputedStyle(probe)[property];
+        probe.remove();
+        return color;
+      };
+      const root = getComputedStyle(document.documentElement);
+      const body = getComputedStyle(preview.body);
+      return body.backgroundColor === normalize(root.getPropertyValue('--surface-bg'), 'backgroundColor')
+        && body.color === normalize(root.getPropertyValue('--text-primary'), 'color');
+    });
+  };
+  await assertPreviewTheme();
+  await page.reload();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'midnight' && document.querySelector('#ui-theme')?.value === 'midnight');
+  assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).colorScheme), 'dark');
+  await assertPreviewTheme();
+  await page.locator('[data-tab="appearance"]').click();
+  await page.locator('#ui-theme').selectOption('blue');
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'blue');
+  assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).getPropertyValue('--app-bg').trim()), '#f5f8fc');
+  assert.equal(await page.evaluate(() => localStorage.getItem('manual-studio-theme')), 'blue');
   assert.deepEqual(errors, []);
   console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot dialog, new page, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
 } finally {

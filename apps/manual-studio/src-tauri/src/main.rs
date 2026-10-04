@@ -75,7 +75,7 @@ fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
         "recording-control",
         tauri::WebviewUrl::App("index.html?recordingControl=1".into()),
     )
-    .title("Manual Studio — 撮影")
+    .title("Munin Manual Studio — 撮影")
     .inner_size(310.0, 100.0)
     .min_inner_size(1.0, 1.0)
     // GTK locks an unresizable WebView at its initial minimum (200px).
@@ -210,13 +210,13 @@ async fn manual_request(
             )
         }))
         .unwrap_or_else(|_| {
-            Err("処理中に予期しないエラーが発生しました。Manual Studioへ戻ります。".into())
+            Err("処理中に予期しないエラーが発生しました。Munin Manual Studioへ戻ります。".into())
         });
         if attempted_capture.load(std::sync::atomic::Ordering::Relaxed) {
             let restored = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
             match (result, restored) {
                 (Err(error), Err(restore_error)) => Err(format!(
-                    "{error}\nManual Studioの再表示にも失敗しました: {restore_error}"
+                    "{error}\nMunin Manual Studioの再表示にも失敗しました: {restore_error}"
                 )),
                 (Err(error), _) => Err(error),
                 (Ok(_), Err(error)) => Err(error),
@@ -299,7 +299,7 @@ fn open_editor(app: tauri::AppHandle, root: String, page: String) -> Result<(), 
         label,
         tauri::WebviewUrl::App(format!("index.html?{query}").into()),
     )
-    .title(format!("{page} — Manual Studio"))
+    .title(format!("{page} — Munin Manual Studio"))
     .inner_size(1250.0, 850.0)
     .build()
     .map_err(|error| error.to_string())?;
@@ -481,5 +481,5 @@ fn main() {
             open_output
         ])
         .run(tauri::generate_context!())
-        .expect("Failed to start Manual Studio");
+        .expect("Failed to start Munin Manual Studio");
 }
