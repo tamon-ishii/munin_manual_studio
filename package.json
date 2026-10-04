@@ -1,0 +1,26 @@
+{
+  "name": "munin-manual-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "manual:dev": "vite --config apps/manual-studio/vite.config.ts",
+    "manual:build": "tsc -p apps/manual-studio/tsconfig.json && vite build --config apps/manual-studio/vite.config.ts",
+    "manual:build-markits": "npm --prefix crates/markits/apps/desktop run build",
+    "manual:test-workflow": "node scripts/test_manual_studio_workflow.mjs",
+    "manual:check": "node scripts/check_manual_studio.mjs",
+    "manual:app": "cd apps/manual-studio && tauri dev",
+    "manual:bundle": "cd apps/manual-studio && tauri build",
+    "manual:smoke": "node scripts/smoke_manual_studio.mjs --start-server",
+    "manual:smoke-native": "node scripts/smoke_manual_markits_native.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5",
+    "playwright-core": "^1.63.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}

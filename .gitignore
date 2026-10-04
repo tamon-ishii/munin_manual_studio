@@ -1,0 +1,9 @@
+/node_modules/
+/target/
+/apps/manual-studio/dist/
+/crates/markits/target/
+/crates/markits/apps/desktop/node_modules/
+/crates/markits/apps/desktop/dist/
+**/__pycache__/
+*.py[cod]
+/crates/markits/manual/

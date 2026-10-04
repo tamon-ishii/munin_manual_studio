@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Manual Studio</title></head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="brand-icon">M</span><div><strong>Manual Studio</strong><small>原稿・画面画像・公開まで</small></div></div>
+    <div class="header-workspace"><span id="workspace-name">プロジェクト未選択</span><button type="button" id="open-workspace-settings" aria-haspopup="dialog">⚙ ワークスペース</button></div>
+  </header>
+  <div class="app-layout" id="app-layout">
+    <nav class="workspace-tabs" aria-label="作業"><button data-tab="editor" class="active">原稿を編集</button><button data-tab="tasks">画像・文章・図 <span id="task-count">0</span></button><button data-tab="uimap">画面一覧 / UI Map</button><button data-tab="publish">AI設定・出力</button></nav>
+    <aside class="sidebar">
+      <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><div class="tree-create-actions"><button type="button" id="new-page" title="Markdownページを作る">＋ MD</button><button type="button" id="new-folder" title="原稿フォルダー内にフォルダーを作る">＋ フォルダー</button></div></div>
+      <button type="button" id="generate-all-pages" class="primary tree-generate-all" title="ファイルツリー内のMarkdown文書のAI指示を順番に実行">すべての文書をAI出力</button>
+      <div id="page-list" class="page-list file-tree" role="tree" aria-label="選択したフォルダーのファイル"><p class="muted">フォルダーを開くとファイルが表示されます。</p></div>
+    </aside>
+    <div id="sidebar-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="ファイルツリーの幅を変更" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="760" tabindex="0" title="ドラッグしてファイルツリーの幅を変更"></div>
+    <main>
+      <section id="panel-editor" class="panel">
+        <div class="panel-header"><div><p class="eyebrow">WRITE & REVIEW</p><h1 id="editor-title">Markdownを編集する</h1></div><div class="actions"><span id="save-state" class="muted">原稿を選択してください</span><button id="generate-page" title="この文書のAI文章・図の指示を実行">この文書をAI出力</button><button id="reload-page">読み直す</button><button id="detach-editor">別ウィンドウで編集</button><button id="save-page" class="primary">保存 <kbd>⌘ / Ctrl S</kbd></button></div></div>
+        <div class="editor-tools">
+          <div class="formatting-toolbar" role="toolbar" aria-label="Markdown書式">
+            <span>書式</span>
+            <button type="button" id="undo-edit" title="元に戻す (Ctrl/Cmd+Z)" aria-label="元に戻す" disabled>↶ Undo</button>
+            <button type="button" id="redo-edit" title="やり直す (Ctrl/Cmd+Shift+Z / Ctrl+Y)" aria-label="やり直す" disabled>↷ Redo</button>
+            <button type="button" data-format="heading" title="見出しを追加" aria-label="見出しを追加">見出し</button>
+            <button type="button" data-format="bold" title="太字 (Ctrl/Cmd+B)" aria-label="太字"><strong>B</strong></button>
+            <button type="button" data-format="italic" title="斜体 (Ctrl/Cmd+I)" aria-label="斜体"><em>I</em></button>
+            <button type="button" data-format="link" title="リンク (Ctrl/Cmd+K)" aria-label="リンクを挿入">🔗 リンク</button>
+            <button type="button" id="insert-image" title="画像ファイルを選んで挿入" aria-label="画像を挿入">▧ 画像</button>
+            <input id="toolbar-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" hidden aria-label="挿入する画像ファイル" />
+            <button type="button" id="confirm-generated" title="カーソル上の生成結果を確定し、以後のAI出力で保護" aria-label="生成結果を確定" disabled>確定</button>
+            <button type="button" id="delete-generated" title="カーソルがある ai:generated ブロックを削除" aria-label="生成結果を削除" disabled>生成結果を削除</button>
+            <button type="button" data-format="bullet" title="箇条書き" aria-label="箇条書き">• リスト</button>
+            <button type="button" data-format="numbered" title="番号付きリスト" aria-label="番号付きリスト">1. リスト</button>
+            <button type="button" data-format="quote" title="引用" aria-label="引用">❞ 引用</button>
+            <button type="button" data-format="inline-code" title="インラインコード" aria-label="インラインコード">`code`</button>
+            <button type="button" data-format="code-block" title="コードブロック" aria-label="コードブロック">コード枠</button>
+            <button type="button" data-format="table" title="表を挿入" aria-label="表を挿入">▦ 表</button>
+            <button type="button" data-format="rule" title="区切り線" aria-label="区切り線">―</button>
+          </div>
+          <div class="instruction-toolbar"><span>原稿に追加</span><button data-insert="text">AI文章の指示</button><button data-insert="screenshot">撮影の指示</button><button data-insert="diagram">依存図の指示</button><span class="muted">追加した指示は「画像・文章・図」に表示されます。</span></div>
+        </div>
+        <div class="editor-split"><div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div><div id="editor-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="Markdownとプレビューの幅を変更" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="ドラッグしてMarkdownとプレビューの幅を変更"></div><div class="preview-column"><div class="column-label">入力中のプレビュー <span>保存前の変更も表示・スクロール同期</span></div><iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe></div></div>
+        <p class="editor-note">このプレビューはMarkdownの見た目です。MermaidやMkDocs固有の表示は「出力・設定」の下書きビルドで確認できます。</p>
+      </section>
+      <section id="panel-tasks" class="panel" hidden>
+        <div class="panel-header"><div><p class="eyebrow">ASSETS</p><h1>画像・文章・図を更新する</h1></div><button id="refresh-tasks">一覧を更新</button></div>
+        <div class="callout"><strong>画像ごとの調整が必要な場合</strong><p>AIが設定できなかった画像や撮影元を変えたい画像は、「撮影元を選ぶ」から対象ウィンドウを指定してください。撮影前の操作は原稿の撮影指示に自然文で記入します。</p></div>
+        <div id="task-list" class="task-list"></div>
+      </section>
+      <section id="panel-uimap" class="panel" hidden>
+        <div class="panel-header"><div><p class="eyebrow">APPLICATION KNOWLEDGE</p><h1>画面・操作の一覧（UI Map）</h1></div><button id="map-refresh" class="primary">コードから画面一覧を作る</button></div>
+        <div class="callout"><strong>アプリの「どの画面に、どんな操作があるか」を整理します。</strong><p>AIの原稿生成や、コード変更後の更新候補の判定に使います。画像の撮影元は「画像・文章・図」で設定し、撮影時の操作は原稿の撮影指示に自然文で記入します。</p></div>
+        <ol class="steps"><li>「コードから画面一覧を作る」を押す。</li><li>下の一覧で画面名・ボタン・入力欄を確認する。</li><li>不足するWeb画面はURLから探索。デスクトップの観測結果はJSONで取り込む。</li></ol>
+        <div id="uimap-list"></div>
+        <details class="card"><summary>起動中のWebアプリを調べる</summary><p>アプリを起動してURLを入力します。探索にはNode.jsとPlaywrightが必要です。</p><div class="actions"><input id="explore-url" type="url" placeholder="http://localhost:3000/" /><button id="explore-web">探索して一覧に追加</button></div></details>
+        <details class="card"><summary>デスクトップなどの観測JSONを取り込む</summary><p>画面名と操作要素を記録したJSONを指定します。形式は専用アプリのマニュアルに記載しています。</p><div class="actions"><input id="observation-path" placeholder="manual/observations/settings.json" /><button id="import-map">取り込む</button></div></details>
+      </section>
+      <section id="panel-publish" class="panel" hidden>
+        <div class="panel-header"><div><p class="eyebrow">PUBLISH</p><h1>原稿を確認して、マニュアルを出力する</h1></div></div>
+        <div class="card"><h2>設定</h2><div class="settings-grid"><label>Markdown原稿のフォルダー<input id="docs-path" value="docs" /></label><label>HTML出力先<input id="output-path" value="manual" /></label><label>サイト名<input id="site-name" value="マニュアル" /></label><label>AIエージェント<select id="ai-agent"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="grok">Grok Build</option><option value="agy">Agy</option></select></label><label>AIモデル（省略可）<input id="ai-model" /></label></div><label>AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label><button id="save-settings">設定を保存</button></div>
+        <div class="card"><h2>共通のアプリ起動コマンド</h2><p>ここで登録したコマンドは、すべてのワークスペースで共有されます。撮影AIタグの作成時に選択できます。</p><div id="launch-command-list" class="launch-command-list"></div><div class="actions"><button type="button" id="add-launch-command">＋ コマンドを追加</button><button type="button" id="save-launch-commands" class="primary">共通コマンドを保存</button></div></div>
+        <div class="card"><h2>下書きとHTML出力</h2><p>MarkdownはAIなしで編集できます。AIに章立てを作らせる場合は、設定したエージェントのCLIが必要です。HTML出力にはMkDocs Materialが必要です。</p><div class="actions"><button id="generate-draft">AIで原稿の下書きを作る</button><button id="build-draft" class="primary">下書きビルド</button><button id="build-final">完成版ビルド</button><button id="open-output">出力フォルダーを開く</button></div></div>
+        <div class="card"><h2>変更と根拠を確認する</h2><div class="actions"><input id="git-ref" value="HEAD" aria-label="比較するGit参照" /><button id="impact-plan">変更による更新候補</button><button id="fact-check">原稿の根拠を確認</button></div><pre id="publish-result" class="result" aria-live="polite"></pre></div>
+      </section>
+    </main>
+  </div>
+  <section id="operation-progress" class="operation-progress" role="dialog" aria-modal="false" aria-labelledby="progress-label" hidden>
+    <div class="progress-heading"><div><small>AI 実行ログ</small><strong id="progress-label">AIを実行しています</strong></div><div class="progress-heading-actions"><span id="progress-elapsed">00:00</span><button type="button" id="progress-dismiss" class="progress-control" aria-label="実行ログを閉じる">閉じる</button></div></div>
+    <div id="progress-track" class="progress-track" role="progressbar" aria-label="AI生成中" aria-valuetext="実行中"><span></span></div>
+    <p id="progress-note" role="status">AIエージェントの起動を待っています。</p>
+    <pre id="progress-log" role="log" aria-live="polite" aria-label="AIの実行ログ"></pre>
+  </section>
+  <button type="button" id="progress-open" class="progress-control progress-open" hidden>AI実行ログを表示</button>
+  <footer><span id="status" role="status" aria-live="polite">プロジェクトのフォルダーを開いてください。</span></footer>
+  <dialog id="workspace-dialog"><form id="project-form"><h2>ワークスペースを開く</h2><p class="muted">プロジェクトフォルダーを選択または入力してください。</p><label>プロジェクトのフォルダー<input id="project-root" aria-label="プロジェクトのフォルダー" placeholder="フォルダーを選ぶ、またはパスを入力" /></label><div class="actions"><button type="button" id="browse-project">フォルダーを選ぶ</button><button type="button" id="cancel-workspace-settings">閉じる</button><button type="submit" class="primary">開く</button></div></form></dialog>
+  <dialog id="new-page-dialog"><form id="new-page-form"><h2>Markdownページを作る</h2><label>原稿フォルダーからの相対パス<input id="new-page-path" placeholder="getting-started.md" required /></label><label>ページタイトル<input id="new-page-title" placeholder="使い始める" required /></label><div class="actions"><button type="button" id="cancel-new-page">キャンセル</button><button type="submit" class="primary">作成して編集</button></div></form></dialog>
+  <dialog id="new-folder-dialog"><form id="new-folder-form"><h2>フォルダーを作る</h2><p id="new-folder-parent" class="muted">原稿フォルダー内に作成します。</p><label>フォルダー名または相対パス<input id="new-folder-path" placeholder="guide/advanced" required /></label><div class="actions"><button type="button" id="cancel-new-folder">キャンセル</button><button type="submit" class="primary">作成</button></div></form></dialog>
+  <dialog id="image-save-dialog"><form id="image-save-form"><h2>画像を保存して原稿に挿入</h2><div class="image-preview-container"><img id="image-save-preview" alt="貼り付け画像のプレビュー" /></div><label>保存先フォルダー（プロジェクト相対）<input id="image-save-folder" value="docs/assets" required /></label><label>ファイル名<input id="image-save-filename" placeholder="image.png" required /></label><label>代替テキスト（省略可）<input id="image-save-alt" placeholder="画像の説明" /></label><div class="markdown-insert-preview"><span class="muted">挿入記法:</span><code id="image-markdown-preview">![alt](path)</code></div><div class="actions"><button type="button" id="cancel-image-save">キャンセル</button><button type="submit" class="primary" id="confirm-image-save">保存して挿入</button></div></form></dialog>
+  <dialog id="screenshot-task-dialog"><form id="screenshot-task-form"><h2>アプリを操作して撮影AIタグを作成</h2><p class="muted">手順: ①起動コマンドを選び「操作を記録」 ②起動したアプリを操作 ③画面上の「スクリーンショットを実行」を押す ④MarkItsで注釈を付け「編集終了」。注釈はこの指示に自動挿入されます。ボタンが見えない場合はCtrl+Shift+F10を押してください。</p><input type="hidden" id="screenshot-task-id" /><section class="capture-launch-settings"><h3>アプリ起動と操作記録</h3><label>共通の起動コマンド<select id="screenshot-launch-command"></select></label><p id="screenshot-launch-summary" class="muted"></p><div id="custom-launch-command" hidden><div class="app-picker-row"><label>カスタム起動アプリ<input id="screenshot-launch-program" placeholder="アプリの実行ファイル" /></label><button type="button" id="browse-screenshot-launch-program">選択</button></div></div><details class="capture-optional-settings"><summary>起動引数・補足（任意）</summary><label id="custom-launch-args-label">カスタム起動引数（1行に1つ）<textarea id="screenshot-launch-args" rows="2" placeholder="--profile
+manual"></textarea></label><label>補足<textarea id="screenshot-notes" rows="2" placeholder="例: 個人情報は表示しない"></textarea></label></details><div class="actions"><button type="button" id="start-operation-recording" class="primary">アプリを起動して操作を記録</button><button type="button" id="stop-operation-recording" class="primary" disabled>スクリーンショットを実行 → MarkItsで注釈</button></div><p id="operation-recording-status" class="muted" role="status">記録中は入力した文字も保存されます。機密情報を入力しないでください。画面上の撮影ボタンが押せない場合は Ctrl+Shift+F10 を押してください。</p></section><p class="muted">設定内容を撮影タスクの指示として原稿に追加します。</p><div class="actions"><button type="button" id="cancel-screenshot-task">キャンセル</button><button type="submit" class="primary">指示を追加</button></div></form></dialog>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

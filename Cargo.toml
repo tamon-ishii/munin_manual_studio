@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "crates/analysis-core",
+    "crates/manual-core",
+    "apps/manual-studio/src-tauri",
+]
+exclude = ["crates/markits"]
+resolver = "2"

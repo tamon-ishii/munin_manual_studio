@@ -1,0 +1,1 @@
+{"manual-studio":{"identifier":"manual-studio","description":"","local":true,"windows":["main","editor-*","recording-control"],"permissions":["core:default","core:window:allow-close","core:window:allow-destroy","core:window:allow-start-dragging"]}}

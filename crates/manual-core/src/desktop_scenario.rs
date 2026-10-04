@@ -1,0 +1,849 @@
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use serde_json::Value;
+use xa11y::{App, AppExt, Element, Key, Locator, Point, Rect, Selector};
+
+use super::scenario::RunResult;
+use super::task::find_task;
+use super::window_capture::{self, WindowInfo};
+
+fn nonempty(value: &Value) -> Option<&str> {
+    value.as_str().filter(|text| !text.trim().is_empty())
+}
+
+fn key_for(name: &str) -> Option<Key> {
+    match name.to_ascii_lowercase().as_str() {
+        "enter" | "return" => Some(Key::Enter),
+        "escape" | "esc" => Some(Key::Escape),
+        "tab" => Some(Key::Tab),
+        "space" => Some(Key::Space),
+        "backspace" => Some(Key::Backspace),
+        "delete" => Some(Key::Delete),
+        "up" => Some(Key::ArrowUp),
+        "down" => Some(Key::ArrowDown),
+        "left" => Some(Key::ArrowLeft),
+        "right" => Some(Key::ArrowRight),
+        "ctrl" | "control" => Some(Key::Ctrl),
+        "alt" => Some(Key::Alt),
+        "shift" => Some(Key::Shift),
+        "meta" | "cmd" | "command" | "win" => Some(Key::Meta),
+        _ if name.len() > 1 && name.starts_with(['f', 'F']) => name[1..]
+            .parse::<u8>()
+            .ok()
+            .filter(|number| (1..=12).contains(number))
+            .map(Key::F),
+        _ if name.chars().count() == 1 => {
+            Some(Key::Char(name.chars().next().unwrap().to_ascii_lowercase()))
+        }
+        _ => None,
+    }
+}
+
+fn parse_keys(value: &str) -> Result<Vec<Key>, String> {
+    let keys: Vec<Key> = value
+        .split('+')
+        .map(|part| key_for(part.trim()).ok_or_else(|| format!("Unsupported key: {part}")))
+        .collect::<Result<_, _>>()?;
+    if keys[..keys.len() - 1]
+        .iter()
+        .any(|key| !matches!(key, Key::Ctrl | Key::Alt | Key::Shift | Key::Meta))
+    {
+        return Err("Only modifiers may precede the final key".into());
+    }
+    Ok(keys)
+}
+
+pub fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
+    for (index, step) in steps.iter().enumerate() {
+        let number = index + 1;
+        let object = step
+            .as_object()
+            .ok_or_else(|| format!("Desktop scenario step {number} must be an object"))?;
+        if object.len() != 1 {
+            return Err(format!(
+                "Desktop scenario step {number} must contain one action"
+            ));
+        }
+        let (action, value) = object.iter().next().unwrap();
+        match action.as_str() {
+            "launch" => {
+                let program = value
+                    .get("program")
+                    .and_then(nonempty)
+                    .ok_or_else(|| format!("Launch step {number} needs a program"))?;
+                if program.contains('\0')
+                    || value.get("args").is_some_and(|args| {
+                        args.as_array()
+                            .is_none_or(|items| items.iter().any(|item| item.as_str().is_none()))
+                    })
+                {
+                    return Err(format!("Launch step {number} has invalid arguments"));
+                }
+            }
+            "window" | "expect_window" => {
+                if nonempty(value).is_none() {
+                    return Err(format!("Step {number} needs nonempty {action} text"));
+                }
+            }
+            "press" | "focus" | "toggle" | "select" | "scroll_into_view" | "expect_visible"
+            | "expect_hidden" | "expect_enabled" | "expect_disabled" | "expect_focused" => {
+                let selector =
+                    nonempty(value).ok_or_else(|| format!("Step {number} needs a selector"))?;
+                Selector::parse(selector).map_err(|error| format!("Step {number}: {error}"))?;
+            }
+            "fill" | "expect_value" => {
+                if value.get("value").and_then(Value::as_str).is_none() {
+                    return Err(format!("{action} step {number} needs selector and value"));
+                }
+                let selector = value
+                    .get("selector")
+                    .and_then(nonempty)
+                    .ok_or_else(|| format!("{action} step {number} needs selector and value"))?;
+                Selector::parse(selector).map_err(|error| format!("Step {number}: {error}"))?;
+            }
+            "text" => {
+                if nonempty(value).is_none() {
+                    let selector = value.get("selector").and_then(nonempty).ok_or_else(|| {
+                        format!("Text step {number} needs text or a selector and value")
+                    })?;
+                    if value.get("value").and_then(nonempty).is_none() {
+                        return Err(format!("Text step {number} needs nonempty value"));
+                    }
+                    Selector::parse(selector).map_err(|error| format!("Step {number}: {error}"))?;
+                }
+            }
+            "key" => {
+                let keys = if let Some(keys) = nonempty(value) {
+                    keys
+                } else {
+                    let selector = value.get("selector").and_then(nonempty).ok_or_else(|| {
+                        format!("Key step {number} needs keys or a selector and keys")
+                    })?;
+                    Selector::parse(selector).map_err(|error| format!("Step {number}: {error}"))?;
+                    value
+                        .get("keys")
+                        .and_then(nonempty)
+                        .ok_or_else(|| format!("Key step {number} needs nonempty keys"))?
+                };
+                parse_keys(keys)?;
+            }
+            "scroll" => {
+                if value.get("x").and_then(Value::as_u64).is_none_or(|x| x > i32::MAX as u64)
+                    || value.get("y").and_then(Value::as_u64).is_none_or(|y| y > i32::MAX as u64)
+                    || value.get("dx").and_then(Value::as_i64).is_none()
+                    || value.get("dy").and_then(Value::as_i64).is_none()
+                {
+                    return Err(format!("Scroll step {number} needs valid x, y, dx, and dy"));
+                }
+            }
+            "click" => {
+                if value
+                    .get("x")
+                    .and_then(Value::as_u64)
+                    .is_none_or(|x| x > i32::MAX as u64)
+                    || value
+                        .get("y")
+                        .and_then(Value::as_u64)
+                        .is_none_or(|y| y > i32::MAX as u64)
+                {
+                    return Err(format!(
+                        "Click step {number} needs nonnegative x and y coordinates"
+                    ));
+                }
+            }
+            "wait_ms" => {
+                if value.as_u64().is_none_or(|ms| ms > 30_000) {
+                    return Err(format!("Wait step {number} must be 0–30000 ms"));
+                }
+            }
+            "screenshot" => {
+                let task_id = value
+                    .get("task")
+                    .and_then(nonempty)
+                    .ok_or_else(|| format!("Screenshot step {number} needs a task ID"))?;
+                if !task_id
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase())
+                    || !task_id.chars().all(|c| {
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'
+                    })
+                {
+                    return Err(format!("Invalid screenshot task ID: {task_id}"));
+                }
+                if find_task(docs, task_id)?.kind != "screenshot" {
+                    return Err(format!("Scenario task is not a screenshot: {task_id}"));
+                }
+                if value
+                    .get("inset")
+                    .is_some_and(|inset| inset.as_u64().is_none_or(|n| n > 64))
+                {
+                    return Err(format!(
+                        "Screenshot step {number} inset must be 0–64 pixels"
+                    ));
+                }
+                if let Some(selector) = value.get("selector") {
+                    let selector = nonempty(selector)
+                        .ok_or_else(|| format!("Screenshot step {number} has an empty selector"))?;
+                    Selector::parse(selector).map_err(|error| format!("Step {number}: {error}"))?;
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "Unsupported desktop scenario step {number}: {action}"
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+fn find_window(query: &str) -> Result<WindowInfo, String> {
+    let windows = window_capture::list_windows()?;
+    let exact: Vec<_> = windows
+        .iter()
+        .filter(|window| window.id == query || window.title.eq_ignore_ascii_case(query))
+        .collect();
+    let matches: Vec<_> = if exact.is_empty() {
+        windows
+            .iter()
+            .filter(|window| window.title.to_lowercase().contains(&query.to_lowercase()))
+            .collect()
+    } else {
+        exact
+    };
+    match matches.as_slice() {
+        [window] => Ok((*window).clone()),
+        [] => Err(format!("Window not found: {query}")),
+        _ => Err(format!(
+            "Window name is ambiguous: {query}; use the full title or window ID"
+        )),
+    }
+}
+
+fn wait_window(query: &str) -> Result<WindowInfo, String> {
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        match find_window(query) {
+            Ok(window) => return Ok(window),
+            Err(error) if Instant::now() >= until => return Err(error),
+            Err(error) if !error.starts_with("Window not found:") => return Err(error),
+            Err(_) => thread::sleep(Duration::from_millis(250)),
+        }
+    }
+}
+
+enum LocatedWindow {
+    Native(WindowInfo),
+    Accessible(Element),
+}
+
+fn wait_any_window(query: &str) -> Result<LocatedWindow, String> {
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        if !window_capture::is_wayland_session() || query == "portal" {
+            match find_window(query) {
+                Ok(window) => return Ok(LocatedWindow::Native(window)),
+                Err(error) if error.starts_with("Window name is ambiguous:") => return Err(error),
+                Err(_) => {}
+            }
+        }
+        match a11y_window(query) {
+            Ok(window) => return Ok(LocatedWindow::Accessible(window)),
+            Err(error) if error.starts_with("Accessibility window name is ambiguous:") => {
+                return Err(error)
+            }
+            Err(error) if Instant::now() >= until => return Err(error),
+            Err(_) => thread::sleep(Duration::from_millis(250)),
+        }
+    }
+}
+
+fn a11y_window(query: &str) -> Result<Element, String> {
+    let scoped = query
+        .strip_prefix("pid:")
+        .and_then(|rest| rest.split_once(':'))
+        .and_then(|(pid, id)| pid.parse::<u32>().ok().map(|pid| (pid, id)));
+    let app_scoped = query
+        .strip_prefix("app:")
+        .and_then(|rest| rest.split_once("::"));
+    let mut exact = Vec::new();
+    let mut partial = Vec::new();
+    for app in App::list().map_err(|error| error.to_string())? {
+        // An unrelated app may close while the desktop is being enumerated.
+        let Ok(windows) = app.windows() else { continue };
+        for window in windows {
+            let name = window.name.as_deref().unwrap_or("");
+            let pid = window.pid.or(app.pid);
+            let matched = if let Some((expected_app, expected_title)) = app_scoped {
+                app.name.eq_ignore_ascii_case(expected_app)
+                    && name.eq_ignore_ascii_case(expected_title)
+            } else if let Some((expected_pid, id)) = scoped {
+                pid == Some(expected_pid)
+                    && (window.stable_id.as_deref() == Some(id) || name.eq_ignore_ascii_case(id))
+            } else {
+                window.stable_id.as_deref() == Some(query) || name.eq_ignore_ascii_case(query)
+            };
+            if matched {
+                exact.push(window);
+            } else if scoped.is_none()
+                && app_scoped.is_none()
+                && name.to_lowercase().contains(&query.to_lowercase())
+            {
+                partial.push(window);
+            }
+        }
+    }
+    let matches = if exact.is_empty() { partial } else { exact };
+    match matches.as_slice() {
+        [window] => Ok(window.clone()),
+        [] => Err(format!("Accessibility window not found: {query}")),
+        _ => Err(format!("Accessibility window name is ambiguous: {query}")),
+    }
+}
+
+#[derive(Serialize)]
+struct AccessibleWindowInfo {
+    id: String,
+    query: String,
+    title: String,
+    app: String,
+    pid: Option<u32>,
+}
+
+pub(super) fn list_accessible_windows() -> Result<String, String> {
+    let mut found = Vec::new();
+    for app in App::list().map_err(|error| error.to_string())? {
+        let Ok(windows) = app.windows() else { continue };
+        for window in windows {
+            let title = window.name.as_deref().unwrap_or("").trim();
+            if title.is_empty() {
+                continue;
+            }
+            let pid = window.pid.or(app.pid);
+            let id = window.stable_id.as_deref().unwrap_or(title);
+            found.push(AccessibleWindowInfo {
+                id: pid.map_or_else(|| id.to_string(), |pid| format!("pid:{pid}:{id}")),
+                query: format!("app:{}::{title}", app.name),
+                title: title.to_string(),
+                app: app.name.clone(),
+                pid,
+            });
+        }
+    }
+    found.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    serde_json::to_string(&found).map_err(|error| error.to_string())
+}
+
+pub(super) fn inspect_window(query: &str) -> Result<String, String> {
+    if query.trim().is_empty() {
+        return Err("inspect-window requires --window".into());
+    }
+    a11y_window(query)?
+        .dump(Some(5))
+        .map_err(|error| error.to_string())
+}
+
+struct SelectedWindow {
+    query: String,
+    native_id: Option<String>,
+    accessible: Option<Element>,
+}
+
+impl SelectedWindow {
+    fn new(query: &str) -> Self {
+        Self {
+            query: query.to_string(),
+            native_id: None,
+            accessible: None,
+        }
+    }
+
+    fn accessible(&self) -> Result<Element, String> {
+        if let Some(window) = &self.accessible {
+            if window.children().is_ok() {
+                return Ok(window.clone());
+            }
+        }
+        selected_a11y_window(&self.query)
+    }
+
+    fn native(&self) -> Result<WindowInfo, String> {
+        if let Some(id) = &self.native_id {
+            if let Ok(window) = find_window(id) {
+                return Ok(window);
+            }
+        }
+        find_window(&self.query)
+    }
+
+    fn wait_native(&self) -> Result<WindowInfo, String> {
+        if let Ok(window) = self.native() {
+            return Ok(window);
+        }
+        wait_window(&self.query)
+    }
+}
+
+fn selected_a11y_window(selected: &str) -> Result<Element, String> {
+    if selected.is_empty() {
+        return Err("Select a window before interacting with it".into());
+    }
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        match a11y_window(selected) {
+            Ok(window) => return Ok(window),
+            Err(error) if Instant::now() >= until => return Err(error),
+            Err(error) if !error.starts_with("Accessibility window not found:") => {
+                return Err(error)
+            }
+            Err(_) => thread::sleep(Duration::from_millis(250)),
+        }
+    }
+}
+
+fn locator(window: &Element, selector: &str) -> Locator {
+    Locator::new(
+        window.provider().clone(),
+        Some(window.data().clone()),
+        selector,
+    )
+}
+
+fn activate(selected: &SelectedWindow) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if !window_capture::is_wayland_session() {
+        if let Ok(window) = selected.native() {
+            return window_capture::activate_window(&window.id).map(|_| ());
+        }
+    }
+    if let Ok(window) = selected.accessible() {
+        if window.activate().is_ok() {
+            return Ok(());
+        }
+    }
+    let window = selected.native()?;
+    window_capture::activate_window(&window.id).map(|_| ())
+}
+
+fn activate_for_input(selected: &SelectedWindow) -> Result<(), String> {
+    if a11y_window(&selected.query).is_ok_and(|window| window.states.active) {
+        return Ok(());
+    }
+    if window_capture::is_wayland_session() {
+        let window = selected.accessible()?;
+        return window.activate().map_err(|error| {
+            format!("Selected window is not active; focus a control before keyboard input: {error}")
+        });
+    }
+    activate(selected)
+}
+
+fn inset_rect(bounds: Rect, inset: u32) -> Result<Rect, String> {
+    let twice = inset.checked_mul(2).ok_or("Inset is too large")?;
+    let width = bounds
+        .width
+        .checked_sub(twice)
+        .filter(|size| *size > 0)
+        .ok_or("Inset exceeds capture width")?;
+    let height = bounds
+        .height
+        .checked_sub(twice)
+        .filter(|size| *size > 0)
+        .ok_or("Inset exceeds capture height")?;
+    let margin = i32::try_from(inset).map_err(|_| "Inset is too large")?;
+    Ok(Rect {
+        x: bounds
+            .x
+            .checked_add(margin)
+            .ok_or("Capture x exceeds desktop bounds")?,
+        y: bounds
+            .y
+            .checked_add(margin)
+            .ok_or("Capture y exceeds desktop bounds")?,
+        width,
+        height,
+    })
+}
+
+fn capture(
+    selected: &SelectedWindow,
+    selector: Option<&str>,
+    inset: u32,
+    destination: &Path,
+) -> Result<(), String> {
+    let portal = window_capture::is_wayland_session();
+    if portal && (selected.query == "portal" || selector.is_none()) {
+        if selector.is_some() {
+            return Err("Select a named window for an element screenshot".into());
+        }
+        window_capture::capture_window("portal", inset, destination, true, None)?;
+        return Ok(());
+    }
+    let accessible = if selector.is_some() {
+        Some(selected.accessible()?)
+    } else {
+        a11y_window(&selected.query)
+            .ok()
+            .or_else(|| selected.accessible().ok())
+    };
+    if let Some(window) = accessible {
+        if !portal {
+            activate(selected)?;
+        }
+        let target = if let Some(selector) = selector {
+            locator(&window, selector)
+                .wait_visible(Duration::from_secs(10))
+                .map_err(|error| error.to_string())?
+        } else {
+            window
+        };
+        let bounds = target
+            .bounds
+            .ok_or("Screenshot target has no accessibility bounds")?;
+        let area = inset_rect(bounds, inset)?;
+        xa11y::screenshot_region(area)
+            .map_err(|error| error.to_string())?
+            .save_png(destination)
+            .map_err(|error| error.to_string())?;
+    } else {
+        let window = selected.wait_native()?;
+        window_capture::capture_window(&window.id, inset, destination, true, None)?;
+    }
+    Ok(())
+}
+
+pub fn run(
+    root: &Path,
+    initial_window: &str,
+    steps: &[Value],
+    captured_dir: &Path,
+) -> Result<RunResult, String> {
+    fs::create_dir_all(captured_dir).map_err(|error| error.to_string())?;
+    let mut selected = SelectedWindow::new(initial_window);
+    let mut captured = Vec::new();
+    for (index, step) in steps.iter().enumerate() {
+        let (action, value) = step.as_object().unwrap().iter().next().unwrap();
+        let result: Result<(), String> = (|| {
+            match action.as_str() {
+                "launch" => {
+                    let program = value["program"].as_str().unwrap();
+                    let args: Vec<&str> = value
+                        .get("args")
+                        .and_then(Value::as_array)
+                        .map(|items| items.iter().filter_map(Value::as_str).collect())
+                        .unwrap_or_default();
+                    Command::new(program)
+                        .args(args)
+                        .current_dir(root)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .spawn()
+                        .map_err(|error| format!("Could not launch {program}: {error}"))?;
+                }
+                "window" => {
+                    let query = value.as_str().unwrap();
+                    if query == "portal" && window_capture::is_wayland_session() {
+                        selected = SelectedWindow::new(query);
+                    } else {
+                        match wait_any_window(query)? {
+                            LocatedWindow::Native(window) => {
+                                selected = SelectedWindow {
+                                    accessible: a11y_window(&window.title).ok(),
+                                    query: window.title,
+                                    native_id: Some(window.id),
+                                };
+                                activate(&selected)?;
+                            }
+                            LocatedWindow::Accessible(window) => {
+                                let native_id = if window_capture::is_wayland_session() {
+                                    None
+                                } else {
+                                    window
+                                        .name
+                                        .as_deref()
+                                        .and_then(|name| find_window(name).ok())
+                                        .map(|native| native.id)
+                                };
+                                selected = SelectedWindow {
+                                    query: query.to_string(),
+                                    native_id,
+                                    accessible: Some(window),
+                                };
+                            }
+                        }
+                    }
+                }
+                "expect_window" => {
+                    wait_any_window(value.as_str().unwrap())?;
+                }
+                "press" | "focus" | "toggle" | "select" | "scroll_into_view" | "expect_visible"
+                | "expect_hidden" | "expect_enabled" | "expect_disabled" | "expect_focused" => {
+                    let window = selected.accessible()?;
+                    let target = locator(&window, value.as_str().unwrap());
+                    match action.as_str() {
+                        "press" => target.press().map_err(|error| error.to_string())?,
+                        "focus" => target.focus().map_err(|error| error.to_string())?,
+                        "toggle" => target.toggle().map_err(|error| error.to_string())?,
+                        "select" => target.select().map_err(|error| error.to_string())?,
+                        "scroll_into_view" => target
+                            .scroll_into_view()
+                            .map_err(|error| error.to_string())?,
+                        "expect_visible" => {
+                            target
+                                .wait_visible(Duration::from_secs(10))
+                                .map_err(|error| error.to_string())?;
+                        }
+                        "expect_hidden" => target
+                            .wait_hidden(Duration::from_secs(10))
+                            .map_err(|error| error.to_string())?,
+                        "expect_enabled" => {
+                            target
+                                .wait_enabled(Duration::from_secs(10))
+                                .map_err(|error| error.to_string())?;
+                        }
+                        "expect_disabled" => {
+                            target
+                                .wait_disabled(Duration::from_secs(10))
+                                .map_err(|error| error.to_string())?;
+                        }
+                        "expect_focused" => {
+                            target
+                                .wait_focused(Duration::from_secs(10))
+                                .map_err(|error| error.to_string())?;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                "fill" | "expect_value" => {
+                    let window = selected.accessible()?;
+                    let target = locator(&window, value["selector"].as_str().unwrap());
+                    let expected = value["value"].as_str().unwrap();
+                    if action == "fill" {
+                        target
+                            .set_value(expected)
+                            .map_err(|error| error.to_string())?;
+                    } else {
+                        target
+                            .wait_until(
+                                |element| {
+                                    element.and_then(|item| item.value.as_deref()) == Some(expected)
+                                },
+                                Duration::from_secs(10),
+                            )
+                            .map_err(|error| error.to_string())?;
+                    }
+                }
+                "scroll" => {
+                    let bounds = if let Ok(window) = selected.accessible() {
+                        window.bounds.ok_or("Selected window has no accessibility bounds")?
+                    } else {
+                        let window = selected.wait_native()?;
+                        Rect { x: window.x, y: window.y, width: window.width, height: window.height }
+                    };
+                    let x = value["x"].as_u64().unwrap() as u32;
+                    let y = value["y"].as_u64().unwrap() as u32;
+                    if x >= bounds.width || y >= bounds.height { return Err("Scroll is outside the selected window".into()); }
+                    if !window_capture::is_wayland_session() { activate(&selected)?; }
+                    let screen_x = bounds.x.checked_add(x as i32).ok_or("Scroll x coordinate exceeds screen bounds")?;
+                    let screen_y = bounds.y.checked_add(y as i32).ok_or("Scroll y coordinate exceeds screen bounds")?;
+                    let dx = value["dx"].as_i64().unwrap().clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+                    let dy = value["dy"].as_i64().unwrap().clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+                    xa11y::input_sim().map_err(|error| error.to_string())?.mouse()
+                        .scroll(Point::new(screen_x, screen_y), xa11y::ScrollDelta::new(dx, dy))
+                        .map_err(|error| error.to_string())?;
+                }
+                "click" => {
+                    let bounds = if let Ok(window) = selected.accessible() {
+                        window
+                            .bounds
+                            .ok_or("Selected window has no accessibility bounds")?
+                    } else {
+                        let window = selected.wait_native()?;
+                        Rect {
+                            x: window.x,
+                            y: window.y,
+                            width: window.width,
+                            height: window.height,
+                        }
+                    };
+                    let x = value["x"].as_u64().unwrap() as u32;
+                    let y = value["y"].as_u64().unwrap() as u32;
+                    if x >= bounds.width || y >= bounds.height {
+                        return Err("Click is outside the selected window".into());
+                    }
+                    if !window_capture::is_wayland_session() {
+                        activate(&selected)?;
+                    }
+                    let screen_x = bounds
+                        .x
+                        .checked_add(x as i32)
+                        .ok_or("Click x coordinate exceeds screen bounds")?;
+                    let screen_y = bounds
+                        .y
+                        .checked_add(y as i32)
+                        .ok_or("Click y coordinate exceeds screen bounds")?;
+                    xa11y::input_sim()
+                        .map_err(|error| error.to_string())?
+                        .mouse()
+                        .click(Point::new(screen_x, screen_y))
+                        .map_err(|error| error.to_string())?;
+                }
+                "text" | "key" => {
+                    if action == "text" && value.is_object() {
+                        let window = selected.accessible()?;
+                        let target = locator(&window, value["selector"].as_str().unwrap());
+                        target.focus().map_err(|error| error.to_string())?;
+                        target
+                            .type_text(value["value"].as_str().unwrap())
+                            .map_err(|error| error.to_string())?;
+                        return Ok(());
+                    }
+                    if action == "key" && value.is_object() {
+                        if !window_capture::is_wayland_session() {
+                            activate(&selected)?;
+                        }
+                        let window = selected.accessible()?;
+                        let target = locator(&window, value["selector"].as_str().unwrap());
+                        target.focus().map_err(|error| error.to_string())?;
+                        target
+                            .wait_focused(Duration::from_secs(10))
+                            .map_err(|error| error.to_string())?;
+                    } else {
+                        activate_for_input(&selected)?;
+                    }
+                    let input = xa11y::input_sim().map_err(|error| error.to_string())?;
+                    if action == "text" {
+                        input
+                            .keyboard()
+                            .type_text(value.as_str().unwrap())
+                            .map_err(|error| error.to_string())?;
+                    } else {
+                        let keys =
+                            parse_keys(value.as_str().or_else(|| value["keys"].as_str()).unwrap())?;
+                        input
+                            .keyboard()
+                            .chord(keys.last().unwrap().clone(), &keys[..keys.len() - 1])
+                            .map_err(|error| error.to_string())?;
+                    }
+                }
+                "wait_ms" => thread::sleep(Duration::from_millis(value.as_u64().unwrap())),
+                "screenshot" => {
+                    let task_id = value["task"].as_str().unwrap();
+                    let inset = value.get("inset").and_then(Value::as_u64).unwrap_or(0) as u32;
+                    capture(
+                        &selected,
+                        value.get("selector").and_then(Value::as_str),
+                        inset,
+                        &captured_dir.join(format!("{task_id}.png")),
+                    )?;
+                    captured.push(task_id.to_string());
+                }
+                _ => unreachable!(),
+            }
+            Ok(())
+        })();
+        result.map_err(|error| {
+            format!(
+                "Desktop scenario step {} ({action}) failed: {error}",
+                index + 1
+            )
+        })?;
+    }
+    Ok(RunResult {
+        captured,
+        steps: steps.len(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn validates_desktop_scenario_before_input() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("index.md"),
+            "<!-- ai:task id=shot kind=screenshot\nCapture the window\n-->\n",
+        )
+        .unwrap();
+        assert!(validate(&[serde_json::json!({"click":{"x":10,"y":20}})], dir.path()).is_ok());
+        assert!(validate(
+            &[serde_json::json!({"press":"button[name='Save']"})],
+            dir.path()
+        )
+        .is_ok());
+        assert!(validate(
+            &[serde_json::json!({"fill":{"selector":"text_field[name='Name']","value":""}})],
+            dir.path()
+        )
+        .is_ok());
+        assert!(validate(
+            &[serde_json::json!({"text":{"selector":"text_field[name='Name']","value":"Ada"}})],
+            dir.path()
+        )
+        .is_ok());
+        assert!(validate(
+            &[serde_json::json!({"key":{"selector":"text_field[name='Name']","keys":"Ctrl+A"}})],
+            dir.path()
+        )
+        .is_ok());
+        assert!(validate(
+            &[serde_json::json!({"expect_value":{"selector":"text_field[name='Name']","value":"Ada"}})],
+            dir.path()
+        ).is_ok());
+        assert!(validate(
+            &[serde_json::json!({"expect_hidden":"button[name='Close']"})],
+            dir.path()
+        )
+        .is_ok());
+        assert!(validate(
+            &[serde_json::json!({"press":"button[name='Save'"})],
+            dir.path()
+        )
+        .is_err());
+        assert!(validate(
+            &[serde_json::json!({"key":{"selector":"button[name='Save']","keys":"Ctrl+NoSuchKey"}})],
+            dir.path()
+        ).is_err());
+        assert!(validate(
+            &[serde_json::json!({"screenshot":{"task":"shot","selector":"button[name='Save']"}})],
+            dir.path()
+        )
+        .is_ok());
+        assert!(validate(
+            &[serde_json::json!({"screenshot":{"task":"shot","selector":"button[name='Save'"}})],
+            dir.path()
+        )
+        .is_err());
+        assert!(validate(&[serde_json::json!({"click":{"x":-1,"y":20}})], dir.path()).is_err());
+        assert!(validate(&[serde_json::json!({"key":"Ctrl+NoSuchKey"})], dir.path()).is_err());
+    }
+
+    #[test]
+    fn inset_checks_capture_bounds() {
+        let rect = Rect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+        };
+        assert_eq!(
+            inset_rect(rect, 5).unwrap(),
+            Rect {
+                x: 15,
+                y: 25,
+                width: 20,
+                height: 30
+            }
+        );
+        assert!(inset_rect(rect, 15).is_err());
+    }
+}

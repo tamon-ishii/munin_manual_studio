@@ -1,0 +1,29 @@
+[package]
+name = "manual-core"
+version = "1.4.0"
+edition = "2021"
+
+[dependencies]
+moduleloom-analysis = { path = "../analysis-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2.5"
+toml = "0.8"
+tempfile = "3.10"
+regex = "1.10"
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+base64 = "0.22"
+markits = { path = "../markits" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+xa11y = { version = "0.15.1", default-features = false }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11-dl = "2.21"
+ashpd = { version = "0.13.13", default-features = false, features = ["screenshot", "tokio"] }
+tokio = { version = "1.51", features = ["rt", "time"] }
+url = "2.5"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+xcap = "=0.4.1"

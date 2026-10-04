@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Manual Studio",
+  "version": "0.1.0",
+  "identifier": "com.moduleloom.manualstudio",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5174",
+    "beforeDevCommand": "npm run manual:dev",
+    "beforeBuildCommand": "npm run manual:build"
+  },
+  "app": {
+    "windows": [{ "label": "main", "title": "Manual Studio", "width": 1440, "height": 940, "minWidth": 950, "minHeight": 640 }],
+    "security": { "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self' about:" }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Markdown editing, repeatable screenshots, and manual publishing",
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"]
+  }
+}
