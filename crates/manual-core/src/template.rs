@@ -99,7 +99,13 @@ fn init_template_inner(
     };
     let is_offline_or_test =
         response.is_none() && (cfg!(test) || std::env::var("MODULELOOM_OFFLINE_TEMPLATE").is_ok());
-    if !is_offline_or_test && response.is_none() && super::agent::which_binary(&agent).is_none() {
+    let requires_cli =
+        existing_cfg.connection_type != "local_llm" && existing_cfg.connection_type != "api";
+    if requires_cli
+        && !is_offline_or_test
+        && response.is_none()
+        && super::agent::which_binary(&agent).is_none()
+    {
         return Err(format!("AI CLI is unavailable: {agent}。インストールされているエージェントを選択するか、PATHを確認してください。"));
     }
 
@@ -215,6 +221,9 @@ fn init_template_inner(
         format: "mkdocs".to_string(),
         agent: agent.clone(),
         model: model.clone(),
+        connection_type: existing_cfg.connection_type.clone(),
+        endpoint_url: existing_cfg.endpoint_url.clone(),
+        assets: existing_cfg.assets.clone(),
         mkdocs: MkDocsConfig {
             site_name,
             theme: "material".to_string(),

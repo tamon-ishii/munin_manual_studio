@@ -157,6 +157,10 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
     let mut y_opt: Option<&str> = None;
     let mut width_opt: Option<&str> = None;
     let mut height_opt: Option<&str> = None;
+    let mut connection_type_opt: Option<&str> = None;
+    let mut endpoint_url_opt: Option<&str> = None;
+    let mut api_key_opt: Option<&str> = None;
+    let mut assets_opt: Option<&str> = None;
 
     for (key, value) in options {
         match *key {
@@ -185,6 +189,9 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
             "--brief" => brief_opt = Some(*value),
             "--agent" => agent_opt = Some(*value),
             "--model" => model_opt = Some(*value),
+            "--connection-type" => connection_type_opt = Some(*value),
+            "--endpoint-url" => endpoint_url_opt = Some(*value),
+            "--api-key" => api_key_opt = Some(*value),
             "--id" => id_opt = Some(*value),
             "--page" => page_opt = Some(*value),
             "--asset" => asset_opt = Some(*value),
@@ -207,8 +214,13 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
             "--inset" => inset_opt = Some(*value),
             "--path" => path_opt = Some(*value),
             "--data" => data_opt = Some(*value),
+            "--assets" => assets_opt = Some(*value),
             _ => return Err(format!("Unsupported manual option: {key}")),
         }
+    }
+
+    if let Some(key) = api_key_opt {
+        std::env::set_var("MUNIN_AI_API_KEY", key);
     }
 
     let cfg = read_config(root);
@@ -372,6 +384,9 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
             });
+            let connection_type = connection_type_opt.or(Some(&cfg.connection_type));
+            let endpoint_url = endpoint_url_opt.or(Some(&cfg.endpoint_url));
+            let assets = assets_opt.or(Some(&cfg.assets));
             save_settings(
                 root,
                 docs,
@@ -382,6 +397,9 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
                 doc_format,
                 mkdocs_raw,
                 targets_vec.as_deref(),
+                connection_type,
+                endpoint_url,
+                assets,
             )?;
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
@@ -913,6 +931,9 @@ mod tests {
             "mkdocs",
             r#"{"site_name": "Test Site"}"#,
             Some(&["docs".to_string(), "README.md".to_string()]),
+            Some("local_llm"),
+            Some("http://localhost:11434/v1"),
+            Some("docs/assets"),
         )
         .unwrap();
 
@@ -924,8 +945,40 @@ mod tests {
         assert_eq!(cfg.output, "manual");
         assert_eq!(cfg.agent, "codex");
         assert_eq!(cfg.model, "gpt-4o");
+        assert_eq!(cfg.connection_type, "local_llm");
+        assert_eq!(cfg.endpoint_url, "http://localhost:11434/v1");
+        assert_eq!(cfg.assets, "docs/assets");
         assert_eq!(cfg.mkdocs.site_name, "Test Site");
         assert_eq!(cfg.targets, vec!["docs", "README.md"]);
+    }
+
+    #[test]
+    fn test_run_save_and_read_with_connection_settings() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::create_dir_all(root.join("manual")).unwrap();
+
+        let options = [
+            ("--connection-type", "api"),
+            ("--endpoint-url", "https://api.openai.com/v1"),
+            ("--model", "gpt-4o-mini"),
+            ("--api-key", "test-secret-key"),
+            ("--assets", "custom_assets"),
+        ];
+        let result = run(root, "save", &options);
+        assert!(result.is_ok());
+
+        let cfg = read_config(root);
+        assert_eq!(cfg.connection_type, "api");
+        assert_eq!(cfg.endpoint_url, "https://api.openai.com/v1");
+        assert_eq!(cfg.model, "gpt-4o-mini");
+        assert_eq!(cfg.assets, "custom_assets");
+        assert_eq!(std::env::var("MUNIN_AI_API_KEY").unwrap(), "test-secret-key");
+
+        // Verify api_key is NOT written to manual_setting.json
+        let raw_setting = fs::read_to_string(root.join("manual_setting.json")).unwrap();
+        assert!(!raw_setting.contains("test-secret-key"));
     }
 
     #[test]
@@ -959,6 +1012,9 @@ mod tests {
             "mkdocs",
             "",
             Some(&["docs".to_string(), "README.md".to_string()]),
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -1009,6 +1065,9 @@ mod tests {
             "mkdocs",
             "",
             Some(&["docs".to_string()]),
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -1045,6 +1104,9 @@ mod tests {
             "mkdocs",
             "",
             Some(&["docs".to_string()]),
+            None,
+            None,
+            None,
         )
         .unwrap();
 

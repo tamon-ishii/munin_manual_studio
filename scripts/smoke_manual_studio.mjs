@@ -490,7 +490,7 @@ try {
   assert.equal(toolbarFile.subarray(1, 4).toString(), 'PNG');
   await page.frameLocator('#markdown-preview').locator('img[alt="Toolbar image"]').waitFor();
 
-  // Test clipboard image paste with custom destination
+  // Test clipboard image paste with auto-naming and direct insertion (no dialog)
   await page.locator('#markdown-editor').evaluate(node => {
     const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const binary = atob(pngBase64);
@@ -502,16 +502,15 @@ try {
     const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
     node.dispatchEvent(evt);
   });
-  await page.locator('#image-save-dialog').waitFor({ state: 'visible' });
-  await page.locator('#image-save-filename').fill('pasted-guide-image.png');
-  await page.locator('#image-save-alt').fill('Pasted guide screenshot');
-  await page.locator('#confirm-image-save').click();
   await idle();
   assert.equal(await page.locator('#image-save-dialog').isVisible(), false);
-  assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Pasted guide screenshot\]\(assets\/pasted-guide-image\.png\)/);
-  const pastedFile = await readFile(path.join(project, 'docs/assets/pasted-guide-image.png'));
+  const editorVal = await page.locator('#markdown-editor').inputValue();
+  const pastedMatch = editorVal.match(/!\[(image-\d{8}-\d{6}[^\]]*)\]\((assets\/(image-\d{8}-\d{6}[^)]*\.png))\)/);
+  assert.ok(pastedMatch, `pasted image markdown must match auto-generated pattern: ${editorVal}`);
+  const pastedRelPath = pastedMatch[2];
+  const pastedFile = await readFile(path.join(project, 'docs', pastedRelPath));
   assert.equal(pastedFile.subarray(1, 4).toString(), 'PNG');
-  await page.frameLocator('#markdown-preview').locator('img[alt="Pasted guide screenshot"]').waitFor();
+  await page.frameLocator('#markdown-preview').locator(`img[alt="${pastedMatch[1]}"]`).waitFor();
 
   // Test image drag & drop
   await page.locator('.editor-column').evaluate(node => {

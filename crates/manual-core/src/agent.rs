@@ -243,6 +243,108 @@ fn run_codex(
     serde_json::from_str(&answer_content).map_err(|error| error.to_string())
 }
 
+pub fn http_agent_json(
+    root: &Path,
+    prompt: &str,
+    schema: &Value,
+    endpoint_url: &str,
+    model: &str,
+    api_key: Option<&str>,
+) -> Result<Value, String> {
+    let base_url = if endpoint_url.trim().is_empty() {
+        "http://localhost:11434/v1"
+    } else {
+        endpoint_url.trim().trim_end_matches('/')
+    };
+    let url = if base_url.ends_with("/chat/completions") {
+        base_url.to_string()
+    } else {
+        format!("{base_url}/chat/completions")
+    };
+
+    let model_name = if model.trim().is_empty() {
+        "default"
+    } else {
+        model.trim()
+    };
+
+    let schema_str = serde_json::to_string(schema).map_err(|e| e.to_string())?;
+    let system_prompt = "You are an AI documentation assistant. You MUST respond with a valid, parseable JSON object matching the requested schema. Do NOT include markdown code blocks, backticks, or conversational text.";
+    let user_prompt = format!("{prompt}\n\nRespond with a valid JSON object matching this schema:\n{schema_str}");
+
+    let body = serde_json::json!({
+        "model": model_name,
+        "messages": [
+            { "role": "system", "content": system_prompt },
+            { "role": "user", "content": user_prompt }
+        ],
+        "response_format": { "type": "json_object" },
+        "temperature": 0.2
+    });
+
+    log_progress(root, &format!("AI ({url}) へリクエストを送信しています..."));
+
+    let mut request = ureq::post(&url)
+        .timeout(Duration::from_secs(120))
+        .set("Content-Type", "application/json");
+
+    let effective_key = api_key
+        .map(|k| k.to_string())
+        .or_else(|| env::var("MUNIN_AI_API_KEY").ok())
+        .or_else(|| env::var("OPENAI_API_KEY").ok());
+
+    if let Some(key) = effective_key {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            request = request.set("Authorization", &format!("Bearer {trimmed}"));
+        }
+    }
+
+    let response = request.send_json(body).map_err(|err| match err {
+        ureq::Error::Status(code, resp) => {
+            let body_text = resp.into_string().unwrap_or_default();
+            format!("AI API returned HTTP {code}: {body_text}")
+        }
+        ureq::Error::Transport(transport) => {
+            format!("AI API connection failed to {url}: {transport}")
+        }
+    })?;
+
+    log_progress(root, "AIからの応答を受信しました。解析中...");
+
+    let resp_json: Value = response
+        .into_json()
+        .map_err(|e| format!("Failed to parse API response as JSON: {e}"))?;
+
+    let content = resp_json
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|msg| msg.get("content"))
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| format!("Invalid response format from AI API: {resp_json}"))?;
+
+    let clean_json = content.trim();
+    let clean_json = if clean_json.starts_with("```") {
+        let lines: Vec<&str> = clean_json.lines().collect();
+        if lines.len() >= 2
+            && lines.first().unwrap().starts_with("```")
+            && lines.last().unwrap().starts_with("```")
+        {
+            lines[1..lines.len() - 1].join("\n")
+        } else {
+            clean_json.to_string()
+        }
+    } else {
+        clean_json.to_string()
+    };
+
+    serde_json::from_str(&clean_json).map_err(|e| {
+        format!("Failed to parse model content as JSON schema: {e}\nRaw output: {content}")
+    })
+}
+
 pub fn agent_json(
     root: &Path,
     prompt: &str,
@@ -250,6 +352,23 @@ pub fn agent_json(
     agent: &str,
     model: &str,
 ) -> Result<Value, String> {
+    let config = crate::config::read_config(root);
+    if config.connection_type == "local_llm" || config.connection_type == "api" {
+        let effective_model = if !model.is_empty() {
+            model
+        } else {
+            &config.model
+        };
+        return http_agent_json(
+            root,
+            prompt,
+            schema,
+            &config.endpoint_url,
+            effective_model,
+            None,
+        );
+    }
+
     let tmp = tempdir().map_err(|e| e.to_string())?;
     let schema_path = tmp.path().join("schema.json");
     let answer_path = tmp.path().join("answer.json");

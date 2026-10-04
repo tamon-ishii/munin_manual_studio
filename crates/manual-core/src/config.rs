@@ -28,6 +28,14 @@ pub fn default_targets() -> Vec<String> {
     vec!["docs".to_string(), "README.md".to_string()]
 }
 
+pub fn default_connection_type() -> String {
+    "cli".to_string()
+}
+
+pub fn default_assets() -> String {
+    "docs/assets".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManualConfig {
     pub docs: String,
@@ -37,6 +45,12 @@ pub struct ManualConfig {
     pub format: String,
     pub agent: String,
     pub model: String,
+    #[serde(default = "default_connection_type")]
+    pub connection_type: String,
+    #[serde(default)]
+    pub endpoint_url: String,
+    #[serde(default = "default_assets")]
+    pub assets: String,
     pub mkdocs: MkDocsConfig,
 }
 
@@ -49,6 +63,9 @@ impl Default for ManualConfig {
             format: "mkdocs".to_string(),
             agent: "codex".to_string(),
             model: "".to_string(),
+            connection_type: default_connection_type(),
+            endpoint_url: String::new(),
+            assets: default_assets(),
             mkdocs: MkDocsConfig::default(),
         }
     }
@@ -127,6 +144,20 @@ pub fn read_config(root: &Path) -> ManualConfig {
         }
     }
 
+    if let Some(ct) = value.get("connection_type").and_then(|v| v.as_str()) {
+        if ["cli", "local_llm", "api"].contains(&ct) {
+            config.connection_type = ct.to_string();
+        }
+    }
+    if let Some(ep) = value.get("endpoint_url").and_then(|v| v.as_str()) {
+        config.endpoint_url = ep.to_string();
+    }
+    if let Some(a) = value.get("assets").and_then(|v| v.as_str()) {
+        config.assets = a.to_string();
+    } else {
+        config.assets = format!("{}/assets", config.docs);
+    }
+
     config
 }
 
@@ -188,6 +219,9 @@ pub fn save_settings(
     doc_format: &str,
     mkdocs_raw: &str,
     targets: Option<&[String]>,
+    connection_type: Option<&str>,
+    endpoint_url: Option<&str>,
+    assets: Option<&str>,
 ) -> Result<ManualConfig, String> {
     let docs_path = project_path(root, docs)?;
     let output_path = project_path(root, output)?;
@@ -208,7 +242,11 @@ pub fn save_settings(
     } else {
         brief.to_string()
     };
-    if !["codex", "claude", "gemini", "grok", "agy"].contains(&agent) {
+    let conn_type = connection_type.unwrap_or("cli");
+    if !["cli", "local_llm", "api"].contains(&conn_type) {
+        return Err(format!("Unsupported AI connection type: {conn_type}"));
+    }
+    if conn_type == "cli" && !["codex", "claude", "gemini", "grok", "agy"].contains(&agent) {
         return Err(format!("Unsupported AI agent: {agent}"));
     }
     if model.len() > 120 || model.contains('\n') {
@@ -267,6 +305,12 @@ pub fn save_settings(
         }
     };
 
+    let rel_assets = if let Some(a) = assets.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        a.to_string()
+    } else {
+        format!("{rel_docs}/assets")
+    };
+
     let config = ManualConfig {
         docs: rel_docs,
         output: rel_output.clone(),
@@ -274,6 +318,9 @@ pub fn save_settings(
         format: doc_format.to_string(),
         agent: agent.to_string(),
         model: model.trim().to_string(),
+        connection_type: conn_type.to_string(),
+        endpoint_url: endpoint_url.unwrap_or_default().trim().to_string(),
+        assets: rel_assets,
         mkdocs: mkdocs_cfg,
     };
 

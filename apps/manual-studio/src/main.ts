@@ -257,7 +257,12 @@ element("progress-open").addEventListener("click", () => {
   element("progress-open").hidden = true;
 });
 async function rpc(action: string, options: Record<string, unknown> = {}, root = projectRoot): Promise<string> {
-  return sendManualRequest({ root, action, options }, native
+  const mergedOptions = { ...options };
+  const apiKey = localStorage.getItem("manual-studio-ai-api-key");
+  if (apiKey && !mergedOptions.api_key) {
+    mergedOptions.api_key = apiKey;
+  }
+  return sendManualRequest({ root, action, options: mergedOptions }, native
     ? (request) => invoke<string>("manual_request", { request })
     : undefined);
 }
@@ -451,11 +456,35 @@ function renderDocumentTags(): void {
   const kinds: Record<string, string> = { screenshot: "画像", text: "文章", diagram: "図" };
   list.innerHTML = tags.size ? [...tags.values()].map((tag) => `<div class="document-tag-row${tag.approved ? " is-approved" : ""}" data-tag-start="${tag.start}" data-tag-end="${tag.end}"${tag.generatedStart === undefined ? "" : ` data-generated-start="${tag.generatedStart}" data-generated-end="${tag.generatedEnd}" data-generated-header-end="${tag.generatedHeaderEnd}" data-approved="${tag.approved}"`}><button type="button" class="document-tag-jump" data-tag-jump><code>${escape(tag.id)}</code><span>${kinds[tag.kind] || escape(tag.kind)}</span><span class="document-tag-status${tag.approved ? " is-approved" : ""}">${tag.status}</span></button>${tag.generatedStart === undefined ? "" : `<span class="document-tag-actions"><button type="button" data-tag-confirm${tag.approved ? ' class="button-approved is-approved"' : ""}${busy || !documentState ? " disabled" : ""}>${tag.approved ? "確定解除" : "確定"}</button><button type="button" data-tag-delete${busy || !documentState ? " disabled" : ""}>生成結果を削除</button></span>`}</div>`).join("") : '<span class="muted">この文書にAIタグはありません。</span>';
 }
+function updateAiSettingsVisibility(): void {
+  const connectionType = element<HTMLSelectElement>("ai-connection-type").value;
+  const agentLabel = element<HTMLElement>("ai-agent-label");
+  const endpointLabel = element<HTMLElement>("ai-endpoint-url-label");
+  const apiKeyLabel = element<HTMLElement>("ai-api-key-label");
+  const endpointInput = input("ai-endpoint-url");
+
+  if (connectionType === "cli") {
+    agentLabel.style.display = "";
+    endpointLabel.style.display = "none";
+    apiKeyLabel.style.display = "none";
+  } else if (connectionType === "local_llm") {
+    agentLabel.style.display = "none";
+    endpointLabel.style.display = "";
+    apiKeyLabel.style.display = "";
+    endpointInput.placeholder = "http://localhost:11434/v1";
+  } else {
+    agentLabel.style.display = "none";
+    endpointLabel.style.display = "";
+    apiKeyLabel.style.display = "";
+    endpointInput.placeholder = "https://api.openai.com/v1";
+  }
+}
 function renderSettings(): void {
   if (!workspace) return;
   input("docs-path").value = workspace.config.docs;
   input("output-path").value = workspace.config.output;
   input("site-name").value = workspace.config.mkdocs.site_name;
+  input("assets-path").value = workspace.config.assets || `${workspace.config.docs || "docs"}/assets`;
   input("ai-model").value = workspace.config.model;
   element<HTMLTextAreaElement>("manual-brief").value = workspace.brief;
   element("ai-agent").innerHTML = workspace.agents.map((agent) => `<option value="${escape(agent.id)}"${agent.available ? "" : " disabled"}>${escape(agent.label)}${agent.available ? "" : "（CLI未検出）"}</option>`).join("");
@@ -463,21 +492,64 @@ function renderSettings(): void {
   const preferred = workspace.has_config && configuredAvailable ? workspace.config.agent : workspace.agents.find((agent) => agent.available)?.id || workspace.config.agent;
   element<HTMLSelectElement>("ai-agent").value = preferred;
   if (preferred !== workspace.config.agent) input("ai-model").value = "";
+
+  const connectionType = workspace.config.connection_type || "cli";
+  element<HTMLSelectElement>("ai-connection-type").value = connectionType;
+  input("ai-endpoint-url").value = workspace.config.endpoint_url || "";
+  input("ai-api-key").value = localStorage.getItem("manual-studio-ai-api-key") || "";
+  updateAiSettingsVisibility();
 }
 function settingsOptions(): Record<string, unknown> {
-  return { docs: input("docs-path").value.trim(), output: input("output-path").value.trim(), agent: element<HTMLSelectElement>("ai-agent").value,
-    model: input("ai-model").value.trim(), brief: element<HTMLTextAreaElement>("manual-brief").value,
-    mkdocs_settings: { ...workspace!.config.mkdocs, site_name: input("site-name").value.trim() } };
+  const apiKey = input("ai-api-key").value.trim();
+  if (apiKey) {
+    localStorage.setItem("manual-studio-ai-api-key", apiKey);
+  } else {
+    localStorage.removeItem("manual-studio-ai-api-key");
+  }
+  const docs = input("docs-path").value.trim();
+  const assets = input("assets-path").value.trim() || `${docs || "docs"}/assets`;
+  return {
+    docs,
+    output: input("output-path").value.trim(),
+    assets,
+    agent: element<HTMLSelectElement>("ai-agent").value,
+    model: input("ai-model").value.trim(),
+    connection_type: element<HTMLSelectElement>("ai-connection-type").value,
+    endpoint_url: input("ai-endpoint-url").value.trim(),
+    api_key: apiKey,
+    brief: element<HTMLTextAreaElement>("manual-brief").value,
+    mkdocs_settings: { ...workspace!.config.mkdocs, site_name: input("site-name").value.trim() },
+  };
 }
 async function ensureAiSettings(): Promise<void> {
   if (!workspace) throw new Error("先にプロジェクトを開いてください。");
+  const connectionType = element<HTMLSelectElement>("ai-connection-type").value;
   const agentId = element<HTMLSelectElement>("ai-agent").value;
-  const selected = workspace.agents.find((agent) => agent.id === agentId && agent.available);
-  if (!selected) {
-    chooseTab("publish");
-    throw new Error("利用できるAIのCLIがありません。CLIをインストールしてからAIエージェントを選んでください。");
+  const model = input("ai-model").value.trim();
+  const endpointUrl = input("ai-endpoint-url").value.trim();
+
+  if (connectionType === "cli") {
+    const selected = workspace.agents.find((agent) => agent.id === agentId && agent.available);
+    if (!selected) {
+      chooseTab("publish");
+      throw new Error("利用できるAIのCLIがありません。CLIをインストールするか、ローカルLLM/API接続を選んでください。");
+    }
+  } else if (connectionType === "api") {
+    if (!endpointUrl && !input("ai-endpoint-url").placeholder) {
+      chooseTab("publish");
+      throw new Error("API接続のエンドポイントURLを入力してください（例: https://api.openai.com/v1）。");
+    }
   }
-  if (!workspace.has_config || workspace.config.agent !== agentId || workspace.config.model !== input("ai-model").value.trim()) {
+
+  const currentConnectionType = workspace.config.connection_type || "cli";
+  const currentEndpointUrl = workspace.config.endpoint_url || "";
+  if (
+    !workspace.has_config ||
+    currentConnectionType !== connectionType ||
+    currentEndpointUrl !== endpointUrl ||
+    workspace.config.agent !== agentId ||
+    workspace.config.model !== model
+  ) {
     await rpc("save", settingsOptions());
     await refreshWorkspace();
     renderSettings();
@@ -1507,8 +1579,8 @@ function openImageSaveDialog(dataUrl: string, suggestedFilename?: string, defaul
   }
   pendingImageDataUrl = dataUrl;
   element<HTMLImageElement>("image-save-preview").src = dataUrl;
-  const docsDir = workspace?.config.docs || "docs";
-  input("image-save-folder").value = `${docsDir}/assets`;
+  const defaultAssets = workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`;
+  input("image-save-folder").value = defaultAssets;
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
@@ -1557,6 +1629,8 @@ element("image-save-form").addEventListener("submit", (event) => {
     status(`画像を ${fullAssetPath} に保存し、原稿に挿入しました。`);
   });
 });
+let lastPastedTimestamp = "";
+let pasteCounter = 0;
 editor.addEventListener("paste", (event: ClipboardEvent) => {
   if (!documentState) return;
   const items = event.clipboardData?.items;
@@ -1570,11 +1644,36 @@ editor.addEventListener("paste", (event: ClipboardEvent) => {
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === "string") {
+          const dataUrl = reader.result;
           const ext = item.type.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "") || "png";
           const now = new Date();
           const pad = (n: number) => String(n).padStart(2, "0");
           const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-          openImageSaveDialog(reader.result, `clipboard-${stamp}.${ext}`, "スクリーンショット");
+          let filename = `image-${stamp}.${ext}`;
+          if (stamp === lastPastedTimestamp) {
+            pasteCounter++;
+            filename = `image-${stamp}-${pasteCounter}.${ext}`;
+          } else {
+            lastPastedTimestamp = stamp;
+            pasteCounter = 0;
+          }
+          const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
+          const fullAssetPath = folder ? `${folder}/${filename}` : filename;
+          void work(async () => {
+            await rpc("save-asset", { path: fullAssetPath, data: dataUrl });
+            const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
+            const alt = filename.replace(/\.[^.]+$/, "");
+            const markdownCode = `![${alt}](${relPath})`;
+            const start = editor.selectionStart;
+            const end = editor.selectionEnd;
+            rememberCurrentSelection(start, end);
+            editor.setRangeText(markdownCode, start, end, "end");
+            dirty = true;
+            updateSaveState();
+            editor.dispatchEvent(new Event("input"));
+            editor.focus();
+            status(`画像を ${fullAssetPath} に保存し、貼り付けました。`);
+          });
         }
       };
       reader.readAsDataURL(file);
@@ -1680,6 +1779,7 @@ element("save-settings").addEventListener("click", () => { void work(async () =>
   await runAction("save", settingsOptions());
   renderSettings();
 }); });
+element("ai-connection-type").addEventListener("change", updateAiSettingsVisibility);
 themePicker.addEventListener("change", () => {
   if (!isThemeId(themePicker.value)) return;
   applyTheme(themePicker.value);

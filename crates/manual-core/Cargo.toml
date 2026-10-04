@@ -18,6 +18,7 @@ markits = { path = "../markits" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 xa11y = { version = "0.15.1", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+ureq = { version = "2.10", features = ["json"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2.21"
