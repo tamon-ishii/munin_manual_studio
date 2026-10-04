@@ -237,7 +237,7 @@ pub(crate) fn generate_task_body(
     let mut prompt = format!(
         "Answer this manual task in concise, professional Japanese Markdown. \
         Read {page_hint} as the primary context. Inspect only the source files needed to verify concrete claims; avoid repository-wide exploration unless the instruction requires it. \
-        Verify UI names from source. Return only the pure documentation content. Do not wrap your answer in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. \
+        Verify UI names from source. Return only the pure documentation content. Do not wrap your answer in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. Do not copy existing generated sections or other tasks' answers; return only this task's new body. \
         For concrete UI or source claims, add a compact HTML comment immediately after the claim in the form <!-- ai:fact {{\"claim\":\"...\",\"ui\":\"#actual-id\"}} --> or <!-- ai:fact {{\"claim\":\"...\",\"file\":\"relative/path\",\"contains\":\"actual source text\"}} -->. Use only evidence you verified; omit the comment when there is no evidence. \
         Do not include meta notes, disclaimers, notes about AI generation, or source attributions.\n\
         Task ID: {task_id}\nInstruction: {}",
@@ -288,8 +288,8 @@ pub(crate) fn generate_task_body(
         return Err("AI agent returned an empty answer".to_string());
     }
 
-    super::fact::verify_generated_body(root, body)?;
-    Ok(body.to_string())
+    let body = checked_generated_body(root, body)?;
+    Ok(body)
 }
 
 pub fn generate_page(root: &Path, page: &str, cli: &str) -> Result<serde_json::Value, String> {
@@ -344,7 +344,7 @@ pub(crate) fn generate_page_at(
         let mut prompt = format!(
             "Answer the following tasks for the same Markdown page in one pass, in concise professional Japanese Markdown. \
             Read {page} as the primary context. Inspect only source files needed to verify concrete claims; avoid repository-wide exploration unless a task requires it. \
-            Return one answer for every ID, with no extra IDs. Verify UI names from source. \
+            Return one answer for every ID, with no extra IDs. Do not copy existing generated sections or other tasks' answers. Verify UI names from source. \
             Do not wrap answers in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. \
             For concrete UI or source claims, add a compact HTML comment immediately after the claim in the form \
             <!-- ai:fact {{\"claim\":\"...\",\"file\":\"relative/path\",\"contains\":\"actual source text\"}} -->. \
@@ -402,8 +402,8 @@ pub(crate) fn generate_page_at(
             if body.is_empty() {
                 return Err(format!("AI returned an empty answer for task {}", task.id));
             }
-            super::fact::verify_generated_body(root, body)?;
-            checked.push((task, body.to_string()));
+            let body = checked_generated_body(root, body)?;
+            checked.push((task, body));
         }
         log_progress(
             root,
@@ -817,4 +817,45 @@ fn diagram_body(task: &super::task::Task, cli: &str, project: &Path) -> Result<S
     let body = format!("```mermaid\n{diagram}\n```");
 
     Ok(body)
+}
+
+fn checked_generated_body(root: &Path, body: &str) -> Result<String, String> {
+    let normalized = super::fact::normalize_generated_facts(body)?;
+    let cleaned = super::task::clean_generated_body(&normalized);
+    if cleaned.is_empty() {
+        return Err("AI agent returned an empty answer".into());
+    }
+    let fences = super::task::get_code_block_ranges(&cleaned);
+    let marker = regex::Regex::new(r"<!--\s*/?ai:(?:task|generated)\b").unwrap();
+    if marker
+        .find_iter(&cleaned)
+        .any(|found| !super::task::is_inside_ranges(&(found.start()..found.end()), &fences))
+    {
+        return Err("AI returned multiple task/generated sections. Return only the requested task's Markdown body; existing document content was preserved.".into());
+    }
+    super::fact::verify_generated_body(root, &cleaned)?;
+    Ok(cleaned)
+}
+
+#[cfg(test)]
+mod answer_regressions {
+    use super::*;
+    #[test]
+    fn a_single_wrapper_is_unwrapped_but_multiple_results_are_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        let single = "<!-- ai:generated id=guide kind=text -->\nNew guide\n<!-- /ai:generated -->";
+        assert_eq!(
+            checked_generated_body(root.path(), single).unwrap(),
+            "New guide"
+        );
+        let multiple = format!("{single}\n\n{single}");
+        assert!(checked_generated_body(root.path(), &multiple)
+            .unwrap_err()
+            .contains("multiple task/generated"));
+        let example = "Example:\n```html\n<!-- ai:generated id=sample -->\nExample content\n<!-- /ai:generated -->\n```";
+        assert_eq!(
+            checked_generated_body(root.path(), example).unwrap(),
+            example
+        );
+    }
 }

@@ -77,10 +77,19 @@ pub fn get_code_block_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
 }
 
 pub fn is_inside_ranges(range: &std::ops::Range<usize>, ranges: &[std::ops::Range<usize>]) -> bool {
-    ranges.iter().any(|r| {
-        (range.start >= r.start && range.end <= r.end)
-            || (range.start < r.end && range.end > r.start)
-    })
+    // Only the opening marker determines whether a tag is an example.
+    // A real generated section may itself contain fenced code.
+    ranges
+        .iter()
+        .any(|r| range.start >= r.start && range.start < r.end)
+}
+
+fn ignored_tag_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = get_code_block_ranges(content);
+    if let Ok(facts) = crate::fact::comment_ranges(content) {
+        ranges.extend(facts);
+    }
+    ranges
 }
 
 pub fn generate_auto_id(
@@ -165,7 +174,9 @@ fn validate_generated_markers(
             .is_some();
         if is_close {
             if open.take().is_none() {
-                return Err(format!("Unmatched ai:generated closing tag in page: {page_rel}"));
+                return Err(format!(
+                    "Unmatched ai:generated closing tag in page: {page_rel}"
+                ));
             }
         } else if open.replace(marker.start()).is_some() {
             return Err(format!("Nested ai:generated tags in page: {page_rel}"));
@@ -283,15 +294,21 @@ pub fn parse_page_tags(
     content: &str,
     existing_ids: &mut HashSet<String>,
 ) -> Result<Vec<PageTag>, String> {
-    let code_blocks = get_code_block_ranges(content);
+    let code_blocks = ignored_tag_ranges(content);
     let t_re = task_regex();
     let g_re = generated_regex();
 
     let id_re = Regex::new(r#"(?:^|\s)id=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
     let kind_re = Regex::new(r#"(?:^|\s)kind=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
-    let source_hash_re = Regex::new(r#"(?:^|\s)source-sha256=(?:"([a-f0-9]{64})"|'([a-f0-9]{64})'|([a-f0-9]{64}))"#).unwrap();
-    let prompt_re = Regex::new(r#"(?:^|\s)prompt-b64=(?:"([A-Za-z0-9+/=]+)"|'([A-Za-z0-9+/=]+)'|([A-Za-z0-9+/=]+))"#).unwrap();
-    let approved_re = Regex::new(r#"(?:^|\s)approved-at=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
+    let source_hash_re =
+        Regex::new(r#"(?:^|\s)source-sha256=(?:"([a-f0-9]{64})"|'([a-f0-9]{64})'|([a-f0-9]{64}))"#)
+            .unwrap();
+    let prompt_re = Regex::new(
+        r#"(?:^|\s)prompt-b64=(?:"([A-Za-z0-9+/=]+)"|'([A-Za-z0-9+/=]+)'|([A-Za-z0-9+/=]+))"#,
+    )
+    .unwrap();
+    let approved_re =
+        Regex::new(r#"(?:^|\s)approved-at=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
     let valid_id_re = Regex::new(r#"^[a-z][a-z0-9_-]*$"#).unwrap();
 
     struct RawTask {
@@ -333,7 +350,10 @@ pub fn parse_page_tags(
         page_rel,
         content,
         &code_blocks,
-        &raw_tasks.iter().map(|task| task.range.clone()).collect::<Vec<_>>(),
+        &raw_tasks
+            .iter()
+            .map(|task| task.range.clone())
+            .collect::<Vec<_>>(),
     )?;
 
     let mut raw_gens = Vec::new();
@@ -451,7 +471,9 @@ pub fn parse_page_tags(
             "text".to_string()
         };
         let approved = approved_re.is_match(&g.attrs);
-        let hash = extract_attr(&source_hash_re, &g.attrs).unwrap_or_default().to_string();
+        let hash = extract_attr(&source_hash_re, &g.attrs)
+            .unwrap_or_default()
+            .to_string();
         let prompt = if let Some(source_prompt) = paired_prompts.get(&gen_index) {
             source_prompt.clone()
         } else if let Some(encoded) = extract_attr(&prompt_re, &g.attrs) {
@@ -659,7 +681,7 @@ pub fn update_task_prompt(templates: &Path, task_id: &str, prompt: &str) -> Resu
         templates.parent().unwrap_or(templates).join(&task.page)
     };
     let content = fs::read_to_string(&page_path).map_err(|e| e.to_string())?;
-    let code_blocks = get_code_block_ranges(&content);
+    let code_blocks = ignored_tag_ranges(&content);
     let id_re = Regex::new(r#"(?:^|\s)id=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
     let mut matches = Vec::new();
     for cap in task_regex().captures_iter(&content) {
@@ -816,9 +838,10 @@ pub fn update_task_in_docs(
         return Ok(());
     }
 
-    let new_content = format!("{}\n\n{}\n", content.trim_end(), replacement);
-    fs::write(&page_path, new_content.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(())
+    Err(format!(
+        "AI task {task_id} is no longer present in {}; reload the document before generating",
+        task.page
+    ))
 }
 
 pub fn save_answer(generated: &Path, task: &Task, body: &str) -> Result<(), String> {
@@ -909,12 +932,16 @@ mod approval_regressions {
             let encoded = base64::engine::general_purpose::STANDARD.encode(prompt);
             let content = format!("<!-- ai:generated id=confirmed kind={kind} prompt-b64=\"{encoded}\" source-sha256=\"{}\" approved-at=\"2026-10-05T12:00:00.000Z\" -->\n確定済み本文\n<!-- /ai:generated -->", "0".repeat(64));
             let tags = parse_page_tags("index.md", &content, &mut HashSet::new()).unwrap();
-            let PageTag::Generated { task, .. } = &tags[0] else { panic!("generated tag expected") };
+            let PageTag::Generated { task, .. } = &tags[0] else {
+                panic!("generated tag expected")
+            };
             assert_eq!(task.prompt, prompt);
             assert_eq!(task.status, "approved");
             let unapproved = content.replace(" approved-at=\"2026-10-05T12:00:00.000Z\"", "");
             let tags = parse_page_tags("index.md", &unapproved, &mut HashSet::new()).unwrap();
-            let PageTag::Generated { task, .. } = &tags[0] else { panic!("generated tag expected") };
+            let PageTag::Generated { task, .. } = &tags[0] else {
+                panic!("generated tag expected")
+            };
             assert_eq!(task.status, "stale");
         }
     }
@@ -928,11 +955,51 @@ mod path_regressions {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("project");
         fs::create_dir_all(root.join("docs")).unwrap();
-        fs::write(root.join("Readme.md"), "<!-- ai:task id=readme-task kind=text\nDescribe\n-->\n").unwrap();
+        fs::write(
+            root.join("Readme.md"),
+            "<!-- ai:task id=readme-task kind=text\nDescribe\n-->\n",
+        )
+        .unwrap();
         let alias = temp.path().join("project-alias");
         std::os::unix::fs::symlink(&root, &alias).unwrap();
         let tasks = tasks_for_page(&alias, "Readme.md").unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].page, "Readme.md");
+    }
+}
+
+#[cfg(test)]
+mod replacement_regressions {
+    use super::*;
+    #[test]
+    fn repeated_generation_replaces_the_answer_and_keeps_manual_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let docs = temp.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        let page = docs.join("index.md");
+        let original = "# Manual intro\n\n<!-- ai:task id=guide kind=text\nExplain\n-->\n\nKeep this manual note.\n";
+        fs::write(&page, original).unwrap();
+        for number in 1..=3 {
+            let task = find_task(&docs, "guide").unwrap();
+            update_task_in_docs(
+                &docs,
+                &task,
+                &format!("Answer version {number}\n\n```sh\nmunin --help\n```"),
+                None,
+            )
+            .unwrap();
+            let saved = fs::read_to_string(&page).unwrap();
+            assert_eq!(saved.matches("<!-- ai:generated id=guide ").count(), 1);
+            assert_eq!(saved.matches("Answer version ").count(), 1);
+            assert!(saved.contains(&format!("Answer version {number}")));
+            assert!(saved.starts_with("# Manual intro"));
+            assert!(saved.contains("Keep this manual note."));
+            assert_eq!(saved.matches("<!-- ai:task id=guide ").count(), 1);
+        }
+        let mut stale_task = find_task(&docs, "guide").unwrap();
+        stale_task.id = "deleted-task".into();
+        let before = fs::read(&page).unwrap();
+        assert!(update_task_in_docs(&docs, &stale_task, "Unwanted duplicate", None).is_err());
+        assert_eq!(fs::read(&page).unwrap(), before);
     }
 }

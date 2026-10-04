@@ -49,13 +49,33 @@ try {
   const adopted = await rpc('editor-save', { page, json: { content: retry.content, revision: retry.before.revision } });
   assert.equal(await readFile(path.join(root, page), 'utf8'), retry.content);
   await rpc('editor-save', { page, json: { content: original, revision: adopted.revision } });
+  const evidence = '<button title="日本語 -->">Save</button>';
+  await writeFile(path.join(root, 'source.html'), evidence);
+  for (let version = 1; version <= 3; version++) {
+    const fact = JSON.stringify({ claim: '保存ボタン', file: 'source.html', contains: evidence });
+    answer = { answers: [{ id: 'guide', markdown: `Version ${version}\n\n\`\`\`sh\nmunin --help\n\`\`\`\n保存ボタン。<!-- ai:fact ${fact} -->` }] };
+    const review = await rpc('generate-review', { page });
+    assert.equal((review.content.match(/<!-- ai:generated id=guide /g) ?? []).length, 1);
+    assert.equal((review.content.match(/Version /g) ?? []).length, 1);
+    assert.match(review.content, /Hand edited introduction/);
+    assert.ok(review.content.includes(`Version ${version}`));
+    await rpc('editor-save', { page, json: { content: review.content, revision: review.before.revision } });
+  }
+  const stable = await readFile(path.join(root, page), 'utf8');
+  answer = { markdown: '<!-- ai:fact {"claim":"broken -->' };
+  await assert.rejects(rpc('generate-review', { page, id: 'guide' }), /Invalid generated ai:fact/);
+  assert.equal(await readFile(path.join(root, page), 'utf8'), stable);
+  const wrapped = '<!-- ai:generated id=guide kind=text -->\nDuplicate\n<!-- /ai:generated -->';
+  answer = { markdown: `${wrapped}\n\n${wrapped}` };
+  await assert.rejects(rpc('generate-review', { page, id: 'guide' }), /multiple task\/generated/);
+  assert.equal(await readFile(path.join(root, page), 'utf8'), stable);
   await writeFile(path.join(root, page), `${original}\nExternal edit\n`);
   await assert.rejects(rpc('editor-save', { page, json: { content: candidate.content, revision: candidate.before.revision } }), /原稿が更新/);
   assert.match(await readFile(path.join(root, page), 'utf8'), /External edit/);
   answer = { markdown: '' };
   await assert.rejects(rpc('generate-review', { page, id: 'guide' }), /empty answer/);
   assert.match(await readFile(path.join(root, page), 'utf8'), /External edit/);
-  console.log('Generation review checks passed: diff, staged generation, feedback, adoption, restore, conflict, and generation failure.');
+  console.log('Generation review checks passed: diff, staged generation, feedback, adoption, restore, repeated fenced results, fact metadata, conflict, and generation failure.');
 } finally {
   await new Promise(resolve => server.close(resolve));
   await rm(root, { recursive: true, force: true });
