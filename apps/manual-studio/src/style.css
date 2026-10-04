@@ -173,3 +173,44 @@ body.detached .app-layout{height:calc(100vh - 28px)}
 .document-tags-header>strong{white-space:nowrap}
 .document-tags-controls{justify-content:flex-start}
 .document-tags-pane[data-collapsed="true"] .document-tags-header{align-items:center}
+
+/* Highlight approved state and "確定解除" button as the confirmation mark */
+button[data-tag-confirm].is-approved,
+button[data-toggle-approved].is-approved,
+.button-approved {
+  background: var(--accent) !important;
+  color: var(--accent-text) !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+  box-shadow: 0 1px 4px var(--shadow-color);
+}
+button[data-tag-confirm].is-approved:hover,
+button[data-toggle-approved].is-approved:hover,
+.button-approved:hover {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+  color: var(--accent-text) !important;
+}
+button[data-tag-confirm].is-approved::before,
+button[data-toggle-approved].is-approved::before,
+.button-approved::before {
+  content: "✓ ";
+  font-weight: 700;
+}
+.document-tag-row.is-approved {
+  border-color: var(--accent);
+}
+.document-tag-status.is-approved {
+  color: var(--accent);
+  font-weight: 700;
+}
+.badge.is-approved,
+.badge-approved {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.card.is-approved,
+.card-approved {
+  border-color: var(--accent);
+}
