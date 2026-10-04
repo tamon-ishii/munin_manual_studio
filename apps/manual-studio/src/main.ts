@@ -1635,7 +1635,8 @@ let isPastingImage = false;
 let lastImagePasteTime = 0;
 
 async function saveAndInsertImage(dataUrl: string, defaultFileType = "image/png"): Promise<void> {
-  await work(async () => {
+  document.body.setAttribute("aria-busy", "true");
+  try {
     if (!documentState) {
       status("先にMarkdown原稿を開いてください。", true);
       return;
@@ -1674,7 +1675,11 @@ async function saveAndInsertImage(dataUrl: string, defaultFileType = "image/png"
     editor.dispatchEvent(new Event("input"));
     editor.focus();
     status(`画像を ${fullAssetPath} に保存し、貼り付けました。`);
-  });
+  } catch (error) {
+    status(String(error), true);
+  } finally {
+    document.body.setAttribute("aria-busy", "false");
+  }
 }
 
 function handleImagePaste(clipboardData: DataTransfer | null): boolean {
@@ -1711,11 +1716,17 @@ function handleImagePaste(clipboardData: DataTransfer | null): boolean {
 
   if (!targetFile) return false;
 
+  document.body.setAttribute("aria-busy", "true");
   const reader = new FileReader();
   reader.onload = () => {
     if (typeof reader.result === "string") {
       void saveAndInsertImage(reader.result, fileType || targetFile!.type);
+    } else {
+      document.body.setAttribute("aria-busy", "false");
     }
+  };
+  reader.onerror = () => {
+    document.body.setAttribute("aria-busy", "false");
   };
   reader.readAsDataURL(targetFile);
   return true;
@@ -1743,8 +1754,14 @@ async function readBrowserClipboardImage(): Promise<string | null> {
   return null;
 }
 
+interface PastedImageResult {
+  filePath: string;
+  filename: string;
+  alt: string;
+}
+
 async function tryNativeImagePaste(): Promise<boolean> {
-  if (isPastingImage || Date.now() - lastImagePasteTime < 1000) return false;
+  if (isPastingImage || Date.now() - lastImagePasteTime < 600) return false;
   if (!documentState) {
     status("先にMarkdown原稿を開いてください。", true);
     return false;
@@ -1752,16 +1769,34 @@ async function tryNativeImagePaste(): Promise<boolean> {
 
   isPastingImage = true;
   try {
-    let dataUrl: string | null = null;
     if (native) {
-      dataUrl = await invoke<string | null>("read_clipboard_image");
+      const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
+      const result = await invoke<PastedImageResult | null>("paste_clipboard_image", {
+        root: projectRoot,
+        page: documentState.page,
+        assetsFolder: folder,
+      });
+      if (!result) return false;
+      lastImagePasteTime = Date.now();
+      const relPath = computeRelativeMarkdownPath(documentState.page, result.filePath, workspace?.config.docs || "docs");
+      const markdownCode = `![${result.alt}](${relPath})`;
+      const start = editor.selectionStart;
+      const end = editor.selectionEnd;
+      rememberCurrentSelection(start, end);
+      editor.setRangeText(markdownCode, start, end, "end");
+      dirty = true;
+      updateSaveState();
+      editor.dispatchEvent(new Event("input"));
+      editor.focus();
+      status(`画像を ${result.filePath} に保存し、貼り付けました。`);
+      return true;
     } else {
-      dataUrl = await readBrowserClipboardImage();
+      const dataUrl = await readBrowserClipboardImage();
+      if (!dataUrl) return false;
+      lastImagePasteTime = Date.now();
+      await saveAndInsertImage(dataUrl);
+      return true;
     }
-    if (!dataUrl) return false;
-    lastImagePasteTime = Date.now();
-    await saveAndInsertImage(dataUrl);
-    return true;
   } catch (error) {
     console.error("Failed to read image from clipboard:", error);
     return false;

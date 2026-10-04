@@ -181,10 +181,6 @@ pub fn save_asset(root: &Path, target_path: &str, data: &str) -> Result<SavedAss
         .write_all(&bytes)
         .map_err(|error| error.to_string())?;
     temporary
-        .as_file()
-        .sync_all()
-        .map_err(|error| error.to_string())?;
-    temporary
         .persist(&abs_path)
         .map_err(|error| error.to_string())?;
 

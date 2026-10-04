@@ -502,6 +502,7 @@ try {
     const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
     node.dispatchEvent(evt);
   });
+  await page.waitForFunction(() => /!\[image-\d{8}-\d{6}/.test(document.querySelector('#markdown-editor').value));
   await idle();
   assert.equal(await page.locator('#image-save-dialog').isVisible(), false);
   const editorVal = await page.locator('#markdown-editor').inputValue();

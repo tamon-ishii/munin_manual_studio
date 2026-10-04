@@ -255,6 +255,139 @@ async fn choose_image() -> Result<Option<String>, String> {
     .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PastedImageResult {
+    file_path: String,
+    filename: String,
+    alt: String,
+}
+
+#[tauri::command]
+async fn paste_clipboard_image(
+    root: String,
+    _page: String,
+    assets_folder: String,
+) -> Result<Option<PastedImageResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+
+        let root_path = PathBuf::from(&root);
+        let folder = if assets_folder.trim().is_empty() {
+            "docs/assets".to_string()
+        } else {
+            assets_folder
+                .trim()
+                .trim_matches(|c| c == '/' || c == '\\')
+                .to_string()
+        };
+        let target_dir = root_path.join(&folder);
+
+        let now = chrono::Local::now();
+        let stamp = now.format("%Y%m%d-%H%M%S").to_string();
+
+        let find_filename = |ext: &str| -> (String, PathBuf) {
+            let mut name = format!("image-{stamp}.{ext}");
+            let mut path = target_dir.join(&name);
+            let mut counter = 1;
+            while path.exists() {
+                name = format!("image-{stamp}-{counter}.{ext}");
+                path = target_dir.join(&name);
+                counter += 1;
+            }
+            (name, path)
+        };
+
+        // 1. Direct fast PNG encoding from clipboard bitmap directly to file
+        if let Ok(img_data) = clipboard.get_image() {
+            if img_data.width > 0 && img_data.height > 0 && !img_data.bytes.is_empty() {
+                if let Err(e) = std::fs::create_dir_all(&target_dir) {
+                    return Err(format!("画像保存先フォルダーの作成に失敗しました: {e}"));
+                }
+                let (filename, dest_path) = find_filename("png");
+
+                let file = std::fs::File::create(&dest_path)
+                    .map_err(|e| format!("画像ファイルの作成に失敗しました: {e}"))?;
+                let buf_writer = std::io::BufWriter::new(file);
+
+                use image::ImageEncoder;
+                let encoder = image::codecs::png::PngEncoder::new_with_quality(
+                    buf_writer,
+                    image::codecs::png::CompressionType::Fast,
+                    image::codecs::png::FilterType::Sub,
+                );
+                encoder
+                    .write_image(
+                        &img_data.bytes,
+                        img_data.width as u32,
+                        img_data.height as u32,
+                        image::ExtendedColorType::Rgba8,
+                    )
+                    .map_err(|e| format!("PNG画像の保存に失敗しました: {e}"))?;
+
+                let full_asset_path = format!("{folder}/{filename}");
+                let alt = filename.trim_end_matches(".png").to_string();
+                return Ok(Some(PastedImageResult {
+                    file_path: full_asset_path,
+                    filename,
+                    alt,
+                }));
+            }
+        }
+
+        // 2. Direct copy of copied image file path or file:// URI (e.g. from file manager)
+        if let Ok(text) = clipboard.get_text() {
+            for raw_line in text.lines() {
+                let line = raw_line.trim();
+                let path_str = if let Some(stripped) = line.strip_prefix("file://") {
+                    stripped
+                } else if line.starts_with('/')
+                    || line.starts_with('\\')
+                    || (line.len() >= 3 && &line[1..3] == ":\\")
+                {
+                    line
+                } else {
+                    continue;
+                };
+                let src_path = std::path::Path::new(path_str);
+                if src_path.is_file() {
+                    let ext = src_path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if ["png", "jpg", "jpeg", "gif", "webp", "svg"].contains(&ext.as_str()) {
+                        if let Err(e) = std::fs::create_dir_all(&target_dir) {
+                            return Err(format!("画像保存先フォルダーの作成に失敗しました: {e}"));
+                        }
+                        let (filename, dest_path) = find_filename(&ext);
+                        if std::fs::copy(src_path, &dest_path).is_ok() {
+                            let full_asset_path = format!("{folder}/{filename}");
+                            let alt = filename
+                                .rsplit_once('.')
+                                .map(|(base, _)| base)
+                                .unwrap_or(&filename)
+                                .to_string();
+                            return Ok(Some(PastedImageResult {
+                                file_path: full_asset_path,
+                                filename,
+                                alt,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 async fn read_clipboard_image() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -266,21 +399,26 @@ async fn read_clipboard_image() -> Result<Option<String>, String> {
         // 1. Try reading bitmap image directly
         if let Ok(img_data) = clipboard.get_image() {
             if img_data.width > 0 && img_data.height > 0 && !img_data.bytes.is_empty() {
-                if let Some(img_buffer) = image::RgbaImage::from_raw(
-                    img_data.width as u32,
-                    img_data.height as u32,
-                    img_data.bytes.into_owned(),
-                ) {
-                    let mut png_bytes = std::io::Cursor::new(Vec::new());
-                    if img_buffer
-                        .write_to(&mut png_bytes, image::ImageFormat::Png)
-                        .is_ok()
-                    {
-                        use base64::Engine;
-                        let base64_str =
-                            base64::engine::general_purpose::STANDARD.encode(png_bytes.into_inner());
-                        return Ok(Some(format!("data:image/png;base64,{base64_str}")));
-                    }
+                let mut png_bytes = std::io::Cursor::new(Vec::new());
+                use image::ImageEncoder;
+                let encoder = image::codecs::png::PngEncoder::new_with_quality(
+                    &mut png_bytes,
+                    image::codecs::png::CompressionType::Fast,
+                    image::codecs::png::FilterType::Sub,
+                );
+                if encoder
+                    .write_image(
+                        &img_data.bytes,
+                        img_data.width as u32,
+                        img_data.height as u32,
+                        image::ExtendedColorType::Rgba8,
+                    )
+                    .is_ok()
+                {
+                    use base64::Engine;
+                    let base64_str =
+                        base64::engine::general_purpose::STANDARD.encode(png_bytes.into_inner());
+                    return Ok(Some(format!("data:image/png;base64,{base64_str}")));
                 }
             }
         }
@@ -545,6 +683,7 @@ fn main() {
             choose_project,
             choose_image,
             read_clipboard_image,
+            paste_clipboard_image,
             choose_application,
             start_operation_recording,
             operation_recording_running,
