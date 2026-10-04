@@ -1631,6 +1631,52 @@ element("image-save-form").addEventListener("submit", (event) => {
 });
 let lastPastedTimestamp = "";
 let pasteCounter = 0;
+let isPastingImage = false;
+let lastImagePasteTime = 0;
+
+async function saveAndInsertImage(dataUrl: string, defaultFileType = "image/png"): Promise<void> {
+  await work(async () => {
+    if (!documentState) {
+      status("先にMarkdown原稿を開いてください。", true);
+      return;
+    }
+    let fileType = defaultFileType;
+    if (dataUrl.startsWith("data:")) {
+      const mime = dataUrl.slice(5, dataUrl.indexOf(";"));
+      if (mime) fileType = mime;
+    }
+    const rawExt = fileType.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "") || "png";
+    const ext = rawExt.toLowerCase() === "jpeg" ? "jpg" : rawExt.toLowerCase();
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    let filename = `image-${stamp}.${ext}`;
+    if (stamp === lastPastedTimestamp) {
+      pasteCounter++;
+      filename = `image-${stamp}-${pasteCounter}.${ext}`;
+    } else {
+      lastPastedTimestamp = stamp;
+      pasteCounter = 0;
+    }
+    const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
+    const fullAssetPath = folder ? `${folder}/${filename}` : filename;
+
+    await rpc("save-asset", { path: fullAssetPath, data: dataUrl });
+    const relPath = computeRelativeMarkdownPath(documentState.page, fullAssetPath, workspace?.config.docs || "docs");
+    const alt = filename.replace(/\.[^.]+$/, "");
+    const markdownCode = `![${alt}](${relPath})`;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    rememberCurrentSelection(start, end);
+    editor.setRangeText(markdownCode, start, end, "end");
+    dirty = true;
+    updateSaveState();
+    editor.dispatchEvent(new Event("input"));
+    editor.focus();
+    status(`画像を ${fullAssetPath} に保存し、貼り付けました。`);
+  });
+}
+
 function handleImagePaste(clipboardData: DataTransfer | null): boolean {
   if (!documentState || !clipboardData) return false;
   const items = clipboardData.items;
@@ -1668,48 +1714,70 @@ function handleImagePaste(clipboardData: DataTransfer | null): boolean {
   const reader = new FileReader();
   reader.onload = () => {
     if (typeof reader.result === "string") {
-      const dataUrl = reader.result;
-      const rawExt = fileType.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "")
-        || targetFile!.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "")
-        || "png";
-      const ext = rawExt.toLowerCase() === "jpeg" ? "jpg" : rawExt.toLowerCase();
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-      let filename = `image-${stamp}.${ext}`;
-      if (stamp === lastPastedTimestamp) {
-        pasteCounter++;
-        filename = `image-${stamp}-${pasteCounter}.${ext}`;
-      } else {
-        lastPastedTimestamp = stamp;
-        pasteCounter = 0;
-      }
-      const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
-      const fullAssetPath = folder ? `${folder}/${filename}` : filename;
-      void work(async () => {
-        await rpc("save-asset", { path: fullAssetPath, data: dataUrl });
-        const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
-        const alt = filename.replace(/\.[^.]+$/, "");
-        const markdownCode = `![${alt}](${relPath})`;
-        const start = editor.selectionStart;
-        const end = editor.selectionEnd;
-        rememberCurrentSelection(start, end);
-        editor.setRangeText(markdownCode, start, end, "end");
-        dirty = true;
-        updateSaveState();
-        editor.dispatchEvent(new Event("input"));
-        editor.focus();
-        status(`画像を ${fullAssetPath} に保存し、貼り付けました。`);
-      });
+      void saveAndInsertImage(reader.result, fileType || targetFile!.type);
     }
   };
   reader.readAsDataURL(targetFile);
   return true;
 }
 
+async function readBrowserClipboardImage(): Promise<string | null> {
+  if (typeof navigator?.clipboard?.read !== "function") return null;
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      for (const type of item.types) {
+        if (type.startsWith("image/")) {
+          const blob = await item.getType(type);
+          return new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+    }
+  } catch {
+    // Permission denied or not supported in this browser context
+  }
+  return null;
+}
+
+async function tryNativeImagePaste(): Promise<boolean> {
+  if (isPastingImage || Date.now() - lastImagePasteTime < 1000) return false;
+  if (!documentState) {
+    status("先にMarkdown原稿を開いてください。", true);
+    return false;
+  }
+
+  isPastingImage = true;
+  try {
+    let dataUrl: string | null = null;
+    if (native) {
+      dataUrl = await invoke<string | null>("read_clipboard_image");
+    } else {
+      dataUrl = await readBrowserClipboardImage();
+    }
+    if (!dataUrl) return false;
+    lastImagePasteTime = Date.now();
+    await saveAndInsertImage(dataUrl);
+    return true;
+  } catch (error) {
+    console.error("Failed to read image from clipboard:", error);
+    return false;
+  } finally {
+    isPastingImage = false;
+  }
+}
+
 editor.addEventListener("paste", (event: ClipboardEvent) => {
   if (handleImagePaste(event.clipboardData)) {
     event.preventDefault();
+    lastImagePasteTime = Date.now();
+    return;
+  }
+  if (native) {
+    void tryNativeImagePaste();
   }
 });
 
@@ -1719,9 +1787,36 @@ document.addEventListener("paste", (event: ClipboardEvent) => {
   if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
     return;
   }
-  if (!element("panel-editor").hidden && documentState) {
+  if (!element("panel-editor").hidden) {
+    if (!documentState) {
+      status("先にMarkdown原稿を開いてください。", true);
+      return;
+    }
     if (handleImagePaste(event.clipboardData)) {
       event.preventDefault();
+      lastImagePasteTime = Date.now();
+      return;
+    }
+    if (native) {
+      void tryNativeImagePaste();
+    }
+  }
+});
+
+window.addEventListener("keydown", (event: KeyboardEvent) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+    const active = document.activeElement;
+    if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
+      return;
+    }
+    if (!element("panel-editor").hidden) {
+      if (!documentState) {
+        status("先にMarkdown原稿を開いてください。", true);
+        return;
+      }
+      if (native) {
+        void tryNativeImagePaste();
+      }
     }
   }
 });

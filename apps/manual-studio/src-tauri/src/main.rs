@@ -256,6 +256,82 @@ async fn choose_image() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+async fn read_clipboard_image() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+
+        // 1. Try reading bitmap image directly
+        if let Ok(img_data) = clipboard.get_image() {
+            if img_data.width > 0 && img_data.height > 0 && !img_data.bytes.is_empty() {
+                if let Some(img_buffer) = image::RgbaImage::from_raw(
+                    img_data.width as u32,
+                    img_data.height as u32,
+                    img_data.bytes.into_owned(),
+                ) {
+                    let mut png_bytes = std::io::Cursor::new(Vec::new());
+                    if img_buffer
+                        .write_to(&mut png_bytes, image::ImageFormat::Png)
+                        .is_ok()
+                    {
+                        use base64::Engine;
+                        let base64_str =
+                            base64::engine::general_purpose::STANDARD.encode(png_bytes.into_inner());
+                        return Ok(Some(format!("data:image/png;base64,{base64_str}")));
+                    }
+                }
+            }
+        }
+
+        // 2. Check if clipboard text contains an image file path or file:// URI (e.g. copied from file manager)
+        if let Ok(text) = clipboard.get_text() {
+            for raw_line in text.lines() {
+                let line = raw_line.trim();
+                let path_str = if let Some(stripped) = line.strip_prefix("file://") {
+                    stripped
+                } else if line.starts_with('/')
+                    || line.starts_with('\\')
+                    || (line.len() >= 3 && &line[1..3] == ":\\")
+                {
+                    line
+                } else {
+                    continue;
+                };
+                let path = std::path::Path::new(path_str);
+                if path.is_file() {
+                    let ext = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if ["png", "jpg", "jpeg", "gif", "webp", "svg"].contains(&ext.as_str()) {
+                        if let Ok(bytes) = std::fs::read(path) {
+                            use base64::Engine;
+                            let mime = if ext == "svg" {
+                                "image/svg+xml"
+                            } else if ext == "jpg" || ext == "jpeg" {
+                                "image/jpeg"
+                            } else {
+                                &format!("image/{ext}")
+                            };
+                            let base64_str =
+                                base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            return Ok(Some(format!("data:{mime};base64,{base64_str}")));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn choose_application() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         rfd::FileDialog::new()
@@ -468,6 +544,7 @@ fn main() {
             return_to_manual_studio,
             choose_project,
             choose_image,
+            read_clipboard_image,
             choose_application,
             start_operation_recording,
             operation_recording_running,
