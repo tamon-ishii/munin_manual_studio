@@ -1,6 +1,9 @@
 import importlib.util
 from pathlib import Path
 import plistlib
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -40,6 +43,28 @@ class ReleaseLayoutTests(unittest.TestCase):
                 for binary in binaries:
                     self.assertEqual((destination / binary.name).read_bytes(), binary.read_bytes())
                 self.assertIn('0.2.1', (package / 'README.txt').read_text())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS codesign')
+    def test_macos_bundle_and_all_helpers_have_valid_signatures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'main.rs'
+            source.write_text('fn main() {}')
+            executable = root / 'manual-studio'
+            subprocess.run(['rustc', str(source), '-o', str(executable)], check=True)
+            binaries = [executable]
+            for name in ('manualctl', 'markits-desktop'):
+                binary = root / name
+                shutil.copy2(executable, binary)
+                binaries.append(binary)
+            package = root / 'package'
+            package.mkdir()
+            repo = Path(__file__).resolve().parent.parent
+            release.assemble_package(package, binaries, repo, '0.2.1', 'macos-arm64')
+            release.sign_macos_bundle(package)
+            for binary in binaries:
+                subprocess.run(['codesign', '--verify', '--strict',
+                                str(package / 'Munin Manual Studio.app/Contents/MacOS' / binary.name)], check=True)
 
 
 if __name__ == '__main__':

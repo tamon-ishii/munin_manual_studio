@@ -50,6 +50,12 @@ def assemble_package(package, binaries, repo, version, platform):
         'macOS bundles use an ad-hoc signature and are not notarized; other executables are unsigned.\n', encoding='utf-8')
 
 
+def sign_macos_bundle(package):
+    bundle = str(package / 'Munin Manual Studio.app')
+    subprocess.run(['codesign', '--force', '--deep', '--sign', '-', bundle], check=True)
+    subprocess.run(['codesign', '--verify', '--deep', '--strict', bundle], check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', required=True)
@@ -72,8 +78,7 @@ def main():
         package = Path(temporary)
         assemble_package(package, binaries, repo, version, args.platform)
         if args.platform.startswith('macos-'):
-            subprocess.run(['codesign', '--force', '--deep', '--sign', '-',
-                            str(package / 'Munin Manual Studio.app')], check=True)
+            sign_macos_bundle(package)
         archive = shutil.make_archive(str(output / f'manual-studio-{version}-{args.platform}'), 'zip', package)
         print(archive)
 

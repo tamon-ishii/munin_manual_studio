@@ -516,6 +516,7 @@ pub fn tasks_for_config(root: &Path, config: &ManualConfig) -> Result<Vec<Task>,
 /// The returned page path is relative to the docs directory when the file lives there,
 /// and project-relative otherwise, matching the paths used by task updates.
 pub fn tasks_for_page(root: &Path, page: &str) -> Result<Vec<Task>, String> {
+    let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
     let path = super::editor::document_path(root, page)?;
     let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let config = read_config(root);
@@ -524,7 +525,7 @@ pub fn tasks_for_page(root: &Path, page: &str) -> Result<Vec<Task>, String> {
         .strip_prefix(&docs)
         .map(|relative| relative.to_string_lossy().replace('\\', "/"))
         .or_else(|_| {
-            path.strip_prefix(root)
+            path.strip_prefix(&canonical_root)
                 .map(|relative| relative.to_string_lossy().replace('\\', "/"))
         })
         .map_err(|error| error.to_string())?;
@@ -916,5 +917,22 @@ mod approval_regressions {
             let PageTag::Generated { task, .. } = &tags[0] else { panic!("generated tag expected") };
             assert_eq!(task.status, "stale");
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod path_regressions {
+    use super::*;
+    #[test]
+    fn page_tasks_accepts_an_aliased_project_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("Readme.md"), "<!-- ai:task id=readme-task kind=text\nDescribe\n-->\n").unwrap();
+        let alias = temp.path().join("project-alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let tasks = tasks_for_page(&alias, "Readme.md").unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].page, "Readme.md");
     }
 }

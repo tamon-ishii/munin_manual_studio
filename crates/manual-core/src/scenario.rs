@@ -391,6 +391,7 @@ mod tests {
         assert_eq!(
             saved,
             root.join("manual/scenarios/settings.json")
+                .canonicalize().unwrap()
                 .display()
                 .to_string()
         );

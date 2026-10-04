@@ -456,18 +456,17 @@ pub fn agent_json(
         cmd_args.insert(0, "--model".to_string());
     }
 
-    if which_binary(binary_name).is_none() {
-        return Err(format!("AI CLI is unavailable: {binary_name}"));
-    }
+    let binary = which_binary(binary_name)
+        .ok_or_else(|| format!("AI CLI is unavailable: {binary_name}"))?;
 
     if agent == "codex" {
-        return run_codex(binary_name, &cmd_args, root, &answer_path);
+        return run_codex(&binary.to_string_lossy(), &cmd_args, root, &answer_path);
     }
 
     let log_path = progress_log_path(root);
     append_progress(&log_path, &format!("{binary_name} CLIを起動しています"));
     let started = Instant::now();
-    let mut child = Command::new(binary_name)
+    let mut child = Command::new(&binary)
         .args(&cmd_args)
         .current_dir(root)
         .stdin(Stdio::null())
@@ -677,14 +676,13 @@ pub fn get_models(root: &Path, agent: &str) -> Result<Value, String> {
         _ => return Err(format!("AI CLI is unavailable: {agent}")),
     };
 
-    if which_binary(command_name).is_none() {
-        return Err(format!("AI CLI is unavailable: {command_name}"));
-    }
+    let binary = which_binary(command_name)
+        .ok_or_else(|| format!("AI CLI is unavailable: {command_name}"))?;
 
     let mut found = Vec::new();
 
     if agent == "codex" {
-        let mut child = Command::new("codex")
+        let mut child = Command::new(&binary)
             .arg("app-server")
             .current_dir(root)
             .stdin(Stdio::piped())
@@ -753,7 +751,7 @@ pub fn get_models(root: &Path, agent: &str) -> Result<Value, String> {
         let _ = child.kill();
         let _ = child.wait();
     } else {
-        let output = Command::new(command_name)
+        let output = Command::new(&binary)
             .arg("models")
             .current_dir(root)
             .output()
