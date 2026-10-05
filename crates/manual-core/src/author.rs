@@ -237,7 +237,9 @@ pub(crate) fn generate_task_body(
     let mut prompt = format!(
         "Answer this manual task in concise, professional Japanese Markdown. \
         Read {page_hint} as the primary context. Inspect only the source files needed to verify concrete claims; avoid repository-wide exploration unless the instruction requires it. \
-        Verify UI names from source. Return only the pure documentation content. Do not wrap your answer in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. Do not copy existing generated sections or other tasks' answers; return only this task's new body. \
+        Verify UI names from source. Return only the pure documentation content. Do not wrap your answer in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. \
+        Do not copy existing generated sections or other tasks' answers; return only this task's new body. \
+        Do not output the full {page_hint} file, page headings, or other tasks from the context. Return ONLY the markdown content for this single task. \
         For concrete UI or source claims, add a compact HTML comment immediately after the claim in the form <!-- ai:fact {{\"claim\":\"...\",\"ui\":\"#actual-id\"}} --> or <!-- ai:fact {{\"claim\":\"...\",\"file\":\"relative/path\",\"contains\":\"actual source text\"}} -->. Use only evidence you verified; omit the comment when there is no evidence. \
         Do not include meta notes, disclaimers, notes about AI generation, or source attributions.\n\
         Task ID: {task_id}\nInstruction: {}",
@@ -288,7 +290,7 @@ pub(crate) fn generate_task_body(
         return Err("AI agent returned an empty answer".to_string());
     }
 
-    let body = checked_generated_body(root, body)?;
+    let body = checked_generated_body(root, body, Some(&task.id))?;
     Ok(body)
 }
 
@@ -346,6 +348,7 @@ pub(crate) fn generate_page_at(
             Read {page} as the primary context. Inspect only source files needed to verify concrete claims; avoid repository-wide exploration unless a task requires it. \
             Return one answer for every ID, with no extra IDs. Do not copy existing generated sections or other tasks' answers. Verify UI names from source. \
             Do not wrap answers in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. \
+            Do not output the full page or surrounding document structure in each task's markdown field; return only the documentation content for that specific task. \
             For concrete UI or source claims, add a compact HTML comment immediately after the claim in the form \
             <!-- ai:fact {{\"claim\":\"...\",\"file\":\"relative/path\",\"contains\":\"actual source text\"}} -->. \
             Use only evidence you verified. Return only documentation content in each markdown field.\nTasks: {}",
@@ -402,7 +405,7 @@ pub(crate) fn generate_page_at(
             if body.is_empty() {
                 return Err(format!("AI returned an empty answer for task {}", task.id));
             }
-            let body = checked_generated_body(root, body)?;
+            let body = checked_generated_body(root, body, Some(&task.id))?;
             checked.push((task, body));
         }
         log_progress(
@@ -819,14 +822,23 @@ fn diagram_body(task: &super::task::Task, cli: &str, project: &Path) -> Result<S
     Ok(body)
 }
 
-fn checked_generated_body(root: &Path, body: &str) -> Result<String, String> {
-    let normalized = super::fact::normalize_generated_facts(body)?;
+fn checked_generated_body(root: &Path, body: &str, target_task_id: Option<&str>) -> Result<String, String> {
+    let effective_body = if let Some(target_id) = target_task_id {
+        if let Some(extracted) = super::task::extract_single_task_block(body, target_id)? {
+            extracted
+        } else {
+            body.to_string()
+        }
+    } else {
+        body.to_string()
+    };
+
+    let normalized = super::fact::normalize_generated_facts(&effective_body)?;
     let cleaned = super::task::clean_generated_body(&normalized);
     if cleaned.is_empty() {
         return Err("AI agent returned an empty answer".into());
     }
-    let mut ignored = super::task::get_code_block_ranges(&cleaned);
-    ignored.extend(super::fact::comment_ranges(&cleaned)?);
+    let ignored = super::task::ignored_tag_ranges(&cleaned);
     let marker = regex::Regex::new(r"<!--\s*/?ai:(?:task|generated)\b").unwrap();
     if marker
         .find_iter(&cleaned)
@@ -846,23 +858,54 @@ mod answer_regressions {
         let root = tempfile::tempdir().unwrap();
         let single = "<!-- ai:generated id=guide kind=text -->\nNew guide\n<!-- /ai:generated -->";
         assert_eq!(
-            checked_generated_body(root.path(), single).unwrap(),
+            checked_generated_body(root.path(), single, Some("guide")).unwrap(),
             "New guide"
         );
         let multiple = format!("{single}\n\n{single}");
-        assert!(checked_generated_body(root.path(), &multiple)
+        assert!(checked_generated_body(root.path(), &multiple, Some("guide"))
+            .unwrap_err()
+            .contains("multiple task/generated"));
+        assert!(checked_generated_body(root.path(), &multiple, None)
             .unwrap_err()
             .contains("multiple task/generated"));
         let example = "Example:\n```html\n<!-- ai:generated id=sample -->\nExample content\n<!-- /ai:generated -->\n```";
         assert_eq!(
-            checked_generated_body(root.path(), example).unwrap(),
+            checked_generated_body(root.path(), example, Some("guide")).unwrap(),
             example
         );
         std::fs::write(root.path().join("source.html"), "<!-- ai:generated -->").unwrap();
         let evidence = r#"<!-- ai:fact {"claim":"example","file":"source.html","contains":"<!-- ai:generated -->"} -->"#;
         let body_with_fact = format!("Supported by source. {evidence}");
-        let checked = checked_generated_body(root.path(), &body_with_fact).unwrap();
+        let checked = checked_generated_body(root.path(), &body_with_fact, Some("guide")).unwrap();
         assert!(checked.contains("ai:generated"));
         assert!(checked.contains("\\u003c!-- ai:generated --\\u003e"));
+
+        // Regression: full page echoed back with other tasks
+        let page_echo = format!("# Page Title\n<!-- ai:task id=other-task prompt=\"other\" -->\nOther\n<!-- /ai:task -->\n\n## Section\n{single}\n");
+        assert_eq!(
+            checked_generated_body(root.path(), &page_echo, Some("guide")).unwrap(),
+            "New guide"
+        );
+
+        // Regression: inline code mentioning ai:task is not treated as a structural section
+        let inline_code = "- **AI tag**: `<!-- ai:task id=foo prompt=\"...\" -->` can be used.";
+        assert_eq!(
+            checked_generated_body(root.path(), inline_code, Some("guide")).unwrap(),
+            inline_code
+        );
+
+        // Regression: wrapped in outer markdown fence
+        let fenced = format!("```markdown\n{single}\n```");
+        assert_eq!(
+            checked_generated_body(root.path(), &fenced, Some("guide")).unwrap(),
+            "New guide"
+        );
+
+        // Regression: trailing closing tag stripped
+        let trailing_close = "Clean content\n<!-- /ai:task -->";
+        assert_eq!(
+            checked_generated_body(root.path(), trailing_close, Some("guide")).unwrap(),
+            "Clean content"
+        );
     }
 }

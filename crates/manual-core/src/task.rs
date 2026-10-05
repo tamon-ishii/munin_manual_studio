@@ -84,8 +84,71 @@ pub fn is_inside_ranges(range: &std::ops::Range<usize>, ranges: &[std::ops::Rang
         .any(|r| range.start >= r.start && range.start < r.end)
 }
 
-fn ignored_tag_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
+pub fn get_inline_code_ranges(
+    content: &str,
+    fenced_ranges: &[std::ops::Range<usize>],
+) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if is_inside_ranges(&(i..i + 1), fenced_ranges) {
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'`' {
+            let start = i;
+            let mut tick_count = 0;
+            while i < bytes.len() && bytes[i] == b'`' {
+                tick_count += 1;
+                i += 1;
+            }
+            let mut search = i;
+            let mut found_end = None;
+            while search < bytes.len() {
+                if is_inside_ranges(&(search..search + 1), fenced_ranges) {
+                    break;
+                }
+                if bytes[search] == b'`' {
+                    let end_start = search;
+                    let mut close_ticks = 0;
+                    while search < bytes.len() && bytes[search] == b'`' {
+                        close_ticks += 1;
+                        search += 1;
+                    }
+                    if close_ticks == tick_count {
+                        found_end = Some(end_start + close_ticks);
+                        break;
+                    }
+                } else {
+                    search += 1;
+                }
+            }
+            if let Some(end) = found_end {
+                ranges.push(start..end);
+                i = end;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    ranges
+}
+
+pub fn get_html_code_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let re = Regex::new(r"(?is)<(?:pre|code)\b[^>]*>.*?</(?:pre|code)>").unwrap();
+    for m in re.find_iter(content) {
+        ranges.push(m.start()..m.end());
+    }
+    ranges
+}
+
+pub fn ignored_tag_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
     let mut ranges = get_code_block_ranges(content);
+    let inline = get_inline_code_ranges(content, &ranges);
+    ranges.extend(inline);
+    ranges.extend(get_html_code_ranges(content));
     if let Ok(facts) = crate::fact::comment_ranges(content) {
         ranges.extend(facts);
     }
@@ -857,6 +920,55 @@ pub fn update_task_prompt(templates: &Path, task_id: &str, prompt: &str) -> Resu
     fs::write(&page_path, updated).map_err(|e| e.to_string())
 }
 
+pub fn extract_single_task_block(content: &str, target_id: &str) -> Result<Option<String>, String> {
+    let ignored = ignored_tag_ranges(content);
+    let task_re = Regex::new(
+        r#"(?s)<!--\s*ai:(?:task|generated)\b(?P<attrs>(?:"[^"]*"|'[^']*'|[^>"'])*)-->\r?\n?(?P<body>.*?)<!--\s*/ai:(?:task|generated)\s*-->"#
+    ).unwrap();
+    let id_re = Regex::new(r#"(?:^|\s)id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap();
+
+    let mut matches = Vec::new();
+    for cap in task_re.captures_iter(content) {
+        let whole = cap.get(0).unwrap();
+        if is_inside_ranges(&(whole.start()..whole.end()), &ignored) {
+            continue;
+        }
+        let attrs = cap.name("attrs").unwrap().as_str();
+        let explicit_id = id_re.captures(attrs).and_then(|c| {
+            c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)).map(|m| m.as_str())
+        });
+        if explicit_id == Some(target_id) {
+            let body = cap.name("body").unwrap().as_str();
+            matches.push(body.to_string());
+        }
+    }
+
+    if matches.len() > 1 {
+        return Err("AI returned multiple task/generated sections. Return only the requested task's Markdown body; existing document content was preserved.".into());
+    }
+    if matches.len() == 1 {
+        return Ok(Some(matches.into_iter().next().unwrap()));
+    }
+    Ok(None)
+}
+
+pub fn strip_outer_markdown_fence(s: &str) -> String {
+    let trimmed = s.trim();
+    if (trimmed.starts_with("```markdown")
+        || trimmed.starts_with("```md")
+        || trimmed.starts_with("```\n")
+        || trimmed.starts_with("```\r\n")
+        || trimmed == "```")
+        && trimmed.ends_with("```")
+    {
+        let lines: Vec<&str> = trimmed.lines().collect();
+        if lines.len() >= 2 && lines.last().map_or(false, |l| l.trim() == "```") {
+            return lines[1..lines.len() - 1].join("\n").trim().to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
 pub fn clean_generated_body(body: &str) -> String {
     let mut cleaned = body.trim().to_string();
     let gen_wrap = Regex::new(
@@ -866,10 +978,16 @@ pub fn clean_generated_body(body: &str) -> String {
     let task_wrap =
         Regex::new(r"(?s)\A<!--\s*ai:task\b[^\r\n]*\r?\n?(?P<body>.*?)\r?\n?-->\z").unwrap();
     let leading_task = Regex::new(r"(?s)\A<!--\s*ai:task\b.*?-->\r?\n?").unwrap();
+    let trailing_task = Regex::new(r"(?s)\r?\n?<!--\s*/ai:task\s*-->\z").unwrap();
     let leading_gen = Regex::new(r"(?s)\A<!--\s*ai:generated\b[^>]*-->\r?\n?").unwrap();
     let trailing_gen = Regex::new(r"(?s)\r?\n?<!--\s*/ai:generated\s*-->\z").unwrap();
 
     loop {
+        let stripped_fence = strip_outer_markdown_fence(&cleaned);
+        if stripped_fence != cleaned {
+            cleaned = stripped_fence;
+            continue;
+        }
         if let Some(caps) = task_block_regex().captures(&cleaned) {
             if caps.get(0).unwrap().as_str() == cleaned {
                 cleaned = caps.name("body").unwrap().as_str().trim().to_string();
@@ -886,6 +1004,10 @@ pub fn clean_generated_body(body: &str) -> String {
         }
         if let Some(m) = leading_task.find(&cleaned) {
             cleaned = cleaned[m.end()..].trim().to_string();
+            continue;
+        }
+        if let Some(m) = trailing_task.find(&cleaned) {
+            cleaned = cleaned[..m.start()].trim().to_string();
             continue;
         }
         if let Some(m) = leading_gen.find(&cleaned) {
