@@ -292,7 +292,7 @@ fn generate_template_with_llm(
             The manual must explain features, workflows, and step-by-step user operations.\n\
             IMPORTANT RULES FOR TASKS & LAYOUT:\n\
             - index.md is required. You MUST add at least one screenshot update task with kind=screenshot to index.md; this is mandatory and must not be omitted or replaced with a static image link.\n\
-            - Put the task immediately after the short introduction and before navigation. Use <!-- ai:task id=overview-screenshot kind=screenshot\\nDescribe the target application's real overview screen and the controls to show\\n--> . This task appears in ModuleLoom's 「更新対象アセット」 list so the instruction can be copied for an agent with access to the target application and the resulting PNG can be registered.\n\
+            - Put the task immediately after the short introduction and before navigation. Use a paired ai:task block with id=overview-screenshot, kind=screenshot and a quoted prompt attribute describing the real overview screen; close it with <!-- /ai:task --> . This task appears in ModuleLoom's 「更新対象アセット」 list so the instruction can be copied for an agent with access to the target application and the resulting PNG can be registered.\n\
             - The screenshot prompt must name a real UI view and relevant controls from the UI Map; do not invent controls or give a generic instruction.\n\
             - Divide into 2 to 3 core chapters matching the application's actual workflows (e.g. quickstart.md for initial setup, features.md for main operations).\n\
             - Write detailed explanatory text, feature overviews, and step-by-step guides DIRECTLY as markdown body text (DO NOT use kind=text tasks, write the actual Japanese text directly into the markdown body).\n\
@@ -426,13 +426,13 @@ fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Re
 
 このドキュメントでは、{project_name} の主な機能と操作方法について説明します。
 
-<!-- ai:task id=overview-screenshot kind=screenshot
-対象アプリのメイン画面を開き、主要な操作領域が見える状態をPNGで撮影する
--->
+<!-- ai:task id=overview-screenshot kind=screenshot prompt="対象アプリのメイン画面を開き、主要な操作領域が見える状態をPNGで撮影する" -->
 
-<!-- ai:task id=overview-intro-text kind=text
-本ツールの目的と提供する価値を読者に向けて簡潔に説明する
--->
+<!-- /ai:task -->
+
+<!-- ai:task id=overview-intro-text kind=text prompt="本ツールの目的と提供する価値を読者に向けて簡潔に説明する" -->
+
+<!-- /ai:task -->
 
 ## ドキュメント構成
 - [はじめに・クイックスタート](quickstart.md): 基本的な操作手順と初期設定
@@ -448,16 +448,16 @@ fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Re
 本ツールの基本的な使い方と操作手順をステップ順に説明します。
 
 ## ステップ 1: 起動とプロジェクト選択
-<!-- ai:task id=quickstart-step1-screenshot kind=screenshot
-対象アプリの起動直後の画面とプロジェクト選択エリアをPNGで撮影する
--->
+<!-- ai:task id=quickstart-step1-screenshot kind=screenshot prompt="対象アプリの起動直後の画面とプロジェクト選択エリアをPNGで撮影する" -->
+
+<!-- /ai:task -->
 
 アプリケーション起動後、対象のソースコードディレクトリを選択します。自動的に構文解析が実行され、モジュール一覧および依存関係が読み込まれます。
 
 ## ステップ 2: 主要機能の実行
-<!-- ai:task id=quickstart-step2-screenshot kind=screenshot
-対象アプリの解析結果が表示されたメインワークスペースをPNGで撮影する
--->
+<!-- ai:task id=quickstart-step2-screenshot kind=screenshot prompt="対象アプリの解析結果が表示されたメインワークスペースをPNGで撮影する" -->
+
+<!-- /ai:task -->
 
 解析完了後、メインビューにモジュール関係図が表示されます。各ノードをクリックすると詳細なプロパティや接続関係を確認できます。
 "#
@@ -470,13 +470,13 @@ fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Re
 {project_name} に備わっている機能の詳細と活用方法を説明します。
 
 ## 主要機能一覧
-<!-- ai:task id=features-main-screenshot kind=screenshot
-対象アプリの主要機能パネルまたはダイアログをPNGで撮影する
--->
+<!-- ai:task id=features-main-screenshot kind=screenshot prompt="対象アプリの主要機能パネルまたはダイアログをPNGで撮影する" -->
 
-<!-- ai:task id=features-guide-text kind=text
-主要機能の操作方法、パラメータ、活用のポイントを解説
--->
+<!-- /ai:task -->
+
+<!-- ai:task id=features-guide-text kind=text prompt="主要機能の操作方法、パラメータ、活用のポイントを解説" -->
+
+<!-- /ai:task -->
 "#
     );
     fs::write(templates.join("features.md"), features_md).map_err(|e| e.to_string())?;
@@ -486,13 +486,13 @@ fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Re
 
 環境設定およびオプション項目について説明します。
 
-<!-- ai:task id=settings-screenshot kind=screenshot
-対象アプリの設定ダイアログを開き、設定項目が見える状態をPNGで撮影する
--->
+<!-- ai:task id=settings-screenshot kind=screenshot prompt="対象アプリの設定ダイアログを開き、設定項目が見える状態をPNGで撮影する" -->
 
-<!-- ai:task id=settings-guide-text kind=text
-各設定項目の意味とおすすめの設定値を解説
--->
+<!-- /ai:task -->
+
+<!-- ai:task id=settings-guide-text kind=text prompt="各設定項目の意味とおすすめの設定値を解説" -->
+
+<!-- /ai:task -->
 "#
     );
     fs::write(templates.join("settings.md"), settings_md).map_err(|e| e.to_string())?;
@@ -524,9 +524,9 @@ fn init_api_template(root: &Path, templates: &Path, project_name: &str) -> Resul
 
 ## システム全体アーキテクチャ
 
-<!-- ai:task id=system-architecture-diagram kind=diagram
-プロジェクト全体の主要モジュール間依存関係をMermaidダイアグラムで生成
--->
+<!-- ai:task id=system-architecture-diagram kind=diagram prompt="プロジェクト全体の主要モジュール間依存関係をMermaidダイアグラムで生成" -->
+
+<!-- /ai:task -->
 
 ## 仕様書構成
 - [モジュール依存関係とアーキテクチャ](architecture.md): レイヤー構造と依存ルール
@@ -542,9 +542,9 @@ fn init_api_template(root: &Path, templates: &Path, project_name: &str) -> Resul
 
 ## パッケージ間依存図
 
-<!-- ai:task id=package-dependency-diagram kind=diagram
-パッケージ間の推移的依存とレイヤー構造をMermaidダイアグラムで生成
--->
+<!-- ai:task id=package-dependency-diagram kind=diagram prompt="パッケージ間の推移的依存とレイヤー構造をMermaidダイアグラムで生成" -->
+
+<!-- /ai:task -->
 
 ## 循環インポート・メトリクス
 コード解析によって検出されたモジュール間結合度および循環参照の状況です。

@@ -59,7 +59,7 @@ pub fn draft(root: &Path) -> Result<(), String> {
         "Read the application context, AST module structure, UI Map, and manual brief below. \
         Create a comprehensive Japanese MkDocs manual outline as JSON pages for this specific application. \
         Use Markdown files, with index.md required. \
-        Insert unique <!-- ai:task id=... kind=text|screenshot|diagram\\n...\\n--> tags for work requiring AI, real screenshots, or Mermaid diagrams.\n\
+        Insert unique paired <!-- ai:task id=... kind=text|screenshot|diagram prompt=\"instruction\" --> followed by an empty body and <!-- /ai:task --> tags for work requiring AI, real screenshots, or Mermaid diagrams.\n\
         IMPORTANT RULES FOR TASKS & LAYOUT:\n\
         - You MUST include at least one kind=screenshot ai:task in index.md. Do not omit it or replace it with a static image link. Put it immediately after the short introduction and before navigation.\n\
         - The screenshot task prompt must describe a real screen of the TARGET application and the controls that should be visible. It appears in ModuleLoom's 「更新対象アセット」 list, where the instruction can be copied for an agent with access to the target application and the resulting PNG can be registered.\n\

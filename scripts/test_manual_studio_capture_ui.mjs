@@ -63,7 +63,7 @@ try {
           });
         }
         if (command === 'markits_annotation_ready') return new Promise(resolve => { resolveAnnotation = resolve; });
-        if (command === 'preserve_markits_capture') return Promise.resolve(`<!-- ai:generated id=${args.taskId} -->\n![capture](assets/${args.taskId}.png)\n<!-- /ai:generated -->`);
+        if (command === 'preserve_markits_capture') return Promise.resolve(`<!-- ai:task id=${args.taskId} kind=screenshot prompt="Capture" -->\n![capture](assets/${args.taskId}.png)\n<!-- /ai:task -->`);
         return Promise.resolve(null);
       },
     };
@@ -76,16 +76,28 @@ try {
 
   const openInstructionToolbar = async () => {
     const toolbar = page.locator('.instruction-toolbar');
+    if (!await toolbar.isVisible()) {
+      await page.locator('.milkdown-top-bar .top-bar-heading-button').filter({ hasText: 'AIタグを追加' }).click();
+      return;
+    }
     if (!await toolbar.evaluate(node => node.open)) {
       await page.locator('.instruction-toolbar summary').click();
     }
   };
 
   await openInstructionToolbar();
-  await page.locator('[data-insert="text"]').click();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: 'AI文章の指示', exact: true }).click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /ai:task id=task-docs-guide-text-1 kind=text/, 'ordinary AI task insertion still works');
+  const inlinePrompt = page.getByRole('textbox', { name: 'AIへの指示 task-docs-guide-text-1', exact: true });
+  const originalPrompt = await inlinePrompt.inputValue();
+  await inlinePrompt.fill('初心者向け "保存"\n手順を説明');
+  assert.match(await page.locator('#markdown-editor').inputValue(), /prompt="初心者向け &quot;保存&quot;&#10;手順を説明"/);
+  assert.equal(await page.locator('#markdown-editor').isVisible(), false, 'prompt editing stays in Milkdown');
+  await inlinePrompt.press('Control+z');
+  assert.equal(await inlinePrompt.inputValue(), originalPrompt);
+
   await openInstructionToolbar();
-  await page.locator('[data-insert="screenshot"]').click();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '撮影の指示', exact: true }).click();
   await page.locator('#screenshot-launch-command').selectOption('__custom__');
   await page.locator('#screenshot-task-form button[type="submit"]').click();
   assert.match(await page.locator('#screenshot-submit-feedback').textContent(), /起動アプリまたは補足/, 'empty screenshot task submission explains what is missing in the dialog');
@@ -95,7 +107,7 @@ try {
   await page.locator('#screenshot-task-form button[type="submit"]').click();
   await page.waitForFunction(() => document.querySelector('#markdown-editor')?.value.includes('起動アプリ: /usr/bin/shared-app'));
   const directScreenshotTask = await page.locator('#markdown-editor').inputValue();
-  assert.match(directScreenshotTask, /起動引数:\n- --shared\n- value/, 'unrecorded screenshot tag retains the selected shared app and arguments');
+  assert.match(directScreenshotTask, /起動引数:&#10;- --shared&#10;- value/, 'unrecorded screenshot tag retains the selected shared app and arguments');
   assert.equal(await page.locator('#screenshot-task-dialog').evaluate(node => node.open), false, 'valid screenshot tag submission closes the dialog');
   assert.match(await page.locator('#status').textContent(), /保存すると実行対象になります/, 'successful screenshot tag insertion tells the user to save');
   await page.locator('#save-page').click();
@@ -103,7 +115,7 @@ try {
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
 
   await openInstructionToolbar();
-  await page.locator('[data-insert="screenshot"]').click();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '撮影の指示', exact: true }).click();
   await page.locator('#screenshot-launch-command').selectOption('__custom__');
   await page.locator('#screenshot-launch-program').fill('/usr/bin/mock-app');
   await page.locator('#start-operation-recording').click();
@@ -125,7 +137,7 @@ try {
   await page.locator('[data-page="docs/other.md"]').click();
   await page.waitForFunction(() => document.querySelector('#markdown-editor')?.value.includes('docs/other.md'));
   await openInstructionToolbar();
-  await page.locator('[data-insert="screenshot"]').click();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '撮影の指示', exact: true }).click();
 
   await page.evaluate(() => window.__captureMock.resolveAnnotation(JSON.stringify({ annotations: [{ id: 'late' }] })));
   await page.waitForTimeout(50);
@@ -151,7 +163,7 @@ try {
   assert.equal(saveRequest.args.request.root, '/tmp/mock-workspace');
   assert.equal(saveRequest.args.request.options.page, 'docs/other.md');
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
-  assert.match(await page.locator('#markdown-editor').inputValue(), /ai:generated id=task-docs-other-screenshot-1/);
+  assert.match(await page.locator('#markdown-editor').inputValue(), /ai:task id=task-docs-other-screenshot-1/);
   assert.deepEqual(errors, [], `browser errors: ${errors.join('; ')}`);
   console.log('Manual Studio native-mock capture UI checks passed.');
 } finally {

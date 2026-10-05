@@ -323,22 +323,26 @@ pub fn http_agent_json(
         .and_then(|choice| choice.get("message"))
         .and_then(|msg| msg.get("content"))
         .and_then(|c| c.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            resp_json
+                .get("candidates")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|cand| cand.get("content"))
+                .and_then(|content| content.get("parts"))
+                .and_then(|parts| parts.as_array())
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .filter_map(|p| p.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join("")
+                })
+        })
         .ok_or_else(|| format!("Invalid response format from AI API: {resp_json}"))?;
 
-    let clean_json = content.trim();
-    let clean_json = if clean_json.starts_with("```") {
-        let lines: Vec<&str> = clean_json.lines().collect();
-        if lines.len() >= 2
-            && lines.first().unwrap().starts_with("```")
-            && lines.last().unwrap().starts_with("```")
-        {
-            lines[1..lines.len() - 1].join("\n")
-        } else {
-            clean_json.to_string()
-        }
-    } else {
-        clean_json.to_string()
-    };
+    let clean_json = clean_markdown_fence(&content);
 
     serde_json::from_str(&clean_json).map_err(|e| {
         format!("Failed to parse model content as JSON schema: {e}\nRaw output: {content}")
@@ -513,52 +517,308 @@ pub fn agent_json(
         ));
     }
 
-    let parsed: Value = serde_json::from_str(&stdout_str)
+    let parsed: Value = extract_json_value(&stdout_str)
         .map_err(|e| format!("Failed to parse {agent} JSON: {e}\nOutput was: {stdout_str}"))?;
 
-    if agent == "grok" {
-        if let Some(text) = parsed.get("text").and_then(|t| t.as_str()) {
-            return serde_json::from_str(text).map_err(|e| e.to_string());
-        }
-        return Ok(parsed);
-    }
+    extract_agent_payload(agent, &parsed, schema)
+}
 
-    if agent == "agy" {
-        if let Some(status) = parsed.get("status").and_then(|s| s.as_str()) {
-            if status != "SUCCESS" {
-                let err = parsed
-                    .get("error")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or("Agy failed");
-                return Err(err.to_string());
+fn clean_markdown_fence(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.starts_with("```") {
+        let lines: Vec<&str> = trimmed.lines().collect();
+        if lines.len() >= 2
+            && lines.first().unwrap().starts_with("```")
+            && lines.last().unwrap().starts_with("```")
+        {
+            return lines[1..lines.len() - 1].join("\n").trim().to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn extract_json_value(raw: &str) -> Result<Value, String> {
+    let trimmed = raw.trim();
+    if let Ok(val) = serde_json::from_str(trimmed) {
+        return Ok(val);
+    }
+    if let Some(start) = trimmed.find('{') {
+        if let Some(end) = trimmed.rfind('}') {
+            if end > start {
+                if let Ok(val) = serde_json::from_str(&trimmed[start..=end]) {
+                    return Ok(val);
+                }
             }
         }
-        if let Some(structured) = parsed.get("structured_output") {
-            if structured.is_object() {
-                return Ok(structured.clone());
+    }
+    if let Some(start) = trimmed.find('[') {
+        if let Some(end) = trimmed.rfind(']') {
+            if end > start {
+                if let Ok(val) = serde_json::from_str(&trimmed[start..=end]) {
+                    return Ok(val);
+                }
             }
         }
-        if let Some(resp) = parsed.get("response").and_then(|r| r.as_str()) {
-            return serde_json::from_str(resp).map_err(|e| e.to_string());
+    }
+    serde_json::from_str(trimmed).map_err(|e| e.to_string())
+}
+
+fn has_schema_properties(val: &Value, schema: &Value) -> bool {
+    if let Some(props) = schema.get("properties").and_then(Value::as_object) {
+        if !props.is_empty() && props.keys().any(|k| val.get(k).is_some()) {
+            return true;
         }
-        return Ok(parsed);
+    }
+    false
+}
+
+fn extract_agent_payload(agent: &str, parsed: &Value, schema: &Value) -> Result<Value, String> {
+    // 1. Error checks in response envelope
+    if parsed.get("is_error").and_then(Value::as_bool) == Some(true) {
+        let msg = parsed
+            .get("result")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                parsed.get("error").and_then(|e| {
+                    e.as_str()
+                        .or_else(|| e.get("message").and_then(Value::as_str))
+                })
+            })
+            .unwrap_or("AI agent returned an error");
+        return Err(format!("{agent} failed: {msg}"));
+    }
+    if let Some(status) = parsed.get("status").and_then(Value::as_str) {
+        if status == "ERROR" || status == "FAILED" || (agent == "agy" && status != "SUCCESS") {
+            let err = parsed
+                .get("error")
+                .and_then(|e| {
+                    e.as_str()
+                        .or_else(|| e.get("message").and_then(Value::as_str))
+                })
+                .unwrap_or("AI agent failed");
+            return Err(format!("{agent} failed: {err}"));
+        }
     }
 
+    // 2. Parsed value already has expected schema properties
+    if parsed.is_object() && has_schema_properties(parsed, schema) {
+        return Ok(parsed.clone());
+    }
+
+    // 3. structured_output (Claude / Agy)
     if let Some(structured) = parsed.get("structured_output") {
         if structured.is_object() {
             return Ok(structured.clone());
         }
-    }
-    if let Some(res) = parsed.get("result").and_then(|r| r.as_str()) {
-        return serde_json::from_str(res).map_err(|e| e.to_string());
+        if let Some(s) = structured.as_str() {
+            let clean = clean_markdown_fence(s);
+            if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+                if val.is_object() {
+                    return Ok(val);
+                }
+            }
+        }
     }
 
-    Ok(parsed)
+    // 4. result (Claude / Grok)
+    if let Some(result) = parsed.get("result") {
+        if result.is_object() {
+            return Ok(result.clone());
+        }
+        if let Some(s) = result.as_str() {
+            let clean = clean_markdown_fence(s);
+            if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+                if val.is_object() {
+                    return Ok(val);
+                }
+            }
+            if schema
+                .get("properties")
+                .and_then(|p| p.get("markdown"))
+                .is_some()
+                && !clean.is_empty()
+            {
+                return Ok(json!({ "markdown": clean }));
+            }
+            return serde_json::from_str(&clean).map_err(|e| e.to_string());
+        }
+    }
+
+    // 5. candidates (Gemini / Vertex AI: candidates[0].content.parts[0].text)
+    if let Some(candidates) = parsed.get("candidates").and_then(Value::as_array) {
+        if let Some(first_cand) = candidates.first() {
+            let parts_opt = first_cand
+                .get("content")
+                .and_then(|c| c.get("parts"))
+                .and_then(Value::as_array)
+                .or_else(|| first_cand.get("parts").and_then(Value::as_array));
+            if let Some(parts) = parts_opt {
+                let text: String = parts
+                    .iter()
+                    .filter_map(|p| p.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("");
+                let clean = clean_markdown_fence(&text);
+                if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+                    if val.is_object() {
+                        return Ok(val);
+                    }
+                }
+                if schema
+                    .get("properties")
+                    .and_then(|p| p.get("markdown"))
+                    .is_some()
+                    && !clean.is_empty()
+                {
+                    return Ok(json!({ "markdown": clean }));
+                }
+            }
+        }
+    }
+
+    // 6. content (Claude / OpenAI format, or content with parts)
+    if let Some(content) = parsed.get("content") {
+        if content.is_object() {
+            if let Some(parts) = content.get("parts").and_then(Value::as_array) {
+                let text: String = parts
+                    .iter()
+                    .filter_map(|p| p.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("");
+                let clean = clean_markdown_fence(&text);
+                if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+                    if val.is_object() {
+                        return Ok(val);
+                    }
+                }
+                if schema
+                    .get("properties")
+                    .and_then(|p| p.get("markdown"))
+                    .is_some()
+                    && !clean.is_empty()
+                {
+                    return Ok(json!({ "markdown": clean }));
+                }
+            }
+        } else if let Some(arr) = content.as_array() {
+            // Check for tool_use blocks
+            for item in arr {
+                if item.get("type").and_then(Value::as_str) == Some("tool_use") {
+                    if let Some(input) = item.get("input").filter(|i| i.is_object()) {
+                        return Ok(input.clone());
+                    }
+                }
+            }
+            // Collect text from blocks
+            let mut texts = Vec::new();
+            for item in arr {
+                if let Some(t) = item.get("text").and_then(Value::as_str) {
+                    texts.push(t);
+                } else if let Some(parts) = item.get("parts").and_then(Value::as_array) {
+                    for p in parts {
+                        if let Some(t) = p.get("text").and_then(Value::as_str) {
+                            texts.push(t);
+                        }
+                    }
+                }
+            }
+            if !texts.is_empty() {
+                let combined = texts.join("");
+                let clean = clean_markdown_fence(&combined);
+                if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+                    if val.is_object() {
+                        return Ok(val);
+                    }
+                }
+                if schema
+                    .get("properties")
+                    .and_then(|p| p.get("markdown"))
+                    .is_some()
+                    && !clean.is_empty()
+                {
+                    return Ok(json!({ "markdown": clean }));
+                }
+            }
+        } else if let Some(s) = content.as_str() {
+            let clean = clean_markdown_fence(s);
+            if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+                if val.is_object() {
+                    return Ok(val);
+                }
+            }
+            if schema
+                .get("properties")
+                .and_then(|p| p.get("markdown"))
+                .is_some()
+                && !clean.is_empty()
+            {
+                return Ok(json!({ "markdown": clean }));
+            }
+        }
+    }
+
+    // 7. Direct parts array
+    if let Some(parts) = parsed.get("parts").and_then(Value::as_array) {
+        let text: String = parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("");
+        let clean = clean_markdown_fence(&text);
+        if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+            if val.is_object() {
+                return Ok(val);
+            }
+        }
+        if schema
+            .get("properties")
+            .and_then(|p| p.get("markdown"))
+            .is_some()
+            && !clean.is_empty()
+        {
+            return Ok(json!({ "markdown": clean }));
+        }
+    }
+
+    // 8. response / text (Agy / Grok)
+    for key in ["response", "text"] {
+        if let Some(val) = parsed.get(key) {
+            if val.is_object() {
+                return Ok(val.clone());
+            }
+            if let Some(s) = val.as_str() {
+                let clean = clean_markdown_fence(s);
+                if let Ok(v) = serde_json::from_str::<Value>(&clean) {
+                    if v.is_object() {
+                        return Ok(v);
+                    }
+                }
+                if schema
+                    .get("properties")
+                    .and_then(|p| p.get("markdown"))
+                    .is_some()
+                    && !clean.is_empty()
+                {
+                    return Ok(json!({ "markdown": clean }));
+                }
+                return serde_json::from_str(&clean).map_err(|e| e.to_string());
+            }
+        }
+    }
+
+    // 9. Fallback if parsed is an object
+    if parsed.is_object() {
+        return Ok(parsed.clone());
+    }
+
+    Err(format!(
+        "Could not extract structured data from {agent} response: {parsed}"
+    ))
 }
 
 fn failure_message(stderr: &str, stdout: &str) -> String {
     for output in [stderr, stdout] {
-        if let Ok(value) = serde_json::from_str::<Value>(output.trim()) {
+        if let Ok(value) = extract_json_value(output) {
             let message = value
                 .get("error")
                 .and_then(|error| {
@@ -658,6 +918,116 @@ mod failure_tests {
         assert!(result.len() <= 2000);
         assert!(message.ends_with(&result));
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn claude_structured_output_is_extracted() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "markdown": { "type": "string" } },
+            "required": ["markdown"]
+        });
+
+        // 1. structured_output as object
+        let res1 = json!({
+            "type": "result",
+            "structured_output": { "markdown": "# Title 1" }
+        });
+        let payload1 = extract_agent_payload("claude", &res1, &schema).unwrap();
+        assert_eq!(payload1["markdown"], "# Title 1");
+
+        // 2. structured_output as JSON string
+        let res2 = json!({
+            "type": "result",
+            "structured_output": "{\"markdown\": \"# Title 2\"}"
+        });
+        let payload2 = extract_agent_payload("claude", &res2, &schema).unwrap();
+        assert_eq!(payload2["markdown"], "# Title 2");
+
+        // 3. result as plain markdown string for markdown schema
+        let res3 = json!({
+            "type": "result",
+            "result": "## Direct markdown"
+        });
+        let payload3 = extract_agent_payload("claude", &res3, &schema).unwrap();
+        assert_eq!(payload3["markdown"], "## Direct markdown");
+    }
+
+    #[test]
+    fn claude_parts_and_candidates_are_extracted() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "markdown": { "type": "string" } },
+            "required": ["markdown"]
+        });
+
+        // Gemini/Vertex candidates with parts
+        let res_candidates = json!({
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            { "text": "```json\n{\"markdown\": \"# From parts\"}\n```" }
+                        ]
+                    }
+                }
+            ]
+        });
+        let payload = extract_agent_payload("claude", &res_candidates, &schema).unwrap();
+        assert_eq!(payload["markdown"], "# From parts");
+
+        // Direct parts array
+        let res_parts = json!({
+            "parts": [
+                { "text": "{\"markdown\": \"# Direct parts\"}" }
+            ]
+        });
+        let payload_parts = extract_agent_payload("claude", &res_parts, &schema).unwrap();
+        assert_eq!(payload_parts["markdown"], "# Direct parts");
+    }
+
+    #[test]
+    fn claude_content_tool_use_is_extracted() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "markdown": { "type": "string" } },
+            "required": ["markdown"]
+        });
+
+        let res_tool = json!({
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "tool_123",
+                    "input": { "markdown": "# From tool" }
+                }
+            ]
+        });
+        let payload = extract_agent_payload("claude", &res_tool, &schema).unwrap();
+        assert_eq!(payload["markdown"], "# From tool");
+    }
+
+    #[test]
+    fn claude_error_surfaces_as_err() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "markdown": { "type": "string" } },
+            "required": ["markdown"]
+        });
+
+        let err_json = json!({
+            "is_error": true,
+            "result": "Not logged in · Please run /login"
+        });
+        let err = extract_agent_payload("claude", &err_json, &schema).unwrap_err();
+        assert!(err.contains("Not logged in"));
+    }
+
+    #[test]
+    fn extract_json_value_handles_surrounding_text() {
+        let raw = "Warning: new version available\n{\"markdown\":\"# Hello\"}\nTips: run claude update";
+        let val = extract_json_value(raw).unwrap();
+        assert_eq!(val["markdown"], "# Hello");
     }
 }
 

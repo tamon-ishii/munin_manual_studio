@@ -55,7 +55,7 @@ try {
     const fact = JSON.stringify({ claim: '保存ボタン', file: 'source.html', contains: evidence });
     answer = { answers: [{ id: 'guide', markdown: `Version ${version}\n\n\`\`\`sh\nmunin --help\n\`\`\`\n保存ボタン。<!-- ai:fact ${fact} -->` }] };
     const review = await rpc('generate-review', { page });
-    assert.equal((review.content.match(/<!-- ai:generated id=guide /g) ?? []).length, 1);
+    assert.equal((review.content.match(/<!-- ai:task id=guide /g) ?? []).length, 1);
     assert.equal((review.content.match(/Version /g) ?? []).length, 1);
     assert.match(review.content, /Hand edited introduction/);
     assert.ok(review.content.includes(`Version ${version}`));

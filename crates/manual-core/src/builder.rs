@@ -7,10 +7,7 @@ use walkdir::WalkDir;
 
 use super::agent::which_binary;
 use super::config::read_config;
-use super::task::{
-    collect_markdown_files, encode_prompt, parse_page_tags, read_answer, source_hash, tasks,
-    utc_now, PageTag,
-};
+use super::task::{collect_markdown_files, parse_page_tags, read_answer, tasks, utc_now, PageTag};
 
 const SITE_MANIFEST: &str = ".moduleloom-site-files.json";
 
@@ -248,17 +245,13 @@ fn build_inner(
                 rendered.push_str(&content[last_idx..range.start]);
                 let task_id = &task.id;
                 let kind = &task.kind;
-                let prompt = &task.prompt;
 
                 if let Some((created, body, approved)) = answers.get(task_id) {
-                    let digest = source_hash(kind, prompt);
-                    let approved_attr = approved
-                        .as_ref()
-                        .map(|a| format!(" approved-at={a}"))
-                        .unwrap_or_default();
-                    let prompt_attr = format!(" prompt-b64={}", encode_prompt(prompt));
-                    rendered.push_str(&format!(
-                        "<!-- ai:generated id={task_id} kind={kind} created-at={created} source-sha256={digest}{prompt_attr}{approved_attr} -->\n{body}\n<!-- /ai:generated -->"
+                    rendered.push_str(&super::task::render_task_block(
+                        &task,
+                        body,
+                        created,
+                        approved.as_deref(),
                     ));
                 } else {
                     rendered.push_str(&format!("> **作成待ち:** `{task_id}` ({kind})"));

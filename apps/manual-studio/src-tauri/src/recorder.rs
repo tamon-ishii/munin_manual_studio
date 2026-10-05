@@ -1007,8 +1007,8 @@ pub fn preserve_annotated_capture(
     }
     fs::remove_file(&temporary).map_err(|e| format!("一時画像を削除できません: {e}"))?;
     let relative_image = format!("assets/{filename}");
-    let prompt_attr = manual_core::task::encode_prompt(prompt);
-    let block = format!("<!-- ai:generated id={task_id} kind=screenshot prompt-b64={prompt_attr} -->\n![撮影画面]({relative_image})\n<!-- /ai:generated -->");
+    let prompt_attr = manual_core::task::escape_prompt(prompt);
+    let block = format!("<!-- ai:task id={task_id} kind=screenshot prompt=\"{prompt_attr}\" -->\n![撮影画面]({relative_image})\n<!-- /ai:task -->");
     Ok(block)
 }
 
@@ -1208,7 +1208,7 @@ mod tests {
             fs::read(root.join("docs/assets/markits-screen-one.png")).unwrap(),
             bytes
         );
-        assert!(first.contains("ai:generated id=screen-one kind=screenshot"));
+        assert!(first.contains("ai:task id=screen-one kind=screenshot"));
 
         let different = root.join("different.png");
         fs::write(&different, b"\x89PNG\r\n\x1a\ndifferent").unwrap();

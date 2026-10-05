@@ -11,8 +11,8 @@ use super::agent::get_agents;
 use super::builder::build;
 use super::config::{has_config, project_path, read_config, DEFAULT_BRIEF};
 use super::task::{
-    collect_target_markdown_files, parse_page_tags, read_answer, scan_entries, source_hash, tasks,
-    utc_now, PageTag,
+    collect_target_markdown_files, parse_page_tags, read_answer, scan_entries, tasks, utc_now,
+    PageTag,
 };
 
 pub fn render_page_markdown(
@@ -60,16 +60,13 @@ pub fn render_page_markdown(
             result.push_str(&content[last_idx..range.start]);
             let task_id = &task.id;
             let kind = &task.kind;
-            let prompt = &task.prompt;
 
             if let Some((created, body, approved)) = answers.get(task_id) {
-                let digest = source_hash(kind, prompt);
-                let approved_attr = approved
-                    .as_ref()
-                    .map(|a| format!(" approved-at={a}"))
-                    .unwrap_or_default();
-                result.push_str(&format!(
-                    "<!-- ai:generated id={task_id} kind={kind} created-at={created} source-sha256={digest}{approved_attr} -->\n{body}\n<!-- /ai:generated -->"
+                result.push_str(&super::task::render_task_block(
+                    &task,
+                    body,
+                    created,
+                    approved.as_deref(),
                 ));
             } else {
                 result.push_str(&format!("> **作成待ち:** `{task_id}` ({kind})"));

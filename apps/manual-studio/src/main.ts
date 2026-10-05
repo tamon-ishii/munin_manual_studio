@@ -1,3 +1,5 @@
+import { applyEditorFontSize, isEditorFontSize, setupEditorFontSize } from "./editorFontSize";
+import { setupMilkdownEditor, renderMermaid } from "./milkdownEditor";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { LogicalSize } from "@tauri-apps/api/dpi";
@@ -27,12 +29,22 @@ import type { Task, State, Document, NativeWindow, RecordingResult, LaunchComman
 const element = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const input = (id: string): HTMLInputElement => element(id);
 const editor = element<HTMLTextAreaElement>("markdown-editor");
+const milkdown = setupMilkdownEditor(editor, message => status(message, true), source => {
+  if (!documentState || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(source)) return Promise.resolve(source);
+  return rpc("preview-asset", { page: documentState.page, asset: source });
+}, uploadMilkdownImage, requestAiTask);
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 const params = new URLSearchParams(location.search);
 const recordingControlMode = params.get("recordingControl") === "1";
 const detached = params.get("editor") === "1";
 initializeTheme();
+setupEditorFontSize(input("editor-font-size"), size => {
+  if (native) void emit("manual-studio-editor-font-size-changed", size);
+});
+if (native) void listen<number>("manual-studio-editor-font-size-changed", ({ payload }) => {
+  if (isEditorFontSize(payload)) applyEditorFontSize(payload, false);
+});
 const themePicker = element<HTMLSelectElement>("ui-theme");
 themePicker.value = currentTheme();
 window.addEventListener("manual-studio-theme-change", () => { themePicker.value = currentTheme(); });
@@ -89,8 +101,9 @@ function editSnapshot(): EditorSnapshot {
   return { value: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
 }
 function updateHistoryButtons(): void {
-  element<HTMLButtonElement>("undo-edit").disabled = busy || !documentState || !editHistory.canUndo;
-  element<HTMLButtonElement>("redo-edit").disabled = busy || !documentState || !editHistory.canRedo;
+  const history = milkdown.historyState() || editHistory;
+  element<HTMLButtonElement>("undo-edit").disabled = busy || !documentState || !history.canUndo;
+  element<HTMLButtonElement>("redo-edit").disabled = busy || !documentState || !history.canRedo;
 }
 function resetEditHistory(): void {
   editHistory.reset(editSnapshot());
@@ -108,6 +121,7 @@ function recordEditHistory(event: Event): void {
 }
 function stepEditHistory(direction: -1 | 1): void {
   if (busy || !documentState) return;
+  if (milkdown.stepHistory(direction)) { updateHistoryButtons(); return; }
   const snapshot = editHistory.step(direction);
   if (!snapshot) return;
   replayingHistory = true;
@@ -371,7 +385,7 @@ function syncScroll(source: Element, target: Element | null): void {
 }
 function onPreviewScroll(): void {
   const source = previewScrollElement();
-  if (source) syncScroll(source, editor);
+  if (source) syncScroll(source, editor.hidden ? milkdown.host : editor);
 }
 let projectRequestVersion = 0;
 let documentRequestVersion = 0;
@@ -426,17 +440,36 @@ async function refreshWorkspace(reloadPage = false): Promise<void> {
     documentState = opened; editor.value = opened.content; resetEditHistory(); dirty = false; updateSaveState(); renderDocumentTags(); await renderPreview();
   }
 }
+function escapeTaskPrompt(prompt: string): string {
+  return prompt.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\r", "&#13;").replaceAll("\n", "&#10;");
+}
+const taskBlockPattern = /<!--\s*ai:task\b(?<attrs>(?:"[^"]*"|'[^']*'|[^>"'])*)-->[\s\S]*?<!--\s*\/ai:task\s*-->/g;
+const taskPromptAttribute = /\s+prompt=(?:"[^"]*"|'[^']*'|[^\s>]+)/;
+const headerAttributes = /(?:^|\s)[a-zA-Z][a-zA-Z0-9_-]*=(?:"[^"]*"|'[^']*'|[^\s>]+)/g;
 function tagAttribute(attrs: string, name: string): string | null {
-  const match = new RegExp(`(?:^|\\s)${name}=(?:"([^"]+)"|'([^']+)'|([^\\s>]+))`).exec(attrs);
-  return match?.[1] || match?.[2] || match?.[3] || null;
+  for (const token of attrs.matchAll(headerAttributes)) {
+    const match = /(?:^|\s)([a-zA-Z][a-zA-Z0-9_-]*)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/.exec(token[0]);
+    if (match?.[1] === name) return match[2] ?? match[3] ?? match[4];
+  }
+  return null;
+}
+function removeTagAttributes(header: string, names: string[]): string {
+  return header.replace(headerAttributes, token => names.some(name => token.trimStart().startsWith(`${name}=`)) ? "" : token);
 }
 function renderDocumentTags(): void {
-  const list = element<HTMLElement>("document-tag-list");
   const pageTasks = workspace && documentState ? tasksForPage(documentState.page) : [];
   const allApproved = !dirty && pageTasks.length > 0 && pageTasks.every(task => task.status === "approved");
-  setButtonDisabled(element<HTMLButtonElement>("generate-page"), !documentState || allApproved);
-  element("generate-page").title = allApproved ? "すべて確定済みです。更新するタグの確定を解除してください。" : "この文書のAI指示を実行し、文章・図・撮影結果を更新";
-  element<HTMLButtonElement>("review-ai-update").hidden = !documentState || !aiReviews.has(aiReviewKey(documentState.page));
+  const generatePage = document.getElementById("generate-page") as HTMLButtonElement | null;
+  if (generatePage) {
+    setButtonDisabled(generatePage, !documentState || allApproved);
+    generatePage.title = allApproved ? "すべて確定済みです。更新するタグの確定を解除してください。" : "この文書のAI指示を実行し、文章・図・撮影結果を更新";
+  }
+  const reviewAiUpdate = document.getElementById("review-ai-update") as HTMLButtonElement | null;
+  if (reviewAiUpdate) {
+    reviewAiUpdate.hidden = !documentState || !aiReviews.has(aiReviewKey(documentState.page));
+  }
+  const list = document.getElementById("document-tag-list");
+  if (!list) return;
   if (!documentState) { list.innerHTML = '<span class="muted">原稿を開くとタグが表示されます。</span>'; return; }
   const content = editor.value;
   const masked = content.split("");
@@ -450,25 +483,29 @@ function renderDocumentTags(): void {
       const id = tagAttribute(attrs, "id");
       if (!id) continue;
       const raw = content.slice(match.index!, match.index! + match[0].length);
-      const actualAttrs = generated ? /^<!--\s*ai:generated\b([^>]*)-->/.exec(raw)?.[1] || "" : /^<!--\s*ai:task([^\r\n]*)/.exec(raw)?.[1] || "";
+      const actualAttrs = attrs;
       const existing = tags.get(id);
-      const headerEnd = generated ? match.index! + raw.indexOf("-->") + 3 : undefined;
-      const approved = generated && Boolean(tagAttribute(actualAttrs, "approved-at"));
+      const unified = /^<!--\s*ai:task\b/.test(raw) && /<!--\s*\/ai:task\s*-->$/.test(raw);
+      const hasBody = !unified || raw.slice(raw.indexOf("-->") + 3, raw.lastIndexOf("<!--")).trim().length > 0;
+      const isGenerated = generated && hasBody;
+      const headerEnd = isGenerated ? match.index! + raw.indexOf("-->") + 3 : undefined;
+      const approved = isGenerated && Boolean(tagAttribute(actualAttrs, "approved-at"));
       tags.set(id, {
         id,
         kind: tagAttribute(actualAttrs, "kind") || existing?.kind || "text",
-        status: generated ? (approved ? "確定済み" : "未確定") : existing?.status || "未生成",
+        status: isGenerated ? (approved ? "確定済み" : "未確定") : existing?.status || "未生成",
         start: existing?.start ?? match.index!,
         end: existing?.end ?? match.index! + match[0].length,
-        generatedStart: generated ? match.index! : existing?.generatedStart,
-        generatedEnd: generated ? match.index! + match[0].length : existing?.generatedEnd,
+        generatedStart: isGenerated ? match.index! : existing?.generatedStart,
+        generatedEnd: isGenerated ? match.index! + match[0].length : existing?.generatedEnd,
         generatedHeaderEnd: headerEnd ?? existing?.generatedHeaderEnd,
-        approved: generated ? approved : existing?.approved,
+        approved: isGenerated ? approved : existing?.approved,
       });
     }
   };
-  collect(/<!--\s*ai:task\b(?<attrs>[^\r\n]*)\r?\n[\s\S]*?\r?\n-->/g, false);
+  collect(/<!--\s*ai:task\b(?<attrs>[^\r\n>]*)\r?\n[\s\S]*?\r?\n-->/g, false);
   collect(/<!--\s*ai:generated\b(?<attrs>[^>]*)-->[\s\S]*?<!--\s*\/ai:generated\s*-->/g, true);
+  collect(taskBlockPattern, true);
   const kinds: Record<string, string> = { screenshot: "画像", text: "文章", diagram: "図" };
   list.innerHTML = tags.size ? [...tags.values()].map((tag) => `<div class="document-tag-row${tag.approved ? " is-approved" : ""}" data-tag-start="${tag.start}" data-tag-end="${tag.end}"${tag.generatedStart === undefined ? "" : ` data-generated-start="${tag.generatedStart}" data-generated-end="${tag.generatedEnd}" data-generated-header-end="${tag.generatedHeaderEnd}" data-approved="${tag.approved}"`}><button type="button" class="document-tag-jump" data-tag-jump><code>${escape(tag.id)}</code><span>${kinds[tag.kind] || escape(tag.kind)}</span><span class="document-tag-status${tag.approved ? " is-approved" : ""}">${tag.status}</span></button>${tag.generatedStart === undefined ? "" : `<span class="document-tag-actions"><button type="button" data-tag-confirm${tag.approved ? ' class="button-approved is-approved"' : ""}${busy || !documentState ? " disabled" : ""}>${tag.approved ? "確定解除" : "確定"}</button><button type="button" data-tag-delete${busy || !documentState ? " disabled" : ""}>生成結果を削除</button></span>`}</div>`).join("") : '<span class="muted">この文書にAIタグはありません。</span>';
 }
@@ -713,10 +750,17 @@ async function editTaskPage(task: Task, edit: (content: string) => string): Prom
   status(`${task.id}を保存しました。`);
 }
 function updateTaskPrompt(content: string, task: Task, prompt: string): string {
-  if (prompt.includes("-->")) throw new Error("AIへの指示にコメント終端「-->」は入力できません。");
-  const safeId = task.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const hasId = (attrs: string) => new RegExp(`(?:^|\\s)id=["']?${safeId}(?:["']|\\s|$)`).test(attrs);
-  const taskTag = /<!--\s*ai:task(?<attrs>[^\r\n]*)\r?\n(?<prompt>.*?)\r?\n-->/gs;
+  const hasId = (attrs: string) => tagAttribute(attrs, "id") === task.id;
+  const blocks = [...content.matchAll(taskBlockPattern)].filter(match => hasId(match.groups?.attrs || ""));
+  if (blocks.length > 1) throw new Error(`${task.id}の指示タグが複数あります。`);
+  if (blocks.length === 1) {
+    const match = blocks[0];
+    const headerEnd = match[0].indexOf("-->") + 3;
+    const header = match[0].slice(0, headerEnd).replace(taskPromptAttribute, () => ` prompt="${escapeTaskPrompt(prompt.trim())}"`);
+    return content.slice(0, match.index) + header + match[0].slice(headerEnd) + content.slice(match.index! + match[0].length);
+  }
+  if (prompt.includes("-->")) throw new Error("旧形式のAI指示にコメント終端「-->」は入力できません。新形式のprompt属性を使ってください。");
+  const taskTag = /<!--\s*ai:task(?<attrs>[^\r\n>]*)\r?\n(?<prompt>.*?)\r?\n-->/gs;
   const taskMatches = [...content.matchAll(taskTag)].filter((match) => hasId(match.groups?.attrs || ""));
   if (taskMatches.length === 1) {
     const match = taskMatches[0];
@@ -741,13 +785,12 @@ function updateTaskPrompt(content: string, task: Task, prompt: string): string {
 }
 function toggleTaskApproval(content: string, task: Task): string {
   const tag = new RegExp(`<!--\\s*ai:generated\\b(?<attrs>[^>]*)-->[\\s\\S]*?<!--\\s*\\/ai:generated\\s*-->`, "g");
-  const safeId = task.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const matches = [...content.matchAll(tag)].filter((match) => new RegExp(`(?:^|\\s)id=["']?${safeId}(?:["']|\\s|$)`).test(match.groups?.attrs || ""));
+  const matches = [...content.matchAll(tag), ...content.matchAll(taskBlockPattern)].filter(match => tagAttribute(match.groups?.attrs || "", "id") === task.id);
   if (matches.length !== 1) throw new Error(`${task.id}の生成結果が原稿にありません。`);
   const match = matches[0];
   const attrs = match.groups!.attrs;
-  const nextAttrs = /\bapproved-at=[^\s>]+/.test(attrs)
-    ? attrs.replace(/\s+approved-at=[^\s>]+/, "")
+  const nextAttrs = Boolean(tagAttribute(attrs, "approved-at"))
+    ? removeTagAttributes(attrs, ["approved-at"])
     : `${attrs} approved-at=${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}`;
   return content.slice(0, match.index) + match[0].replace(attrs, nextAttrs) + content.slice(match.index! + match[0].length);
 }
@@ -1060,6 +1103,7 @@ element("detach-editor").addEventListener("click", () => { void work(async () =>
   if (native) await invoke("open_editor", { root: projectRoot, page: documentState.page });
   else window.open(`/?editor=1&root=${encodeURIComponent(projectRoot)}&page=${encodeURIComponent(documentState.page)}`, "_blank");
 }); });
+editor.addEventListener("editor-mode-change", updateHistoryButtons);
 editor.addEventListener("beforeinput", (event) => {
   if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
     event.preventDefault();
@@ -1072,7 +1116,7 @@ editor.addEventListener("input", (event) => {
   renderDocumentTags();
   clearTimeout(previewTimer); previewTimer = setTimeout(() => { void renderPreview(); }, 250);
 });
-element("document-tag-list").addEventListener("click", (event) => {
+document.getElementById("document-tag-list")?.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   const row = target.closest<HTMLElement>(".document-tag-row");
   if (!row) return;
@@ -1083,7 +1127,7 @@ element("document-tag-list").addEventListener("click", (event) => {
     const oldHeader = editor.value.slice(start, headerEnd);
     const approved = row.dataset.approved === "true";
     const newHeader = approved
-      ? oldHeader.replace(/\s+approved-at=[^\s>]+/, "")
+      ? removeTagAttributes(oldHeader, ["approved-at"])
       : oldHeader.replace(/\s*-->$/, ` approved-at=${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")} -->`);
     if (oldHeader !== newHeader) {
       replaceMarkdown(start, headerEnd, newHeader, 0, newHeader.length);
@@ -1097,25 +1141,39 @@ element("document-tag-list").addEventListener("click", (event) => {
     let end = Number(row.dataset.generatedEnd);
     if (editor.value[end] === "\r" && editor.value[end + 1] === "\n") end += 2;
     else if (editor.value[end] === "\n") end++;
-    replaceMarkdown(start, end, "", 0);
+    const block = editor.value.slice(start, Number(row.dataset.generatedEnd));
+    const unified = /^<!--\s*ai:task\b/.test(block);
+    const cleared = unified ? removeTagAttributes(block.slice(0, block.indexOf("-->") + 3), ["created-at", "source-sha256", "approved-at"]) + "\n\n<!-- /ai:task -->\n" : "";
+    replaceMarkdown(start, end, cleared, 0);
     status(`${row.querySelector("code")?.textContent || "生成結果"}を削除しました。Undo で戻せます。`);
     return;
   }
   if (!target.closest("[data-tag-jump]")) return;
   const start = Number(row.dataset.tagStart);
   const end = Number(row.dataset.tagEnd);
+  milkdown.showSource();
   jumpToSource(editor, start, end);
   updateCursor();
 });
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
+milkdown.host.addEventListener("scroll", () => syncScroll(milkdown.host, previewScrollElement()));
 element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
+  const previewDocument = element<HTMLIFrameElement>("markdown-preview").contentDocument;
+  previewDocument?.querySelectorAll<HTMLElement>('code.language-mermaid, pre.mermaid, .highlight.language-mermaid pre').forEach(code => {
+    const target = previewDocument.createElement("div");
+    target.className = "mermaid-preview";
+    target.style.cssText = "overflow:auto;background:#fff;padding:12px";
+    (code.closest("pre") || code).replaceWith(target);
+    void renderMermaid(target, code.textContent || "");
+  });
   previewScrollWindow?.removeEventListener("scroll", onPreviewScroll);
   previewScrollWindow = element<HTMLIFrameElement>("markdown-preview").contentWindow;
   previewScrollWindow?.addEventListener("scroll", onPreviewScroll);
-  syncScroll(editor, previewScrollElement());
+  syncScroll(editor.hidden ? milkdown.host : editor, previewScrollElement());
 });
 editor.addEventListener("click", updateCursor); editor.addEventListener("keyup", updateCursor); editor.addEventListener("select", updateCursor);
 function replaceMarkdown(start: number, end: number, replacement: string, selectStart: number, selectEnd = selectStart): void {
+  milkdown.showSource();
   rememberCurrentSelection();
   editor.setRangeText(replacement, start, end, "end");
   editor.focus();
@@ -1124,12 +1182,37 @@ function replaceMarkdown(start: number, end: number, replacement: string, select
 }
 const openTableEditor = setupMarkdownTableEditor({ editor, canEdit: () => !busy && Boolean(documentState), replace: replaceMarkdown, report: message => status(message, true) });
 setupDocumentTagsPane();
+window.addEventListener("manual-studio-status", (event: Event) => {
+  const detail = (event as CustomEvent<{ message: string; error?: boolean }>).detail;
+  if (detail?.message) status(detail.message, detail.error);
+});
+window.addEventListener("manual-studio-regenerate-task", (event: Event) => {
+  const { id, kind } = (event as CustomEvent<{ id: string; kind: string }>).detail;
+  void work(async () => {
+    if (!documentState) return;
+    if (dirty) await saveDocument();
+    const page = documentState.page;
+    if (kind === "screenshot") {
+      const source = workspace?.capture_sources[id];
+      if (source) {
+        await hideManualStudioForCapture();
+        try { await runAction("recapture", { id }); }
+        finally { await restoreManualStudioAfterCapture(); }
+      } else {
+        status("撮影元が未設定です。「画像・文章・図」タブで撮影元を設定するか、画面一覧から設定してください。", true);
+      }
+    } else {
+      await generateReviewed(page, id);
+    }
+  });
+});
 function applyAssist(edit: MarkdownEdit): void {
   replaceMarkdown(edit.start, edit.end, edit.text, edit.selectionStart - edit.start, edit.selectionEnd - edit.start);
 }
 function applyMarkdownFormat(format: string): void {
   if (busy) return;
   if (!documentState) { status("先に原稿を開いてください。", true); return; }
+  milkdown.showSource();
   const start = editor.selectionStart;
   const end = editor.selectionEnd;
   const selected = editor.value.slice(start, end);
@@ -1157,6 +1240,8 @@ function applyMarkdownFormat(format: string): void {
     const lines = editor.value.slice(lineStart, lineEnd).split("\n");
     const replacement = lines.map((line, index) => `${format === "bullet" ? "- " : format === "quote" ? "> " : `${index + 1}. `}${line}`).join("\n");
     replaceMarkdown(lineStart, lineEnd, replacement, replacement.length, replacement.length);
+  } else if (format === "mermaid") {
+    replaceMarkdown(start, end, "\n\n```mermaid\ngraph TD\n    A[開始] --> B[完了]\n```\n", 0);
   } else if (format === "code-block" || format === "table" || format === "rule") {
     const before = editor.value.slice(0, start);
     const after = editor.value.slice(end);
@@ -1444,13 +1529,15 @@ function insertAiTask(kind: string, custom?: { id: string; prompt: string }, sel
     return false;
   }
   const prompt = kind === "screenshot" ? "対象アプリの画面と、表示する操作要素を指定してください。" : kind === "diagram" ? "Pythonモジュール間の依存関係を図にしてください。" : "対象読者と説明する操作手順を指定してください。";
+  const markdown = `\n\n<!-- ai:task id=${id} kind=${kind} prompt="${escapeTaskPrompt(custom?.prompt ?? prompt)}" -->\n\n<!-- /ai:task -->\n`;
+  if (milkdown.isRichEditing) return milkdown.insertAiTag(markdown);
   rememberCurrentSelection(selection?.start, selection?.end);
-  editor.setRangeText(`\n\n<!-- ai:task id=${id} kind=${kind}\n${custom?.prompt ?? prompt}\n-->\n`, selection?.start ?? editor.selectionStart, selection?.end ?? editor.selectionEnd, "end");
+  editor.setRangeText(markdown, selection?.start ?? editor.selectionStart, selection?.end ?? editor.selectionEnd, "end");
   editor.dispatchEvent(new Event("input")); editor.focus();
   return true;
 }
-document.querySelectorAll<HTMLElement>("[data-insert]").forEach((button) => button.addEventListener("click", () => {
-  const kind = button.dataset.insert!;
+function requestAiTask(kind: string): void {
+  if (busy) return;
   element("panel-editor").querySelector<HTMLDetailsElement>(".instruction-toolbar")!.open = false;
   if (kind !== "screenshot") { insertAiTask(kind); return; }
   if (!documentState) { status("先に原稿を開いてください。", true); return; }
@@ -1487,7 +1574,8 @@ document.querySelectorAll<HTMLElement>("[data-insert]").forEach((button) => butt
   clearScreenshotFeedback();
   element<HTMLDialogElement>("screenshot-task-dialog").showModal();
   if (element<HTMLSelectElement>("screenshot-launch-command").value === "__custom__") input("screenshot-launch-program").focus();
-}));
+}
+document.querySelectorAll<HTMLElement>("[data-insert]").forEach(button => button.addEventListener("click", () => requestAiTask(button.dataset.insert!)));
 element("screenshot-launch-command").addEventListener("change", updateLaunchSelection);
 async function cancelCaptureSession(): Promise<void> {
   const session = captureSessions.active;
@@ -1571,7 +1659,7 @@ element("screenshot-task-form").addEventListener("submit", async (event) => {
       }
       if (!dialog.open) { reportSubmitIssue("撮影AIタグのダイアログを開いてから追加してください。"); return; }
       const aiTagIds = collectAiTagIds(editor.value);
-      const alreadyInserted = [...editor.value.matchAll(/<!--\s*ai:generated\b([^>]*)-->/g)]
+      const alreadyInserted = [...editor.value.matchAll(/<!--\s*ai:(?:generated|task)\b((?:"[^"]*"|[^>"])*)-->/g)]
         .some((match) => match[1].split(/\s+/).includes(`id=${id}`));
       if (!alreadyInserted && (aiTagIds.has(id) || workspace?.tasks.some((task) => task.id === id))) {
         reportSubmitIssue("撮影IDがすでに使われています。画像と入力は保持しています。キャンセルして撮影AIタグを作り直してください。"); return;
@@ -1620,7 +1708,7 @@ element("screenshot-task-form").addEventListener("submit", async (event) => {
             if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影がキャンセルされました。画面の内容を確認してください。");
           },
           reportStage: (stage) => {
-            const labels = { image: "1/3 編集済み画像を取り込んでいます…", document: "2/3 ai:generatedタグを原稿へ保存しています…", "capture-source": "3/3 次回の再撮影設定を登録しています…", refresh: "保存結果を確認しています…" };
+            const labels = { image: "1/3 編集済み画像を取り込んでいます…", document: "2/3 AIタグの本文を原稿へ保存しています…", "capture-source": "3/3 次回の再撮影設定を登録しています…", refresh: "保存結果を確認しています…" };
             stageLabel = labels[stage];
             stageStartedAt = Date.now();
             element("operation-recording-status").textContent = stageLabel;
@@ -1641,7 +1729,7 @@ element("screenshot-task-form").addEventListener("submit", async (event) => {
         acceptedRecordingResultGeneration = -1;
         dialog.close(); pendingLaunchProgram = ""; pendingLaunchArgs = [];
         element("operation-recording-status").textContent = "完了：注釈付き画像と撮影設定を保存しました。";
-        status("注釈付き画像をai:generatedとして保存し、同じ操作を再撮影する設定も登録しました。");
+        status("注釈付き画像をAIタグの本文として保存し、同じ操作を再撮影する設定も登録しました。");
       } catch (error) {
         const message = `MarkIts画像の追加で停止しました。入力と画像を保持しています。再試行できます。\n${String(error)}`;
         reportSubmitIssue(message);
@@ -1750,6 +1838,25 @@ toolbarImageInput.addEventListener("change", () => {
   reader.onerror = () => { pendingImageSelection = null; status("画像を読み込めませんでした。", true); };
   reader.readAsDataURL(file);
 });
+async function uploadMilkdownImage(file: File): Promise<string> {
+  if (busy || !documentState) throw new Error("先に原稿を開いてください。");
+  const current = documentState;
+  const root = projectRoot;
+  const extension = file.name.split('.').at(-1)?.toLowerCase() || '';
+  if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) throw new Error("対応していない画像形式です。");
+  const data = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("画像を読み込めませんでした。"));
+    reader.readAsDataURL(file);
+  });
+  const directory = current.page.split('/').slice(0, -1).join('/');
+  const path = `${directory ? `${directory}/` : ''}assets/image-${crypto.randomUUID()}.${extension}`;
+  await rpc("save-asset", { path, data }, root);
+  if (documentState !== current || projectRoot !== root) throw new Error("編集中の原稿が切り替わりました。画像を挿入し直してください。");
+  return computeRelativeMarkdownPath(current.page, path, workspace?.config.docs || "docs");
+}
+
 function computeRelativeMarkdownPath(pagePath: string, assetPath: string, docsFolder = "docs"): string {
   const pageRelative = pagePath.startsWith(docsFolder + "/") ? pagePath : `${docsFolder}/${pagePath}`;
   const pageDir = pageRelative.split("/").slice(0, -1);
@@ -2017,6 +2124,7 @@ editor.addEventListener("paste", (event: ClipboardEvent) => {
 });
 
 document.addEventListener("paste", (event: ClipboardEvent) => {
+  if (event.target instanceof Node && milkdown.host.contains(event.target)) return;
   if (event.defaultPrevented) return;
   const active = document.activeElement;
   if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
@@ -2041,6 +2149,7 @@ document.addEventListener("paste", (event: ClipboardEvent) => {
 window.addEventListener("keydown", (event: KeyboardEvent) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
     const active = document.activeElement;
+    if (active && milkdown.host.contains(active)) return;
     if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
       return;
     }
@@ -2059,6 +2168,7 @@ const editorColumn = document.querySelector<HTMLElement>(".editor-column");
 if (editorColumn) {
   ["dragenter", "dragover"].forEach((type) => {
     editorColumn.addEventListener(type, (event) => {
+      if (event.target instanceof Node && milkdown.host.contains(event.target)) return;
       event.preventDefault();
       if (documentState) {
         editorColumn.classList.add("drag-over");
@@ -2067,11 +2177,13 @@ if (editorColumn) {
   });
   ["dragleave", "dragend"].forEach((type) => {
     editorColumn.addEventListener(type, (event) => {
+      if (event.target instanceof Node && milkdown.host.contains(event.target)) return;
       event.preventDefault();
       editorColumn.classList.remove("drag-over");
     });
   });
   editorColumn.addEventListener("drop", (event) => {
+    if (event.target instanceof Node && milkdown.host.contains(event.target)) return;
     event.preventDefault();
     editorColumn.classList.remove("drag-over");
     if (!documentState) {

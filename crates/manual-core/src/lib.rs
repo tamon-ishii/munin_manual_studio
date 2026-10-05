@@ -1056,7 +1056,7 @@ mod tests {
         .unwrap();
 
         let updated_readme = fs::read_to_string(&readme).unwrap();
-        assert!(updated_readme.contains("<!-- ai:generated id=readme-intro"));
+        assert!(updated_readme.contains("<!-- ai:task id=readme-intro"));
         assert!(updated_readme.contains("これは素晴らしいプロジェクトです。"));
     }
 
@@ -2331,7 +2331,7 @@ mod tests {
         task::update_task_in_docs(&docs, auto_task, answer_body, None).unwrap();
 
         let updated_content = fs::read_to_string(&page1).unwrap();
-        assert!(updated_content.contains(&format!("<!-- ai:generated id={}", auto_task.id)));
+        assert!(updated_content.contains(&format!("<!-- ai:task id={}", auto_task.id)));
         assert!(updated_content.contains("![guide-screenshot](assets/guide.png)"));
         assert!(
             updated_content.contains(&format!("<!-- ai:task id={} kind=screenshot", auto_task.id))
@@ -2388,7 +2388,7 @@ mod tests {
 
         task::update_task_prompt(&docs, "intro", "新しい指示\n二行目").unwrap();
         let content = fs::read_to_string(&page).unwrap();
-        assert!(content.contains("<!-- ai:task id=intro kind=text\n新しい指示\n二行目\n-->"));
+        assert!(content.contains("prompt=\"新しい指示&#10;二行目\""));
         assert!(content.contains("既存の本文"));
         let changed = task::find_task(&docs, "intro").unwrap();
         assert_eq!(changed.status, "stale");
@@ -2551,10 +2551,10 @@ mod tests {
 
         let updated = fs::read_to_string(&page).unwrap();
         // The visible text must NOT be nested inside duplicate comment tags
-        assert!(updated.contains("<!-- ai:generated id=guide-text"));
+        assert!(updated.contains("<!-- ai:task id=guide-text"));
         assert!(updated.contains("AIが作成した可視のガイド本文です。"));
-        // Check that there is only one <!-- ai:generated tag and one closing tag
-        assert_eq!(updated.matches("<!-- ai:generated").count(), 1);
-        assert_eq!(updated.matches("<!-- /ai:generated -->").count(), 1);
+        // The unified task has one opening and one closing tag
+        assert_eq!(updated.matches("<!-- ai:task").count(), 1);
+        assert_eq!(updated.matches("<!-- /ai:task -->").count(), 1);
     }
 }

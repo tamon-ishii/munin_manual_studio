@@ -13,8 +13,10 @@ const steps = [
 
 steps.push(
   { name: 'Manual Studio frontend build', command: npm, args: ['run', 'manual:build'], timeoutMs: 240_000 },
+  { name: 'Milkdown and Mermaid browser checks', command: process.execPath, args: ['scripts/test_manual_studio_milkdown.mjs'], timeoutMs: 120_000 },
   { name: 'native capture UI mock checks', command: process.execPath, args: ['scripts/test_manual_studio_capture_ui.mjs'], timeoutMs: 120_000 },
   { name: 'manualctl build for browser smoke', command: 'cargo', args: ['build', '-p', 'manual-core', '--bin', 'manualctl', '--offline'], timeoutMs: 300_000 },
+  { name: 'Milkdown AI prompt save checks', command: process.execPath, args: ['scripts/test_manual_studio_ai_prompt.mjs'], timeoutMs: 120_000 },
   { name: 'generation review integration checks', command: process.execPath, args: ['scripts/test_manual_studio_generation_review.mjs'], timeoutMs: 120_000 },
   { name: 'browser smoke checks', command: process.execPath, args: ['scripts/smoke_manual_studio.mjs', '--start-server'], timeoutMs: 240_000 },
   { name: 'Manual Studio Rust checks', command: 'cargo', args: ['test', '--manifest-path', 'apps/manual-studio/src-tauri/Cargo.toml', '--offline'], timeoutMs: 360_000 },

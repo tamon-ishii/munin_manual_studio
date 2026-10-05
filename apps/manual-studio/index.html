@@ -16,7 +16,7 @@
     <div id="sidebar-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="ファイルツリーの幅を変更" aria-orientation="vertical" aria-valuemin="210" aria-valuemax="760" tabindex="0" title="ドラッグしてファイルツリーの幅を変更"></div>
     <main>
       <section id="panel-editor" class="panel">
-        <div class="panel-header"><div><p class="eyebrow">WRITE & REVIEW</p><h1 id="editor-title">Markdownを編集する</h1></div><div class="actions"><span id="save-state" class="muted">原稿を選択してください</span><button id="generate-page" title="この文書のAI指示を実行し、文章・図・撮影結果を更新">この文書のAIタグを更新</button><button id="reload-page">読み直す</button><button id="detach-editor">別ウィンドウで編集</button><button id="save-page" class="primary">保存 <kbd>⌘ / Ctrl S</kbd></button></div></div>
+        <div class="panel-header"><div><p class="eyebrow">WRITE & REVIEW</p><h1 id="editor-title">Markdownを編集する</h1></div><div class="actions"><span id="save-state" class="muted">原稿を選択してください</span><button id="generate-page" title="この文書のAI指示を実行し、文章・図・撮影結果を更新">この文書のAIタグを更新</button><button type="button" id="review-ai-update" hidden>AI更新の差分</button><button id="reload-page">読み直す</button><button id="detach-editor">別ウィンドウで編集</button><button id="save-page" class="primary">保存 <kbd>⌘ / Ctrl S</kbd></button></div></div>
         <div class="editor-tools">
           <div class="formatting-toolbar" role="toolbar" aria-label="Markdown書式">
             <span>書式</span>
@@ -35,6 +35,7 @@
             <button type="button" data-format="numbered" title="番号付きリスト" aria-label="番号付きリスト">1. リスト</button>
             <button type="button" data-format="quote" title="引用" aria-label="引用">❞ 引用</button>
             <button type="button" data-format="inline-code" title="インラインコード" aria-label="インラインコード">`code`</button>
+            <button type="button" data-format="mermaid" title="Mermaidの図を挿入" aria-label="Mermaidの図を挿入">Mermaid</button>
             <button type="button" data-format="code-block" title="コードブロック" aria-label="コードブロック">コード枠</button>
             <button type="button" data-format="task-list" title="タスクリスト" aria-label="タスクリスト">☑ タスク</button>
             <button type="button" data-format="indent" title="選択行をインデント" aria-label="インデント">→ インデント</button>
@@ -43,13 +44,8 @@
           </div>
           <details class="instruction-toolbar"><summary>AI指示を追加</summary><div class="instruction-actions"><button type="button" data-insert="text">AI文章の指示</button><button type="button" data-insert="screenshot">撮影の指示</button><button type="button" data-insert="diagram">依存図の指示</button><span class="muted">追加した指示は「AIタグ一覧」に表示されます。</span></div></details>
         </div>
-        <div id="editor-workspace" class="editor-workspace" data-tag-position="right">
-          <div class="editor-split"><div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div><div id="editor-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="Markdownとプレビューの幅を変更" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="ドラッグしてMarkdownとプレビューの幅を変更"></div><div class="preview-column"><div class="column-label">入力中のプレビュー <span title="MermaidやMkDocs固有の表示は出力・設定の下書きビルドで確認できます">保存前の変更も表示・スクロール同期</span></div><iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe></div></div>
-          <div id="document-tags-resizer" class="pane-resizer vertical-resizer document-tags-resizer" role="separator" aria-label="AIタグペインの幅を変更" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="620" aria-valuenow="320" tabindex="0" title="ドラッグしてAIタグペインの幅を変更"></div>
-          <section id="document-tags-pane" class="document-tags document-tags-pane" aria-label="この文書のAIタグ" data-tag-position="right">
-            <div id="document-tags-handle" class="document-tags-header document-tags-handle" tabindex="0" aria-label="ドラッグしてAIタグペインを移動"><strong>この文書のAIタグ</strong><button type="button" id="review-ai-update" hidden>AI更新の差分</button></div>
-            <div id="document-tag-list" class="document-tag-list"></div>
-          </section>
+        <div id="editor-workspace" class="editor-workspace">
+          <div class="editor-split"><div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div><div id="editor-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="Markdownとプレビューの幅を変更" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="ドラッグしてMarkdownとプレビューの幅を変更"></div><div class="preview-column"><div class="column-label">入力中のプレビュー <span title="Mermaidの図も表示できます。MkDocs固有の表示は下書きビルドで確認できます">保存前の変更も表示・スクロール同期</span></div><iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe></div></div>
         </div>
       </section>
       <section id="panel-tasks" class="panel" hidden>
@@ -67,7 +63,7 @@
       </section>
       <section id="panel-appearance" class="panel" hidden>
         <div class="panel-header"><div><p class="eyebrow">APPEARANCE</p><h1>外観設定</h1></div></div>
-        <div class="card display-settings"><h2>表示設定</h2><label for="document-tags-position">この文書のAIタグの場所<select id="document-tags-position"><option value="right">右</option><option value="left">左</option><option value="floating">自由配置</option></select></label><label for="ui-theme">カラーテーマ<select id="ui-theme"><optgroup label="白ベース"><option value="forest">フォレスト</option><option value="blue">ブルー</option><option value="warm">ウォーム</option></optgroup><optgroup label="黒ベース"><option value="charcoal">チャコール</option><option value="midnight">ミッドナイト</option><option value="dark-forest">ダークフォレスト</option></optgroup></select></label><p class="muted">選ぶとすぐに反映され、この端末のほかのMunin Manual Studioウィンドウにも同期します。</p></div>
+        <div class="card display-settings"><h2>表示設定</h2><label for="editor-font-size">編集画面の文字サイズ（px）<input id="editor-font-size" type="number" min="12" max="28" step="1" value="14" /></label><p class="muted">12〜28pxで設定できます。本文・AIへの指示・Markdownソースに反映します。</p><label for="ui-theme">カラーテーマ<select id="ui-theme"><optgroup label="白ベース"><option value="forest">フォレスト</option><option value="blue">ブルー</option><option value="warm">ウォーム</option></optgroup><optgroup label="黒ベース"><option value="charcoal">チャコール</option><option value="midnight">ミッドナイト</option><option value="dark-forest">ダークフォレスト</option></optgroup></select></label><p class="muted">選ぶとすぐに反映され、この端末のほかのMunin Manual Studioウィンドウにも同期します。</p></div>
       </section>
       <section id="panel-publish" class="panel" hidden>
         <div class="panel-header"><div><p class="eyebrow">PUBLISH</p><h1>原稿を確認して、マニュアルを出力する</h1></div></div>

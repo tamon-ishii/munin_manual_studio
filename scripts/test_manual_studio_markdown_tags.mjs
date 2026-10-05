@@ -17,4 +17,5 @@ assert.deepEqual([...collectAiTagIds(markdown)].sort(), [
   'task-page-screenshot-1', 'task-page-screenshot-10', 'task-page-screenshot-2',
 ].sort());
 assert.equal(collectAiTagIds(markdown).has('task-page-screenshot-12'), false, 'id prefixes and prompt prose do not collide');
+assert.deepEqual([...collectAiTagIds('<!-- ai:task id="guide" kind=text prompt="id=fake > 説明" -->\n本文に id=other\n<!-- /ai:task -->')], ['guide']);
 console.log('Manual Studio Markdown AI tag ID checks passed.');

@@ -1,7 +1,7 @@
 {
   "name": "munin-manual-studio",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "manual:dev": "vite --config apps/manual-studio/vite.config.ts",
@@ -15,7 +15,12 @@
     "manual:smoke-native": "node scripts/smoke_manual_markits_native.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.2.0"
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/language-data": "^6.5.2",
+    "@milkdown/crepe": "^7.22.2",
+    "@milkdown/kit": "^7.22.2",
+    "@tauri-apps/api": "^2.2.0",
+    "mermaid": "^11.17.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",

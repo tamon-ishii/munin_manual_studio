@@ -145,8 +145,42 @@ pub enum PageTag {
 }
 
 pub fn task_regex() -> Regex {
-    Regex::new(r"(?s)<!--\s*ai:task(?P<attrs>[^\r\n]*)\r?\n(?P<prompt>.*?)\r?\n-->")
+    Regex::new(r"(?s)<!--\s*ai:task(?P<attrs>[^\r\n>]*)\r?\n(?P<prompt>.*?)\r?\n-->")
         .expect("valid task regex")
+}
+
+/// Unified task blocks keep the instruction in a readable HTML attribute.
+pub fn task_block_regex() -> Regex {
+    Regex::new(r#"(?s)<!--\s*ai:task\b(?P<attrs>(?:"[^"]*"|'[^']*'|[^>"'])*)-->\r?\n?(?P<body>.*?)<!--\s*/ai:task\s*-->"#).unwrap()
+}
+
+pub fn escape_prompt(prompt: &str) -> String {
+    prompt
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\r', "&#13;")
+        .replace('\n', "&#10;")
+}
+
+fn decode_prompt(prompt: &str) -> String {
+    prompt
+        .replace("&#10;", "\n")
+        .replace("&#13;", "\r")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+pub fn render_task_block(task: &Task, body: &str, created: &str, approved: Option<&str>) -> String {
+    let approval = approved
+        .map(|value| format!(" approved-at={value}"))
+        .unwrap_or_default();
+    format!("<!-- ai:task id={} kind={} prompt=\"{}\" created-at={created} source-sha256={}{approval} -->\n{}\n<!-- /ai:task -->",
+        task.id, task.kind, escape_prompt(&task.prompt), task.source_sha256, body.trim())
 }
 
 pub fn generated_regex() -> Regex {
@@ -281,12 +315,18 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
 }
 
 fn extract_attr<'a>(re: &Regex, s: &'a str) -> Option<&'a str> {
-    re.captures(s).and_then(|cap| {
-        cap.get(1)
-            .or_else(|| cap.get(2))
-            .or_else(|| cap.get(3))
-            .map(|m| m.as_str())
-    })
+    let attributes =
+        Regex::new(r#"(?:^|\s)[a-zA-Z][a-zA-Z0-9_-]*=(?:"[^"]*"|'[^']*'|[^\s>]+)"#).unwrap();
+    for token in attributes.find_iter(s) {
+        if let Some(cap) = re.captures(token.as_str()) {
+            return cap
+                .get(1)
+                .or_else(|| cap.get(2))
+                .or_else(|| cap.get(3))
+                .map(|m| m.as_str());
+        }
+    }
+    None
 }
 
 pub fn parse_page_tags(
@@ -295,6 +335,41 @@ pub fn parse_page_tags(
     existing_ids: &mut HashSet<String>,
 ) -> Result<Vec<PageTag>, String> {
     let code_blocks = ignored_tag_ranges(content);
+    let marker_re =
+        Regex::new(r#"<!--\s*(?P<close>/)?ai:task\b(?P<attrs>(?:"[^"]*"|'[^']*'|[^>"'])*)-->"#)
+            .unwrap();
+    let mut open: Option<(usize, usize, String)> = None;
+    let mut blocks = Vec::new();
+    for cap in marker_re.captures_iter(content) {
+        let marker = cap.get(0).unwrap();
+        if is_inside_ranges(&(marker.start()..marker.end()), &code_blocks) {
+            continue;
+        }
+        if cap.name("close").is_some() {
+            let Some((start, body_start, attrs)) = open.take() else {
+                return Err(format!("Unmatched ai:task closing tag in page: {page_rel}"));
+            };
+            blocks.push((
+                start..marker.end(),
+                attrs,
+                content[body_start..marker.start()].trim().to_string(),
+            ));
+        } else if cap.name("attrs").unwrap().as_str().split('\n').next().unwrap_or("").contains("prompt=") {
+            if open.is_some() {
+                return Err(format!("Nested ai:task tags in page: {page_rel}"));
+            }
+            open = Some((
+                marker.start(),
+                marker.end(),
+                cap.name("attrs").unwrap().as_str().to_string(),
+            ));
+        } else if open.is_some() {
+            return Err(format!("Nested ai:task tags in page: {page_rel}"));
+        }
+    }
+    if open.is_some() {
+        return Err(format!("Unclosed ai:task tag in page: {page_rel}"));
+    }
     let t_re = task_regex();
     let g_re = generated_regex();
 
@@ -307,6 +382,8 @@ pub fn parse_page_tags(
         r#"(?:^|\s)prompt-b64=(?:"([A-Za-z0-9+/=]+)"|'([A-Za-z0-9+/=]+)'|([A-Za-z0-9+/=]+))"#,
     )
     .unwrap();
+    let plain_prompt_re =
+        Regex::new(r#"(?:^|\s)prompt=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap();
     let approved_re =
         Regex::new(r#"(?:^|\s)approved-at=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
     let valid_id_re = Regex::new(r#"^[a-z][a-z0-9_-]*$"#).unwrap();
@@ -328,6 +405,12 @@ pub fn parse_page_tags(
         let m = cap.get(0).unwrap();
         let range = m.start()..m.end();
         if is_inside_ranges(&range, &code_blocks) {
+            continue;
+        }
+        if blocks
+            .iter()
+            .any(|(block, _, _)| range.start >= block.start && range.start < block.end)
+        {
             continue;
         }
         let attrs = cap
@@ -370,6 +453,33 @@ pub fn parse_page_tags(
             .to_string();
         let body = cap.name("body").unwrap().as_str().to_string();
         raw_gens.push(RawGenerated { range, attrs, body });
+    }
+
+    for (range, mut attrs, body) in blocks {
+        let prompt = decode_prompt(
+            extract_attr(&plain_prompt_re, &attrs)
+                .ok_or_else(|| format!("Missing prompt in ai:task in page: {page_rel}"))?,
+        );
+        if prompt.trim().is_empty() {
+            return Err(format!("Empty instruction in page: {page_rel}"));
+        }
+        let kind = extract_attr(&kind_re, &attrs).unwrap_or("text");
+        if !matches!(kind, "text" | "screenshot" | "diagram") {
+            return Err(format!("Invalid task kind: '{kind}'"));
+        }
+        if extract_attr(&id_re, &attrs).is_none() {
+            let id = generate_auto_id(kind, page_rel, &prompt, existing_ids);
+            attrs = format!(" id={id}{attrs}");
+        }
+        if body.is_empty() {
+            raw_tasks.push(RawTask {
+                range,
+                attrs,
+                prompt,
+            });
+        } else {
+            raw_gens.push(RawGenerated { range, attrs, body });
+        }
     }
 
     // An instruction immediately followed by its answer is one updateable asset.
@@ -476,6 +586,8 @@ pub fn parse_page_tags(
             .to_string();
         let prompt = if let Some(source_prompt) = paired_prompts.get(&gen_index) {
             source_prompt.clone()
+        } else if let Some(plain) = extract_attr(&plain_prompt_re, &g.attrs) {
+            decode_prompt(plain)
         } else if let Some(encoded) = extract_attr(&prompt_re, &g.attrs) {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(encoded)
@@ -669,9 +781,9 @@ pub fn find_task(templates: &Path, task_id: &str) -> Result<Task, String> {
 
 pub fn update_task_prompt(templates: &Path, task_id: &str, prompt: &str) -> Result<(), String> {
     let prompt = prompt.trim();
-    if prompt.is_empty() || prompt.contains("<!--") || prompt.contains("-->") {
+    if prompt.is_empty() {
         return Err(
-            "Task instruction must be nonempty and cannot contain HTML comment markers".to_string(),
+            "Task instruction must be nonempty".to_string(),
         );
     }
     let task = find_task(templates, task_id)?;
@@ -681,6 +793,35 @@ pub fn update_task_prompt(templates: &Path, task_id: &str, prompt: &str) -> Resu
         templates.parent().unwrap_or(templates).join(&task.page)
     };
     let content = fs::read_to_string(&page_path).map_err(|e| e.to_string())?;
+    let mut ids = HashSet::new();
+    let tags = parse_page_tags(&task.page, &content, &mut ids)?;
+    for tag in &tags {
+        let (range, current) = match tag {
+            PageTag::Task { range, task } | PageTag::Generated { range, task, .. } => (range, task),
+        };
+        if current.id != task_id {
+            continue;
+        }
+        let old = &content[range.clone()];
+        if let Some(cap) = task_block_regex().captures(old) {
+            let attr_re = Regex::new(r#"(?:^|\s)prompt=(?:"[^"]*"|'[^']*'|[^\s>]+)"#).unwrap();
+            let attrs = cap.name("attrs").unwrap();
+            let next = attr_re.replace(attrs.as_str(), |_: &regex::Captures| {
+                format!(" prompt=\"{}\"", escape_prompt(prompt))
+            });
+            let replacement = format!("{}{}{}", &old[..attrs.start()], next, &old[attrs.end()..]);
+            let updated = format!(
+                "{}{}{}",
+                &content[..range.start],
+                replacement,
+                &content[range.end..]
+            );
+            return fs::write(&page_path, updated).map_err(|e| e.to_string());
+        }
+    }
+    if prompt.contains("<!--") || prompt.contains("-->") {
+        return Err("Legacy task instruction cannot contain HTML comment markers".to_string());
+    }
     let code_blocks = ignored_tag_ranges(&content);
     let id_re = Regex::new(r#"(?:^|\s)id=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
     let mut matches = Vec::new();
@@ -729,6 +870,12 @@ pub fn clean_generated_body(body: &str) -> String {
     let trailing_gen = Regex::new(r"(?s)\r?\n?<!--\s*/ai:generated\s*-->\z").unwrap();
 
     loop {
+        if let Some(caps) = task_block_regex().captures(&cleaned) {
+            if caps.get(0).unwrap().as_str() == cleaned {
+                cleaned = caps.name("body").unwrap().as_str().trim().to_string();
+                continue;
+            }
+        }
         if let Some(caps) = gen_wrap.captures(&cleaned) {
             cleaned = caps.name("body").unwrap().as_str().trim().to_string();
             continue;
@@ -776,24 +923,9 @@ pub fn update_task_in_docs(
     }
     let content = fs::read_to_string(&page_path).map_err(|e| e.to_string())?;
     let task_id = &task.id;
-    let kind = &task.kind;
     let created = utc_now();
-    let hash_val = &task.source_sha256;
-    let approved_attr = approved
-        .map(|a| format!(" approved-at={a}"))
-        .unwrap_or_default();
-    let hash_attr = if !hash_val.is_empty() {
-        format!(" source-sha256={hash_val}")
-    } else {
-        String::new()
-    };
-    let prompt_attr = format!(" prompt-b64={}", encode_prompt(&task.prompt));
     let clean_body = clean_generated_body(body);
-
-    let replacement = format!(
-        "<!-- ai:generated id={task_id} kind={kind} created-at={created}{hash_attr}{prompt_attr}{approved_attr} -->\n{}\n<!-- /ai:generated -->",
-        clean_body.trim()
-    );
+    let replacement = render_task_block(task, &clean_body, &created, approved);
 
     let page_rel = task.page.replace('\\', "/");
     let mut ids = HashSet::new();
@@ -809,7 +941,17 @@ pub fn update_task_in_docs(
             PageTag::Task { .. } => unreachable!(),
         };
         let mut new_content = String::with_capacity(content.len() + replacement.len());
-        new_content.push_str(&content[..range.start]);
+        let mut start = range.start;
+        let id_re = Regex::new(r#"(?:^|\s)id=(?:"([^"]+)"|'([^']+)'|([^\s>]+))"#).unwrap();
+        for cap in task_regex().captures_iter(&content[..range.start]) {
+            let source = cap.get(0).unwrap();
+            if extract_attr(&id_re, cap.name("attrs").unwrap().as_str()) == Some(task_id)
+                && content[source.end()..range.start].trim().is_empty()
+            {
+                start = source.start();
+            }
+        }
+        new_content.push_str(&content[..start]);
         new_content.push_str(&replacement);
         new_content.push_str(&content[range.end..]);
         fs::write(&page_path, new_content.as_bytes()).map_err(|e| e.to_string())?;
@@ -821,17 +963,8 @@ pub fn update_task_in_docs(
             PageTag::Task { task: t, .. } if t.id == *task_id
         )
     }) {
-        let source_tag = &content[range.start..range.end];
-        let id_attr_re = Regex::new(r#"(?:^|\s)id=(?:\"[^\"]+\"|'[^']+'|[^\s>]+)"#).unwrap();
-        let task_tag = if id_attr_re.is_match(source_tag) {
-            source_tag.to_string()
-        } else {
-            source_tag.replacen("<!-- ai:task", &format!("<!-- ai:task id={task_id}"), 1)
-        };
-        let mut new_content = String::with_capacity(content.len() + replacement.len() + 2);
+        let mut new_content = String::with_capacity(content.len() + replacement.len());
         new_content.push_str(&content[..range.start]);
-        new_content.push_str(&task_tag);
-        new_content.push_str("\n\n");
         new_content.push_str(&replacement);
         new_content.push_str(&content[range.end..]);
         fs::write(&page_path, new_content.as_bytes()).map_err(|e| e.to_string())?;
@@ -878,31 +1011,34 @@ pub fn approve_task(templates: &Path, generated: &Path, task_id: &str) -> Result
         PageTag::Generated { task: t, .. } => t.id == task_id,
         _ => false,
     }) {
-        if let PageTag::Generated { range, body, .. } = target_tag {
+        if let PageTag::Generated { range, .. } = target_tag {
             let old_block = &content[range.start..range.end];
-            let g_re = generated_regex();
-            if let Some(cap) = g_re.captures(old_block) {
-                let mut attrs = cap
-                    .name("attrs")
-                    .map(|a| a.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if !attrs.contains("approved-at=") {
-                    attrs = format!("{attrs} approved-at={now}");
+            let header_end = old_block.find("-->").ok_or("Missing task header")?;
+            let header = &old_block[..header_end];
+            let re_attr = Regex::new(r#"\s+approved-at=(?:"[^"]*"|'[^']*'|[^\s>]+)"#).unwrap();
+            let tokens =
+                Regex::new(r#"(?:^|\s)[a-zA-Z][a-zA-Z0-9_-]*=(?:"[^"]*"|'[^']*'|[^\s>]+)"#)
+                    .unwrap();
+            let header = tokens.replace_all(header, |cap: &regex::Captures| {
+                let token = cap.get(0).unwrap().as_str();
+                if re_attr.is_match(token) {
+                    String::new()
                 } else {
-                    let re_attr = Regex::new(r"approved-at=\S+").unwrap();
-                    attrs = re_attr
-                        .replace(&attrs, format!("approved-at={now}").as_str())
-                        .to_string();
+                    token.to_string()
                 }
-                let replacement =
-                    format!("<!-- ai:generated{attrs} -->\n{body}\n<!-- /ai:generated -->");
-                let mut new_content = String::with_capacity(content.len() + replacement.len());
-                new_content.push_str(&content[..range.start]);
-                new_content.push_str(&replacement);
-                new_content.push_str(&content[range.end..]);
-                fs::write(&page_path, new_content.as_bytes()).map_err(|e| e.to_string())?;
-            }
+            });
+            let replacement = format!(
+                "{} approved-at={now} {}",
+                header.trim_end(),
+                &old_block[header_end..]
+            );
+            let updated = format!(
+                "{}{}{}",
+                &content[..range.start],
+                replacement,
+                &content[range.end..]
+            );
+            fs::write(&page_path, updated).map_err(|e| e.to_string())?;
         }
     }
 
@@ -989,7 +1125,7 @@ mod replacement_regressions {
             )
             .unwrap();
             let saved = fs::read_to_string(&page).unwrap();
-            assert_eq!(saved.matches("<!-- ai:generated id=guide ").count(), 1);
+            assert_eq!(saved.matches("<!-- /ai:task -->").count(), 1);
             assert_eq!(saved.matches("Answer version ").count(), 1);
             assert!(saved.contains(&format!("Answer version {number}")));
             assert!(saved.starts_with("# Manual intro"));
@@ -1001,5 +1137,94 @@ mod replacement_regressions {
         let before = fs::read(&page).unwrap();
         assert!(update_task_in_docs(&docs, &stale_task, "Unwanted duplicate", None).is_err());
         assert_eq!(fs::read(&page).unwrap(), before);
+    }
+}
+
+#[cfg(test)]
+mod unified_task_tests {
+    use super::*;
+    fn parse(content: &str) -> Result<Vec<PageTag>, String> {
+        parse_page_tags("index.md", content, &mut HashSet::new())
+    }
+    #[test]
+    fn unified_instruction_body_and_metadata_round_trip() {
+        let temp = tempfile::tempdir().unwrap();
+        let page = temp.path().join("index.md");
+        fs::write(&page, "# Before\n\n<!-- ai:task id=guide kind=text prompt=\"初心者向け &quot;保存&quot;&#10;approved-at=fake を説明\" -->\n\n<!-- /ai:task -->\n\nKeep me").unwrap();
+        let task = find_task(temp.path(), "guide").unwrap();
+        assert_eq!(task.status, "missing");
+        assert_eq!(task.prompt, "初心者向け \"保存\"\napproved-at=fake を説明");
+        let body = "本文\n\n```mermaid\ngraph TD\n A --> B\n```";
+        update_task_in_docs(temp.path(), &task, body, None).unwrap();
+        let task = find_task(temp.path(), "guide").unwrap();
+        assert_eq!(task.status, "current");
+        approve_task(temp.path(), &temp.path().join("ai"), "guide").unwrap();
+        let approved = find_task(temp.path(), "guide").unwrap();
+        assert_eq!(approved.prompt, task.prompt);
+        assert_eq!(approved.status, "approved");
+        update_task_in_docs(temp.path(), &approved, body, None).unwrap();
+        let saved = fs::read_to_string(&page).unwrap();
+        assert!(!saved.contains("ai:generated"));
+        assert!(saved.contains(body));
+        assert!(saved.ends_with("Keep me"));
+        update_task_prompt(temp.path(), "guide", "新しい指示\n二行目 & \"引用\"").unwrap();
+        let task = find_task(temp.path(), "guide").unwrap();
+        assert_eq!(task.status, "stale");
+        assert_eq!(task.prompt, "新しい指示\n二行目 & \"引用\"");
+        assert!(fs::read_to_string(&page).unwrap().contains(body));
+        approve_task(temp.path(), &temp.path().join("ai"), "guide").unwrap();
+        assert_eq!(find_task(temp.path(), "guide").unwrap().status, "approved");
+    }
+    #[test]
+    fn unified_blocks_validate_structure_and_ignore_fenced_examples() {
+        for content in [
+            "<!-- ai:task id=x prompt=\"説明\" -->\n本文",
+            "<!-- /ai:task -->",
+            "<!-- ai:task id=x prompt=\"説明\" --><!-- ai:task id=y prompt=\"説明\" --><!-- /ai:task --><!-- /ai:task -->",
+            "<!-- ai:task id=x prompt=\"\" --><!-- /ai:task -->",
+            "<!-- ai:task id=x kind=invalid prompt=\"説明\" --><!-- /ai:task -->",
+            "<!-- ai:task id=x prompt=\"説明\" --><!-- /ai:task -->\n<!-- ai:task id=x prompt=\"説明\" --><!-- /ai:task -->",
+        ] { assert!(parse(content).is_err(), "{content}"); }
+        assert!(parse(
+            "```html\n<!-- ai:task id=x prompt=\"説明\" -->\n本文\n<!-- /ai:task -->\n```"
+        )
+        .unwrap()
+        .is_empty());
+        let parsed =
+            parse("<!-- ai:task id=x prompt=\"説明 > 補足\" -->\n編集済み本文\n<!-- /ai:task -->")
+                .unwrap();
+        let PageTag::Generated { task, body, .. } = &parsed[0] else {
+            panic!()
+        };
+        assert_eq!(task.prompt, "説明 > 補足");
+        assert_eq!(body, "編集済み本文");
+    }
+    #[test]
+    fn closing_markers_in_code_examples_do_not_truncate_the_body() {
+        let body = "Example:\n```html\n<!-- ai:task id=example prompt=\"説明\" -->\n本文\n<!-- /ai:task -->\n```\nAfter example";
+        let content =
+            format!("<!-- ai:task id=guide prompt=\"説明\" -->\n{body}\n<!-- /ai:task -->");
+        let tags = parse(&content).unwrap();
+        assert_eq!(tags.len(), 1);
+        let PageTag::Generated {
+            body: parsed_body, ..
+        } = &tags[0]
+        else {
+            panic!()
+        };
+        assert_eq!(parsed_body, body);
+    }
+    #[test]
+    fn legacy_pair_migrates_without_duplicate_instruction() {
+        let temp = tempfile::tempdir().unwrap();
+        let page = temp.path().join("index.md");
+        fs::write(&page, "<!-- ai:task id=guide kind=text\n説明\n-->\n\n<!-- ai:generated id=guide kind=text -->\n旧本文\n<!-- /ai:generated -->\nKeep").unwrap();
+        let task = find_task(temp.path(), "guide").unwrap();
+        update_task_in_docs(temp.path(), &task, "新本文", None).unwrap();
+        let saved = fs::read_to_string(page).unwrap();
+        assert_eq!(saved.matches("<!-- ai:task ").count(), 1);
+        assert!(!saved.contains("ai:generated"));
+        assert!(saved.contains("prompt=\"説明\""));
+        assert_eq!(parse(&saved).unwrap().len(), 1);
     }
 }

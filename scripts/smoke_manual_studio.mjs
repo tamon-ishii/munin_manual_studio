@@ -58,6 +58,11 @@ try {
     const source = await response.text();
     await route.fulfill({ response, body: `${source}\nwindow.__manualStudioRaceTest = { openPage, openProject, saveDocument, refreshWorkspace, get documentState() { return documentState; } };\n` });
   });
+  const sourceEditor = async target => {
+    await target.waitForSelector('#milkdown-editor .ProseMirror', { state: 'attached' });
+    if (!await target.locator('#markdown-editor').isVisible()) await target.getByRole('button', { name: 'Markdownソース', exact: true }).click();
+    return target.locator('#markdown-editor');
+  };
   const idle = async (target = page) => {
     await target.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
   };
@@ -68,6 +73,34 @@ try {
   await page.goto(`${base}/?root=${encodeURIComponent(root)}`);
   await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Original text'));
   await idle();
+  await page.waitForSelector("#milkdown-editor .ProseMirror");
+  await page.locator('.ProseMirror p').filter({ hasText: 'Original text' }).click();
+  await page.keyboard.press('End'); await page.keyboard.type(' rich edit');
+  assert.match(await page.locator('#markdown-editor').inputValue(), /Original text rich edit/);
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
+  assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(), /rich edit/);
+  assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives text Undo');
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: 'Mermaidの図を挿入', exact: true }).click();
+  assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives diagram insertion');
+  await page.locator('#milkdown-editor .mermaid-preview svg').waitFor();
+  await page.frameLocator('#markdown-preview').locator('.mermaid-preview svg').waitFor();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
+  assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives diagram Undo');
+  const addNativeAiTag = async label => {
+    await page.locator('.milkdown-top-bar .top-bar-heading-button').filter({ hasText: 'AIタグを追加' }).click();
+    await page.locator('.milkdown-top-bar').getByRole('button', { name: label, exact: true }).click();
+  };
+  for (const [label, kind] of [['AI文章の指示', 'text'], ['依存図の指示', 'diagram']]) {
+    await addNativeAiTag(label);
+    assert.match(await page.locator('#markdown-editor').inputValue(), new RegExp(`ai:task id=[^\\s]+ kind=${kind}`));
+    assert.equal(await page.locator('#markdown-editor').isVisible(), false);
+    assert.match(await page.locator('.milkdown-ai-task-summary').innerText(), /task-index/);
+    await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
+  }
+  await addNativeAiTag('撮影の指示');
+  await page.locator('#screenshot-task-dialog[open]').waitFor();
+  await page.locator('#cancel-screenshot-task').click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   const initialPaneValues = await page.evaluate(() => ({
     sidebarWidth: Number.parseFloat(document.querySelector('#app-layout').style.getPropertyValue('--sidebar-width')),
     editorRatio: Number(document.querySelector('#editor-resizer').dataset.ratio),
@@ -77,30 +110,6 @@ try {
   assert.equal(await page.locator('#generate-page').innerText(), 'この文書のAIタグを更新');
   const editorHeight = await page.locator('#markdown-editor').evaluate(node => node.clientHeight);
   assert.ok(editorHeight > 400, `editor must preserve vertical room: ${editorHeight}px`);
-  const setTagPosition = async position => {
-    await page.locator('[data-tab="appearance"]').click();
-    await page.locator('#document-tags-position').selectOption(position);
-    await page.locator('[data-tab="editor"]').click();
-  };
-  await setTagPosition('left');
-  let paneBounds = await page.locator('#document-tags-pane').boundingBox();
-  let splitBounds = await page.locator('.editor-split').boundingBox();
-  assert.ok(paneBounds.x < splitBounds.x, 'left dock places tags before editor');
-  await setTagPosition('right');
-  paneBounds = await page.locator('#document-tags-pane').boundingBox();
-  splitBounds = await page.locator('.editor-split').boundingBox();
-  assert.ok(paneBounds.x >= splitBounds.x + splitBounds.width, 'right dock places tags after editor');
-  const tagHandle = page.locator('#document-tags-handle strong');
-  const tagHandleBounds = await tagHandle.boundingBox();
-  await page.mouse.move(tagHandleBounds.x + 15, tagHandleBounds.y + 7);
-  await page.mouse.down();
-  await page.mouse.move(tagHandleBounds.x - 90, tagHandleBounds.y + 90, { steps: 5 });
-  await page.mouse.up();
-  assert.equal(await page.locator('#document-tags-position').inputValue(), 'floating', 'drag detaches the tags pane');
-  assert.equal(await page.locator('#document-tags-pane').evaluate(node => getComputedStyle(node).position), 'fixed');
-  await setTagPosition('right');
-  assert.equal(await page.locator('#document-tags-pane select, #document-tags-collapse, [data-open-all-tags]').count(), 0, 'tag pane has no placement, collapse, or all-tags controls');
-  await page.screenshot({ path: '/tmp/munin-editor-layout.png' });
 
   for (const handleId of ['sidebar-resizer', 'editor-resizer']) {
     const handle = page.locator(`#${handleId}`);
@@ -145,7 +154,7 @@ try {
   await page.locator('#undo-edit').click();
   await page.locator('[data-format="italic"]').click();
   assert.equal(await page.locator('#redo-edit').isEnabled(), false);
-  await page.locator('#markdown-editor').fill(originalMarkdown);
+  await (await sourceEditor(page)).fill(originalMarkdown);
   await page.locator('#markdown-editor').evaluate(node => {
     const start = node.value.indexOf('Original text');
     node.setSelectionRange(start, start + 'Original text'.length);
@@ -153,7 +162,7 @@ try {
   await page.locator('[data-format="link"]').click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /\[Original text\]\(https:\/\/example\.com\)/);
   assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart, node.selectionEnd)), 'https://example.com');
-  await page.locator('#markdown-editor').fill(originalMarkdown);
+  await (await sourceEditor(page)).fill(originalMarkdown);
   await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(node.value.length, node.value.length));
   await page.locator('[data-format="table"]').click();
   const tableDialog = page.locator('#markdown-table-dialog');
@@ -178,7 +187,7 @@ try {
   assert.equal((await page.locator('#markdown-editor').inputValue()).includes('備考'), true);
   await page.locator('[data-format="table"]').click();
   await tableDialog.locator('[data-table-cancel]').click();
-  await page.locator('#markdown-editor').fill(originalMarkdown);
+  await (await sourceEditor(page)).fill(originalMarkdown);
   assert.equal(await page.locator('#page-list [data-page="docs/index.md"]').count(), 1);
   assert.equal(await page.locator('#page-list .tree-static[title="project.txt"]').count(), 1);
   assert.equal(await page.locator('#page-list [data-page="docs/z-guide/intro.md"]').count(), 1);
@@ -190,7 +199,7 @@ try {
   assert.match(await page.locator('#markdown-editor').inputValue(), /Project note/);
   assert.equal(await page.locator('#undo-edit').isEnabled(), false);
   const originalNote = await page.locator('#markdown-editor').inputValue();
-  await page.locator('#markdown-editor').fill(originalNote + '\nUnsaved dialog check\n');
+  await (await sourceEditor(page)).fill(originalNote + '\nUnsaved dialog check\n');
   await page.locator('#page-list [data-page="docs/index.md"]').click();
   assert.equal(await page.locator('#unsaved-changes-dialog button').count(), 3);
   await page.locator('[data-unsaved-action=cancel]').click();
@@ -203,7 +212,7 @@ try {
   assert.match(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), /Unsaved dialog check/);
   await page.locator('#page-list [data-page="notes/extra.md"]').click();
   await idle();
-  await page.locator('#markdown-editor').fill('This change must be discarded');
+  await (await sourceEditor(page)).fill('This change must be discarded');
   await page.locator('#page-list [data-page="docs/index.md"]').click();
   await page.locator('[data-unsaved-action=discard]').click();
   await idle();
@@ -304,7 +313,7 @@ try {
   const oldSavePage = await page.evaluate(() => window.__manualStudioRaceTest.documentState.page);
   const newerPage = await page.locator('#page-list [data-page]').evaluateAll(nodes => nodes.map(node => node.dataset.page).find(candidate => candidate?.endsWith('/intro.md')));
   assert.ok(newerPage, 'fixture project must expose its nested guide page');
-  await page.locator('#markdown-editor').fill('# Save response from old document\n');
+  await (await sourceEditor(page)).fill('# Save response from old document\n');
   let releaseOldSave;
   let oldSaveStarted;
   const oldSaveGate = new Promise(resolve => { releaseOldSave = resolve; });
@@ -353,7 +362,7 @@ try {
     window.__pendingWorkspaceRefresh = window.__manualStudioRaceTest.refreshWorkspace(true);
   });
   await awaitRpcObserved(refreshReadObserved, 'refresh editor-read');
-  await page.locator('#markdown-editor').fill('# User edit during refresh\n');
+  await (await sourceEditor(page)).fill('# User edit during refresh\n');
   releaseRefreshRead();
   await page.evaluate(() => window.__pendingWorkspaceRefresh);
   assert.equal(await page.locator('#markdown-editor').inputValue(), '# User edit during refresh\n');
@@ -361,7 +370,7 @@ try {
   await page.unroute('**/__manual/rpc');
 
   const longDraft = Array.from({ length: 120 }, (_, index) => `Paragraph ${index + 1}: scroll synchronization check.\n\n`).join('');
-  await page.locator('#markdown-editor').fill(`# Long draft\n\n${longDraft}`);
+  await (await sourceEditor(page)).fill(`# Long draft\n\n${longDraft}`);
   await page.frameLocator('#markdown-preview').locator('body').filter({ hasText: 'Paragraph 120' }).waitFor();
   await page.locator('#markdown-editor').evaluate(node => {
     node.scrollTop = (node.scrollHeight - node.clientHeight) * 0.65;
@@ -381,7 +390,7 @@ try {
     const ratio = editor.scrollTop / (editor.scrollHeight - editor.clientHeight);
     return ratio > 0.15 && ratio < 0.35;
   });
-  await page.locator('#markdown-editor').fill('# Edited guide\n\n**Saved content**\n');
+  await (await sourceEditor(page)).fill('# Edited guide\n\n**Saved content**\n');
   await page.locator('#save-page').click();
   await idle();
   assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /Saved content/);
@@ -451,10 +460,12 @@ try {
   const popup = await popupPromise;
   await popup.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Saved content'));
   await idle(popup);
-  await popup.locator('#markdown-editor').fill('# Updated in another window\n');
+  await popup.waitForSelector("#milkdown-editor .ProseMirror");
+  await popup.getByRole("button", { name: "Markdownソース", exact: true }).click();
+  await (await sourceEditor(popup)).fill('# Updated in another window\n');
   await popup.locator('#save-page').click();
   await idle(popup);
-  await page.locator('#markdown-editor').fill('# Stale edit\n');
+  await (await sourceEditor(page)).fill('# Stale edit\n');
   await page.locator('#save-page').click();
   await idle();
   assert.match(await page.locator('#status').innerText(), /原稿が更新/);
@@ -488,33 +499,7 @@ try {
   const generatedPrompt = '画面を開いてからボタンを押す';
   const generatedPromptB64 = Buffer.from(generatedPrompt, 'utf8').toString('base64');
   const generatedExample = `# New guide\n\n<!-- ai:generated id=smoke-generated kind=screenshot prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n`;
-  await page.locator('#markdown-editor').fill(generatedExample);
-  const documentTags = page.locator('#document-tag-list [data-tag-start]');
-  assert.equal(await documentTags.count(), 1, 'the document list includes generated-only tags from unsaved editor text');
-  const middleContent = Array.from({ length: 80 }, (_, index) => `Paragraph ${index}`).join('\n');
-  await page.locator('#markdown-editor').fill(`# New guide\n\n${middleContent}\n\n<!-- ai:task id=smoke-generated kind=screenshot\n${generatedPrompt}\n-->\n<!-- ai:generated id=smoke-generated kind=screenshot prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n\n<!-- ai:task id=unsaved-text kind=text\nUnsaved instruction\n-->\n`);
-  assert.equal(await documentTags.count(), 2, 'task and generated tags with the same id are merged while unsaved instructions appear');
-  assert.match(await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'smoke-generated' }).innerText(), /未確定/);
-  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'unsaved-text' }).locator('[data-tag-jump]').click();
-  assert.ok(await page.locator('#markdown-editor').evaluate(node => node.scrollTop > 0), 'selecting a tag lower in the document scrolls the editor to it');
-  assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart).startsWith('<!-- ai:task id=unsaved-text')), true);
-  await page.locator('#document-tag-list [data-tag-start]').filter({ hasText: 'smoke-generated' }).locator('[data-tag-jump]').click();
-  assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart).startsWith('<!-- ai:task id=smoke-generated')), true, 'selecting a document tag jumps to its Markdown comment');
-  const wrappedPrefix = '折り返しのある長い文章です。'.repeat(500);
-  await page.locator('#markdown-editor').fill(`${wrappedPrefix}\n${generatedExample}\n${wrappedPrefix}`);
-  await page.locator('#document-tag-list [data-tag-jump]').click();
-  const wrappedJump = await page.locator('#markdown-editor').evaluate(node => ({
-    top: node.scrollTop, height: node.scrollHeight, viewport: node.clientHeight,
-    selected: node.value.slice(node.selectionStart, node.selectionEnd),
-    focused: document.activeElement === node,
-  }));
-  assert.match(wrappedJump.selected, /^<!-- ai:generated id=smoke-generated/);
-  assert.equal(wrappedJump.focused, true);
-  assert.ok(wrappedJump.top > wrappedJump.height * 0.3 && wrappedJump.top < wrappedJump.height * 0.65,
-    'jump measures wrapped text and reveals the tag near the middle of the document');
-  await page.locator('#markdown-editor').fill(generatedExample);
-  await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(0, 0));
-  assert.equal(await page.locator('#confirm-generated').count(), 0, 'generated controls have moved out of the editor toolbar');
+  await (await sourceEditor(page)).fill(generatedExample);
   let delayedSaveSeen = false;
   await page.route('**/__manual/rpc', async route => {
     const request = route.request().postDataJSON();
@@ -526,10 +511,8 @@ try {
   });
   await page.locator('#save-page').click();
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'true');
-  assert.equal(await page.locator('#document-tag-list [data-tag-confirm]').isDisabled(), true, 'tag controls are disabled while saving');
   await idle();
   assert.equal(delayedSaveSeen, true);
-  assert.equal(await page.locator('#document-tag-list [data-tag-confirm]').isEnabled(), true, 'tag controls are enabled again after saving');
   assert.equal(await page.locator('#undo-edit').isEnabled(), true, 'saving must preserve undo history');
   await page.unroute('**/__manual/rpc');
 
@@ -555,30 +538,81 @@ try {
   assert.doesNotMatch(generatedOnlyMarkdown, /approved-at=/);
   await page.locator('[data-tab="editor"]').click();
 
+  if (!await page.locator('#markdown-editor').isVisible()) {
+    await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
+  }
   const otherGenerated = '<!-- ai:generated id=other-generated kind=text -->\nOther generated text\n<!-- /ai:generated -->\n';
-  await page.locator('#markdown-editor').fill(`${generatedExample}\n${otherGenerated}`);
-  await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(0, 0));
-  const otherTag = page.locator('#document-tag-list .document-tag-row').filter({ hasText: 'other-generated' });
-  await otherTag.locator('[data-tag-confirm]').click();
+  await (await sourceEditor(page)).fill(`${generatedExample}\n${otherGenerated}`);
+  await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  const otherCard = page.locator('.milkdown-ai-task').filter({ hasText: 'other-generated' });
+  await otherCard.waitFor();
+  await otherCard.locator('.milkdown-ai-task-confirm').click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   let editedTags = await page.locator('#markdown-editor').inputValue();
-  assert.match(editedTags, /id=other-generated[^>]*approved-at=/, 'confirmation targets the clicked tag even with the caret elsewhere');
-  assert.doesNotMatch(editedTags.match(/<!-- ai:generated id=smoke-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'confirmation leaves the other generated tag untouched');
-  await page.locator('#document-tag-list .document-tag-row').filter({ hasText: 'other-generated' }).locator('[data-tag-confirm]').click();
+  assert.match(editedTags, /id="?other-generated"?[^>]*approved-at=/, 'confirmation targets the clicked tag');
+  assert.doesNotMatch(editedTags.match(/<!-- ai:task id="?smoke-generated"?[^>]*-->/)?.[0] || '', /approved-at=/, 'confirmation leaves the other generated tag untouched');
+  await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  await otherCard.locator('.milkdown-ai-task-confirm').click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   editedTags = await page.locator('#markdown-editor').inputValue();
-  assert.doesNotMatch(editedTags.match(/<!-- ai:generated id=other-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'local confirmation can be removed from the same tag');
-  await page.locator('#markdown-editor').press('Control+z');
-  assert.match((await page.locator('#markdown-editor').inputValue()).match(/<!-- ai:generated id=other-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'Undo restores local confirmation removal');
-  await page.locator('#markdown-editor').press('Control+z');
+  assert.doesNotMatch(editedTags.match(/<!-- ai:task id="?other-generated"?[^>]*-->/)?.[0] || '', /approved-at=/, 'local confirmation can be removed from the same tag');
+  await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  await otherCard.locator('.milkdown-ai-task-delete').click();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
+  assert.match(await page.locator('#markdown-editor').inputValue(), /id="?other-generated"?/, 'Undo restores the deleted result');
+  await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  await otherCard.locator('.milkdown-ai-task-delete').click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   editedTags = await page.locator('#markdown-editor').inputValue();
-  assert.doesNotMatch(editedTags.match(/<!-- ai:generated id=other-generated[^>]*-->/)?.[0] || '', /approved-at=/, 'Undo removes the confirmation');
-  await page.locator('#document-tag-list .document-tag-row').filter({ hasText: 'other-generated' }).locator('[data-tag-delete]').click();
-  editedTags = await page.locator('#markdown-editor').inputValue();
-  assert.doesNotMatch(editedTags, /id=other-generated/, 'deletion targets only the clicked generated tag');
-  assert.match(editedTags, /id=smoke-generated/, 'deletion keeps the other generated tag');
-  await page.locator('#markdown-editor').press('Control+z');
-  assert.match(await page.locator('#markdown-editor').inputValue(), /id=other-generated/, 'Undo restores the deleted result');
+  assert.doesNotMatch(editedTags, /id="?other-generated"?/, 'deletion targets only the clicked generated tag');
+  assert.match(editedTags, /id="?smoke-generated"?/, 'deletion keeps the other generated tag');
 
-  await page.locator('#markdown-editor').fill('# New guide\n\n');
+  const unifiedPrompt = '初心者向け &quot;保存&quot;&#10;approved-at=fake を説明';
+  const unifiedBlock = `<!-- ai:task id=unified-guide kind=text prompt="${unifiedPrompt}" -->\nGenerated unified body\n<!-- /ai:task -->`;
+  await (await sourceEditor(page)).fill(`# New guide\n\n${unifiedBlock}\n\nKeep manual text\n`);
+  await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  const unifiedCard = page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' });
+  await unifiedCard.waitFor();
+  assert.match(await unifiedCard.locator('.milkdown-ai-task-status').innerText(), /未確定/);
+  await unifiedCard.locator('.milkdown-ai-task-confirm').click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
+  let unifiedMarkdown = await page.locator('#markdown-editor').inputValue();
+  assert.match(unifiedMarkdown, /approved-at="\d{4}-\d\d-\d\dT/);
+  assert.match(unifiedMarkdown, /prompt="初心者向け &quot;保存&quot;&#10;approved-at=fake を説明"/);
+  await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  await unifiedCard.locator('.milkdown-ai-task-confirm').click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
+  unifiedMarkdown = await page.locator('#markdown-editor').inputValue();
+  assert.doesNotMatch(unifiedMarkdown, /approved-at="\d{4}-/);
+  assert.match(unifiedMarkdown, /approved-at=fake/);
+  await page.locator('#save-page').click(); await idle();
+  await page.locator('[data-tab="tasks"]').click();
+  const unifiedCardInTasks = page.locator('[data-task="unified-guide"]');
+  assert.equal(await unifiedCardInTasks.locator('[data-prompt]').inputValue(), '初心者向け "保存"\napproved-at=fake を説明');
+  await unifiedCardInTasks.locator('[data-prompt]').fill('新しい指示 "引用"\n二行目');
+  await unifiedCardInTasks.locator('[data-save-prompt]').click(); await idle();
+  unifiedMarkdown = await readFile(path.join(project, 'docs/new.md'), 'utf8');
+  assert.match(unifiedMarkdown, /prompt="新しい指示 &quot;引用&quot;&#10;二行目"/);
+  assert.match(unifiedMarkdown, /Generated unified body/);
+  assert.doesNotMatch(unifiedMarkdown, /ai:generated/);
+  await page.locator('[data-tab="editor"]').click();
+  if (await page.locator('#markdown-editor').isVisible()) {
+    await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  }
+  const unifiedCardDelete = page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' }).locator('.milkdown-ai-task-delete');
+  await unifiedCardDelete.click();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
+  assert.match(await page.locator('#markdown-editor').inputValue(), /Generated unified body/);
+  await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
+  await page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' }).locator('.milkdown-ai-task-delete').click();
+  await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
+  unifiedMarkdown = await page.locator('#markdown-editor').inputValue();
+  assert.doesNotMatch(unifiedMarkdown, /unified-guide/);
+  assert.match(unifiedMarkdown, /Keep manual text/);
+
+  await (await sourceEditor(page)).fill('# New guide\n\n');
 
   const imageChooserPromise = page.waitForEvent('filechooser');
   await page.locator('#insert-image').click();
