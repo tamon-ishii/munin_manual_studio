@@ -929,22 +929,54 @@ async function generateReviewed(page: string, id?: string, initialFeedback = "")
     let candidate: { before: Document; content: string; updated: string[] };
     try {
       let body: string | undefined;
+      let bodies: Record<string, string> | undefined;
       const isCli = workspace?.config.connection_type === "cli" || !workspace?.config.connection_type;
-      if (terminalController?.isConnected() && id && workspace && isCli) {
-        const task = workspace.tasks.find((t) => t.id === id);
-        if (task && task.kind !== "screenshot") {
-          logProgress(`常駐AIターミナルで ${task.id} のプロンプトを実行しています…`);
-          try {
-            const prompt = buildTaskPromptForTerminal(page, task, feedback);
-            body = await terminalController.injectPrompt(prompt, 15_000);
-            logProgress(`AIターミナルから生成結果を受信しました。原稿へ反映しています。`);
-          } catch (terminalErr) {
-            logProgress(`AIターミナルでの生成に失敗（${String(terminalErr)}）。通常のCLI呼び出しへフォールバックします。`);
+      if (terminalController?.isConnected() && workspace && isCli) {
+        if (id) {
+          const tasks = JSON.parse(await rpc("page-tasks", { page }, root)) as Task[];
+          const task = tasks.find((t) => t.id === id) || workspace.tasks.find((t) => t.id === id);
+          if (task && task.kind !== "screenshot") {
+            logProgress(`常駐AIターミナルで ${task.id} のプロンプトを実行しています…`);
+            try {
+              const prompt = buildTaskPromptForTerminal(page, task, feedback);
+              body = await terminalController.injectPrompt(prompt, 15_000);
+              logProgress(`AIターミナルから生成結果を受信しました。原稿へ反映しています。`);
+            } catch (terminalErr) {
+              logProgress(`AIターミナルでの生成に失敗（${String(terminalErr)}）。通常のCLI呼び出しへフォールバックします。`);
+            }
+          }
+        } else {
+          const tasks = (JSON.parse(await rpc("page-tasks", { page }, root)) as Task[])
+            .filter((t) => (t.kind === "text" || t.kind === "diagram") && t.status !== "approved");
+          if (tasks.length > 0) {
+            const bodiesMap: Record<string, string> = {};
+            for (let i = 0; i < tasks.length; i++) {
+              const task = tasks[i];
+              logProgress(`常駐AIターミナルで ${task.id} (${i + 1}/${tasks.length}) のプロンプトを実行しています…`);
+              try {
+                const prompt = buildTaskPromptForTerminal(page, task, feedback);
+                const taskResult = await terminalController.injectPrompt(prompt, 20_000);
+                bodiesMap[task.id] = taskResult;
+                logProgress(`AIターミナルから ${task.id} の生成結果を受信しました。`);
+              } catch (terminalErr) {
+                logProgress(`AIターミナルでの ${task.id} 生成に失敗（${String(terminalErr)}）。`);
+              }
+            }
+            if (Object.keys(bodiesMap).length > 0) {
+              bodies = bodiesMap;
+              logProgress(`AIターミナルでの一括生成が完了しました（${Object.keys(bodiesMap).length}/${tasks.length}件）。原稿へ反映しています。`);
+            }
           }
         }
       }
 
-      candidate = JSON.parse(await rpc("generate-review", { page, id, feedback, ...(body ? { body } : {}) }, root));
+      candidate = JSON.parse(await rpc("generate-review", {
+        page,
+        id,
+        feedback,
+        ...(body ? { body } : {}),
+        ...(bodies ? { bodies: JSON.stringify(bodies) } : {}),
+      }, root));
       await pollAgentProgress();
       await stopAiProgress(true);
     } catch (error) {

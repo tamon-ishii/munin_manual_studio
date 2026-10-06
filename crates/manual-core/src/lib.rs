@@ -145,6 +145,7 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
     let mut mkdocs_settings_opt: Option<&str> = None;
     let mut feedback_opt: Option<&str> = None;
     let mut body_opt: Option<&str> = None;
+    let mut bodies_opt: Option<&str> = None;
     let mut project_opt: Option<&str> = None;
     let mut lang_opt: Option<&str> = None;
     let mut ref_opt: Option<&str> = None;
@@ -222,6 +223,7 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
             "--mkdocs-settings" => mkdocs_settings_opt = Some(*value),
             "--feedback" => feedback_opt = Some(*value),
             "--body" => body_opt = Some(*value),
+            "--bodies" => bodies_opt = Some(*value),
             "--project" => project_opt = Some(*value),
             "--lang" => lang_opt = Some(*value),
             "--git-ref" | "--ref" => ref_opt = Some(*value),
@@ -437,7 +439,21 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
-        "generate-review" => generation_review::generate(root, page_opt.ok_or("generate-review requires --page")?, id_opt, feedback_opt.unwrap_or(""), body_opt),
+        "generate-review" => {
+            let bodies_map = if let Some(b_json) = bodies_opt {
+                serde_json::from_str::<std::collections::HashMap<String, String>>(b_json).ok()
+            } else {
+                None
+            };
+            generation_review::generate(
+                root,
+                page_opt.ok_or("generate-review requires --page")?,
+                id_opt,
+                feedback_opt.unwrap_or(""),
+                body_opt,
+                bodies_map,
+            )
+        }
         "generate-page-captures" => {
             let page = page_opt.ok_or("generate-page-captures requires --page")?;
             Ok(author::generate_page_at(root, page, "", &templates_path, &generated_path, true, false, "")?.to_string())

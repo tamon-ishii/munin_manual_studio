@@ -49,6 +49,18 @@ try {
   const adopted = await rpc('editor-save', { page, json: { content: retry.content, revision: retry.before.revision } });
   assert.equal(await readFile(path.join(root, page), 'utf8'), retry.content);
   await rpc('editor-save', { page, json: { content: original, revision: adopted.revision } });
+
+  // Direct terminal single-task body injection
+  const directSingle = await rpc('generate-review', { page, id: 'guide', body: 'Direct terminal body' });
+  assert.equal(directSingle.before.content, original);
+  assert.match(directSingle.content, /Direct terminal body/);
+  assert.deepEqual(directSingle.updated, ['guide']);
+
+  // Direct terminal batch bodies injection
+  const directBatch = await rpc('generate-review', { page, bodies: JSON.stringify({ guide: 'Direct terminal batch body' }) });
+  assert.equal(directBatch.before.content, original);
+  assert.match(directBatch.content, /Direct terminal batch body/);
+  assert.deepEqual(directBatch.updated, ['guide']);
   const evidence = '<button title="日本語 -->">Save</button>';
   await writeFile(path.join(root, 'source.html'), evidence);
   for (let version = 1; version <= 3; version++) {

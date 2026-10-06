@@ -1,5 +1,5 @@
 use serde_json::json;
-use std::{fs, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
 pub fn generate(
     root: &Path,
@@ -7,6 +7,7 @@ pub fn generate(
     id: Option<&str>,
     feedback: &str,
     body: Option<&str>,
+    bodies: Option<HashMap<String, String>>,
 ) -> Result<String, String> {
     let before = crate::editor::read(root, page)?;
     let config = crate::config::read_config(root);
@@ -40,6 +41,19 @@ pub fn generate(
         };
         crate::task::update_task_in_docs(&templates, task, &task_body, None)?;
         vec![id.to_string()]
+    } else if let Some(bodies_map) = bodies.filter(|m| !m.is_empty()) {
+        let mut updated_ids = Vec::new();
+        for task in &tasks {
+            if task.status != "approved" {
+                if let Some(task_body) = bodies_map.get(&task.id) {
+                    if !task_body.trim().is_empty() {
+                        crate::task::update_task_in_docs(&templates, task, task_body, None)?;
+                        updated_ids.push(task.id.clone());
+                    }
+                }
+            }
+        }
+        updated_ids
     } else {
         let report = crate::author::generate_page_at(
             root, page, "", &templates, &generated, false, true, feedback,
