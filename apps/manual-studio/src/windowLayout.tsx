@@ -18,15 +18,11 @@ export interface PanelDef {
 
 export const PANELS: PanelDef[] = [
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
-  { id: "editor", name: "Markdownエディタ", elementId: "panel-editor" },
-  { id: "preview", name: "プレビュー", elementId: "panel-preview" },
+  { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "ai-tags", name: "AIタグ一覧", elementId: "panel-tasks" },
-  { id: "ui-map", name: "画面一覧 / UI Map", elementId: "panel-uimap" },
-  { id: "publish", name: "AI設定・出力", elementId: "panel-publish" },
-  { id: "appearance", name: "外観設定", elementId: "panel-appearance" },
 ];
 
-export const STORAGE_KEY = "manual-studio-flexlayout-model";
+export const STORAGE_KEY = "manual-studio-flexlayout-model-v3";
 
 export const defaultLayoutJson: IJsonModel = {
   global: {
@@ -61,70 +57,29 @@ export const defaultLayoutJson: IJsonModel = {
         weight: 78,
         children: [
           {
-            type: "row",
-            weight: 65,
+            type: "tabset",
+            id: "tabset-editor",
+            weight: 75,
             children: [
               {
-                type: "tabset",
-                id: "tabset-editor",
-                weight: 50,
-                children: [
-                  {
-                    type: "tab",
-                    id: "editor",
-                    name: "Markdownエディタ",
-                    component: "editor",
-                    enableClose: true,
-                  },
-                ],
-              },
-              {
-                type: "tabset",
-                id: "tabset-preview",
-                weight: 50,
-                children: [
-                  {
-                    type: "tab",
-                    id: "preview",
-                    name: "プレビュー",
-                    component: "preview",
-                    enableClose: true,
-                  },
-                ],
+                type: "tab",
+                id: "editor",
+                name: "原稿を編集",
+                component: "editor",
+                enableClose: true,
               },
             ],
           },
           {
             type: "tabset",
             id: "tabset-bottom",
-            weight: 35,
+            weight: 25,
             children: [
               {
                 type: "tab",
                 id: "ai-tags",
                 name: "AIタグ一覧",
                 component: "ai-tags",
-                enableClose: true,
-              },
-              {
-                type: "tab",
-                id: "ui-map",
-                name: "画面一覧 / UI Map",
-                component: "ui-map",
-                enableClose: true,
-              },
-              {
-                type: "tab",
-                id: "publish",
-                name: "AI設定・出力",
-                component: "publish",
-                enableClose: true,
-              },
-              {
-                type: "tab",
-                id: "appearance",
-                name: "外観設定",
-                component: "appearance",
                 enableClose: true,
               },
             ],
@@ -167,10 +122,20 @@ const DomPanelHost: React.FC<{ elementId: string }> = ({ elementId }) => {
 
 function loadStoredModel(): Model {
   try {
+    localStorage.removeItem("manual-studio-flexlayout-model");
+    localStorage.removeItem("manual-studio-flexlayout-model-v2");
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return Model.fromJson(parsed);
+      const str = JSON.stringify(parsed);
+      if (
+        !str.includes('"preview"') &&
+        !str.includes('"ui-map"') &&
+        !str.includes('"publish"') &&
+        !str.includes('"appearance"')
+      ) {
+        return Model.fromJson(parsed);
+      }
     }
   } catch (error) {
     console.warn("Failed to restore stored layout, using default layout:", error);
@@ -200,6 +165,7 @@ export const FlexLayoutApp: React.FC<{
   const resetLayout = useCallback(() => {
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("manual-studio-flexlayout-model");
     } catch {
       // ignore
     }

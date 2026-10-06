@@ -32,7 +32,7 @@ export function setupPaneResizers(lookup: ElementLookup = byId): void {
   const sidebarHandle = lookup<HTMLElement>("sidebar-resizer");
   const editorHandle = lookup<HTMLElement>("editor-resizer");
   const split = document.querySelector<HTMLElement>(".editor-split");
-  if (!layout || !sidebarHandle || !editorHandle) return;
+  if (!sidebarHandle && !editorHandle) return;
 
   let activeHandle: HTMLElement | null = null;
   let activePointerId: number | null = null;
@@ -66,33 +66,35 @@ export function setupPaneResizers(lookup: ElementLookup = byId): void {
     return (event: PointerEvent) => activeHandle === handle && activePointerId === event.pointerId;
   };
 
-  const sidebarStorageKey = "manual-studio-sidebar-width";
-  const applySidebarWidth = (value: number): number => {
-    const availableWidth = layout.clientWidth;
-    const max = Math.max(1, Math.min(760, availableWidth > 0 ? availableWidth * 0.62 : 760));
-    const width = clamp(value, Math.min(210, max), max);
-    layout.style.setProperty("--sidebar-width", `${width}px`);
-    sidebarHandle.setAttribute("aria-valuenow", String(Math.round(width)));
-    return width;
-  };
-  let sidebarWidth = applySidebarWidth(readStoredNumber(sidebarStorageKey, 350));
-  const isSidebarDragging = makePointerResize(sidebarHandle, () => {
-    storeFiniteNumber(sidebarStorageKey, Math.round(sidebarWidth));
-  });
-  sidebarHandle.addEventListener("pointermove", (event: PointerEvent) => {
-    if (!isSidebarDragging(event)) return;
-    const left = layout.getBoundingClientRect().left;
-    if (!Number.isFinite(event.clientX) || !Number.isFinite(left)) return;
-    sidebarWidth = applySidebarWidth(event.clientX - left);
-  });
-  sidebarHandle.addEventListener("keydown", (event: KeyboardEvent) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    sidebarWidth = applySidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 24 : -24));
-    storeFiniteNumber(sidebarStorageKey, Math.round(sidebarWidth));
-  });
+  if (layout && sidebarHandle) {
+    const sidebarStorageKey = "manual-studio-sidebar-width";
+    const applySidebarWidth = (value: number): number => {
+      const availableWidth = layout.clientWidth;
+      const max = Math.max(1, Math.min(760, availableWidth > 0 ? availableWidth * 0.62 : 760));
+      const width = clamp(value, Math.min(210, max), max);
+      layout.style.setProperty("--sidebar-width", `${width}px`);
+      sidebarHandle.setAttribute("aria-valuenow", String(Math.round(width)));
+      return width;
+    };
+    let sidebarWidth = applySidebarWidth(readStoredNumber(sidebarStorageKey, 350));
+    const isSidebarDragging = makePointerResize(sidebarHandle, () => {
+      storeFiniteNumber(sidebarStorageKey, Math.round(sidebarWidth));
+    });
+    sidebarHandle.addEventListener("pointermove", (event: PointerEvent) => {
+      if (!isSidebarDragging(event)) return;
+      const left = layout.getBoundingClientRect().left;
+      if (!Number.isFinite(event.clientX) || !Number.isFinite(left)) return;
+      sidebarWidth = applySidebarWidth(event.clientX - left);
+    });
+    sidebarHandle.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      sidebarWidth = applySidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 24 : -24));
+      storeFiniteNumber(sidebarStorageKey, Math.round(sidebarWidth));
+    });
+  }
 
-  if (!split) return;
+  if (!split || !editorHandle) return;
   const editorStorageKey = "manual-studio-editor-ratio";
   const applyEditorRatio = (value: number): number => {
     const ratio = clamp(value, 0.42, 2.38);

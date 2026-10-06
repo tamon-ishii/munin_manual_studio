@@ -8,6 +8,7 @@ import { EditorHistory, type EditorSnapshot } from "./editorHistory";
 import { completeMarkitsCapture } from "./markitsWorkflow";
 import { CaptureSessionStore } from "./captureSession";
 import { collectAiTagIds } from "./markdownTags";
+import { setupPaneResizers } from "./paneResizers";
 import { setupWindowLayout, type WindowLayoutManager } from "./windowLayout";
 import { createPreviewNavigator } from "./previewNavigation";
 import { sendManualRequest } from "./manualTransport";
@@ -106,6 +107,7 @@ if (!recordingControlMode) {
     console.error("Failed to setup FlexLayout:", error);
   }
 }
+setupPaneResizers();
 
 const previewNavigator = createPreviewNavigator({
   getCurrentPage: () => documentState?.page || null,
@@ -372,19 +374,42 @@ async function confirmDiscard(): Promise<boolean> {
     if (dirty) throw new Error("原稿を保存できなかったため、移動を中止しました。");
   });
 }
+function closeAllPanelDialogs(): void {
+  document.querySelectorAll<HTMLDialogElement>("dialog.panel-dialog").forEach((d) => {
+    if (d.open) d.close();
+  });
+}
+
+let activeWorkspaceTab = "editor";
+
+function openPanelDialog(panelId: string): void {
+  const dlg = element<HTMLDialogElement>(panelId);
+  if (!dlg) return;
+  if (dlg.open) {
+    dlg.close();
+    return;
+  }
+  closeAllPanelDialogs();
+  dlg.show();
+}
+
 function tabToComponentId(name: string): string {
   switch (name) {
     case "editor": return "editor";
     case "tasks": return "ai-tags";
-    case "uimap": return "ui-map";
-    case "publish": return "publish";
-    case "appearance": return "appearance";
     case "tree": return "file-tree";
-    case "preview": return "preview";
+    case "preview": return "editor";
     default: return name;
   }
 }
 function chooseTab(name: string): void {
+  if (name === "uimap" || name === "publish" || name === "appearance") {
+    document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
+    openPanelDialog(`panel-${name}`);
+    return;
+  }
+  activeWorkspaceTab = name;
+  closeAllPanelDialogs();
   if (layoutManager) {
     layoutManager.focusPanel(tabToComponentId(name));
   } else {
@@ -1034,6 +1059,21 @@ function taskControl<T extends HTMLElement>(card: HTMLElement, attribute: string
   return card.querySelector<T>(`[${attribute}]`)!;
 }
 document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => button.addEventListener("click", () => chooseTab(button.dataset.tab!)));
+
+document.querySelectorAll<HTMLDialogElement>("dialog.panel-dialog").forEach((dialog) => {
+  dialog.querySelectorAll("[data-close-dialog]").forEach((button) => {
+    button.addEventListener("click", () => dialog.close());
+  });
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") dialog.close();
+  });
+  dialog.addEventListener("close", () => {
+    document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.tab === activeWorkspaceTab);
+    });
+  });
+});
+
 element("open-workspace-settings").addEventListener("click", () => {
   if (!workspace) return;
   input("docs-path").value = workspace.config.docs;

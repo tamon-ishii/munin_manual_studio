@@ -44,40 +44,59 @@
         <details class="instruction-toolbar"><summary>AI指示を追加</summary><div class="instruction-actions"><button type="button" data-insert="text">AI文章の指示</button><button type="button" data-insert="screenshot">撮影の指示</button><button type="button" data-insert="diagram">依存図の指示</button><span class="muted">追加した指示は「AIタグ一覧」に表示されます。</span></div></details>
       </div>
       <div id="editor-workspace" class="editor-workspace">
-        <div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div>
+        <div class="editor-split">
+          <div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div>
+          <div id="editor-resizer" class="pane-resizer vertical-resizer" role="separator" aria-label="Markdownとプレビューの幅を変更" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="ドラッグしてMarkdownとプレビューの幅を変更"></div>
+          <div class="preview-column">
+            <div id="preview-nav-bar" class="preview-nav-bar"></div>
+            <iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe>
+          </div>
+        </div>
       </div>
-    </section>
-    <section id="panel-preview" class="panel panel-preview-standalone">
-      <div id="preview-nav-bar" class="preview-nav-bar"></div>
-      <div class="preview-column"><iframe id="markdown-preview" title="Markdownプレビュー" sandbox="allow-same-origin"></iframe></div>
     </section>
     <section id="panel-tasks" class="panel">
       <div class="panel-header"><div><p class="eyebrow">AI TAGS</p><h1>AIタグ一覧</h1><p class="muted">指示の編集と生成結果の確定をここで行えます。</p></div><button id="refresh-tasks">一覧を更新</button></div>
       <div class="callout"><strong>画像ごとの調整が必要な場合</strong><p>AIが設定できなかった画像や撮影元を変えたい画像は、「撮影元を選ぶ」から対象ウィンドウを指定してください。撮影前の操作は原稿の撮影指示に自然文で記入します。</p></div>
       <div id="task-list" class="task-list"></div>
     </section>
-    <section id="panel-uimap" class="panel">
-      <div class="panel-header"><div><p class="eyebrow">APPLICATION KNOWLEDGE</p><h1>画面・操作の一覧（UI Map）</h1></div><button id="map-refresh" class="primary">コードから画面一覧を作る</button></div>
-      <div class="callout"><strong>アプリの「どの画面に、どんな操作があるか」を整理します。</strong><p>AIの原稿生成や、コード変更後の更新候補の判定に使います。画像の撮影元は「画像・文章・図」で設定し、撮影時の操作は原稿の撮影指示に自然文で記入します。</p></div>
-      <ol class="steps"><li>「コードから画面一覧を作る」を押す。</li><li>下の一覧で画面名・ボタン・入力欄を確認する。</li><li>不足するWeb画面はURLから探索。デスクトップの観測結果はJSONで取り込む。</li></ol>
-      <div id="uimap-list"></div>
-      <details class="card"><summary>起動中のWebアプリを調べる</summary><p>アプリを起動してURLを入力します。探索にはNode.jsとPlaywrightが必要です。</p><div class="actions"><input id="explore-url" type="url" placeholder="http://localhost:3000/" /><button id="explore-web">探索して一覧に追加</button></div></details>
-      <details class="card"><summary>デスクトップなどの観測JSONを取り込む</summary><p>画面名と操作要素を記録したJSONを指定します。形式は専用アプリのマニュアルに記載しています。</p><div class="actions"><input id="observation-path" placeholder="manual/observations/settings.json" /><button id="import-map">取り込む</button></div></details>
-    </section>
-    <section id="panel-appearance" class="panel">
-      <div class="panel-header"><div><p class="eyebrow">APPEARANCE</p><h1>外観設定</h1></div></div>
-      <div class="card display-settings"><h2>表示設定</h2><label for="editor-font-size">編集画面の文字サイズ（px）<input id="editor-font-size" type="number" min="12" max="28" step="1" value="14" /></label><p class="muted">12〜28pxで設定できます。本文・AIへの指示・Markdownソースに反映します。</p><label for="ui-theme">カラーテーマ<select id="ui-theme"><optgroup label="白ベース"><option value="forest">フォレスト</option><option value="blue">ブルー</option><option value="warm">ウォーム</option></optgroup><optgroup label="黒ベース"><option value="charcoal">チャコール</option><option value="midnight">ミッドナイト</option><option value="dark-forest">ダークフォレスト</option></optgroup></select></label><p class="muted">選ぶとすぐに反映され、この端末のほかのMunin Manual Studioウィンドウにも同期します。</p></div>
-    </section>
-    <section id="panel-publish" class="panel">
-      <div class="panel-header"><div><p class="eyebrow">PUBLISH</p><h1>原稿を確認して、マニュアルを出力する</h1></div></div>
-      <div class="card"><h2>AI設定</h2><div class="settings-grid"><label for="ai-connection-type">接続方式<select id="ai-connection-type"><option value="none">後で設定する（AI未設定）</option><option value="cli">CLIツール</option><option value="local_llm">ローカルLLM (Ollama / LM Studio)</option><option value="api">クラウドAPI (OpenAI互換)</option></select></label><label id="ai-agent-label" for="ai-agent">AIエージェント<select id="ai-agent"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="grok">Grok Build</option><option value="agy">Agy</option></select></label><label id="ai-endpoint-url-label" for="ai-endpoint-url">エンドポイントURL<input id="ai-endpoint-url" placeholder="http://localhost:11434/v1" /></label><label id="ai-api-key-label" for="ai-api-key">APIキー<input id="ai-api-key" type="password" placeholder="sk-... (ローカル保存)" autocomplete="off" /></label><label id="ai-model-label" for="ai-model">AIモデル（省略可）<input id="ai-model" placeholder="（省略時は既定モデル）" /></label></div><p class="muted">AI設定は変更すると自動保存します。APIキーはこの端末に保存します。</p><div class="actions"><span id="ai-save-state" role="status" aria-live="polite"></span><button type="button" id="ai-save-retry" hidden>保存を再試行</button></div><p id="ai-cli-status" role="status"></p><label>AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label><button id="save-settings">読者・目的・操作を保存</button></div>
-
-      <div class="card"><h2>共通のアプリ起動コマンド</h2><p>ここで登録したコマンドは、すべてのワークスペースで共有されます。撮影AIタグの作成時に選択できます。</p><div id="launch-command-list" class="launch-command-list"></div><div class="actions"><button type="button" id="add-launch-command">＋ コマンドを追加</button><button type="button" id="save-launch-commands" class="primary">共通コマンドを保存</button></div></div>
-      <div class="card"><h2>下書きとHTML出力</h2><p>MarkdownはAIなしで編集できます。AIに章立てを作らせる場合は、設定したエージェントのCLIが必要です。HTML出力にはMkDocs Materialが必要です。</p><div class="actions"><button id="generate-draft">AIで原稿の下書きを作る</button><button id="build-draft" class="primary">下書きビルド</button><button id="build-final">完成版ビルド</button><button id="open-output">出力フォルダーを開く</button></div></div>
-      <details class="card"><summary>コード変更に伴う原稿の点検</summary><p>原稿とソースコードの対応を登録しているプロジェクト向けの機能です。</p><h3>更新が必要なAIタグを探す</h3><p>Gitの変更と、原稿に登録されたソースコードの依存関係から、更新候補のAIタグを一覧にします。</p><div class="actions"><label>比較するGit参照<input id="git-ref" value="HEAD" /></label><button id="impact-plan">変更に関係するAIタグを探す</button></div><h3>原稿に登録された参照先を点検する</h3><p>原稿の根拠として登録されたファイル・コード・画面要素が存在するか確認します。参照先がなくなった箇所や、根拠が未登録のAI生成文章を報告します。</p><button id="fact-check">登録された参照先を点検</button></details>
-      <pre id="publish-result" class="result" aria-live="polite"></pre>
-    </section>
   </div>
+  <dialog id="panel-uimap" class="panel-dialog">
+    <div class="panel-header">
+      <div><p class="eyebrow">APPLICATION KNOWLEDGE</p><h1>画面・操作の一覧（UI Map）</h1></div>
+      <div class="actions">
+        <button id="map-refresh" class="primary">コードから画面一覧を作る</button>
+        <button type="button" class="dialog-close" data-close-dialog="panel-uimap">閉じる</button>
+      </div>
+    </div>
+    <div class="callout"><strong>アプリの「どの画面に、どんな操作があるか」を整理します。</strong><p>AIの原稿生成や、コード変更後の更新候補の判定に使います。画像の撮影元は「画像・文章・図」で設定し、撮影時の操作は原稿の撮影指示に自然文で記入します。</p></div>
+    <ol class="steps"><li>「コードから画面一覧を作る」を押す。</li><li>下の一覧で画面名・ボタン・入力欄を確認する。</li><li>不足するWeb画面はURLから探索。デスクトップの観測結果はJSONで取り込む。</li></ol>
+    <div id="uimap-list"></div>
+    <details class="card"><summary>起動中のWebアプリを調べる</summary><p>アプリを起動してURLを入力します。探索にはNode.jsとPlaywrightが必要です。</p><div class="actions"><input id="explore-url" type="url" placeholder="http://localhost:3000/" /><button id="explore-web">探索して一覧に追加</button></div></details>
+    <details class="card"><summary>デスクトップなどの観測JSONを取り込む</summary><p>画面名と操作要素を記録したJSONを指定します。形式は専用アプリのマニュアルに記載しています。</p><div class="actions"><input id="observation-path" placeholder="manual/observations/settings.json" /><button id="import-map">取り込む</button></div></details>
+  </dialog>
+  <dialog id="panel-appearance" class="panel-dialog">
+    <div class="panel-header">
+      <div><p class="eyebrow">APPEARANCE</p><h1>外観設定</h1></div>
+      <div class="actions">
+        <button type="button" class="dialog-close" data-close-dialog="panel-appearance">閉じる</button>
+      </div>
+    </div>
+    <div class="card display-settings"><h2>表示設定</h2><label for="editor-font-size">編集画面の文字サイズ（px）<input id="editor-font-size" type="number" min="12" max="28" step="1" value="14" /></label><p class="muted">12〜28pxで設定できます。本文・AIへの指示・Markdownソースに反映します。</p><label for="ui-theme">カラーテーマ<select id="ui-theme"><optgroup label="白ベース"><option value="forest">フォレスト</option><option value="blue">ブルー</option><option value="warm">ウォーム</option></optgroup><optgroup label="黒ベース"><option value="charcoal">チャコール</option><option value="midnight">ミッドナイト</option><option value="dark-forest">ダークフォレスト</option></optgroup></select></label><p class="muted">選ぶとすぐに反映され、この端末のほかのMunin Manual Studioウィンドウにも同期します。</p></div>
+  </dialog>
+  <dialog id="panel-publish" class="panel-dialog">
+    <div class="panel-header">
+      <div><p class="eyebrow">PUBLISH</p><h1>原稿を確認して、マニュアルを出力する</h1></div>
+      <div class="actions">
+        <button type="button" class="dialog-close" data-close-dialog="panel-publish">閉じる</button>
+      </div>
+    </div>
+    <div class="card"><h2>AI設定</h2><div class="settings-grid"><label for="ai-connection-type">接続方式<select id="ai-connection-type"><option value="none">後で設定する（AI未設定）</option><option value="cli">CLIツール</option><option value="local_llm">ローカルLLM (Ollama / LM Studio)</option><option value="api">クラウドAPI (OpenAI互換)</option></select></label><label id="ai-agent-label" for="ai-agent">AIエージェント<select id="ai-agent"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="grok">Grok Build</option><option value="agy">Agy</option></select></label><label id="ai-endpoint-url-label" for="ai-endpoint-url">エンドポイントURL<input id="ai-endpoint-url" placeholder="http://localhost:11434/v1" /></label><label id="ai-api-key-label" for="ai-api-key">APIキー<input id="ai-api-key" type="password" placeholder="sk-... (ローカル保存)" autocomplete="off" /></label><label id="ai-model-label" for="ai-model">AIモデル（省略可）<input id="ai-model" placeholder="（省略時は既定モデル）" /></label></div><p class="muted">AI設定は変更すると自動保存します。APIキーはこの端末に保存します。</p><div class="actions"><span id="ai-save-state" role="status" aria-live="polite"></span><button type="button" id="ai-save-retry" hidden>保存を再試行</button></div><p id="ai-cli-status" role="status"></p><label>AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label><button id="save-settings">読者・目的・操作を保存</button></div>
+
+    <div class="card"><h2>共通のアプリ起動コマンド</h2><p>ここで登録したコマンドは、すべてのワークスペースで共有されます。撮影AIタグの作成時に選択できます。</p><div id="launch-command-list" class="launch-command-list"></div><div class="actions"><button type="button" id="add-launch-command">＋ コマンドを追加</button><button type="button" id="save-launch-commands" class="primary">共通コマンドを保存</button></div></div>
+    <div class="card"><h2>下書きとHTML出力</h2><p>MarkdownはAIなしで編集できます。AIに章立てを作らせる場合は、設定したエージェントのCLIが必要です。HTML出力にはMkDocs Materialが必要です。</p><div class="actions"><button id="generate-draft">AIで原稿の下書きを作る</button><button id="build-draft" class="primary">下書きビルド</button><button id="build-final">完成版ビルド</button><button id="open-output">出力フォルダーを開く</button></div></div>
+    <details class="card"><summary>コード変更に伴う原稿の点検</summary><p>原稿とソースコードの対応を登録しているプロジェクト向けの機能です。</p><h3>更新が必要なAIタグを探す</h3><p>Gitの変更と、原稿に登録されたソースコードの依存関係から、更新候補のAIタグを一覧にします。</p><div class="actions"><label>比較するGit参照<input id="git-ref" value="HEAD" /></label><button id="impact-plan">変更に関係するAIタグを探す</button></div><h3>原稿に登録された参照先を点検する</h3><p>原稿の根拠として登録されたファイル・コード・画面要素が存在するか確認します。参照先がなくなった箇所や、根拠が未登録のAI生成文章を報告します。</p><button id="fact-check">登録された参照先を点検</button></details>
+    <pre id="publish-result" class="result" aria-live="polite"></pre>
+  </dialog>
   <section id="operation-progress" class="operation-progress" role="dialog" aria-modal="false" aria-labelledby="progress-label" hidden>
     <div class="progress-heading"><div><small>AI 実行ログ</small><strong id="progress-label">AIを実行しています</strong></div><div class="progress-heading-actions"><span id="progress-elapsed">00:00</span><button type="button" id="progress-dismiss" class="progress-control" aria-label="実行ログを閉じる">閉じる</button></div></div>
     <div id="progress-track" class="progress-track" role="progressbar" aria-label="AI生成中" aria-valuetext="実行中"><span></span></div>

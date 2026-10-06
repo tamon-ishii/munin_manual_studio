@@ -114,6 +114,16 @@ try {
     await page.mouse.move(bounds.x + bounds.width / 2 + 10, bounds.y + bounds.height / 2);
     await page.mouse.up();
   }
+
+  const editorResizer = page.locator('#editor-resizer');
+  assert.ok(await editorResizer.count() > 0, '#editor-resizer must exist in unified editor pane');
+  const resizerBounds = await editorResizer.boundingBox();
+  if (resizerBounds) {
+    await page.mouse.move(resizerBounds.x + resizerBounds.width / 2, resizerBounds.y + resizerBounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(resizerBounds.x + resizerBounds.width / 2 + 10, resizerBounds.y + resizerBounds.height / 2);
+    await page.mouse.up();
+  }
   assert.equal(await page.locator('#panel-editor').isVisible(), true);
   await page.waitForFunction(() => {
     const images = [...(document.querySelector('#markdown-preview').contentDocument?.querySelectorAll('img') || [])];
