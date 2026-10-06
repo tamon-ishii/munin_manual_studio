@@ -8,7 +8,8 @@ import { EditorHistory, type EditorSnapshot } from "./editorHistory";
 import { completeMarkitsCapture } from "./markitsWorkflow";
 import { CaptureSessionStore } from "./captureSession";
 import { collectAiTagIds } from "./markdownTags";
-import { setupPaneResizers } from "./paneResizers";
+import { setupWindowLayout, type WindowLayoutManager } from "./windowLayout";
+import { createPreviewNavigator } from "./previewNavigation";
 import { sendManualRequest } from "./manualTransport";
 import { renderFileTree } from "./fileTree";
 import { setupPreviewTheme } from "./themePreview";
@@ -96,6 +97,25 @@ let screenshotSubmitRunning = false;
 let screenshotStageTimer: ReturnType<typeof setInterval> | undefined;
 let busyButtonStates: Map<HTMLButtonElement, boolean> | null = null;
 if (detached) document.body.classList.add("detached");
+
+let layoutManager: WindowLayoutManager | null = null;
+if (!recordingControlMode) {
+  try {
+    layoutManager = setupWindowLayout();
+  } catch (error) {
+    console.error("Failed to setup FlexLayout:", error);
+  }
+}
+
+const previewNavigator = createPreviewNavigator({
+  getCurrentPage: () => documentState?.page || null,
+  openPage: (page) => openPage(page),
+  refreshPreview: () => renderPreview(),
+});
+const previewNavBar = element<HTMLElement>("preview-nav-bar");
+if (previewNavBar) {
+  previewNavigator.attachToolbar(previewNavBar);
+}
 
 function editSnapshot(): EditorSnapshot {
   return { value: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
@@ -352,7 +372,20 @@ async function confirmDiscard(): Promise<boolean> {
     if (dirty) throw new Error("原稿を保存できなかったため、移動を中止しました。");
   });
 }
+function tabToComponentId(name: string): string {
+  switch (name) {
+    case "editor": return "editor";
+    case "tasks": return "ai-tags";
+    case "uimap": return "ui-map";
+    case "publish": return "publish";
+    case "appearance": return "appearance";
+    case "tree": return "file-tree";
+    case "preview": return "preview";
+    default: return name;
+  }
+}
 function chooseTab(name: string): void {
+  layoutManager?.focusPanel(tabToComponentId(name));
   document.querySelectorAll<HTMLElement>(".panel").forEach((panel) => { panel.hidden = panel.id !== `panel-${name}`; });
   document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
 }
@@ -364,7 +397,10 @@ async function renderPreview(): Promise<void> {
   const version = ++previewVersion;
   try {
     const html = await rpc("editor-preview", { page: documentState.page, body: editor.value });
-    if (version === previewVersion) element<HTMLIFrameElement>("markdown-preview").srcdoc = html;
+    if (version === previewVersion) {
+      element<HTMLIFrameElement>("markdown-preview").srcdoc = html;
+      previewNavigator.updateToolbarState();
+    }
   } catch (error) { if (version === previewVersion) status(`プレビュー: ${String(error)}`, true); }
 }
 function updateCursor(): void {
@@ -409,6 +445,7 @@ async function openPage(page: string, check = true): Promise<void> {
   document.title = `${page} — Munin Manual Studio`;
   updateSaveState(); updateCursor(); renderPages(); renderDocumentTags();
   await renderPreview();
+  previewNavigator.pushPage(page);
   chooseTab("editor");
 }
 function renderPages(): void {
@@ -1158,6 +1195,8 @@ document.getElementById("document-tag-list")?.addEventListener("click", (event) 
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 milkdown.host.addEventListener("scroll", () => syncScroll(milkdown.host, previewScrollElement()));
 element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
+  previewNavigator.setupIframeInterception(element<HTMLIFrameElement>("markdown-preview"));
+  previewNavigator.updateToolbarState();
   const previewDocument = element<HTMLIFrameElement>("markdown-preview").contentDocument;
   previewDocument?.querySelectorAll<HTMLElement>('code.language-mermaid, pre.mermaid, .highlight.language-mermaid pre').forEach(code => {
     const target = previewDocument.createElement("div");
@@ -2314,7 +2353,6 @@ element("open-output").addEventListener("click", () => { void work(async () => {
   if (native) await invoke("open_output", { root: projectRoot });
   else status(`出力フォルダー: ${projectRoot}/${workspace?.config.output || "manual"}`);
 }); });
-setupPaneResizers();
 setBusy(false);
 if (native && !recordingControlMode) {
   void listen("manual-studio-screenshot-requested", () => {
