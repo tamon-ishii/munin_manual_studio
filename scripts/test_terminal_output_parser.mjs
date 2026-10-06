@@ -24,4 +24,19 @@ const res3 = extractDelimitedResult(coloredDelimited);
 assert.equal(res3.completed, true);
 assert.equal(res3.result?.trim(), "# Section");
 
+// Test prompt echo containing START marker only must not complete
+const promptEcho = "マニュアル作成タスク\n開始マーカー <<<MANUAL_STUDIO_RESULT_START>>> を出力し、終了マーカーを出力してください。\n";
+const resPromptOnly = extractDelimitedResult(promptEcho);
+assert.equal(resPromptOnly.completed, false);
+assert.equal(resPromptOnly.result, undefined);
+
+// Test prompt echo followed by AI response extracts ONLY the AI response
+const chunkWithEcho = promptEcho + "Thinking...\n<<<MANUAL_STUDIO_RESULT_START>>>\n# Real Output\nContent\n<<<MANUAL_STUDIO_RESULT_END>>>\nDone!";
+const resWithEcho = extractDelimitedResult(chunkWithEcho);
+assert.equal(resWithEcho.completed, true);
+assert.equal(resWithEcho.result?.trim(), "# Real Output\nContent");
+
+// Test bracketed paste stripping
+assert.equal(stripAnsi("\x1b[200~Pasted text\x1b[201~"), "Pasted text");
+
 console.log("terminalOutputParser tests passed!");

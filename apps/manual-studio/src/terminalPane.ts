@@ -1,6 +1,6 @@
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { extractDelimitedResult, DELIMITER_START, DELIMITER_END } from "./terminalOutputParser";
+import { extractDelimitedResult, DELIMITER_START } from "./terminalOutputParser";
 import { currentTheme, type ThemeId } from "./theme";
 
 export interface TerminalPaneOptions {
@@ -404,10 +404,9 @@ export function setupTerminalPane(
         const instruction = [
           prompt.trim(),
           "",
-          "【重要】生成した結果のみを以下のマーカーで囲んで出力してください。余分な解説や挨拶は含めないでください:",
-          DELIMITER_START,
-          "(ここに生成結果)",
-          DELIMITER_END,
+          "【重要】生成した結果のみを出力してください。余分な解説や挨拶は含めないでください。",
+          `出力の最初の行にマーカー ${DELIMITER_START} を出力し、`,
+          "出力の最後の行に上記マーカーの START を END に置き換えた終了マーカーを出力してください。",
           "",
         ].join("\n");
 
@@ -421,7 +420,12 @@ export function setupTerminalPane(
           }
         }, timeoutMs);
 
-        options.rpc("pty-write", { sessionId, data: instruction }, options.getProjectRoot())
+        const useBracketed = Boolean((terminal as any).modes?.bracketedPasteMode);
+        const dataToSend = useBracketed
+          ? `\x1b[200~${instruction}\x1b[201~\r`
+          : `${instruction}\n`;
+
+        options.rpc("pty-write", { sessionId, data: dataToSend }, options.getProjectRoot())
           .catch((err) => {
             if (promptTimeoutTimer) clearTimeout(promptTimeoutTimer);
             isPromptInjecting = false;

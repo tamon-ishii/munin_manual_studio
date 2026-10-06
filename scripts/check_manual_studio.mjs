@@ -9,6 +9,7 @@ const steps = [
   { name: 'MarkIts workflow checks', command: npm, args: ['run', 'manual:test-workflow'], timeoutMs: 60_000 },
   { name: 'transport callback mock checks', command: process.execPath, args: ['scripts/test_manual_studio_transport.mjs'], timeoutMs: 60_000 },
   { name: 'capture session checks', command: process.execPath, args: ['scripts/test_manual_studio_capture_session.mjs'], timeoutMs: 60_000 },
+  { name: 'terminal output parser checks', command: 'npx', args: ['tsx', 'scripts/test_terminal_output_parser.mjs'], timeoutMs: 60_000 },
 ];
 
 steps.push(

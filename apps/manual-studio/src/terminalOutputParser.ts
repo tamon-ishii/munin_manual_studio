@@ -29,22 +29,23 @@ export interface DelimitedResult {
 /**
  * Extracts content enclosed between DELIMITER_START and DELIMITER_END.
  * If delimiters are found, strips ANSI codes from the result and returns remaining text.
+ * Uses lastIndexOf to ensure it extracts the generated response rather than matching prompt echoes.
  */
 export function extractDelimitedResult(buffer: string): DelimitedResult {
   // Strip ANSI before checking delimiter positions in case delimiters were broken up by styling codes
   const cleanBuffer = stripAnsi(buffer);
 
-  const startIdx = cleanBuffer.indexOf(DELIMITER_START);
-  if (startIdx === -1) {
-    return { completed: false, remaining: buffer };
-  }
-
-  const contentStart = startIdx + DELIMITER_START.length;
-  const endIdx = cleanBuffer.indexOf(DELIMITER_END, contentStart);
+  const endIdx = cleanBuffer.lastIndexOf(DELIMITER_END);
   if (endIdx === -1) {
     return { completed: false, remaining: buffer };
   }
 
+  const startIdx = cleanBuffer.lastIndexOf(DELIMITER_START, endIdx);
+  if (startIdx === -1 || startIdx + DELIMITER_START.length > endIdx) {
+    return { completed: false, remaining: buffer };
+  }
+
+  const contentStart = startIdx + DELIMITER_START.length;
   const result = cleanBuffer.slice(contentStart, endIdx).trim();
   const remaining = cleanBuffer.slice(endIdx + DELIMITER_END.length);
 
