@@ -1,5 +1,9 @@
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--pty-daemon") {
+        manual_core::pty::run_daemon();
+        return;
+    }
     let result = if args.get(1).map(String::as_str) == Some("--request") {
         args.get(2)
             .ok_or("--request requires JSON".into())

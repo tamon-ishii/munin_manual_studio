@@ -15,6 +15,7 @@ pub mod editor;
 pub mod fact;
 pub mod preview;
 pub mod platform;
+pub mod pty;
 pub mod scenario;
 pub mod task;
 pub mod template;
@@ -107,12 +108,26 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
         "scenario-test",
         "e2e",
         "fact-check",
+        "pty-spawn",
+        "pty-write",
+        "pty-read",
+        "pty-resize",
+        "pty-kill",
     ];
     if !allowed.contains(&action) {
         return Err(format!("Unsupported manual action: {action}"));
     }
     if !root.is_dir() {
         return Err(format!("Manual project does not exist: {}", root.display()));
+    }
+
+    if action.starts_with("pty-") {
+        let mut map = serde_json::Map::new();
+        for (k, v) in options {
+            let key = k.trim_start_matches('-').replace('-', "_");
+            map.insert(key, serde_json::Value::String(v.to_string()));
+        }
+        return pty::handle_pty_request(action, root, &serde_json::Value::Object(map));
     }
 
     let mut docs_opt: Option<&str> = None;
@@ -848,6 +863,9 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
     }
     if action == "validate-workspace" {
         return workspace::validate(Path::new(root), &request["options"]);
+    }
+    if action.starts_with("pty-") {
+        return pty::handle_pty_request(action, Path::new(root), &request["options"]);
     }
     let mut owned = Vec::new();
     if let Some(options) = request
