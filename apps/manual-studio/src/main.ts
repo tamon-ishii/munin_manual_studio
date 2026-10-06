@@ -929,13 +929,14 @@ async function generateReviewed(page: string, id?: string, initialFeedback = "")
     let candidate: { before: Document; content: string; updated: string[] };
     try {
       let body: string | undefined;
-      if (terminalController?.isConnected() && id && workspace) {
+      const isCli = workspace?.config.connection_type === "cli" || !workspace?.config.connection_type;
+      if (terminalController?.isConnected() && id && workspace && isCli) {
         const task = workspace.tasks.find((t) => t.id === id);
         if (task && task.kind !== "screenshot") {
           logProgress(`常駐AIターミナルで ${task.id} のプロンプトを実行しています…`);
           try {
             const prompt = buildTaskPromptForTerminal(page, task, feedback);
-            body = await terminalController.injectPrompt(prompt);
+            body = await terminalController.injectPrompt(prompt, 15_000);
             logProgress(`AIターミナルから生成結果を受信しました。原稿へ反映しています。`);
           } catch (terminalErr) {
             logProgress(`AIターミナルでの生成に失敗（${String(terminalErr)}）。通常のCLI呼び出しへフォールバックします。`);
@@ -1007,15 +1008,7 @@ async function generateDocument(page: string): Promise<number> {
   let succeeded = false;
   try {
     const generatedTasks = tasks.filter(task => task.kind !== "screenshot");
-    if (generatedTasks.length) {
-      if (terminalController?.isConnected()) {
-        for (const t of generatedTasks) {
-          if (!await generateReviewed(page, t.id)) { succeeded = true; return 0; }
-        }
-      } else {
-        if (!await generateReviewed(page)) { succeeded = true; return 0; }
-      }
-    }
+    if (generatedTasks.length && !await generateReviewed(page)) { succeeded = true; return 0; }
     const result = tasks.some(task => task.kind === "screenshot")
       ? JSON.parse(await rpc("generate-page-captures", { page })) as { updated: string[]; captured?: string[]; capture_errors?: Array<{ id: string; reason: string }> }
       : { updated: generatedTasks.map(task => task.id), captured: [], capture_errors: [] };

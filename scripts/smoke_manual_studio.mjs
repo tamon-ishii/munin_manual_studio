@@ -848,8 +848,22 @@ try {
   await page.locator('#generate-draft').click();
   await idle();
   assert.match(await page.locator('#status').innerText(), /未設定/);
+
+  // Verify AI terminal dock and controls
+  const closePublishBtn = page.locator('#panel-publish [data-close-dialog]');
+  if (await closePublishBtn.isVisible()) await closePublishBtn.click();
+  const terminalTab = page.locator('.flexlayout__tab_button').filter({ hasText: 'AIターミナル' });
+  await terminalTab.click();
+  await page.locator('#panel-terminal').waitFor({ state: 'visible' });
+  await page.locator('#terminal-container .xterm').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#terminal-restart-btn').isVisible(), true);
+  assert.equal(await page.locator('#terminal-clear-btn').isVisible(), true);
+  await page.locator('#terminal-clear-btn').click();
+  await page.locator('#terminal-restart-btn').click();
+  await page.waitForTimeout(500);
+
   assert.deepEqual(errors, []);
-  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot dialog, new page, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
+  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot dialog, new page, AI terminal, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
 } finally {
   await browser?.close();
   if (server && server.exitCode === null) {
