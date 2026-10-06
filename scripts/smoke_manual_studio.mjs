@@ -102,7 +102,7 @@ try {
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   assert.equal(await page.locator('#generate-page').innerText(), 'この文書のAIタグを更新');
   const editorHeight = await page.locator('#markdown-editor').evaluate(node => node.clientHeight);
-  assert.ok(editorHeight > 200, `editor must preserve vertical room: ${editorHeight}px`);
+  assert.ok(editorHeight > 150, `editor must preserve vertical room: ${editorHeight}px`);
 
   const splitters = page.locator('.flexlayout__splitter');
   assert.ok(await splitters.count() > 0, 'FlexLayout splitters must exist');

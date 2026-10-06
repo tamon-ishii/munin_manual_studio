@@ -287,7 +287,7 @@ button[data-toggle-approved].is-approved::before,
 /* FlexLayout styles & Theme integration */
 .app-layout {
   position: relative !important;
-  height: calc(100vh - 100px) !important;
+  height: calc(100vh - 105px) !important;
   min-height: 0 !important;
   width: 100% !important;
   overflow: hidden !important;
@@ -300,6 +300,32 @@ button[data-toggle-approved].is-approved::before,
   width: 100% !important;
   height: 100% !important;
   background: var(--app-bg) !important;
+  --fl-color-text: var(--text-primary);
+  --fl-color-background: var(--app-bg);
+  --fl-color-base: var(--surface-bg);
+  --fl-color-tabset-background: var(--surface-soft);
+  --fl-color-tabset-background-selected: var(--surface-soft);
+  --fl-color-tabset-background-maximized: var(--surface-soft);
+  --fl-color-tabset-divider-line: var(--border-color);
+  --fl-color-tab-content: var(--surface-bg);
+  --fl-color-tab-selected: var(--accent);
+  --fl-color-tab-selected-background: var(--surface-bg);
+  --fl-color-tab-unselected: var(--text-secondary);
+  --fl-color-tab-unselected-background: transparent;
+  --fl-color-splitter: var(--border-color);
+  --fl-color-splitter-hover: var(--accent);
+  --fl-color-splitter-drag: var(--accent);
+  --fl-color-icon: var(--text-muted);
+  --fl-color-overflow: var(--text-muted);
+  --fl-color-focus: var(--accent);
+  --fl-color-toolbar-button-hover: var(--surface-raised);
+  --fl-color-popup-unselected-background: var(--surface-bg);
+  --fl-color-popup-selected-background: var(--surface-soft);
+  --fl-color-popup-unselected: var(--text-secondary);
+  --fl-color-popup-selected: var(--text-primary);
+  --fl-color-popup-border: var(--border-color);
+  --fl-color-drag-rect-border: var(--accent);
+  --fl-color-drag-rect-background: var(--accent-soft);
 }
 
 .flexlayout__tabset {
@@ -309,21 +335,42 @@ button[data-toggle-approved].is-approved::before,
   overflow: hidden !important;
 }
 
-.flexlayout__tabset_header {
+/* Widget Header Bar */
+.flexlayout__tabset_tabbar_outer,
+.flexlayout__tabset_tabbar_outer_top,
+.flexlayout__tabset_tabbar_outer_bottom {
   background: var(--surface-soft) !important;
   border-bottom: 1px solid var(--border-color) !important;
+  min-height: 32px !important;
   height: 32px !important;
+  box-sizing: border-box !important;
 }
 
+.flexlayout__tabset_tabbar_inner {
+  background: transparent !important;
+}
+
+.flexlayout__tabset_tabbar_inner_tab_container {
+  padding-left: 2px !important;
+  gap: 2px !important;
+}
+
+/* Tab Button */
 .flexlayout__tab_button {
   background: transparent !important;
   color: var(--text-secondary) !important;
   font-size: 12px !important;
   font-weight: 500 !important;
   padding: 4px 10px !important;
-  border: 0 !important;
-  border-right: 1px solid var(--border-color) !important;
+  border: 1px solid transparent !important;
+  border-radius: 4px 4px 0 0 !important;
   cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  box-sizing: border-box !important;
+  height: 32px !important;
 }
 
 .flexlayout__tab_button:hover {
@@ -335,9 +382,74 @@ button[data-toggle-approved].is-approved::before,
   background: var(--surface-bg) !important;
   color: var(--accent) !important;
   font-weight: 650 !important;
+  border-color: var(--border-color) var(--border-color) transparent var(--border-color) !important;
   border-bottom: 2px solid var(--accent) !important;
 }
 
+.flexlayout__tab_button--unselected {
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+}
+
+.flexlayout__tab_button_content {
+  color: inherit !important;
+  font-size: 12px !important;
+}
+
+/* Tab Close Button */
+.flexlayout__tab_button_trailing {
+  color: var(--text-muted) !important;
+  fill: var(--text-muted) !important;
+  opacity: 0.7;
+}
+
+.flexlayout__tab_button_trailing:hover {
+  color: var(--text-primary) !important;
+  fill: var(--text-primary) !important;
+  opacity: 1;
+}
+
+/* Toolbar buttons (overflow, maximize, etc.) */
+.flexlayout__tab_toolbar {
+  padding-right: 6px !important;
+}
+
+.flexlayout__tab_toolbar_button {
+  color: var(--text-muted) !important;
+  fill: var(--text-muted) !important;
+  background: transparent !important;
+  border-radius: 4px !important;
+}
+
+.flexlayout__tab_toolbar_button:hover {
+  background: var(--surface-raised) !important;
+  color: var(--text-primary) !important;
+  fill: var(--text-primary) !important;
+}
+
+.flexlayout__tab_toolbar_button svg,
+.flexlayout__tab_toolbar_icon svg,
+.flexlayout__tab_button_trailing svg {
+  fill: currentColor !important;
+}
+
+/* Tab Content */
+.flexlayout__tab {
+  background: var(--surface-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+.flexlayout-panel-host {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-bg);
+}
+
+/* Splitter */
 .flexlayout__splitter {
   background: var(--border-color) !important;
   transition: background 0.15s ease;
@@ -348,18 +460,22 @@ button[data-toggle-approved].is-approved::before,
   background: var(--accent) !important;
 }
 
-.flexlayout__tab {
-  background: var(--surface-bg);
-  color: var(--text-primary);
+/* Overflow Popup */
+.flexlayout__popup_menu {
+  background: var(--surface-bg) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 16px var(--shadow-color) !important;
 }
 
-.flexlayout-panel-host {
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
+.flexlayout__popup_menu_item {
+  color: var(--text-primary) !important;
+  padding: 6px 12px !important;
+}
+
+.flexlayout__popup_menu_item:hover {
+  background: var(--surface-soft) !important;
 }
 
 /* Header View Menu */
@@ -511,6 +627,7 @@ button[data-toggle-approved].is-approved::before,
   padding: 12px;
   box-sizing: border-box;
   overflow: hidden;
+  background: var(--surface-bg);
 }
 
 #panel-editor .editor-workspace {
