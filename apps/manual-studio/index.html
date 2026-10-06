@@ -59,6 +59,16 @@
       <div class="callout"><strong>画像ごとの調整が必要な場合</strong><p>AIが設定できなかった画像や撮影元を変えたい画像は、「撮影元を選ぶ」から対象ウィンドウを指定してください。撮影前の操作は原稿の撮影指示に自然文で記入します。</p></div>
       <div id="task-list" class="task-list"></div>
     </section>
+    <section id="panel-terminal" class="panel panel-terminal">
+      <div class="terminal-toolbar">
+        <div class="terminal-status"><span id="terminal-badge" class="badge">● 接続待機中</span><span id="terminal-agent-name" class="muted">AI CLI</span></div>
+        <div class="actions">
+          <button type="button" id="terminal-restart-btn">再起動</button>
+          <button type="button" id="terminal-clear-btn">クリア</button>
+        </div>
+      </div>
+      <div id="terminal-container" class="terminal-container"></div>
+    </section>
   </div>
   <dialog id="panel-uimap" class="panel-dialog">
     <div class="panel-header">
