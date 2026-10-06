@@ -20,9 +20,10 @@ export const PANELS: PanelDef[] = [
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "ai-tags", name: "AIタグ一覧", elementId: "panel-tasks" },
+  { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
 ];
 
-export const STORAGE_KEY = "manual-studio-flexlayout-model-v3";
+export const STORAGE_KEY = "manual-studio-flexlayout-model-v4";
 
 export const defaultLayoutJson: IJsonModel = {
   global: {
@@ -82,6 +83,13 @@ export const defaultLayoutJson: IJsonModel = {
                 component: "ai-tags",
                 enableClose: true,
               },
+              {
+                type: "tab",
+                id: "terminal",
+                name: "AIターミナル",
+                component: "terminal",
+                enableClose: true,
+              },
             ],
           },
         ],
@@ -124,6 +132,7 @@ function loadStoredModel(): Model {
   try {
     localStorage.removeItem("manual-studio-flexlayout-model");
     localStorage.removeItem("manual-studio-flexlayout-model-v2");
+    localStorage.removeItem("manual-studio-flexlayout-model-v3");
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -166,6 +175,8 @@ export const FlexLayoutApp: React.FC<{
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem("manual-studio-flexlayout-model");
+      localStorage.removeItem("manual-studio-flexlayout-model-v2");
+      localStorage.removeItem("manual-studio-flexlayout-model-v3");
     } catch {
       // ignore
     }

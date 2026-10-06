@@ -23,6 +23,7 @@ import { showUnsavedChangesDialog } from "./unsavedChangesDialog";
 import { loadWorkspaceHistory, recordWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
 import { changeHeadingLevel, toggleStrikethrough, toggleTaskList, changeIndent, continueMarkdownList, type MarkdownEdit } from "./markdownAssists";
 import { applyTheme, currentTheme, initializeTheme, isThemeId, type ThemeId } from "./theme";
+import { setupTerminalPane, type TerminalController } from "./terminalPane";
 import { emit } from "@tauri-apps/api/event";
 import "./style.css";
 
@@ -310,6 +311,33 @@ async function rpc(action: string, options: Record<string, unknown> = {}, root =
     ? (request) => invoke<string>("manual_request", { request })
     : undefined);
 }
+
+let terminalController: TerminalController | null = null;
+
+function getTerminalCliCommand(): { command: string; args: string[]; label: string } {
+  const agent = workspace?.config.agent || "claude";
+  const labels: Record<string, string> = {
+    codex: "Codex",
+    claude: "Claude Code",
+    grok: "Grok Build",
+    agy: "Agy",
+  };
+  return {
+    command: agent,
+    args: [],
+    label: labels[agent] || agent,
+  };
+}
+
+const terminalPanel = element<HTMLElement>("panel-terminal");
+if (terminalPanel) {
+  terminalController = setupTerminalPane(terminalPanel, {
+    rpc,
+    getProjectRoot: () => projectRoot,
+    getCliCommand: getTerminalCliCommand,
+  });
+}
+
 function setBusy(value: boolean): void {
   busy = value;
   document.body.setAttribute("aria-busy", String(value));
@@ -399,6 +427,7 @@ function tabToComponentId(name: string): string {
     case "tasks": return "ai-tags";
     case "tree": return "file-tree";
     case "preview": return "editor";
+    case "terminal": return "terminal";
     default: return name;
   }
 }
@@ -416,6 +445,9 @@ function chooseTab(name: string): void {
     document.querySelectorAll<HTMLElement>(".panel").forEach((panel) => { panel.hidden = panel.id !== `panel-${name}`; });
   }
   document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
+  if (name === "terminal") {
+    setTimeout(() => { terminalController?.fit(); }, 50);
+  }
 }
 function updateSaveState(): void {
   element("save-state").textContent = documentState ? dirty ? "● 未保存の変更" : "保存済み" : "原稿を選択してください";
@@ -767,6 +799,9 @@ async function openProject(root: string, check = true): Promise<void> {
   else { editor.value = ""; updateSaveState(); status("「＋」から最初のMarkdownページを作ってください。"); }
   if (page) status(`プロジェクトを開きました。${page}を編集できます。`);
   if (!loaded.has_config && !detached) status("AI機能は利用できるCLIを自動選択します。変更する場合は「AI設定・出力」で選べます。");
+  if (terminalController) {
+    void terminalController.restart();
+  }
 }
 async function saveDocument(refresh = true): Promise<void> {
   if (!documentState) throw new Error("保存する原稿を選択してください。");
