@@ -385,8 +385,11 @@ function tabToComponentId(name: string): string {
   }
 }
 function chooseTab(name: string): void {
-  layoutManager?.focusPanel(tabToComponentId(name));
-  document.querySelectorAll<HTMLElement>(".panel").forEach((panel) => { panel.hidden = panel.id !== `panel-${name}`; });
+  if (layoutManager) {
+    layoutManager.focusPanel(tabToComponentId(name));
+  } else {
+    document.querySelectorAll<HTMLElement>(".panel").forEach((panel) => { panel.hidden = panel.id !== `panel-${name}`; });
+  }
   document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
 }
 function updateSaveState(): void {

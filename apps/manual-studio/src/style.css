@@ -349,11 +349,8 @@ button[data-toggle-approved].is-approved::before,
 }
 
 .flexlayout__tab {
-  background: var(--surface-bg) !important;
-  color: var(--text-primary) !important;
-  overflow: auto !important;
-  position: absolute !important;
-  inset: 0 !important;
+  background: var(--surface-bg);
+  color: var(--text-primary);
 }
 
 .flexlayout-panel-host {

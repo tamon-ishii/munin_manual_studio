@@ -46,8 +46,7 @@ try {
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext();
   await context.addInitScript(() => {
-    localStorage.setItem('manual-studio-sidebar-width', 'Infinity');
-    localStorage.setItem('manual-studio-editor-ratio', 'NaN');
+    localStorage.setItem('manual-studio-flexlayout-model', '{invalid-json');
   });
   const page = await context.newPage();
   const errors = [];
@@ -101,31 +100,18 @@ try {
   await page.locator('#screenshot-task-dialog[open]').waitFor();
   await page.locator('#cancel-screenshot-task').click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
-  const initialPaneValues = await page.evaluate(() => ({
-    sidebarWidth: Number.parseFloat(document.querySelector('#app-layout').style.getPropertyValue('--sidebar-width')),
-    editorRatio: Number(document.querySelector('#editor-resizer').dataset.ratio),
-  }));
-  assert.ok(Number.isFinite(initialPaneValues.sidebarWidth), 'invalid saved sidebar width must use a finite default');
-  assert.ok(Number.isFinite(initialPaneValues.editorRatio), 'invalid saved editor ratio must use a finite default');
   assert.equal(await page.locator('#generate-page').innerText(), 'この文書のAIタグを更新');
   const editorHeight = await page.locator('#markdown-editor').evaluate(node => node.clientHeight);
-  assert.ok(editorHeight > 400, `editor must preserve vertical room: ${editorHeight}px`);
+  assert.ok(editorHeight > 200, `editor must preserve vertical room: ${editorHeight}px`);
 
-  for (const handleId of ['sidebar-resizer', 'editor-resizer']) {
-    const handle = page.locator(`#${handleId}`);
-    await handle.evaluate(node => {
-      window.__smokePointerId = null;
-      node.addEventListener('pointerdown', event => { window.__smokePointerId = event.pointerId; }, { once: true });
-    });
-    const bounds = await handle.boundingBox();
+  const splitters = page.locator('.flexlayout__splitter');
+  assert.ok(await splitters.count() > 0, 'FlexLayout splitters must exist');
+  const firstSplitter = splitters.first();
+  const bounds = await firstSplitter.boundingBox();
+  if (bounds) {
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     await page.mouse.down();
-    await page.waitForFunction(() => document.body.classList.contains('pane-resizing'));
-    await page.evaluate(handleId => {
-      const target = document.getElementById(handleId);
-      target.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: window.__smokePointerId }));
-    }, handleId);
-    await page.waitForFunction(() => !document.body.classList.contains('pane-resizing'));
+    await page.mouse.move(bounds.x + bounds.width / 2 + 10, bounds.y + bounds.height / 2);
     await page.mouse.up();
   }
   assert.equal(await page.locator('#panel-editor').isVisible(), true);

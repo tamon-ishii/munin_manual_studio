@@ -6,9 +6,9 @@
     <div class="brand"><span class="brand-icon">M</span><div><strong>Munin Manual Studio</strong><small>原稿・画面画像・公開まで</small></div></div>
     <div class="header-workspace"><button type="button" id="workspace-name" aria-haspopup="dialog" title="最近開いたワークスペースを選択">プロジェクト未選択</button><button type="button" id="new-workspace">新規作成</button><button type="button" id="open-existing-workspace">開く</button><button type="button" id="open-workspace-settings" aria-haspopup="dialog" disabled>⚙ ワークスペース</button><div class="view-menu-container"><button type="button" id="view-menu-button" aria-haspopup="true" aria-expanded="false" title="パネルの表示・非表示とレイアウト初期化">表示 ▾</button><div id="view-menu-dropdown" class="view-menu-dropdown" hidden></div></div></div>
   </header>
+  <nav class="workspace-tabs" aria-label="作業"><button data-tab="editor" class="active">原稿を編集</button><button data-tab="tasks">AIタグ一覧 <span id="task-count">0</span></button><button data-tab="uimap">画面一覧 / UI Map</button><button data-tab="publish">AI設定・出力</button><button data-tab="appearance">外観設定</button></nav>
   <div class="app-layout" id="app-layout"></div>
   <div id="layout-panel-pool" style="display:none">
-    <nav class="workspace-tabs" aria-label="作業" style="display:none"><button data-tab="editor" class="active">原稿を編集</button><button data-tab="tasks">AIタグ一覧 <span id="task-count">0</span></button><button data-tab="uimap">画面一覧 / UI Map</button><button data-tab="publish">AI設定・出力</button><button data-tab="appearance">外観設定</button></nav>
     <aside id="panel-tree" class="sidebar">
       <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><div class="tree-create-actions"><button type="button" id="new-page" title="Markdownページを作る">＋ MD</button><button type="button" id="new-folder" title="原稿フォルダー内にフォルダーを作る">＋ フォルダー</button></div></div>
       <button type="button" id="generate-all-pages" class="primary tree-generate-all" title="ファイルツリー内のMarkdown文書のAI指示を順番に実行">すべての文書をAI出力</button>

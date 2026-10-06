@@ -151,6 +151,7 @@ const DomPanelHost: React.FC<{ elementId: string }> = ({ elementId }) => {
     if (!target || !container) return;
 
     target.style.display = "";
+    target.hidden = false;
     container.appendChild(target);
 
     return () => {
