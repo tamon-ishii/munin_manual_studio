@@ -6,6 +6,7 @@ pub fn generate(
     page: &str,
     id: Option<&str>,
     feedback: &str,
+    body: Option<&str>,
 ) -> Result<String, String> {
     let before = crate::editor::read(root, page)?;
     let config = crate::config::read_config(root);
@@ -32,8 +33,12 @@ pub fn generate(
             .iter()
             .find(|task| task.id == id)
             .ok_or("AIタグが文書にありません。")?;
-        let body = crate::author::generate_task_body(root, task, "", feedback)?;
-        crate::task::update_task_in_docs(&templates, task, &body, None)?;
+        let task_body = if let Some(b) = body.filter(|b| !b.trim().is_empty()) {
+            b.to_string()
+        } else {
+            crate::author::generate_task_body(root, task, "", feedback)?
+        };
+        crate::task::update_task_in_docs(&templates, task, &task_body, None)?;
         vec![id.to_string()]
     } else {
         let report = crate::author::generate_page_at(

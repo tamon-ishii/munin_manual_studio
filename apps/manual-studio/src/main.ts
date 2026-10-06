@@ -903,6 +903,18 @@ async function generateCurrentPage(): Promise<void> {
   if (!documentState || !workspace) throw new Error("先にMarkdown原稿を開いてください。");
   await generateDocument(documentState.page);
 }
+function buildTaskPromptForTerminal(page: string, task: Task, feedback = ""): string {
+  let text = `マニュアル作成タスク（タスクID: ${task.id}、対象原稿: ${page}）の本文をMarkdownで作成してください。\n` +
+    `【指示内容】\n${task.prompt}\n` +
+    `【要件】\n` +
+    `- 余分な挨拶や解説は出力せず、マニュアル本文となる純粋なMarkdownのみを出力してください。\n` +
+    `- <!-- ai:task --> や <!-- ai:generated --> などのタグで囲まないでください。\n`;
+  if (feedback.trim()) {
+    text += `【修正・フィードバック指示】\n${feedback.trim()}\n`;
+  }
+  return text;
+}
+
 async function generateReviewed(page: string, id?: string, initialFeedback = ""): Promise<boolean> {
   savedBeforeOperation();
   await ensureAiSettings();
@@ -916,7 +928,22 @@ async function generateReviewed(page: string, id?: string, initialFeedback = "")
     logProgress(`${page} の生成候補を準備しています。`);
     let candidate: { before: Document; content: string; updated: string[] };
     try {
-      candidate = JSON.parse(await rpc("generate-review", { page, id, feedback }, root));
+      let body: string | undefined;
+      if (terminalController?.isConnected() && id && workspace) {
+        const task = workspace.tasks.find((t) => t.id === id);
+        if (task && task.kind !== "screenshot") {
+          logProgress(`常駐AIターミナルで ${task.id} のプロンプトを実行しています…`);
+          try {
+            const prompt = buildTaskPromptForTerminal(page, task, feedback);
+            body = await terminalController.injectPrompt(prompt);
+            logProgress(`AIターミナルから生成結果を受信しました。原稿へ反映しています。`);
+          } catch (terminalErr) {
+            logProgress(`AIターミナルでの生成に失敗（${String(terminalErr)}）。通常のCLI呼び出しへフォールバックします。`);
+          }
+        }
+      }
+
+      candidate = JSON.parse(await rpc("generate-review", { page, id, feedback, ...(body ? { body } : {}) }, root));
       await pollAgentProgress();
       await stopAiProgress(true);
     } catch (error) {
@@ -980,7 +1007,15 @@ async function generateDocument(page: string): Promise<number> {
   let succeeded = false;
   try {
     const generatedTasks = tasks.filter(task => task.kind !== "screenshot");
-    if (generatedTasks.length && !await generateReviewed(page)) { succeeded = true; return 0; }
+    if (generatedTasks.length) {
+      if (terminalController?.isConnected()) {
+        for (const t of generatedTasks) {
+          if (!await generateReviewed(page, t.id)) { succeeded = true; return 0; }
+        }
+      } else {
+        if (!await generateReviewed(page)) { succeeded = true; return 0; }
+      }
+    }
     const result = tasks.some(task => task.kind === "screenshot")
       ? JSON.parse(await rpc("generate-page-captures", { page })) as { updated: string[]; captured?: string[]; capture_errors?: Array<{ id: string; reason: string }> }
       : { updated: generatedTasks.map(task => task.id), captured: [], capture_errors: [] };

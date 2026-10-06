@@ -437,7 +437,7 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
-        "generate-review" => generation_review::generate(root, page_opt.ok_or("generate-review requires --page")?, id_opt, feedback_opt.unwrap_or("")),
+        "generate-review" => generation_review::generate(root, page_opt.ok_or("generate-review requires --page")?, id_opt, feedback_opt.unwrap_or(""), body_opt),
         "generate-page-captures" => {
             let page = page_opt.ok_or("generate-page-captures requires --page")?;
             Ok(author::generate_page_at(root, page, "", &templates_path, &generated_path, true, false, "")?.to_string())
