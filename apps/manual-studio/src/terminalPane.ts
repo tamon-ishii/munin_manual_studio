@@ -1,6 +1,7 @@
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { extractDelimitedResult, DELIMITER_START, DELIMITER_END } from "./terminalOutputParser";
+import { currentTheme, type ThemeId } from "./theme";
 
 export interface TerminalPaneOptions {
   rpc: (action: string, options?: Record<string, unknown>, root?: string) => Promise<string>;
@@ -17,6 +18,152 @@ export interface TerminalController {
   injectPrompt(prompt: string, timeoutMs?: number): Promise<string>;
   isConnected(): boolean;
   dispose(): void;
+}
+
+const terminalThemes: Record<ThemeId, ITheme> = {
+  forest: {
+    background: "#161e19",
+    foreground: "#e2eae4",
+    cursor: "#82c69a",
+    cursorAccent: "#161e19",
+    selectionBackground: "rgba(130, 198, 154, 0.35)",
+    black: "#161e19",
+    red: "#e26a64",
+    green: "#5cb887",
+    yellow: "#e2c275",
+    blue: "#6fafe7",
+    magenta: "#cd93db",
+    cyan: "#61cbbb",
+    white: "#e2eae4",
+    brightBlack: "#4d5b52",
+    brightRed: "#f0857f",
+    brightGreen: "#7bd4a3",
+    brightYellow: "#f3d893",
+    brightBlue: "#8dc5f8",
+    brightMagenta: "#e2aef0",
+    brightCyan: "#7fe0d2",
+    brightWhite: "#ffffff",
+  },
+  blue: {
+    background: "#131924",
+    foreground: "#e3ebf5",
+    cursor: "#6299e8",
+    cursorAccent: "#131924",
+    selectionBackground: "rgba(98, 153, 232, 0.35)",
+    black: "#131924",
+    red: "#e46a78",
+    green: "#57c98b",
+    yellow: "#e6c675",
+    blue: "#66a5f2",
+    magenta: "#cb98eb",
+    cyan: "#5ecbe2",
+    white: "#e3ebf5",
+    brightBlack: "#485469",
+    brightRed: "#f38793",
+    brightGreen: "#75e0a4",
+    brightYellow: "#f6db91",
+    brightBlue: "#8abbfa",
+    brightMagenta: "#dfb4fa",
+    brightCyan: "#7de2f5",
+    brightWhite: "#ffffff",
+  },
+  warm: {
+    background: "#1c1815",
+    foreground: "#eee4dc",
+    cursor: "#bc794f",
+    cursorAccent: "#1c1815",
+    selectionBackground: "rgba(188, 121, 79, 0.35)",
+    black: "#1c1815",
+    red: "#de6757",
+    green: "#6cb773",
+    yellow: "#ddb564",
+    blue: "#78a6e8",
+    magenta: "#ce8fd6",
+    cyan: "#62c5b7",
+    white: "#eee4dc",
+    brightBlack: "#594f47",
+    brightRed: "#ee8476",
+    brightGreen: "#8ad191",
+    brightYellow: "#f1ce80",
+    brightBlue: "#97bdf5",
+    brightMagenta: "#e1ace7",
+    brightCyan: "#7edccf",
+    brightWhite: "#ffffff",
+  },
+  charcoal: {
+    background: "#181b19",
+    foreground: "#edf1ee",
+    cursor: "#82c69a",
+    cursorAccent: "#181b19",
+    selectionBackground: "rgba(130, 198, 154, 0.3)",
+    black: "#181b19",
+    red: "#ff978d",
+    green: "#82c69a",
+    yellow: "#e2c076",
+    blue: "#7cb7ff",
+    magenta: "#d8a0df",
+    cyan: "#79d4cf",
+    white: "#edf1ee",
+    brightBlack: "#47504a",
+    brightRed: "#ffb3ab",
+    brightGreen: "#9fdaaf",
+    brightYellow: "#ecd394",
+    brightBlue: "#9ecbff",
+    brightMagenta: "#e7bcf0",
+    brightCyan: "#99e3df",
+    brightWhite: "#ffffff",
+  },
+  midnight: {
+    background: "#10141e",
+    foreground: "#edf2fb",
+    cursor: "#8db9ff",
+    cursorAccent: "#10141e",
+    selectionBackground: "rgba(141, 185, 255, 0.3)",
+    black: "#10141e",
+    red: "#ff9aa7",
+    green: "#8bd3a0",
+    yellow: "#f3ca7e",
+    blue: "#8db9ff",
+    magenta: "#dba4f2",
+    cyan: "#84d6ef",
+    white: "#edf2fb",
+    brightBlack: "#3f4b63",
+    brightRed: "#ffb5bf",
+    brightGreen: "#a6e8b8",
+    brightYellow: "#fae09c",
+    brightBlue: "#afd0ff",
+    brightMagenta: "#eabefb",
+    brightCyan: "#a1e4f7",
+    brightWhite: "#ffffff",
+  },
+  "dark-forest": {
+    background: "#121915",
+    foreground: "#eaf2ec",
+    cursor: "#8bd3a0",
+    cursorAccent: "#121915",
+    selectionBackground: "rgba(139, 211, 160, 0.3)",
+    black: "#121915",
+    red: "#ff9884",
+    green: "#8bd3a0",
+    yellow: "#dfc776",
+    blue: "#78bbf3",
+    magenta: "#d6a1db",
+    cyan: "#77d7bd",
+    white: "#eaf2ec",
+    brightBlack: "#435548",
+    brightRed: "#ffb4a4",
+    brightGreen: "#a5e8b8",
+    brightYellow: "#f0dc91",
+    brightBlue: "#9ad0fa",
+    brightMagenta: "#e5bbfb",
+    brightCyan: "#95e7d1",
+    brightWhite: "#ffffff",
+  },
+};
+
+function getTerminalTheme(): ITheme {
+  const id = currentTheme();
+  return terminalThemes[id] || terminalThemes.forest;
 }
 
 export function setupTerminalPane(
@@ -51,6 +198,24 @@ export function setupTerminalPane(
   terminal.loadAddon(fitAddon);
   terminal.open(container);
 
+  function applyActiveTheme(): void {
+    const t = getTerminalTheme();
+    terminal.options.theme = t;
+    if (t.background) {
+      container.style.backgroundColor = t.background;
+      panelElement.style.backgroundColor = t.background;
+    }
+  }
+
+  applyActiveTheme();
+
+  window.addEventListener("manual-studio-theme-change", applyActiveTheme);
+  const themeObserver = new MutationObserver(applyActiveTheme);
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme", "style"],
+  });
+
   // ResizeObserver to automatically fit on pane resize
   const resizeObserver = new ResizeObserver(() => {
     try {
@@ -77,33 +242,6 @@ export function setupTerminalPane(
     }
     options.onStatusChange?.(status, message);
   }
-
-  function getTerminalTheme() {
-    const isDark = document.documentElement.classList.contains("theme-charcoal") ||
-                   document.documentElement.classList.contains("theme-midnight") ||
-                   document.documentElement.classList.contains("theme-dark-forest") ||
-                   window.matchMedia("(prefers-color-scheme: dark)").matches;
-    if (isDark) {
-      return {
-        background: "#181e19",
-        foreground: "#dce5dc",
-        cursor: "#a4c4a8",
-        selectionBackground: "rgba(255, 255, 255, 0.2)",
-      };
-    }
-    return {
-      background: "#ffffff",
-      foreground: "#26342f",
-      cursor: "#285d46",
-      selectionBackground: "rgba(40, 93, 70, 0.2)",
-    };
-  }
-
-  // Update theme when theme changes
-  const themeObserver = new MutationObserver(() => {
-    terminal.options.theme = getTerminalTheme();
-  });
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 
   // Terminal input handler -> pty-write
   terminal.onData((data) => {
@@ -300,8 +438,9 @@ export function setupTerminalPane(
     dispose() {
       if (promptTimeoutTimer) clearTimeout(promptTimeoutTimer);
       if (pollTimer) clearTimeout(pollTimer);
-      resizeObserver.disconnect();
+      window.removeEventListener("manual-studio-theme-change", applyActiveTheme);
       themeObserver.disconnect();
+      resizeObserver.disconnect();
       terminal.dispose();
     },
   };

@@ -23,7 +23,7 @@ export const PANELS: PanelDef[] = [
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
 ];
 
-export const STORAGE_KEY = "manual-studio-flexlayout-model-v4";
+export const STORAGE_KEY = "manual-studio-flexlayout-model-v5";
 
 export const defaultLayoutJson: IJsonModel = {
   global: {
@@ -78,13 +78,6 @@ export const defaultLayoutJson: IJsonModel = {
             children: [
               {
                 type: "tab",
-                id: "ai-tags",
-                name: "AIタグ一覧",
-                component: "ai-tags",
-                enableClose: true,
-              },
-              {
-                type: "tab",
                 id: "terminal",
                 name: "AIターミナル",
                 component: "terminal",
@@ -133,6 +126,7 @@ function loadStoredModel(): Model {
     localStorage.removeItem("manual-studio-flexlayout-model");
     localStorage.removeItem("manual-studio-flexlayout-model-v2");
     localStorage.removeItem("manual-studio-flexlayout-model-v3");
+    localStorage.removeItem("manual-studio-flexlayout-model-v4");
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -177,6 +171,7 @@ export const FlexLayoutApp: React.FC<{
       localStorage.removeItem("manual-studio-flexlayout-model");
       localStorage.removeItem("manual-studio-flexlayout-model-v2");
       localStorage.removeItem("manual-studio-flexlayout-model-v3");
+      localStorage.removeItem("manual-studio-flexlayout-model-v4");
     } catch {
       // ignore
     }

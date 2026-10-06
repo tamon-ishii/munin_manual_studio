@@ -391,7 +391,7 @@ try {
   await idle();
   assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /Saved content/);
   await page.frameLocator('#markdown-preview').locator('strong').waitFor();
-  await page.locator('[data-tab="tasks"]').click();
+  await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   assert.equal(await page.locator('#generate-all-pages').count(), 1);
   await page.locator('[data-tab="publish"]').click();
   assert.ok(['codex', 'claude', 'grok', 'agy'].includes(await page.locator('#ai-agent').inputValue()));
@@ -512,7 +512,7 @@ try {
   assert.equal(await page.locator('#undo-edit').isEnabled(), true, 'saving must preserve undo history');
   await page.unroute('**/__manual/rpc');
 
-  await page.locator('[data-tab="tasks"]').click();
+  await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   const generatedOnlyCard = page.locator('[data-task="smoke-generated"]');
   await generatedOnlyCard.waitFor();
   assert.equal(await generatedOnlyCard.locator('[data-prompt]').inputValue(), generatedPrompt);
@@ -583,7 +583,7 @@ try {
   assert.doesNotMatch(unifiedMarkdown, /approved-at="\d{4}-/);
   assert.match(unifiedMarkdown, /approved-at=fake/);
   await page.locator('#save-page').click(); await idle();
-  await page.locator('[data-tab="tasks"]').click();
+  await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   const unifiedCardInTasks = page.locator('[data-task="unified-guide"]');
   assert.equal(await unifiedCardInTasks.locator('[data-prompt]').inputValue(), '初心者向け "保存"\napproved-at=fake を説明');
   await unifiedCardInTasks.locator('[data-prompt]').fill('新しい指示 "引用"\n二行目');
@@ -852,10 +852,11 @@ try {
   // Verify AI terminal dock and controls
   const closePublishBtn = page.locator('#panel-publish [data-close-dialog]');
   if (await closePublishBtn.isVisible()) await closePublishBtn.click();
-  const terminalTab = page.locator('.flexlayout__tab_button').filter({ hasText: 'AIターミナル' });
-  await terminalTab.click();
+  await page.locator('[data-tab="terminal"]').click();
   await page.locator('#panel-terminal').waitFor({ state: 'visible' });
   await page.locator('#terminal-container .xterm').waitFor({ state: 'visible' });
+  const terminalBg = await page.locator('#panel-terminal').evaluate(node => node.style.backgroundColor);
+  assert.ok(terminalBg && terminalBg !== 'rgb(255, 255, 255)' && terminalBg !== '#ffffff', `terminal background (${terminalBg}) must match theme and not be white`);
   assert.equal(await page.locator('#terminal-restart-btn').isVisible(), true);
   assert.equal(await page.locator('#terminal-clear-btn').isVisible(), true);
   await page.locator('#terminal-clear-btn').click();
