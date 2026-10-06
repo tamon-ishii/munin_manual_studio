@@ -43,11 +43,11 @@
   - `pub fn pty_resize(session_id: &str, cols: u16, rows: u16) -> Result<(), String>`
   - `pub fn pty_kill(session_id: &str) -> Result<(), String>`
 
-- [ ] **Step 1: Add `portable-pty` dependency to `crates/manual-core/Cargo.toml`**
+- [x] **Step 1: Add `portable-pty` dependency to `crates/manual-core/Cargo.toml`**
 
 Add `portable-pty = "0.8"` to dependencies.
 
-- [ ] **Step 2: Write failing unit test for PTY lifecycle in `crates/manual-core/src/pty.rs`**
+- [x] **Step 2: Write failing unit test for PTY lifecycle in `crates/manual-core/src/pty.rs`**
 
 ```rust
 #[cfg(test)]
@@ -72,25 +72,25 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `cargo test --package manual-core pty`
 Expected: FAIL (missing module / functions)
 
-- [ ] **Step 4: Implement `crates/manual-core/src/pty.rs`**
+- [x] **Step 4: Implement `crates/manual-core/src/pty.rs`**
 
 Implement global session storage with `Arc<Mutex<HashMap<String, PtySession>>>`, capturing child process, writer, and a thread reading from the PTY master into a buffer.
 
-- [ ] **Step 5: Wire PTY RPC actions into `lib.rs` and `manualctl.rs`**
+- [x] **Step 5: Wire PTY RPC actions into `lib.rs` and `manualctl.rs`**
 
 Add handlers for `"pty-spawn"`, `"pty-write"`, `"pty-read"`, `"pty-resize"`, `"pty-kill"` in `run_request`.
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `cargo test --package manual-core pty`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/manual-core/Cargo.toml crates/manual-core/src/pty.rs crates/manual-core/src/lib.rs crates/manual-core/src/bin/manualctl.rs
@@ -110,7 +110,7 @@ git commit -m "feat(core): implement portable-pty session manager and RPC endpoi
   - `stripAnsi(text: string): string`
   - `extractDelimitedResult(buffer: string): { completed: boolean; result?: string; remaining: string }`
 
-- [ ] **Step 1: Write test script `scripts/test_terminal_output_parser.mjs`**
+- [x] **Step 1: Write test script `scripts/test_terminal_output_parser.mjs`**
 
 ```javascript
 import assert from "node:assert/strict";
@@ -132,21 +132,21 @@ assert.equal(res2.result?.trim(), "# Title\nContent");
 console.log("terminalOutputParser tests passed!");
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --loader tsx scripts/test_terminal_output_parser.mjs`
 Expected: FAIL (module not found)
 
-- [ ] **Step 3: Implement `apps/manual-studio/src/terminalOutputParser.ts`**
+- [x] **Step 3: Implement `apps/manual-studio/src/terminalOutputParser.ts`**
 
 Implement `stripAnsi` using standard ANSI escape regex, and `extractDelimitedResult` searching for `<<<MANUAL_STUDIO_RESULT_START>>>` and `<<<MANUAL_STUDIO_RESULT_END>>>`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `npx tsx scripts/test_terminal_output_parser.mjs`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/manual-studio/src/terminalOutputParser.ts scripts/test_terminal_output_parser.mjs
@@ -168,11 +168,11 @@ git commit -m "feat(terminal): add terminal output parser and ANSI stripper"
   - `export function setupTerminalPane(container: HTMLElement, options: TerminalPaneOptions): TerminalController`
   - `interface TerminalController { write(data: string): void; fit(): void; kill(): Promise<void>; restart(): Promise<void>; injectPrompt(prompt: string): Promise<string>; }`
 
-- [ ] **Step 1: Install `@xterm/xterm` and `@xterm/addon-fit`**
+- [x] **Step 1: Install `@xterm/xterm` and `@xterm/addon-fit`**
 
 Run: `npm install @xterm/xterm @xterm/addon-fit`
 
-- [ ] **Step 2: Add `#panel-terminal` DOM structure to `apps/manual-studio/index.html`**
+- [x] **Step 2: Add `#panel-terminal` DOM structure to `apps/manual-studio/index.html`**
 
 Inside `#layout-panel-pool`, add:
 ```html
@@ -188,22 +188,22 @@ Inside `#layout-panel-pool`, add:
 </section>
 ```
 
-- [ ] **Step 3: Add CSS for terminal in `apps/manual-studio/src/style.css`**
+- [x] **Step 3: Add CSS for terminal in `apps/manual-studio/src/style.css`**
 
 Import `@xterm/xterm/css/xterm.css` and style `.panel-terminal`, `.terminal-toolbar`, and `.terminal-container` (full height, flex layout).
 
-- [ ] **Step 4: Implement `apps/manual-studio/src/terminalPane.ts`**
+- [x] **Step 4: Implement `apps/manual-studio/src/terminalPane.ts`**
 
 Initialize `Terminal` and `FitAddon`.
 Implement PTY polling/communication (`pty-spawn`, `pty-read`, `pty-write`, `pty-resize`, `pty-kill`).
 Synchronize theme variables from `document.documentElement` to xterm terminal colors (`background`, `foreground`, `selectionBackground`, `cursor`).
 
-- [ ] **Step 5: Build verification**
+- [x] **Step 5: Build verification**
 
 Run: `npm run manual:build`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add package.json package-lock.json apps/manual-studio/index.html apps/manual-studio/src/style.css apps/manual-studio/src/terminalPane.ts
@@ -222,23 +222,23 @@ git commit -m "feat(terminal): integrate xterm.js terminal pane and PTY client"
 - `PANELS`: includes `{ id: "terminal", name: "AIターミナル", elementId: "panel-terminal" }`
 - `STORAGE_KEY`: updated to `"manual-studio-flexlayout-model-v4"`
 
-- [ ] **Step 1: Update `windowLayout.tsx` with terminal panel**
+- [x] **Step 1: Update `windowLayout.tsx` with terminal panel**
 
 Add `terminal` panel to `PANELS`.
 In `defaultLayoutJson`, add `terminal` tab to `tabset-bottom` alongside `ai-tags`.
 Update `STORAGE_KEY = "manual-studio-flexlayout-model-v4"`.
 In `loadStoredModel()`, purge previous keys.
 
-- [ ] **Step 2: Connect `setupTerminalPane` in `apps/manual-studio/src/main.ts`**
+- [x] **Step 2: Connect `setupTerminalPane` in `apps/manual-studio/src/main.ts`**
 
 Initialize the terminal pane on `#panel-terminal` and start the persistent PTY session when a workspace is opened.
 
-- [ ] **Step 3: Build verification**
+- [x] **Step 3: Build verification**
 
 Run: `npm run manual:build`
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/manual-studio/src/windowLayout.tsx apps/manual-studio/src/main.ts
@@ -252,25 +252,25 @@ git commit -m "feat(layout): dock AI terminal into FlexLayout bottom tabset"
 **Files:**
 - Modify: `apps/manual-studio/src/main.ts`
 
-- [ ] **Step 1: Wire tag generation to `terminalController.injectPrompt`**
+- [x] **Step 1: Wire tag generation to `terminalController.injectPrompt`**
 
 In `main.ts`, update `runAiPage` / AI tag regeneration to inject prompt with delimiters into `terminalController` when terminal is connected.
 
-- [ ] **Step 2: Handle response extraction and editor update**
+- [x] **Step 2: Handle response extraction and editor update**
 
 When the end marker is found, extract clean Markdown, strip ANSI, and update the document.
 Update preview and show feedback note.
 
-- [ ] **Step 3: Add timeout and fallback handling**
+- [x] **Step 3: Add timeout and fallback handling**
 
 If delimiter is not received within timeout (e.g. 60s), notify user and provide manual fallback.
 
-- [ ] **Step 4: Build verification**
+- [x] **Step 4: Build verification**
 
 Run: `npm run manual:build`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/manual-studio/src/main.ts
@@ -284,26 +284,26 @@ git commit -m "feat(generation): multiplex AI tag generation through persistent 
 **Files:**
 - Modify: `scripts/smoke_manual_studio.mjs`
 
-- [ ] **Step 1: Add terminal smoke checks in `scripts/smoke_manual_studio.mjs`**
+- [x] **Step 1: Add terminal smoke checks in `scripts/smoke_manual_studio.mjs`**
 
 Verify `#panel-terminal`, xterm canvas/DOM elements, toolbar restart button, and AI tag generation through PTY.
 
-- [ ] **Step 2: Run `manual:smoke`**
+- [x] **Step 2: Run `manual:smoke`**
 
 Run: `npm run manual:smoke`
 Expected: PASS
 
-- [ ] **Step 3: Run `manual:test-workflow`**
+- [x] **Step 3: Run `manual:test-workflow`**
 
 Run: `npm run manual:test-workflow`
 Expected: PASS
 
-- [ ] **Step 4: Run full `manual:check`**
+- [x] **Step 4: Run full `manual:check`**
 
 Run: `npm run manual:check`
 Expected: PASS (all 15 check steps pass)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/smoke_manual_studio.mjs
