@@ -64,3 +64,31 @@ assert.equal(navigator.canGoBack(), true);
 assert.equal(navigator.canGoForward(), true);
 
 console.log("previewNavigation tests passed successfully!");
+
+assert.equal(resolveRelativeMarkdownLink('docs/index.md', '%E6%97%A5%E6%9C%AC%E8%AA%9E.md#heading'), 'docs/日本語.md');
+assert.equal(resolveRelativeMarkdownLink('docs/index.md', '../../outside.md'), null);
+assert.equal(resolveRelativeMarkdownLink('docs/index.md', '%broken.md'), null);
+
+let cancelNavigation = true;
+let failNavigation = false;
+let retainedPage = 'second.md';
+const retained = createPreviewNavigator({
+  getCurrentPage: () => retainedPage,
+  openPage: async page => {
+    if (failNavigation) throw new Error('missing page');
+    if (!cancelNavigation) retainedPage = page;
+  },
+  refreshPreview: async () => {},
+});
+retained.pushPage('first.md'); retained.pushPage('second.md');
+await retained.goBack();
+assert.equal(retained.canGoBack(), true);
+assert.equal(retained.canGoForward(), false);
+cancelNavigation = false; failNavigation = true;
+await assert.rejects(retained.goBack(), /missing page/);
+assert.equal(retained.canGoBack(), true);
+assert.equal(retained.canGoForward(), false);
+failNavigation = false;
+await retained.goBack();
+assert.equal(retainedPage, 'first.md');
+assert.equal(retained.canGoForward(), true);

@@ -1,0 +1,27 @@
+{
+  "platform": "desktop",
+  "steps": [
+    {
+      "launch": {
+        "args": [],
+        "program": "/home/ishii/PycharmProjects/pymodulemgr/target/release/manual-studio"
+      }
+    },
+    {
+      "window": "Manual Studio"
+    },
+    {
+      "click": {
+        "x": 273,
+        "y": 90
+      }
+    },
+    {
+      "screenshot": {
+        "task": "task-readme-screenshot-2"
+      }
+    }
+  ],
+  "version": 1,
+  "window": "Manual Studio"
+}

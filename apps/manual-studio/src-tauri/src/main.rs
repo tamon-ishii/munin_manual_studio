@@ -184,12 +184,21 @@ fn restore_manual_studio(
     while let Some(label) = hidden.last().cloned() {
         if let Some(window) = app.get_webview_window(&label) {
             window.show().map_err(|error| error.to_string())?;
+            window.unminimize().map_err(|error| error.to_string())?;
         }
         hidden.pop();
     }
     if let Some(main) = app.get_webview_window("main") {
         main.show().map_err(|error| error.to_string())?;
-        main.set_focus().map_err(|error| error.to_string())?;
+        main.unminimize().map_err(|error| error.to_string())?;
+        // Raising explicitly also brings Studio back above the app launched
+        // for capture. Keep its usual stacking policy after taking focus.
+        let was_on_top = main.is_always_on_top().map_err(|error| error.to_string())?;
+        main.set_always_on_top(true).map_err(|error| error.to_string())?;
+        let focused = main.set_focus();
+        let reset = main.set_always_on_top(was_on_top);
+        focused.map_err(|error| error.to_string())?;
+        reset.map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -662,6 +671,10 @@ fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
     let mode = args.next();
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--manual-studio-annotate")) {
+        markits_desktop_lib::run();
+        return;
+    }
     if mode.as_deref() == Some(std::ffi::OsStr::new(native_worker::FLAG)) {
         let result = args
             .next()

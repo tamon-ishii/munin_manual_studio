@@ -7,8 +7,30 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tempfile::tempdir;
+
+thread_local! { static REQUEST_TIMEOUT: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) }; }
+pub struct TimeoutScope(Option<u64>);
+impl Drop for TimeoutScope { fn drop(&mut self) { REQUEST_TIMEOUT.with(|value|value.set(self.0)); } }
+pub fn request_timeout(seconds: Option<u64>) -> TimeoutScope {
+    TimeoutScope(REQUEST_TIMEOUT.with(|value|value.replace(seconds)))
+}
+pub(crate) fn operation_timeout(default: u64) -> Duration {
+    Duration::from_secs(REQUEST_TIMEOUT.with(|value|value.get()).unwrap_or(default))
+}
+pub(crate) fn run_process(root: &Path,binary: &str,args: &[String]) -> Result<std::process::Output,String> {
+    let checkpoint=cancellation_checkpoint(root);
+    let mut child=cli_command(binary,args,root).spawn().map_err(|e|e.to_string())?;
+    let mut stdout=child.stdout.take().ok_or("No process stdout")?;
+    let mut stderr=child.stderr.take().ok_or("No process stderr")?;
+    let out=thread::spawn(move||{let mut bytes=Vec::new();stdout.read_to_end(&mut bytes).map(|_|bytes)});
+    let err=thread::spawn(move||{let mut bytes=Vec::new();stderr.read_to_end(&mut bytes).map(|_|bytes)});
+    let result=wait_for_cli(&mut child,root,&checkpoint,operation_timeout(300));
+    let stdout=out.join().map_err(|_|"stdout reader failed")?.map_err(|e|e.to_string())?;
+    let stderr=err.join().map_err(|_|"stderr reader failed")?.map_err(|e|e.to_string())?;
+    Ok(std::process::Output{status:result?,stdout,stderr})
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
@@ -100,6 +122,106 @@ fn append_progress(path: &Path, message: &str) {
     }
 }
 
+thread_local! {
+    static REQUEST_API_KEY: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) struct ApiKeyScope(Option<String>);
+impl Drop for ApiKeyScope {
+    fn drop(&mut self) {
+        REQUEST_API_KEY.with(|key| *key.borrow_mut() = self.0.take());
+    }
+}
+pub(crate) fn request_api_key(key: Option<&str>) -> ApiKeyScope {
+    ApiKeyScope(REQUEST_API_KEY.with(|current| current.replace(key.map(str::to_string))))
+}
+
+// The marker works across the separate manualctl processes used by the dev bridge.
+fn cancel_path(root: &Path) -> PathBuf {
+    progress_log_path(root).with_extension("cancel")
+}
+
+pub(crate) fn cancellation_checkpoint(root: &Path) -> String {
+    fs::read_to_string(cancel_path(root)).unwrap_or_default()
+}
+
+pub(crate) fn check_cancelled(root: &Path, checkpoint: &str) -> Result<(), String> {
+    if cancellation_checkpoint(root) != checkpoint {
+        Err("AI生成を中断しました。原稿は変更していません。".into())
+    } else {
+        Ok(())
+    }
+}
+
+pub fn cancel(root: &Path) -> Result<(), String> {
+    fs::write(cancel_path(root), format!("{:?}", SystemTime::now()))
+        .map_err(|error| error.to_string())
+}
+
+fn stop_cli_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", child.id())])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
+
+fn wait_for_cli(
+    child: &mut std::process::Child,
+    root: &Path,
+    checkpoint: &str,
+    timeout: Duration,
+) -> Result<std::process::ExitStatus, String> {
+    let started = Instant::now();
+    loop {
+        let interrupted = check_cancelled(root, checkpoint).err().or_else(|| {
+            (started.elapsed() >= timeout)
+                .then(|| format!("AI CLIが制限時間（{}秒）を超えました。", timeout.as_secs()))
+        });
+        if let Some(error) = interrupted {
+            // CLI tools can launch descendants that keep stdout/stderr open.
+            // Stop the process group as well so pipe reader threads can finish.
+            stop_cli_tree(child);
+            let _ = child.wait();
+            return Err(error);
+        }
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            // A completed CLI must not leave background tools holding its pipes.
+            stop_cli_tree(child);
+            return Ok(status);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn cli_command(binary: &str, args: &[String], root: &Path) -> Command {
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+}
+
 fn codex_event_message(event: &Value) -> Option<String> {
     let event_type = event.get("type")?.as_str()?;
     match event_type {
@@ -177,12 +299,8 @@ fn run_codex(
     append_progress(&log_path, "Codex CLIを起動しています");
     let started = Instant::now();
 
-    let mut child = Command::new(binary)
-        .args(args)
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let checkpoint = cancellation_checkpoint(root);
+    let mut child = cli_command(binary, args, root)
         .spawn()
         .map_err(|error| format!("Failed to run {binary}: {error}"))?;
     let stdout = child.stdout.take().ok_or("Failed to read Codex output")?;
@@ -201,30 +319,39 @@ fn run_codex(
         text
     });
 
-    let mut stdout_text = String::new();
-    let mut first_output = true;
-    for line in BufReader::new(stdout).lines() {
-        let line = line.map_err(|error| format!("Failed to read Codex output: {error}"))?;
-        if first_output {
-            append_progress(
-                &log_path,
-                &format!(
-                    "Codexから最初のイベントを受信しました（起動から{}秒）",
-                    started.elapsed().as_secs()
-                ),
-            );
-            first_output = false;
-        }
-        stdout_text.push_str(&line);
-        stdout_text.push('\n');
-        if let Ok(event) = serde_json::from_str::<Value>(&line) {
-            if let Some(message) = codex_event_message(&event) {
-                append_progress(&log_path, &message);
+    let stdout_log_path = log_path.clone();
+    let stdout_reader = thread::spawn(move || -> Result<String, String> {
+        let log_path = stdout_log_path;
+        let mut stdout_text = String::new();
+        let mut first_output = true;
+        for line in BufReader::new(stdout).lines() {
+            let line = line.map_err(|error| format!("Failed to read Codex output: {error}"))?;
+            if first_output {
+                append_progress(
+                    &log_path,
+                    &format!(
+                        "Codexから最初のイベントを受信しました（起動から{}秒）",
+                        started.elapsed().as_secs()
+                    ),
+                );
+                first_output = false;
+            }
+            stdout_text.push_str(&line);
+            stdout_text.push('\n');
+            if let Ok(event) = serde_json::from_str::<Value>(&line) {
+                if let Some(message) = codex_event_message(&event) {
+                    append_progress(&log_path, &message);
+                }
             }
         }
-    }
-    let status = child.wait().map_err(|error| error.to_string())?;
+        Ok(stdout_text)
+    });
+    let status = wait_for_cli(&mut child, root, &checkpoint, operation_timeout(300));
     let stderr_text = stderr_reader.join().unwrap_or_default();
+    let stdout_text = stdout_reader
+        .join()
+        .map_err(|_| "Codex output reader failed")??;
+    let status = status?;
     append_progress(
         &log_path,
         &format!(
@@ -270,7 +397,8 @@ pub fn http_agent_json(
 
     let schema_str = serde_json::to_string(schema).map_err(|e| e.to_string())?;
     let system_prompt = "You are an AI documentation assistant. You MUST respond with a valid, parseable JSON object matching the requested schema. Do NOT include markdown code blocks, backticks, or conversational text.";
-    let user_prompt = format!("{prompt}\n\nRespond with a valid JSON object matching this schema:\n{schema_str}");
+    let user_prompt =
+        format!("{prompt}\n\nRespond with a valid JSON object matching this schema:\n{schema_str}");
 
     let body = serde_json::json!({
         "model": model_name,
@@ -284,37 +412,54 @@ pub fn http_agent_json(
 
     log_progress(root, &format!("AI ({url}) へリクエストを送信しています..."));
 
-    let mut request = ureq::post(&url)
-        .timeout(Duration::from_secs(120))
-        .set("Content-Type", "application/json");
-
+    let checkpoint = cancellation_checkpoint(root);
     let effective_key = api_key
-        .map(|k| k.to_string())
+        .map(str::to_string)
+        .or_else(|| REQUEST_API_KEY.with(|key| key.borrow().clone()))
         .or_else(|| env::var("MUNIN_AI_API_KEY").ok())
         .or_else(|| env::var("OPENAI_API_KEY").ok());
-
-    if let Some(key) = effective_key {
-        let trimmed = key.trim();
-        if !trimmed.is_empty() {
-            request = request.set("Authorization", &format!("Bearer {trimmed}"));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("AI API runtime failed: {e}"))?;
+    let resp_json: Value = runtime.block_on(async {
+        let client = reqwest::Client::builder()
+            .timeout(operation_timeout(120))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("AI API connection failed: {e}"))?;
+        let mut request = client.post(&url).json(&body);
+        if let Some(key) = effective_key.filter(|key| !key.trim().is_empty()) {
+            request = request.bearer_auth(key.trim());
         }
-    }
-
-    let response = request.send_json(body).map_err(|err| match err {
-        ureq::Error::Status(code, resp) => {
-            let body_text = resp.into_string().unwrap_or_default();
-            format!("AI API returned HTTP {code}: {body_text}")
-        }
-        ureq::Error::Transport(transport) => {
-            format!("AI API connection failed to {url}: {transport}")
+        let operation = async {
+            let response = request
+                .send()
+                .await
+                .map_err(|e| format!("AI API connection failed to {url}: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                let detail = response.text().await.unwrap_or_default();
+                return Err(format!(
+                    "AI API returned HTTP {}: {detail}",
+                    status.as_u16()
+                ));
+            }
+            response
+                .json::<Value>()
+                .await
+                .map_err(|e| format!("Failed to parse API response as JSON: {e}"))
+        };
+        let mut operation = std::pin::pin!(operation);
+        loop {
+            check_cancelled(root, &checkpoint)?;
+            match tokio::time::timeout(Duration::from_millis(50), &mut operation).await {
+                Ok(result) => break result,
+                Err(_) => continue,
+            }
         }
     })?;
-
     log_progress(root, "AIからの応答を受信しました。解析中...");
-
-    let resp_json: Value = response
-        .into_json()
-        .map_err(|e| format!("Failed to parse API response as JSON: {e}"))?;
 
     let content = resp_json
         .get("choices")
@@ -335,6 +480,7 @@ pub fn http_agent_json(
                 .map(|parts| {
                     parts
                         .iter()
+                        .filter(|p| p.get("thought") != Some(&Value::Bool(true)))
                         .filter_map(|p| p.get("text").and_then(Value::as_str))
                         .collect::<Vec<_>>()
                         .join("")
@@ -344,9 +490,11 @@ pub fn http_agent_json(
 
     let clean_json = clean_markdown_fence(&content);
 
-    serde_json::from_str(&clean_json).map_err(|e| {
+    let payload: Value = serde_json::from_str(&clean_json).map_err(|e| {
         format!("Failed to parse model content as JSON schema: {e}\nRaw output: {content}")
-    })
+    })?;
+    validate_payload(&payload, schema, "answer")?;
+    Ok(payload)
 }
 
 pub fn agent_json(
@@ -460,22 +608,20 @@ pub fn agent_json(
         cmd_args.insert(0, "--model".to_string());
     }
 
-    let binary = which_binary(binary_name)
-        .ok_or_else(|| format!("AI CLI is unavailable: {binary_name}"))?;
+    let binary =
+        which_binary(binary_name).ok_or_else(|| format!("AI CLI is unavailable: {binary_name}"))?;
 
     if agent == "codex" {
-        return run_codex(&binary.to_string_lossy(), &cmd_args, root, &answer_path);
+        let payload = run_codex(&binary.to_string_lossy(), &cmd_args, root, &answer_path)?;
+        validate_payload(&payload, schema, "answer")?;
+        return Ok(payload);
     }
 
     let log_path = progress_log_path(root);
     append_progress(&log_path, &format!("{binary_name} CLIを起動しています"));
     let started = Instant::now();
-    let mut child = Command::new(&binary)
-        .args(&cmd_args)
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let checkpoint = cancellation_checkpoint(root);
+    let mut child = cli_command(&binary.to_string_lossy(), &cmd_args, root)
         .spawn()
         .map_err(|e| format!("Failed to run {binary_name}: {e}"))?;
     append_progress(&log_path, "AIエージェントの応答を待っています");
@@ -493,15 +639,18 @@ pub fn agent_json(
         }
         text
     });
-    let mut stdout_str = String::new();
-    child
-        .stdout
-        .take()
-        .ok_or("Failed to read AI output")?
-        .read_to_string(&mut stdout_str)
-        .map_err(|e| format!("Failed to read {binary_name} output: {e}"))?;
-    let exit_status = child.wait().map_err(|e| e.to_string())?;
+    let mut stdout = child.stdout.take().ok_or("Failed to read AI output")?;
+    let stdout_reader = thread::spawn(move || {
+        let mut text = String::new();
+        stdout.read_to_string(&mut text).map(|_| text)
+    });
+    let exit_status = wait_for_cli(&mut child, root, &checkpoint, operation_timeout(300));
     let stderr_text = stderr_reader.join().unwrap_or_default();
+    let stdout_str = stdout_reader
+        .join()
+        .map_err(|_| "AI output reader failed")?
+        .map_err(|error| format!("Failed to read AI output: {error}"))?;
+    let exit_status = exit_status?;
     append_progress(
         &log_path,
         &format!(
@@ -573,6 +722,82 @@ fn has_schema_properties(val: &Value, schema: &Value) -> bool {
 }
 
 fn extract_agent_payload(agent: &str, parsed: &Value, schema: &Value) -> Result<Value, String> {
+    let payload = extract_agent_payload_unchecked(agent, parsed, schema)?;
+    validate_payload(&payload, schema, "answer")?;
+    Ok(payload)
+}
+
+// Validate the schema keywords used by this application's response schemas.
+fn validate_payload(value: &Value, schema: &Value, path: &str) -> Result<(), String> {
+    if let Some(kind) = schema.get("type") {
+        let matches_type = |kind: &str| match kind {
+            "object" => value.is_object(),
+            "array" => value.is_array(),
+            "string" => value.is_string(),
+            "boolean" => value.is_boolean(),
+            "number" => value.is_number(),
+            "integer" => value.is_i64() || value.is_u64(),
+            "null" => value.is_null(),
+            _ => false,
+        };
+        let valid = kind.as_str().map(matches_type).unwrap_or_else(|| {
+            kind.as_array()
+                .is_some_and(|kinds| kinds.iter().filter_map(Value::as_str).any(matches_type))
+        });
+        if !valid {
+            return Err(format!("AI回答の形式が不正です: {path} must be {kind}"));
+        }
+    }
+    if let Some(allowed) = schema.get("enum").and_then(Value::as_array) {
+        if !allowed.contains(value) {
+            return Err(format!("AI回答の値が不正です: {path}"));
+        }
+    }
+    if let Some(object) = value.as_object() {
+        if let Some(required) = schema.get("required").and_then(Value::as_array) {
+            for key in required.iter().filter_map(Value::as_str) {
+                if !object.contains_key(key) {
+                    return Err(format!("AI回答に必須項目がありません: {path}.{key}"));
+                }
+            }
+        }
+        if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            for (key, item) in object {
+                if let Some(item_schema) = properties.get(key) {
+                    validate_payload(item, item_schema, &format!("{path}.{key}"))?;
+                } else if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
+                    return Err(format!("AI回答に未定義の項目があります: {path}.{key}"));
+                }
+            }
+        }
+    }
+    if let (Some(items), Some(item_schema)) = (value.as_array(), schema.get("items")) {
+        for (index, item) in items.iter().enumerate() {
+            validate_payload(item, item_schema, &format!("{path}[{index}]"))?;
+        }
+    }
+    Ok(())
+}
+
+fn extract_agent_payload_unchecked(
+    agent: &str,
+    parsed: &Value,
+    schema: &Value,
+) -> Result<Value, String> {
+    if let Some(kind) = parsed.get("type").and_then(Value::as_str) {
+        if kind != "result" && !has_schema_properties(parsed, schema) {
+            return Err(format!(
+                "{agent} returned an intermediate event instead of a final result: {kind}"
+            ));
+        }
+    }
+    if parsed
+        .get("subtype")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.starts_with("error"))
+    {
+        return Err(format!("{agent} did not complete: {parsed}"));
+    }
     // 1. Error checks in response envelope
     if parsed.get("is_error").and_then(Value::as_bool) == Some(true) {
         let msg = parsed
@@ -655,6 +880,7 @@ fn extract_agent_payload(agent: &str, parsed: &Value, schema: &Value) -> Result<
             if let Some(parts) = parts_opt {
                 let text: String = parts
                     .iter()
+                    .filter(|p| p.get("thought") != Some(&Value::Bool(true)))
                     .filter_map(|p| p.get("text").and_then(Value::as_str))
                     .collect::<Vec<_>>()
                     .join("");
@@ -682,6 +908,7 @@ fn extract_agent_payload(agent: &str, parsed: &Value, schema: &Value) -> Result<
             if let Some(parts) = content.get("parts").and_then(Value::as_array) {
                 let text: String = parts
                     .iter()
+                    .filter(|p| p.get("thought") != Some(&Value::Bool(true)))
                     .filter_map(|p| p.get("text").and_then(Value::as_str))
                     .collect::<Vec<_>>()
                     .join("");
@@ -712,6 +939,13 @@ fn extract_agent_payload(agent: &str, parsed: &Value, schema: &Value) -> Result<
             // Collect text from blocks
             let mut texts = Vec::new();
             for item in arr {
+                if item
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind != "text")
+                {
+                    continue;
+                }
                 if let Some(t) = item.get("text").and_then(Value::as_str) {
                     texts.push(t);
                 } else if let Some(parts) = item.get("parts").and_then(Value::as_array) {
@@ -761,6 +995,7 @@ fn extract_agent_payload(agent: &str, parsed: &Value, schema: &Value) -> Result<
     if let Some(parts) = parsed.get("parts").and_then(Value::as_array) {
         let text: String = parts
             .iter()
+            .filter(|p| p.get("thought") != Some(&Value::Bool(true)))
             .filter_map(|p| p.get("text").and_then(Value::as_str))
             .collect::<Vec<_>>()
             .join("");
@@ -851,6 +1086,101 @@ fn bounded_failure_message(message: &str) -> &str {
 #[cfg(test)]
 mod failure_tests {
     use super::*;
+
+    #[test]
+    fn incomplete_or_wrongly_typed_answers_are_rejected() {
+        let schema = json!({"type":"object", "properties": {
+            "answers": {"type":"array", "items": {"type":"object", "properties": {
+                "id":{"type":"string"}, "markdown":{"type":"string"}
+            }, "required":["id", "markdown"], "additionalProperties":false}}
+        }, "required":["answers"], "additionalProperties":false});
+        for value in [
+            json!({"status":"SUCCESS"}),
+            json!({"answers":[{"id":"a"}]}),
+            json!({"answers":[{"id":"a","markdown":42}]}),
+            json!({"answers":[],"reasoning":"Generating..."}),
+        ] {
+            assert!(extract_agent_payload("agy", &value, &schema).is_err());
+        }
+        let nullable = json!({"type":["string", "null"]});
+        assert!(validate_payload(&Value::Null, &nullable, "file").is_ok());
+        assert!(validate_payload(&json!("source.rs"), &nullable, "file").is_ok());
+        assert!(validate_payload(&json!(42), &nullable, "file").is_err());
+    }
+
+    #[test]
+    fn intermediate_events_and_thought_blocks_are_not_answers() {
+        let schema = json!({"type":"object", "properties":{"markdown":{"type":"string"}}, "required":["markdown"]});
+        assert!(extract_agent_payload(
+            "claude",
+            &json!({"type":"assistant", "content":"Generating..."}),
+            &schema
+        )
+        .is_err());
+        let payload = extract_agent_payload(
+            "claude",
+            &json!({"content":[
+                {"type":"thinking", "text":"private reasoning"},
+                {"type":"text", "text":"Final answer"}
+            ]}),
+            &schema,
+        )
+        .unwrap();
+        assert_eq!(payload["markdown"], "Final answer");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_timeout_and_cancel_stop_descendants_holding_pipes() {
+        for cancelled in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let args = vec!["-c".into(), "sleep 30 & wait".into()];
+            let checkpoint = cancellation_checkpoint(root.path());
+            let mut child = cli_command("/bin/sh", &args, root.path()).spawn().unwrap();
+            let mut stdout = child.stdout.take().unwrap();
+            let reader = thread::spawn(move || {
+                let mut text = String::new();
+                stdout.read_to_string(&mut text).unwrap();
+            });
+            if cancelled {
+                cancel(root.path()).unwrap();
+            }
+            let started = Instant::now();
+            let error = wait_for_cli(
+                &mut child,
+                root.path(),
+                &checkpoint,
+                Duration::from_millis(100),
+            )
+            .unwrap_err();
+            reader.join().unwrap();
+            assert!(started.elapsed() < Duration::from_secs(3));
+            assert!(error.contains(if cancelled { "中断" } else { "制限時間" }));
+            fs::remove_file(cancel_path(root.path())).ok();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_waits_for_exit_and_reads_final_answer_instead_of_progress() {
+        let root = tempfile::tempdir().unwrap();
+        let answer_path = root.path().join("answer.json");
+        let script = r#"
+printf '%s\n' '{"type":"item.completed","item":{"type":"reasoning","text":"Generating..."}}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Intermediate commentary"}}'
+sleep 0.1
+printf '%s' '{"markdown":"Final manual text"}' > "$1"
+"#;
+        let args = vec![
+            "-c".to_string(),
+            script.to_string(),
+            "fake-codex".to_string(),
+            answer_path.to_string_lossy().into_owned(),
+        ];
+        let result = run_codex("/bin/sh", &args, root.path(), &answer_path).unwrap();
+        assert_eq!(result["markdown"], "Final manual text");
+        clear_progress(root.path());
+    }
 
     #[test]
     fn codex_progress_events_are_summarized_without_exposing_agent_text() {
@@ -1025,7 +1355,8 @@ mod failure_tests {
 
     #[test]
     fn extract_json_value_handles_surrounding_text() {
-        let raw = "Warning: new version available\n{\"markdown\":\"# Hello\"}\nTips: run claude update";
+        let raw =
+            "Warning: new version available\n{\"markdown\":\"# Hello\"}\nTips: run claude update";
         let val = extract_json_value(raw).unwrap();
         assert_eq!(val["markdown"], "# Hello");
     }

@@ -25,7 +25,7 @@ class ReleaseLayoutTests(unittest.TestCase):
                 binaries = []
                 source = root / ('source-' + platform)
                 source.mkdir()
-                for name in ('manual-studio', 'manualctl', 'markits-desktop'):
+                for name in ('manual-studio', 'manualctl'):
                     binary = source / (name + extension)
                     binary.write_bytes(name.encode())
                     binaries.append(binary)
@@ -42,6 +42,7 @@ class ReleaseLayoutTests(unittest.TestCase):
                     self.assertTrue((contents / 'Resources/manual-studio.icns').is_file())
                 for binary in binaries:
                     self.assertEqual((destination / binary.name).read_bytes(), binary.read_bytes())
+                self.assertFalse((destination / ('markits-desktop' + extension)).exists())
                 self.assertIn('0.2.1', (package / 'README.txt').read_text())
 
     @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS codesign')
@@ -53,7 +54,7 @@ class ReleaseLayoutTests(unittest.TestCase):
             executable = root / 'manual-studio'
             subprocess.run(['rustc', str(source), '-o', str(executable)], check=True)
             binaries = [executable]
-            for name in ('manualctl', 'markits-desktop'):
+            for name in ('manualctl',):
                 binary = root / name
                 shutil.copy2(executable, binary)
                 binaries.append(binary)

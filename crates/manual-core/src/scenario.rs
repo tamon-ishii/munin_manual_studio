@@ -2,7 +2,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tempfile::tempdir_in;
 
 use super::author;
@@ -62,6 +61,14 @@ fn run_mode(
     let docs = project_path(root, &read_config(root).docs)?;
     validate_scenario_with_tasks(&scenario, &docs, selected)?;
 
+    if record {
+        for step in &scenario.steps {
+            if let Some(id) = step.get("screenshot").and_then(|v| v.get("task")).and_then(serde_json::Value::as_str) {
+                let task = selected.iter().find(|task| task.id == id).cloned().map(Ok).unwrap_or_else(|| super::task::find_task(&docs, id))?;
+                super::task::ensure_unlocked(&task)?;
+            }
+        }
+    }
     let temporary = tempdir_in(root).map_err(|error| error.to_string())?;
     let captured_dir = temporary.path().join("captured");
     let completed = if scenario.platform.as_deref() == Some("desktop") {
@@ -70,13 +77,9 @@ fn run_mode(
         let script = temporary.path().join("scenario_runner.mjs");
         fs::write(&script, include_str!("scenario_runner.mjs"))
             .map_err(|error| error.to_string())?;
-        let result = Command::new("node")
-            .arg(&script)
-            .arg(&input_path)
-            .arg(&captured_dir)
-            .current_dir(root)
-            .output()
-            .map_err(|error| format!("Failed to start Node.js scenario runner: {error}"))?;
+        let result = super::agent::run_process(root, "node", &[
+            script.to_string_lossy().into_owned(),input_path.to_string_lossy().into_owned(),captured_dir.to_string_lossy().into_owned()
+        ])?;
         if !result.status.success() {
             return Err(format!(
                 "Scenario failed: {}",

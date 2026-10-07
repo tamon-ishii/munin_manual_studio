@@ -86,7 +86,7 @@ try {
   };
 
   await openInstructionToolbar();
-  await page.locator('.milkdown-top-bar').getByRole('button', { name: 'AI文章の指示', exact: true }).click();
+  await page.locator('.milkdown-top-bar').getByRole('button', { name: '文章の指示', exact: true }).click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /ai:task id=task-docs-guide-text-1 kind=text/, 'ordinary AI task insertion still works');
   const inlinePrompt = page.getByRole('textbox', { name: 'AIへの指示 task-docs-guide-text-1', exact: true });
   const originalPrompt = await inlinePrompt.inputValue();
@@ -96,8 +96,22 @@ try {
   await inlinePrompt.press('Control+z');
   assert.equal(await inlinePrompt.inputValue(), originalPrompt);
 
+  await page.locator('#markdown-editor').evaluate(node => {
+    node.value += '\n\nBefore capture cursor.\n\nAfter capture cursor.\n';
+    node.dispatchEvent(new Event('input', {bubbles:true}));
+  });
+  const cursorParagraph = page.locator('.ProseMirror p').filter({hasText:'Before capture cursor.'});
+  await cursorParagraph.click(); await cursorParagraph.press('End');
   await openInstructionToolbar();
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '撮影の指示', exact: true }).click();
+  // Move the live editor selection while the dialog is open. Insertion must
+  // retain the position at which capture was requested.
+  await page.evaluate(() => {
+    const node = [...document.querySelectorAll('.ProseMirror p')].find(node => node.textContent === 'After capture cursor.');
+    const range = document.createRange(); range.selectNodeContents(node); range.collapse(false);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  });
   await page.locator('#screenshot-launch-command').selectOption('__custom__');
   await page.locator('#screenshot-task-form button[type="submit"]').click();
   assert.match(await page.locator('#screenshot-submit-feedback').textContent(), /起動アプリまたは補足/, 'empty screenshot task submission explains what is missing in the dialog');
@@ -107,6 +121,8 @@ try {
   await page.locator('#screenshot-task-form button[type="submit"]').click();
   await page.waitForFunction(() => document.querySelector('#markdown-editor')?.value.includes('起動アプリ: /usr/bin/shared-app'));
   const directScreenshotTask = await page.locator('#markdown-editor').inputValue();
+  assert.ok(directScreenshotTask.indexOf('Before capture cursor.') < directScreenshotTask.indexOf('kind=screenshot'));
+  assert.ok(directScreenshotTask.indexOf('kind=screenshot') < directScreenshotTask.indexOf('After capture cursor.'), 'capture dialog preserves the original rich editor position');
   assert.match(directScreenshotTask, /起動引数:&#10;- --shared&#10;- value/, 'unrecorded screenshot tag retains the selected shared app and arguments');
   assert.equal(await page.locator('#screenshot-task-dialog').evaluate(node => node.open), false, 'valid screenshot tag submission closes the dialog');
   assert.match(await page.locator('#status').textContent(), /保存すると実行対象になります/, 'successful screenshot tag insertion tells the user to save');
@@ -121,17 +137,20 @@ try {
   await page.locator('#start-operation-recording').click();
   await page.waitForFunction(() => document.querySelector('#operation-recording-status')?.textContent.includes('simulated first start failure'));
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
+  assert.equal(await page.locator('[data-capture-step][aria-current=step]').getAttribute('data-capture-step'), '1', 'startup failure returns to target selection');
   assert.equal(await page.locator('#start-operation-recording').isEnabled(), true, 'a failed startup unlocks the retry button');
   assert.equal(await page.locator('#cancel-screenshot-task').isEnabled(), true, 'a failed startup can be cancelled');
 
   await page.locator('#start-operation-recording').click();
   await page.waitForFunction(() => window.__captureMock.starts === 2);
   await page.waitForFunction(() => document.querySelector('#stop-operation-recording')?.disabled === false);
+  assert.equal(await page.locator('[data-capture-step][aria-current=step]').getAttribute('data-capture-step'), '2', 'live recording displays recording step');
   assert.equal(await page.locator('#start-operation-recording').isEnabled(), false, 'a live recorder cannot be started twice');
   assert.equal(await page.locator('#cancel-screenshot-task').isEnabled(), false, 'a live recorder cannot be cancelled without finishing');
 
   await page.locator('#stop-operation-recording').click();
   await page.waitForFunction(() => window.__captureMock.calls.some(call => call.command === 'markits_annotation_ready'));
+  assert.equal(await page.locator('[data-capture-step][aria-current=step]').getAttribute('data-capture-step'), '3', 'annotation wait displays capture step');
   assert.equal(await page.locator('#cancel-screenshot-task').isEnabled(), true, 'MarkIts annotation wait can be cancelled');
   await page.locator('#cancel-screenshot-task').click();
   await page.locator('[data-page="docs/other.md"]').click();

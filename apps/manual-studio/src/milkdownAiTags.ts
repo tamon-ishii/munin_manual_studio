@@ -3,9 +3,9 @@ import { $command, insert } from '@milkdown/kit/utils';
 
 export type AiTaskKind = 'text' | 'screenshot' | 'diagram';
 export const aiTagItems: { kind: AiTaskKind; label: string; icon: string }[] = [
-  { kind: 'text', label: 'AI文章の指示', icon: '<span>AI文</span>' },
+  { kind: 'text', label: '文章の指示', icon: '<span>AI文</span>' },
   { kind: 'screenshot', label: '撮影の指示', icon: '<span>AI撮</span>' },
-  { kind: 'diagram', label: '依存図の指示', icon: '<span>AI図</span>' },
+  { kind: 'diagram', label: '図の指示', icon: '<span>AI図</span>' },
 ];
 
 /** Commands shared by Crepe's toolbar, slash menu and the capture dialog. */

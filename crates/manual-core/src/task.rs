@@ -34,6 +34,11 @@ pub struct Task {
     pub status: String, // "missing", "current", "approved", "stale"
 }
 
+pub fn ensure_unlocked(task: &Task) -> Result<(), String> {
+    if task.status == "approved" { return Err(format!("確定済みのAIタグは更新できません: {}。先に確定を解除してください。", task.id)); }
+    Ok(())
+}
+
 pub fn get_code_block_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
     let mut ranges = Vec::new();
     let mut in_fence = false;
@@ -1044,6 +1049,7 @@ pub fn update_task_in_docs(
         return Err(format!("Page file not found: {}", page_path.display()));
     }
     let content = fs::read_to_string(&page_path).map_err(|e| e.to_string())?;
+    ensure_unlocked(task)?;
     let task_id = &task.id;
     let created = utc_now();
     let clean_body = clean_generated_body(body);
@@ -1052,6 +1058,10 @@ pub fn update_task_in_docs(
     let page_rel = task.page.replace('\\', "/");
     let mut ids = HashSet::new();
     let tags = parse_page_tags(&page_rel, &content, &mut ids)?;
+    for tag in &tags {
+        let current = match tag { PageTag::Task { task, .. } | PageTag::Generated { task, .. } => task };
+        if current.id == task.id { ensure_unlocked(current)?; }
+    }
 
     if let Some(target_tag) = tags.iter().find(|t| {
         matches!(t,
@@ -1284,7 +1294,12 @@ mod unified_task_tests {
         let approved = find_task(temp.path(), "guide").unwrap();
         assert_eq!(approved.prompt, task.prompt);
         assert_eq!(approved.status, "approved");
-        update_task_in_docs(temp.path(), &approved, body, None).unwrap();
+        let before = fs::read_to_string(&page).unwrap();
+        assert!(update_task_in_docs(temp.path(), &approved, "Unwanted update", None).is_err());
+        // A stale caller cannot bypass a newly applied approval either.
+        assert!(update_task_in_docs(temp.path(), &task, "Unwanted update", None).is_err());
+        assert_eq!(fs::read_to_string(&page).unwrap(), before);
+        fs::write(&page, before.replace("approved-at=", "previous-approval=")).unwrap();
         let saved = fs::read_to_string(&page).unwrap();
         assert!(!saved.contains("ai:generated"));
         assert!(saved.contains(body));

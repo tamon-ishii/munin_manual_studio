@@ -36,7 +36,7 @@ try {
     await page.locator('.milkdown-top-bar .top-bar-heading-button').filter({ hasText: 'AIタグを追加' }).click();
     await page.locator('.milkdown-top-bar').getByRole('button', { name: label, exact: true }).click();
   };
-  await insertAiTag('AI文章の指示');
+  await insertAiTag('文章の指示');
   assert.match(await page.locator('#source').inputValue(), /ai:task id=plugin-1 kind=text prompt="指示の本文" -->/);
   assert.match(await page.locator('#source').inputValue(), /<!-- \/ai:task -->/);
   assert.equal(await page.locator('#source').isVisible(), false);
@@ -51,7 +51,7 @@ try {
   await promptField.press('Control+z');
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   assert.doesNotMatch(await page.locator('#source').inputValue(), /id=plugin-1/);
-  await insertAiTag('依存図の指示');
+  await insertAiTag('図の指示');
   assert.match(await page.locator('#source').inputValue(), /ai:task id=plugin-2 kind=diagram/);
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   await insertAiTag('撮影の指示');
@@ -97,6 +97,7 @@ try {
   await page.getByPlaceholder('コードの言語を検索').fill('mermaid');
   await page.locator('.language-list-item[data-language="mermaid"]').click();
   await page.waitForSelector('.mermaid-preview svg');
+  await page.locator('.milkdown-top-bar .top-bar-heading-button').filter({ hasText: '挿入・その他' }).click();
   await page.locator('.milkdown-top-bar').getByRole('button', { name: 'Mermaidの図を挿入', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.mermaid-preview svg').length === 2);
   assert.match(await page.locator('#source').inputValue(), /開始/);
@@ -109,7 +110,7 @@ try {
   await page.evaluate(() => { source.value = '# Slash\n\n<br />\n'; });
   await page.locator('.ProseMirror p').last().click();
   await page.keyboard.type('/');
-  await page.locator('.milkdown-slash-menu').getByText('AI文章の指示', { exact: true }).click();
+  await page.locator('.milkdown-slash-menu').getByText('文章の指示', { exact: true }).click();
   assert.match(await page.locator('#source').inputValue(), /ai:task id=plugin-3 kind=text/);
   assert.doesNotMatch(await page.locator('#source').inputValue(), /^\/$/m);
   assert.equal(await page.locator('#source').isVisible(), false);
@@ -137,7 +138,7 @@ try {
 
   const confirmBtn = card.locator('.milkdown-ai-task-confirm');
   assert.equal(await confirmBtn.innerText(), '確定');
-  assert.equal(await card.locator('.milkdown-ai-task-status').innerText(), '未確定');
+  assert.equal(await card.locator('.milkdown-ai-task-status').innerText(), '生成済み');
 
   // Confirm
   await confirmBtn.click();
@@ -153,7 +154,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('#source').value.includes('approved-at='));
   assert.doesNotMatch(await page.locator('#source').inputValue(), /approved-at=/);
   assert.equal(await confirmBtn.innerText(), '確定');
-  assert.equal(await card.locator('.milkdown-ai-task-status').innerText(), '未確定');
+  assert.equal(await card.locator('.milkdown-ai-task-status').innerText(), '生成済み');
   assert.equal(await regenBtn.isEnabled(), true, 'enabled when unapproved');
 
   // Clicking regenerate dispatches custom event

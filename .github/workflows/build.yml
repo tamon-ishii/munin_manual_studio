@@ -63,7 +63,6 @@ jobs:
       - name: Build frontends and check workflow logic
         run: |
           npm run manual:build
-          npm run manual:build-markits
           npm run manual:test-workflow
       - name: Test native Rust code and release layouts
         run: |
@@ -71,8 +70,6 @@ jobs:
           python -m unittest discover -s scripts -p "test_package_release.py"
       - name: Build Manual Studio and CLI
         run: cargo build --locked --release --target ${{ matrix.target }} -p manual-studio -p manual-core
-      - name: Build MarkIts Desktop
-        run: cargo build --locked --release --manifest-path crates/markits/Cargo.toml --target-dir target --target ${{ matrix.target }} -p markits-desktop --features tauri/custom-protocol
       - name: Package applications
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}

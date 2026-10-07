@@ -23,7 +23,7 @@ export const PANELS: PanelDef[] = [
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
 ];
 
-export const STORAGE_KEY = "manual-studio-flexlayout-model-v5";
+export const STORAGE_KEY = "manual-studio-flexlayout-model-v6";
 
 export const defaultLayoutJson: IJsonModel = {
   global: {
@@ -71,20 +71,6 @@ export const defaultLayoutJson: IJsonModel = {
               },
             ],
           },
-          {
-            type: "tabset",
-            id: "tabset-bottom",
-            weight: 25,
-            children: [
-              {
-                type: "tab",
-                id: "terminal",
-                name: "AIターミナル",
-                component: "terminal",
-                enableClose: true,
-              },
-            ],
-          },
         ],
       },
     ],
@@ -109,6 +95,9 @@ const DomPanelHost: React.FC<{ elementId: string }> = ({ elementId }) => {
     target.style.display = "";
     target.hidden = false;
     container.appendChild(target);
+    if (elementId === "panel-terminal") {
+      window.dispatchEvent(new CustomEvent("manual-studio-terminal-open"));
+    }
 
     return () => {
       const pool = document.getElementById("layout-panel-pool");
@@ -127,7 +116,8 @@ function loadStoredModel(): Model {
     localStorage.removeItem("manual-studio-flexlayout-model-v2");
     localStorage.removeItem("manual-studio-flexlayout-model-v3");
     localStorage.removeItem("manual-studio-flexlayout-model-v4");
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const current = localStorage.getItem(STORAGE_KEY);
+    const raw = current ?? localStorage.getItem("manual-studio-flexlayout-model-v5");
     if (raw) {
       const parsed = JSON.parse(raw);
       const str = JSON.stringify(parsed);
@@ -137,7 +127,14 @@ function loadStoredModel(): Model {
         !str.includes('"publish"') &&
         !str.includes('"appearance"')
       ) {
-        return Model.fromJson(parsed);
+        const restored = Model.fromJson(parsed);
+        // Older layouts included the terminal by default. Preserve the other
+        // panels while making the terminal opt-in on this first migration.
+        if (!current && restored.getNodeById("terminal")) {
+          restored.doAction(Actions.deleteTab("terminal"));
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(restored.toJson()));
+        return restored;
       }
     }
   } catch (error) {
@@ -172,6 +169,7 @@ export const FlexLayoutApp: React.FC<{
       localStorage.removeItem("manual-studio-flexlayout-model-v2");
       localStorage.removeItem("manual-studio-flexlayout-model-v3");
       localStorage.removeItem("manual-studio-flexlayout-model-v4");
+      localStorage.removeItem("manual-studio-flexlayout-model-v5");
     } catch {
       // ignore
     }

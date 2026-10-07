@@ -453,6 +453,8 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
         "config": config,
         "agents": get_agents(),
         "brief": brief,
+        "execution_results": crate::workflow::latest_results(root)?,
+        "update_reasons": crate::workflow::update_reasons(root, &tasks)?,
         "tasks": tasks,
         "image_assets": image_assets,
         "capture_sources": super::capture_source::read(root)?,

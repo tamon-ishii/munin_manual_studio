@@ -441,7 +441,10 @@ pub fn start(
             };
             let windows: Vec<Value> = serde_json::from_str(&raw)
                 .map_err(|error| format!("ウィンドウ一覧を読み取れません: {error}"))?;
-            if let Some(found) = select_launched_window(&windows, &existing_ids, &window_title) {
+            let app_ids = if window_title.trim().is_empty() {
+                launched_app_window_ids(&crate::native_worker::window_processes()?, &executable, app.id())
+            } else { HashSet::new() };
+            if let Some(found) = select_launched_window(&windows, &existing_ids, &window_title, &app_ids) {
                 reused_window = found["id"].as_str().is_some_and(|id| existing_ids.contains(id));
                 return Ok((
                     WindowBounds {
@@ -530,26 +533,13 @@ pub fn start(
             return Err(format!("入力記録プロセスを起動できません: {error}"));
         }
     };
-    let configured_markits = if markits_program.trim().is_empty() {
-        "markits-desktop"
-    } else {
-        markits_program.trim()
-    };
-    let markits_program = if configured_markits == "markits-desktop" {
-        let binary_name = if cfg!(target_os = "windows") {
-            "markits-desktop.exe"
-        } else {
-            "markits-desktop"
-        };
-        std::env::current_exe()
-            .ok()
-            .and_then(|executable| executable.parent().map(|parent| parent.join(binary_name)))
-            .filter(|candidate| candidate.is_file())
-            .map(|candidate| candidate.to_string_lossy().into_owned())
-            .unwrap_or_else(|| configured_markits.to_string())
-    } else {
-        configured_markits.to_string()
-    };
+    // The annotation editor is linked into this executable. Keep the RPC
+    // argument for compatibility with existing frontends, but never launch an
+    // independently installed executable.
+    let _ = markits_program;
+    let markits_program = std::env::current_exe()
+        .map_err(|error| format!("注釈エディタの実行ファイルを確認できません: {error}"))?
+        .to_string_lossy().into_owned();
     let mut lock = match state.0.lock() {
         Ok(lock) => lock,
         Err(error) => {
@@ -592,6 +582,7 @@ fn select_launched_window<'a>(
     windows: &'a [Value],
     existing_ids: &HashSet<String>,
     requested_title: &str,
+    app_window_ids: &HashSet<String>,
 ) -> Option<&'a Value> {
     if !requested_title.trim().is_empty() {
         return windows
@@ -616,13 +607,52 @@ fn select_launched_window<'a>(
         .filter(|window| {
             window["id"]
                 .as_str()
-                .is_some_and(|id| !existing_ids.contains(id))
+                .is_some_and(|id| !existing_ids.contains(id) && app_window_ids.contains(id))
                 && window["width"].as_u64().unwrap_or(0) >= 120
                 && window["height"].as_u64().unwrap_or(0) >= 80
         })
         .max_by_key(|window| {
             window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
         })
+}
+
+fn process_descends_from(mut pid: u32, launched_pid: u32) -> bool {
+    for _ in 0..64 {
+        if pid == launched_pid { return true; }
+        #[cfg(target_os = "linux")]
+        {
+            let Some(parent) = fs::read_to_string(format!("/proc/{pid}/stat")).ok()
+                .and_then(|stat| stat.rsplit_once(')').map(|(_, fields)| fields.to_string()))
+                .and_then(|fields| fields.split_whitespace().nth(1)?.parse::<u32>().ok())
+            else { return false; };
+            if parent == 0 || parent == pid { return false; }
+            pid = parent;
+        }
+        #[cfg(not(target_os = "linux"))]
+        return false;
+    }
+    false
+}
+
+fn launched_app_window_ids(
+    processes: &[markits::ui_elements::DetectedUiElement],
+    executable: &Path,
+    launched_pid: u32,
+) -> HashSet<String> {
+    let executable = executable.canonicalize().ok();
+    processes.iter().filter_map(|window| {
+        let pid = window.pid?;
+        let same_executable = executable.as_ref().is_some_and(|expected| {
+            manual_core::platform::process_executable(pid)
+                .and_then(|path| path.canonicalize().ok()).as_ref() == Some(expected)
+        });
+        if !process_descends_from(pid, launched_pid) && !same_executable { return None; }
+        let raw_id = window.window_id.as_deref()?;
+        let id = if let Some(hex) = raw_id.strip_prefix("0x") {
+            u64::from_str_radix(hex, 16).ok()?
+        } else { raw_id.parse::<u64>().ok()? };
+        Some(format!("0x{id:x}"))
+    }).collect()
 }
 
 fn select_existing_app_window<'a>(
@@ -717,6 +747,7 @@ pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f
     let log_path = handoff_dir.join(format!("{}-{nonce}-markits.log", session.task_id));
     let mut command = Command::new(&session.markits_program);
     command
+        .arg("--manual-studio-annotate")
         .arg("--manual-studio-input")
         .arg(&screenshot_path)
         .arg("--manual-studio-output")
@@ -947,7 +978,8 @@ pub fn preserve_annotated_capture(
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("MarkIts出力がPNG画像ではありません。".into());
     }
-    let asset_dir = page_path.parent().unwrap_or(root).join("assets");
+    let (initial_asset, _) = manual_core::config::asset_destination(root, &page_path, &format!("markits-{task_id}.png"))?;
+    let asset_dir = initial_asset.parent().ok_or("Invalid asset destination")?.to_path_buf();
     fs::create_dir_all(&asset_dir).map_err(|e| e.to_string())?;
     let base_filename = format!("markits-{task_id}.png");
     let digest = format!("{:x}", Sha256::digest(&bytes));
@@ -1006,7 +1038,7 @@ pub fn preserve_annotated_capture(
         }
     }
     fs::remove_file(&temporary).map_err(|e| format!("一時画像を削除できません: {e}"))?;
-    let relative_image = format!("assets/{filename}");
+    let (_, relative_image) = manual_core::config::asset_destination(root, &page_path, &filename)?;
     let prompt_attr = manual_core::task::escape_prompt(prompt);
     let block = format!("<!-- ai:task id={task_id} kind=screenshot prompt=\"{prompt_attr}\" -->\n![撮影画面]({relative_image})\n<!-- /ai:task -->");
     Ok(block)
@@ -1247,6 +1279,22 @@ mod tests {
             fs::read(root.join("docs").join(hashed_asset)).unwrap(),
             b"\x89PNG\r\n\x1a\ndifferent"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn markits_capture_uses_configured_assets_for_nested_pages() {
+        let root = test_dir("capture-configured-assets");
+        fs::create_dir_all(root.join("docs/sub")).unwrap();
+        fs::write(root.join("docs/sub/guide.md"), "# Guide\n").unwrap();
+        fs::write(root.join("manual_setting.json"), r#"{"docs":"docs","assets":"media/shots"}"#).unwrap();
+        let source = root.join("capture.png");
+        let bytes = b"\x89PNG\r\n\x1a\nimage";
+        fs::write(&source, bytes).unwrap();
+        let block = preserve_annotated_capture(root.to_str().unwrap(), "docs/sub/guide.md", "nested-shot", source.to_str().unwrap(), "capture").unwrap();
+        assert!(block.contains("../../media/shots/markits-nested-shot.png"));
+        assert_eq!(fs::read(root.join("media/shots/markits-nested-shot.png")).unwrap(), bytes);
+        assert!(!root.join("docs/sub/assets").exists());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1522,19 +1570,21 @@ mod tests {
     }
 
     #[test]
-    fn automatic_window_selection_chooses_the_new_largest_app_window() {
+    fn automatic_window_selection_only_chooses_the_launched_app() {
         let existing = HashSet::from(["manual-studio-window".to_string()]);
         let windows = vec![
             json!({"id":"manual-studio-window","title":"Manual Studio","width":1400,"height":900}),
+            json!({"id":"unrelated-new","title":"Other app","width":2000,"height":1400}),
             json!({"id":"new-splash","title":"Loading","width":320,"height":120}),
             json!({"id":"new-app","title":"Settings","width":1000,"height":700}),
         ];
         assert_eq!(
-            select_launched_window(&windows, &existing, "").unwrap()["id"],
+            select_launched_window(&windows, &existing, "", &HashSet::from(["new-splash".into(), "new-app".into()])).unwrap()["id"],
             "new-app"
         );
+        assert!(select_launched_window(&windows, &existing, "", &HashSet::new()).is_none());
         assert_eq!(
-            select_launched_window(&windows, &existing, "Manual Studio").unwrap()["id"],
+            select_launched_window(&windows, &existing, "Manual Studio", &HashSet::new()).unwrap()["id"],
             "manual-studio-window"
         );
     }

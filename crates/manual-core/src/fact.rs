@@ -282,6 +282,40 @@ fn visible_text(body: &str) -> Result<String, String> {
         .to_string())
 }
 
+pub(crate) fn has_documentation_content(body: &str) -> Result<bool, String> {
+    let mut markdown = body.to_string();
+    for comment in fact_comments(body)?.into_iter().rev() {
+        markdown.replace_range(comment.range, "");
+    }
+    let mut visible = false;
+    let mut items = Vec::<bool>::new();
+    for event in pulldown_cmark::Parser::new_ext(&markdown, pulldown_cmark::Options::all()) {
+        let content = match event {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Item) => {
+                items.push(false);
+                false
+            }
+            pulldown_cmark::Event::End(pulldown_cmark::TagEnd::Item) => {
+                if items.pop() == Some(false) {
+                    return Err("AI回答に本文のない箇条書き項目があります。根拠タグは説明の後に付けてください。".into());
+                }
+                false
+            }
+            pulldown_cmark::Event::Text(text) => text.chars().any(char::is_alphanumeric),
+            pulldown_cmark::Event::Code(code) => !code.trim().is_empty(),
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image { .. }) => true,
+            _ => false,
+        };
+        if content {
+            visible = true;
+            for item in &mut items {
+                *item = true;
+            }
+        }
+    }
+    Ok(visible)
+}
+
 pub fn verify_generated_body(root: &Path, body: &str) -> Result<(), String> {
     let (selectors, symbols) = known_evidence(root);
     for comment in

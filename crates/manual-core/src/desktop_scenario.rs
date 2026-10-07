@@ -248,6 +248,46 @@ fn find_window(query: &str) -> Result<WindowInfo, String> {
     }
 }
 
+fn process_belongs_to(mut pid: u32, launched: u32) -> bool {
+    for _ in 0..64 {
+        if pid == launched { return true; }
+        #[cfg(target_os = "linux")]
+        {
+            let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else { return false; };
+            let Some(fields) = stat.rsplit_once(") ").map(|(_, rest)| rest) else { return false; };
+            let Some(parent) = fields.split_whitespace().nth(1).and_then(|value| value.parse::<u32>().ok()) else { return false; };
+            if parent == 0 || parent == pid { return false; }
+            pid = parent;
+        }
+        #[cfg(not(target_os = "linux"))]
+        { return false; }
+    }
+    false
+}
+
+fn select_launched_window(query: &str, windows: &[WindowInfo], owners: &[(String, u32)], launched: u32) -> Result<WindowInfo, String> {
+    let eligible: Vec<_> = windows.iter().filter(|window| owners.iter().any(|(id, pid)| id == &window.id && process_belongs_to(*pid, launched))).collect();
+    let exact: Vec<_> = eligible.iter().copied().filter(|window| window.id == query || window.title.eq_ignore_ascii_case(query)).collect();
+    let matches = if exact.is_empty() { eligible.into_iter().filter(|window| window.title.to_lowercase().contains(&query.to_lowercase())).collect() } else { exact };
+    match matches.as_slice() {
+        [window] => Ok((*window).clone()),
+        [] => Err(format!("Window not found: {query} (launched process {launched})")),
+        _ => Err(format!("Window name is ambiguous in launched process: {query}")),
+    }
+}
+
+fn wait_launched_window(query: &str, pid: u32) -> Result<WindowInfo, String> {
+    let until = Instant::now() + Duration::from_secs(15);
+    loop {
+        let result = select_launched_window(query, &window_capture::list_windows()?, &window_capture::window_process_ids()?, pid);
+        match result {
+            Ok(window) => return Ok(window),
+            Err(error) if Instant::now() >= until || !error.starts_with("Window not found:") => return Err(error),
+            Err(_) => thread::sleep(Duration::from_millis(200)),
+        }
+    }
+}
+
 fn wait_window(query: &str) -> Result<WindowInfo, String> {
     let until = Instant::now() + Duration::from_secs(10);
     loop {
@@ -586,11 +626,16 @@ pub fn run(
     captured_dir: &Path,
 ) -> Result<RunResult, String> {
     fs::create_dir_all(captured_dir).map_err(|error| error.to_string())?;
+    let started = std::time::Instant::now();
+    let checkpoint = super::agent::cancellation_checkpoint(root);
+    let timeout = super::agent::operation_timeout(300);
     let mut selected = SelectedWindow::new(initial_window);
-    let mut launched_window = false;
+    let mut launched_window = None;
     let mut captured = Vec::new();
     for (index, step) in steps.iter().enumerate() {
         let (action, value) = step.as_object().unwrap().iter().next().unwrap();
+        super::agent::check_cancelled(root, &checkpoint)?;
+        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
         let result: Result<(), String> = (|| {
             match action.as_str() {
                 "launch" => {
@@ -601,14 +646,16 @@ pub fn run(
                         .map(|items| items.iter().filter_map(Value::as_str).collect())
                         .unwrap_or_default();
                     let executable = super::platform::application_executable_in(root, program)?;
-                    Command::new(executable)
+                    let mut child = Command::new(executable)
                         .args(args)
                         .current_dir(root)
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
+                        .stderr(Stdio::null())
                         .spawn()
                         .map_err(|error| format!("Could not launch {program}: {error}"))?;
-                    launched_window = true;
+                    launched_window = Some(child.id());
+                    thread::spawn(move || { let _ = child.wait(); });
                 }
                 "window" => {
                     let query = value.as_str().unwrap();
@@ -617,12 +664,12 @@ pub fn run(
                     } else {
                         // A freshly launched native window may not exist yet. Poll
                         // for it instead of scanning every app's accessibility tree.
-                        let located = if launched_window
+                        let located = if launched_window.is_some()
                             && !window_capture::is_wayland_session()
                             && !query.starts_with("pid:")
                             && !query.starts_with("app:")
                         {
-                            LocatedWindow::Native(wait_window(query)?)
+                            LocatedWindow::Native(wait_launched_window(query, launched_window.unwrap())?)
                         } else {
                             wait_any_window(query)?
                         };
@@ -630,7 +677,12 @@ pub fn run(
                             LocatedWindow::Native(window) => {
                                 selected = SelectedWindow {
                                     accessible: None,
-                                    query: window.title,
+                                    query: if launched_window.is_some() {
+                                        window_capture::window_process_ids()?.into_iter()
+                                            .find(|(id, _)| id == &window.id)
+                                            .map(|(_, pid)| format!("pid:{pid}:{}", window.title))
+                                            .ok_or("Selected application window has no process ID")?
+                                    } else { window.title },
                                     native_id: Some(window.id),
                                 };
                                 activate(&selected)?;
@@ -653,7 +705,7 @@ pub fn run(
                             }
                         }
                     }
-                    launched_window = false;
+                    launched_window = None;
                 }
                 "expect_window" => {
                     wait_any_window(value.as_str().unwrap())?;
@@ -814,10 +866,22 @@ pub fn run(
                             .map_err(|error| error.to_string())?;
                     }
                 }
-                "wait_ms" => thread::sleep(Duration::from_millis(value.as_u64().unwrap())),
+                "wait_ms" => {
+                    let end=std::time::Instant::now()+Duration::from_millis(value.as_u64().unwrap());
+                    while std::time::Instant::now()<end {
+                        super::agent::check_cancelled(root,&checkpoint)?;
+                        if started.elapsed()>=timeout {return Err("撮影手順が制限時間を超えました。".into());}
+                        thread::sleep(Duration::from_millis(50).min(end.saturating_duration_since(std::time::Instant::now())));
+                    }
+                },
                 "screenshot" => {
                     let task_id = value["task"].as_str().unwrap();
                     let inset = value.get("inset").and_then(Value::as_u64).unwrap_or(0) as u32;
+                    let expectations = super::capture_validation::read(root, task_id)?;
+                    if !expectations.window_title.is_empty() || !expectations.screen_text.is_empty() {
+                        let window = selected.native()?;
+                        super::capture_validation::check_target(root, task_id, &window.id, &window.title)?;
+                    }
                     capture(
                         &selected,
                         value.get("selector").and_then(Value::as_str),
@@ -847,6 +911,15 @@ pub fn run(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn launched_window_selection_excludes_ide_with_matching_title() {
+        let window = |id: &str, title: &str| WindowInfo { id: id.into(), title: title.into(), x: 0, y: 0, width: 1440, height: 940 };
+        let windows = vec![window("ide", "Manual Studio"), window("app", "Munin Manual Studio")];
+        let owners = vec![("ide".into(), u32::MAX), ("app".into(), std::process::id())];
+        assert_eq!(select_launched_window("Manual Studio", &windows, &owners, std::process::id()).unwrap().id, "app");
+        assert!(select_launched_window("Manual Studio", &windows[..1], &owners, std::process::id()).is_err());
+    }
 
     #[test]
     fn validates_desktop_scenario_before_input() {

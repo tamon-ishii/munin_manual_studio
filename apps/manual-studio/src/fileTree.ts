@@ -1,3 +1,4 @@
+import { uiIcon } from './uiIcons';
 export interface FileTreeEntry {
   path: string;
   directory: boolean;
@@ -31,6 +32,7 @@ export function renderFileTree(
   currentPage: string | undefined,
   docsFolder: string,
   expandedFolders: Set<string>,
+  options: { query?: string; markdownOnly?: boolean } = {},
 ): string {
   if (!entries.length) return '<p class="muted">フォルダーにファイルがありません。</p>';
 
@@ -49,8 +51,15 @@ export function renderFileTree(
       ? docsRelativePage
       : undefined;
 
+  const query = (options.query || "").trim().toLocaleLowerCase();
+  const filtering = Boolean(query || options.markdownOnly);
+  const visibleEntries = filtering ? normalizedEntries.filter(entry => !entry.directory
+    && (!options.markdownOnly || pagePaths.has(entry.path) || /\.md$/i.test(entry.path))
+    && entry.path.toLocaleLowerCase().includes(query)) : normalizedEntries;
+  if (!visibleEntries.length) return '<p class="muted" role="status">条件に一致するファイルがありません。</p>';
+
   const root: TreeNode = { name: "", path: "", folders: new Map(), files: [] };
-  for (const entry of normalizedEntries) {
+  for (const entry of visibleEntries) {
     const parts = entry.path.split("/");
     let node = root;
     const folderParts = entry.directory ? parts : parts.slice(0, -1);
@@ -75,13 +84,13 @@ export function renderFileTree(
 
   const renderNode = (node: TreeNode): string => {
     const folders = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name, "ja"));
-    const folderHtml = folders.map((folder) => `<details class="tree-folder" data-folder="${escapeHtml(folder.path)}" ${expandedFolders.has(folder.path) ? "open" : ""}><summary role="treeitem" aria-label="${escapeHtml(folder.name)} フォルダー"><span class="tree-chevron">▸</span><span class="tree-icon">▤</span><span class="tree-name">${escapeHtml(folder.name)}</span></summary><div role="group">${renderNode(folder)}</div></details>`).join("");
+    const folderHtml = folders.map((folder) => `<details class="tree-folder" data-folder="${escapeHtml(folder.path)}" ${filtering || expandedFolders.has(folder.path) ? "open" : ""}><summary role="treeitem" aria-label="${escapeHtml(folder.name)} フォルダー"><span class="tree-chevron">▸</span><span class="tree-icon">${uiIcon("folder")}</span><span class="tree-name">${escapeHtml(folder.name)}</span></summary><div role="group">${renderNode(folder)}</div></details>`).join("");
     const fileHtml = node.files.sort((a, b) => a.localeCompare(b, "ja")).map((path) => {
       const name = path.split("/").at(-1)!;
       const isPage = pagePaths.has(path) || /\.md$/i.test(name);
       return isPage
-        ? `<div class="tree-file-row"><button type="button" role="treeitem" data-page="${escapeHtml(path)}" class="tree-file ${activePath === path ? "selected" : ""}" title="${escapeHtml(path)}" ${activePath === path ? 'aria-current="page"' : ""}><span class="tree-icon">▦</span><span class="tree-name">${escapeHtml(name)}</span></button><button type="button" class="tree-generate" data-generate-page="${escapeHtml(path)}" title="${escapeHtml(name)}のAI文章・図・撮影指示を実行" aria-label="${escapeHtml(name)}をAI出力">AI</button></div>`
-        : `<div role="treeitem" class="tree-file tree-static" title="${escapeHtml(path)}"><span class="tree-icon">${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? "▧" : "◇"}</span><span class="tree-name">${escapeHtml(name)}</span></div>`;
+        ? `<div class="tree-file-row"><button type="button" role="treeitem" data-page="${escapeHtml(path)}" class="tree-file ${activePath === path ? "selected" : ""}" title="${escapeHtml(path)}" ${activePath === path ? 'aria-current="page"' : ""}><span class="tree-icon">${uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></button><button type="button" class="tree-generate" data-generate-page="${escapeHtml(path)}" title="${escapeHtml(name)}のAI文章・図・撮影指示を実行" aria-label="${escapeHtml(name)}をAI更新">AI</button></div>`
+        : `<div role="treeitem" class="tree-file tree-static" title="${escapeHtml(path)}"><span class="tree-icon">${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? uiIcon("image") : uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></div>`;
     }).join("");
     return folderHtml + fileHtml;
   };

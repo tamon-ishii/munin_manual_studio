@@ -1,3 +1,4 @@
+import { uiIcon } from './uiIcons';
 import { aiTaskBlockPlugins } from './milkdownAiTaskBlock';
 import { aiTagItems, createAiTagsPlugin, type AiTaskKind } from './milkdownAiTags';
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
@@ -48,10 +49,12 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
   let syncing = false;
   let sourceMode = false;
   let ready = false;
+  let imageRefreshVersion = 0;
   let readonly = source.disabled || source.readOnly;
   const valueProperty = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!;
   const sourceValue = () => valueProperty.get!.call(source) as string;
   function refresh() {
+    ++imageRefreshVersion;
     if (!ready || !instance || syncing) return;
     syncing = true;
     try { instance.action(replaceAll(sourceValue(), true)); } finally { syncing = false; }
@@ -60,6 +63,28 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
     get: sourceValue,
     set(value: string) { valueProperty.set!.call(source, value); refresh(); },
   });
+  async function refreshImages(): Promise<void> {
+    if (!ready || !instance) return;
+    const version = ++imageRefreshVersion;
+    const images = instance.action(ctx => {
+      const view = ctx.get(editorViewCtx);
+      const images: Array<{ image: HTMLImageElement; source: string }> = [];
+      view.state.doc.descendants((node, position) => {
+        if (!['image', 'image-block'].includes(node.type.name) || !node.attrs.src) return;
+        const dom = view.nodeDOM(position);
+        const image = dom instanceof HTMLImageElement ? dom : dom instanceof HTMLElement ? dom.querySelector<HTMLImageElement>('img') : null;
+        if (image) images.push({ image, source: String(node.attrs.src) });
+      });
+      return images;
+    });
+    await Promise.all(images.map(async ({ image, source: imageSource }) => {
+      try {
+        const resolved = await resolveImage(imageSource);
+        if (version !== imageRefreshVersion || !image.isConnected) return;
+        image.src = resolved;
+      } catch (error) { if (version === imageRefreshVersion) report(`画像の更新に失敗しました: ${String(error)}`); }
+    }));
+  }
   function showSource() {
     sourceMode = true; host.hidden = true; source.hidden = false;
     if (sourceToolbar) sourceToolbar.hidden = false;
@@ -141,12 +166,19 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
         headingOptions: [{ label: '本文', level: null }, ...Array.from({ length: 6 }, (_, index) => ({ label: `見出し${index + 1}`, level: index + 1 }))],
         buildTopBar: builder => {
           builder.addGroup('history', '履歴')
-            .addItem('undo', { icon: icon('↶'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); undo(view.state, view.dispatch); } })
-            .addItem('redo', { icon: icon('↷'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); redo(view.state, view.dispatch); } });
+            .addItem('undo', { icon: uiIcon('undo'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); undo(view.state, view.dispatch); } })
+            .addItem('redo', { icon: uiIcon('redo'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); redo(view.state, view.dispatch); } });
           builder.getGroup('block').addItem('mermaid', { icon: icon('Mermaid'), active: () => false, onRun: (ctx: Ctx) => insert(mermaidSource)(ctx) });
           if (requestAiTask) builder.addGroup('ai-tags', 'AIタグ').addItem('ai-tags', {
             icon: '', active: () => false,
             selector: { activeLabel: () => 'AIタグを追加', options: aiTagItems.map(item => ({ label: item.label, onSelect: ctx => { callCommand(aiTags.requestAiTag.key, item.kind)(ctx); } })) },
+          });
+          const advancedKeys = new Set(['strikethrough', 'code', 'code-block', 'math', 'quote', 'hr', 'task-list', 'mermaid']);
+          const advanced = builder.build().flatMap(group => group.items).filter(item => advancedKeys.has(item.key) && item.onRun);
+          for (const group of builder.build()) group.items = group.items.filter(item => !advancedKeys.has(item.key));
+          builder.addGroup('insert', '挿入').addItem('insert', {
+            icon: '', active: () => false,
+            selector: { activeLabel: () => '挿入・その他', options: advanced.map(item => ({ label: labels[item.key] || item.key, onSelect: ctx => item.onRun!(ctx) })) },
           });
           topBarLabels.splice(0, topBarLabels.length, ...builder.build().flatMap(group => group.items.filter(item => item.onRun).map(item => labels[item.key] || item.key)));
         },
@@ -213,8 +245,25 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
     instance.action(ctx => { const view = ctx.get(editorViewCtx); (direction < 0 ? undo : redo)(view.state, view.dispatch); view.focus(); });
     return true;
   }
-  return { showSource, refresh, host, stepHistory,
+  return { showSource, refresh, refreshImages, host, stepHistory,
     get isRichEditing() { return ready && !sourceMode; },
+    captureAiTagInsertion: (): ((markdown: string) => boolean) | undefined => {
+      if (sourceMode || !ready || !instance) return undefined;
+      const editor = instance;
+      const { bookmark, document } = editor.action(ctx => {
+        const state = ctx.get(editorViewCtx).state;
+        return { bookmark: state.selection.getBookmark(), document: state.doc };
+      });
+      return markdown => editor.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        if (!view.state.doc.eq(document)) throw new Error('撮影中に原稿が変更されました。撮影タグを追加する位置を選び直してください。');
+        view.dispatch(view.state.tr.setSelection(bookmark.resolve(view.state.doc)));
+        // Programmatic capture completion also runs while the UI is readonly.
+        insert(markdown)(ctx);
+        view.focus();
+        return true;
+      });
+    },
     insertAiTag: (markdown: string): boolean => {
       if (sourceMode || !ready || !instance) return false;
       return instance.action(callCommand(aiTags.insertAiTag.key, markdown));

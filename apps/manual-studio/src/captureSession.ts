@@ -3,6 +3,7 @@ export interface CaptureSession {
   readonly root: string;
   readonly page: string;
   readonly id: string;
+  readonly insertTag?: (markdown: string) => boolean;
   readonly selection: Readonly<{ start: number; end: number }>;
 }
 

@@ -87,7 +87,7 @@ The application SHALL provide a unified settings popup modal accessible from the
 - **THEN** ModuleLoom displays dedicated input fields for HTML output directory (default: `manual`), Markdown source directory (default: `docs`), target project path, and AI CLI / model ID selectors.
 
 ### Requirement: Strict AI Tag Syntax and Lifecycle Rules
-The application and manual authoring pipeline SHALL enforce strict identifier formatting, single-responsibility separation, and SHA-256 state tracking for AI tags.
+The application and manual authoring pipeline SHALL enforce strict identifier formatting, single-responsibility separation, visible content placement, and SHA-256 state tracking for AI tags.
 
 #### Scenario: Tag identifier formatting
 - **WHEN** an `ai:task` tag is authored or parsed
@@ -96,6 +96,14 @@ The application and manual authoring pipeline SHALL enforce strict identifier fo
 #### Scenario: Single responsibility separation
 - **WHEN** generating or validating assets
 - **THEN** `kind=screenshot` MUST contain only raw image Markdown tags, `kind=diagram` MUST contain only raw Mermaid code blocks, and all explanatory prose or instructions MUST be placed in dedicated `kind=text` tags.
+
+#### Scenario: Generated answer placement and tag unwrapping
+- **WHEN** generating, updating, or recording an answer for an `ai:task` tag
+- **THEN** the generated body MUST be placed in the visible document body enclosed between the opening `<!-- ai:generated ... -->` tag and closing `<!-- /ai:generated -->` tag, and any outer, leading, or trailing `ai:generated` or `ai:task` HTML comment tags in the answer MUST be stripped out so no text is trapped inside comments.
+
+#### Scenario: Validation of generated markers
+- **WHEN** parsing page tags in a document
+- **THEN** unclosed or nested `ai:generated` markers outside code blocks MUST be detected and rejected with an error.
 
 ### Requirement: Build and Preview Manuals
 The application SHALL support draft and strict MkDocs builds and preview generated pages and images using a native management engine.

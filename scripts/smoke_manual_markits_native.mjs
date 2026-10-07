@@ -10,7 +10,7 @@ import { deflateSync } from 'node:zlib';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bin = path.join(repo, 'target/debug');
-const markits = path.join(bin, 'markits-desktop');
+const markits = path.join(bin, process.platform === 'win32' ? 'manual-studio.exe' : 'manual-studio');
 const manualctl = path.join(bin, 'manualctl');
 const timeoutMs = 30_000;
 const deadline = Date.now() + timeoutMs;
@@ -140,7 +140,7 @@ try {
   };
   await writeFile(scenarioPath, JSON.stringify(scenario, null, 2));
   const before = new Set((await listWindows()).map((w) => String(w.id)));
-  app = spawnTracked(markits, ['--manual-studio-input', input, '--manual-studio-output', output, '--manual-studio-completion', completion], { stdio: 'ignore' });
+  app = spawnTracked(markits, ['--manual-studio-annotate', '--manual-studio-input', input, '--manual-studio-output', output, '--manual-studio-completion', completion], { stdio: 'ignore' });
   if (!app.pid) throw new Error('MarkIts Desktop was not spawned');
   const window = await waitForNewWindow(before);
   scenario.window = `pid:${app.pid}:${window.title}`;

@@ -461,6 +461,17 @@ mod linux {
         Ok(windows)
     }
 
+    pub fn window_process_ids() -> Result<Vec<(String, u32)>, String> {
+        let conn = DisplayConnection::open()?;
+        Ok(conn.client_windows()?.into_iter().filter_map(|id| {
+            let (format, bytes) = conn.property(id, "_NET_WM_PID")?;
+            if format != 32 || bytes.len() < std::mem::size_of::<c_ulong>() { return None; }
+            let mut value = [0u8; std::mem::size_of::<c_ulong>()];
+            value.copy_from_slice(&bytes[..std::mem::size_of::<c_ulong>()]);
+            Some((format!("0x{id:x}"), c_ulong::from_ne_bytes(value) as u32))
+        }).collect())
+    }
+
     pub fn activate_window(window_id: &str) -> Result<WindowInfo, String> {
         if is_wayland_session() {
             return Err("Wayland does not allow ModuleLoom to activate arbitrary windows".into());
@@ -530,18 +541,35 @@ mod linux {
         }
         conn.activate(id);
         thread::sleep(Duration::from_millis(400));
-        let result = capture_visible(
-            &conn,
-            id,
-            inset,
-            destination,
-            include_uimap,
-            target_window_id,
-        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let result = loop {
+            let frame = capture_visible(&conn, id, inset, destination, include_uimap, target_window_id);
+            if frame.as_ref().is_err_and(|error| error == "Selected window has not finished painting")
+                && std::time::Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(250));
+                continue;
+            }
+            break frame;
+        };
         if !already_above {
             conn.set_above(id, false);
         }
         result
+    }
+
+    // A compositor maintains a separate pixmap for each window. Reading it
+    // avoids capturing whatever happens to overlap the target on the desktop.
+    struct WindowPixmap { _connection: x11rb::rust_connection::RustConnection, drawable: u32 }
+
+    impl WindowPixmap {
+        fn open(window: u32) -> Option<Self> {
+            use x11rb::connection::Connection;
+            use x11rb::protocol::composite::ConnectionExt;
+            let (connection, _) = x11rb::connect(None).ok()?;
+            let drawable = connection.generate_id().ok()?;
+            connection.composite_name_window_pixmap(window, drawable).ok()?.check().ok()?;
+            Some(Self { _connection: connection, drawable })
+        }
     }
 
     fn capture_visible(
@@ -573,12 +601,14 @@ mod linux {
         if x < 0 || y < 0 || x + width as i32 > screen_width || y + height as i32 > screen_height {
             return Err("The entire window must be visible on the screen before capture".into());
         }
+        let pixmap = WindowPixmap::open(id as u32);
+        let drawable = pixmap.as_ref().map_or(id, |pixmap| pixmap.drawable as xlib::Drawable);
         let raw = unsafe {
             (conn.api.XGetImage)(
                 conn.display,
-                conn.root,
-                x,
-                y,
+                drawable,
+                margin,
+                margin,
                 width,
                 height,
                 !0,
@@ -589,12 +619,16 @@ mod linux {
             return Err("Could not capture the window pixels".into());
         }
         let mut pixels = Vec::with_capacity(width as usize * height as usize * 3);
+        // XGetImage on a pixmap has no visual and returns zero RGB masks.
+        // Decode its pixels using the visual of the source window.
         let masks = unsafe {
-            (
-                (*raw).red_mask as u64,
-                (*raw).green_mask as u64,
-                (*raw).blue_mask as u64,
-            )
+            let mut attributes = std::mem::MaybeUninit::<xlib::XWindowAttributes>::uninit();
+            if (conn.api.XGetWindowAttributes)(conn.display, id, attributes.as_mut_ptr()) != 0 {
+                let visual = attributes.assume_init().visual;
+                if !visual.is_null() {
+                    ((*visual).red_mask as u64, (*visual).green_mask as u64, (*visual).blue_mask as u64)
+                } else { ((*raw).red_mask as u64, (*raw).green_mask as u64, (*raw).blue_mask as u64) }
+            } else { ((*raw).red_mask as u64, (*raw).green_mask as u64, (*raw).blue_mask as u64) }
         };
         let raw_layout = unsafe {
             let stride = usize::try_from((*raw).bytes_per_line).ok();
@@ -633,6 +667,12 @@ mod linux {
         }
         unsafe {
             (conn.api.XDestroyImage)(raw);
+        }
+        // GTK/WebKit can show a uniform background before its UI is ready.
+        let background = &pixels[..3];
+        if background.iter().max().unwrap() - background.iter().min().unwrap() <= 4
+            && pixels.chunks_exact(3).all(|pixel| pixel == background) {
+            return Err("Selected window has not finished painting".into());
         }
         let picture = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, pixels)
             .ok_or("Invalid screenshot dimensions")?;
@@ -723,6 +763,43 @@ mod linux {
         }
 
         #[test]
+        fn capture_reads_target_pixels_when_another_window_covers_it() {
+            if std::env::var_os("DISPLAY").is_none() { return; }
+            let conn = DisplayConnection::open().unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            let image_path = dir.path().join("target.png");
+            let mut attributes: xlib::XSetWindowAttributes = unsafe { std::mem::zeroed() };
+            attributes.override_redirect = xlib::True;
+            let make_window = |color| unsafe {
+                let window = (conn.api.XCreateSimpleWindow)(conn.display, conn.root, 24, 24, 64, 64, 0, 0, color);
+                (conn.api.XChangeWindowAttributes)(conn.display, window, xlib::CWOverrideRedirect, &mut attributes);
+                let title = std::ffi::CString::new("Capture regression fixture").unwrap();
+                (conn.api.XStoreName)(conn.display, window, title.as_ptr());
+                (conn.api.XMapRaised)(conn.display, window);
+                (conn.api.XClearWindow)(conn.display, window);
+                window
+            };
+            let mut make_window = make_window;
+            let target = make_window(0xff0000);
+            unsafe { (conn.api.XSync)(conn.display, xlib::False); }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            unsafe { (conn.api.XClearWindow)(conn.display, target); (conn.api.XSync)(conn.display, xlib::False); }
+            let covering = make_window(0x0000ff);
+            unsafe { (conn.api.XSync)(conn.display, xlib::False); }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let result = super::capture_visible(&conn, target, 0, &image_path, false, None);
+            unsafe {
+                (conn.api.XDestroyWindow)(conn.display, covering);
+                (conn.api.XDestroyWindow)(conn.display, target);
+                (conn.api.XSync)(conn.display, xlib::False);
+            }
+            drop(conn);
+            result.unwrap();
+            let image = image::open(image_path).unwrap().to_rgb8();
+            assert_eq!(image.get_pixel(32, 32).0, [255, 0, 0], "The target must be red even while a blue window covers it");
+        }
+
+        #[test]
         fn rgb_masks_decode_x11_pixel() {
             assert_eq!(channel(0x336699, 0xff0000), 0x33);
             assert_eq!(channel(0x336699, 0x00ff00), 0x66);
@@ -733,7 +810,7 @@ mod linux {
 
 #[cfg(target_os = "linux")]
 pub use linux::{
-    activate_window, capture_window as platform_capture_window, close_window, list_windows,
+    activate_window, capture_window as platform_capture_window, close_window, list_windows, window_process_ids,
 };
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

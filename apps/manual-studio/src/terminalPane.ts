@@ -7,7 +7,8 @@ export interface TerminalPaneOptions {
   rpc: (action: string, options?: Record<string, unknown>, root?: string) => Promise<string>;
   getProjectRoot: () => string;
   getCliCommand: () => { command: string; args: string[]; label: string };
-  onStatusChange?: (status: "connected" | "stopped" | "waiting", message?: string) => void;
+  onUnload?: (ownerId: string, root: string) => void;
+  onStatusChange?: (status: "connected" | "stopped" | "starting" | "stopping" | "error", message?: string) => void;
 }
 
 export interface TerminalController {
@@ -17,7 +18,25 @@ export interface TerminalController {
   restart(): Promise<void>;
   injectPrompt(prompt: string, timeoutMs?: number): Promise<string>;
   isConnected(): boolean;
+  getSelection(): string;
+  disconnectOnUnload(): void;
   dispose(): void;
+}
+
+export const TERMINAL_FONT_FAMILIES: Record<string, string> = {
+  jetbrains: '"JetBrains Mono", "Noto Sans Mono CJK JP", "BIZ UDGothic", "Hiragino Sans", "Ubuntu Mono", "DejaVu Sans Mono", "TakaoGothic", "IPAGothic", monospace',
+  noto: '"Noto Sans Mono", "Noto Sans Mono CJK JP", "BIZ UDGothic", "Hiragino Sans", "TakaoGothic", "IPAGothic", monospace',
+  system: 'ui-monospace, "SF Mono", Monaco, "Cascadia Code", Consolas, "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", monospace',
+};
+
+export function getTerminalFontFamily(): string {
+  const saved = localStorage.getItem("manual-studio-terminal-font-family") || "jetbrains";
+  return TERMINAL_FONT_FAMILIES[saved] || TERMINAL_FONT_FAMILIES.jetbrains;
+}
+
+export function getTerminalFontSize(): number {
+  const raw = Number(localStorage.getItem("manual-studio-terminal-font-size"));
+  return Number.isFinite(raw) && raw >= 11 && raw <= 24 ? raw : 13;
 }
 
 const terminalThemes: Record<ThemeId, ITheme> = {
@@ -173,10 +192,16 @@ export function setupTerminalPane(
   const container = panelElement.querySelector<HTMLElement>("#terminal-container") || panelElement;
   const badge = panelElement.querySelector<HTMLElement>("#terminal-badge");
   const agentLabel = panelElement.querySelector<HTMLElement>("#terminal-agent-name");
-  const restartBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-restart-btn");
+  const connectBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-connect-btn");
+  const disconnectBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-disconnect-btn");
+  const stateNote = panelElement.querySelector<HTMLElement>("#terminal-state-note");
   const clearBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-clear-btn");
 
   let sessionId: string | null = null;
+  let sessionGeneration = 0;
+  let sessionRoot = "";
+  let ownerId: string | null = null;
+  let disposed = false;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let isPolling = false;
   let isPromptInjecting = false;
@@ -187,9 +212,10 @@ export function setupTerminalPane(
 
   const terminal = new Terminal({
     cursorBlink: true,
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-    fontSize: 13,
-    lineHeight: 1.25,
+    fontFamily: getTerminalFontFamily(),
+    fontSize: getTerminalFontSize(),
+    lineHeight: 1.3,
+    letterSpacing: 0,
     theme: getTerminalTheme(),
     convertEol: true,
   });
@@ -197,6 +223,19 @@ export function setupTerminalPane(
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.open(container);
+
+  if (typeof document !== "undefined" && (document as any).fonts?.ready) {
+    (document as any).fonts.ready.then(() => {
+      try {
+        fitAddon.fit();
+        if (terminal.rows && terminal.cols) {
+          terminal.refresh(0, terminal.rows - 1);
+        }
+      } catch {
+        // Ignored
+      }
+    });
+  }
 
   function applyActiveTheme(): void {
     const t = getTerminalTheme();
@@ -207,9 +246,33 @@ export function setupTerminalPane(
     }
   }
 
+  function applyActiveFont(): void {
+    const fontFamily = getTerminalFontFamily();
+    const fontSize = getTerminalFontSize();
+    if (terminal.options.fontFamily !== fontFamily) {
+      terminal.options.fontFamily = fontFamily;
+    }
+    if (terminal.options.fontSize !== fontSize) {
+      terminal.options.fontSize = fontSize;
+    }
+    try {
+      fitAddon.fit();
+      if (sessionId) {
+        void options.rpc("pty-resize", {
+          sessionId,
+          cols: terminal.cols,
+          rows: terminal.rows,
+        }, options.getProjectRoot());
+      }
+    } catch {
+      // Ignored
+    }
+  }
+
   applyActiveTheme();
 
   window.addEventListener("manual-studio-theme-change", applyActiveTheme);
+  window.addEventListener("manual-studio-terminal-font-change", applyActiveFont);
   const themeObserver = new MutationObserver(applyActiveTheme);
   themeObserver.observe(document.documentElement, {
     attributes: true,
@@ -235,11 +298,12 @@ export function setupTerminalPane(
   });
   resizeObserver.observe(container);
 
-  function updateStatus(status: "connected" | "stopped" | "waiting", message?: string): void {
-    if (badge) {
-      badge.className = `badge ${status}`;
-      badge.textContent = status === "connected" ? "● 接続中" : status === "stopped" ? "● 停止" : "● 待機中";
-    }
+  function updateStatus(status: "connected" | "stopped" | "starting" | "stopping" | "error", message?: string): void {
+    const labels = { connected: "接続中", stopped: "未接続", starting: "起動中", stopping: "終了中", error: "接続失敗" };
+    if (badge) { badge.className = `badge ${status}`; badge.textContent = `● ${labels[status]}`; }
+    if (connectBtn) connectBtn.disabled = status === "connected" || status === "starting" || status === "stopping" || (status === "error" && sessionId !== null);
+    if (disconnectBtn) disconnectBtn.disabled = status !== "connected" && status !== "starting" && !(status === "error" && ownerId !== null);
+    if (stateNote) stateNote.textContent = message || (status === "stopped" ? "接続ボタンでAI CLIを起動します。" : labels[status]);
     options.onStatusChange?.(status, message);
   }
 
@@ -262,10 +326,13 @@ export function setupTerminalPane(
   });
 
   async function pollOutput(): Promise<void> {
-    if (!sessionId || isPolling) return;
+    if (!sessionId || isPolling || disposed) return;
+    const readingSessionId = sessionId;
+    const readingGeneration = sessionGeneration;
     isPolling = true;
     try {
-      const raw = await options.rpc("pty-read", { sessionId }, options.getProjectRoot());
+      const raw = await options.rpc("pty-read", { sessionId: readingSessionId }, sessionRoot);
+      if (readingGeneration !== sessionGeneration || readingSessionId !== sessionId || disposed) return;
       const res = JSON.parse(raw) as { data?: string; alive?: boolean };
       if (res.data) {
         terminal.write(res.data);
@@ -292,28 +359,26 @@ export function setupTerminalPane(
       // Ignore transient errors
     } finally {
       isPolling = false;
-      if (sessionId) {
+      if (sessionId && !disposed) {
         pollTimer = setTimeout(() => { void pollOutput(); }, 50);
       }
     }
   }
 
   async function spawnSession(): Promise<void> {
-    if (sessionId) {
-      await killSession();
-    }
+    if (disposed || sessionId) return;
+    const generation = ++sessionGeneration;
     const root = options.getProjectRoot();
-    if (!root) {
-      updateStatus("waiting", "プロジェクトが開かれていません");
-      return;
-    }
-
+    if (!root) { updateStatus("stopped", "先にプロジェクトを開いてください。"); return; }
+    ownerId = crypto.randomUUID();
+    sessionRoot = root;
+    const spawningOwner = ownerId;
     const { command, args, label } = options.getCliCommand();
     if (agentLabel) {
       agentLabel.textContent = label;
     }
 
-    updateStatus("waiting", `${label} を起動中…`);
+    updateStatus("starting", `${label} を起動中…`);
     terminal.writeln(`\r\n\x1b[36m--- ${label} セッションを起動中 (${root}) ---\x1b[0m\r\n`);
 
     try {
@@ -321,12 +386,19 @@ export function setupTerminalPane(
       const raw = await options.rpc("pty-spawn", {
         command,
         args,
+        ownerId: spawningOwner,
         cols: terminal.cols || 80,
         rows: terminal.rows || 24,
       }, root);
 
       const res = JSON.parse(raw) as { session_id?: string; sessionId?: string };
-      sessionId = res.session_id || res.sessionId || null;
+      const spawnedId = res.session_id || res.sessionId || null;
+      if (generation !== sessionGeneration) {
+        if (spawnedId) await options.rpc("pty-kill", { sessionId: spawnedId }, root).catch(() => {});
+        return;
+      }
+      sessionId = spawnedId;
+      sessionRoot = root;
       if (sessionId) {
         updateStatus("connected");
         void pollOutput();
@@ -334,33 +406,30 @@ export function setupTerminalPane(
         updateStatus("stopped", "セッションIDの取得に失敗しました");
       }
     } catch (error) {
-      updateStatus("stopped", String(error));
+      if (generation !== sessionGeneration) return;
+      updateStatus("error", String(error));
       terminal.writeln(`\r\n\x1b[31m起動に失敗しました: ${String(error)}\x1b[0m\r\n`);
     }
   }
 
   async function killSession(): Promise<void> {
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = undefined;
+    const generation = ++sessionGeneration;
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined; }
+    const id = sessionId, root = sessionRoot, owner = ownerId;
+    sessionId = null;
+    ownerId = null;
+    updateStatus("stopping");
+    try {
+      if (owner) await options.rpc("pty-close-owner", { ownerId: owner }, root);
+      else if (id) await options.rpc("pty-kill", { sessionId: id }, root);
     }
-    if (sessionId) {
-      const idToKill = sessionId;
-      sessionId = null;
-      try {
-        await options.rpc("pty-kill", { sessionId: idToKill }, options.getProjectRoot());
-      } catch {
-        // Ignored
-      }
-    }
-    updateStatus("stopped");
+    catch (error) { if (generation === sessionGeneration) { sessionId = id; ownerId = owner; updateStatus("error", `切断に失敗しました: ${String(error)}`); throw error; } }
+    if (generation === sessionGeneration) updateStatus("stopped");
   }
 
-  if (restartBtn) {
-    restartBtn.addEventListener("click", () => {
-      void spawnSession();
-    });
-  }
+  connectBtn?.addEventListener("click", () => { void spawnSession(); });
+  disconnectBtn?.addEventListener("click", () => { void killSession().catch(() => {}); });
+  updateStatus("stopped");
 
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
@@ -387,7 +456,7 @@ export function setupTerminalPane(
     async restart() {
       await spawnSession();
     },
-    injectPrompt(prompt: string, timeoutMs = 60_000): Promise<string> {
+    injectPrompt(prompt: string, timeoutMs = 120_000): Promise<string> {
       if (!sessionId) {
         return Promise.reject(new Error("AIターミナルが接続されていません。再起動してください。"));
       }
@@ -416,6 +485,7 @@ export function setupTerminalPane(
             const rejectFn = promptRejecter;
             promptResolver = null;
             promptRejecter = null;
+            void options.rpc("pty-write", { sessionId, data: "\x03" }, options.getProjectRoot()).catch(() => {});
             rejectFn?.(new Error(`AIプロンプトの応答がタイムアウト（${Math.round(timeoutMs / 1000)}秒）しました。ターミナルの状態を確認してください。`));
           }
         }, timeoutMs);
@@ -436,13 +506,25 @@ export function setupTerminalPane(
           });
       });
     },
+    getSelection(): string { return terminal.getSelection(); },
     isConnected(): boolean {
       return sessionId !== null;
     },
+    disconnectOnUnload() {
+      ++sessionGeneration;
+      if (pollTimer) clearTimeout(pollTimer);
+      const owner = ownerId;
+      sessionId = null;
+      ownerId = null;
+      if (owner) options.onUnload?.(owner, sessionRoot);
+    },
     dispose() {
+      disposed = true;
+      void killSession().catch(() => {});
       if (promptTimeoutTimer) clearTimeout(promptTimeoutTimer);
       if (pollTimer) clearTimeout(pollTimer);
       window.removeEventListener("manual-studio-theme-change", applyActiveTheme);
+      window.removeEventListener("manual-studio-terminal-font-change", applyActiveFont);
       themeObserver.disconnect();
       resizeObserver.disconnect();
       terminal.dispose();

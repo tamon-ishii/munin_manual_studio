@@ -161,6 +161,49 @@ pub fn read_config(root: &Path) -> ManualConfig {
     config
 }
 
+/// Use the configured source asset directory, and link to it from the actual page.
+pub fn asset_destination(
+    root: &Path,
+    page: &Path,
+    filename: &str,
+) -> Result<(PathBuf, String), String> {
+    if Path::new(filename).components().count() != 1
+        || !matches!(
+            Path::new(filename).components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+    {
+        return Err("画像のファイル名が不正です。".into());
+    }
+    let config = read_config(root);
+    let folder = if config.assets.trim().is_empty() {
+        format!("{}/assets", config.docs)
+    } else {
+        config.assets
+    };
+    let destination = project_path(
+        root,
+        &format!("{}/{filename}", folder.trim_end_matches('/')),
+    )?;
+    let page = page.parent().ok_or("原稿の保存先が不正です。")?;
+    let from: Vec<_> = page.components().collect();
+    let to: Vec<_> = destination.components().collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return Err("原稿と画像の保存先が一致しません。".into());
+    }
+    let link = format!(
+        "{}{}",
+        "../".repeat(from.len() - common),
+        to[common..]
+            .iter()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    );
+    Ok((destination, link))
+}
+
 pub fn project_path(root: &Path, value: &str) -> Result<PathBuf, String> {
     let abs_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     if value.trim().is_empty()
@@ -338,4 +381,40 @@ pub fn save_settings(
     fs::write(&brief_path, format!("{}\n", final_brief.trim_end())).map_err(|e| e.to_string())?;
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::*;
+
+    #[test]
+    fn asset_links_follow_configuration_and_page_location() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs/sub")).unwrap();
+        for (page, expected) in [
+            ("README.md", "docs/assets/shot.png"),
+            ("docs/sub/index.md", "../assets/shot.png"),
+        ] {
+            let (destination, link) =
+                asset_destination(root.path(), &root.path().join(page), "shot.png").unwrap();
+            assert_eq!(link, expected);
+            assert_eq!(destination, root.path().join("docs/assets/shot.png"));
+        }
+        fs::write(
+            root.path().join("manual_setting.json"),
+            r#"{"docs":"docs","assets":"media/shots"}"#,
+        )
+        .unwrap();
+        let (destination, link) = asset_destination(
+            root.path(),
+            &root.path().join("docs/sub/index.md"),
+            "shot.png",
+        )
+        .unwrap();
+        assert_eq!(destination, root.path().join("media/shots/shot.png"));
+        assert_eq!(link, "../../media/shots/shot.png");
+        assert!(
+            asset_destination(root.path(), &root.path().join("README.md"), "../shot.png").is_err()
+        );
+    }
 }

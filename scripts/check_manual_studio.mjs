@@ -3,6 +3,8 @@ import process from 'node:process';
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const steps = [
+  { name: "AI credentials checks", command: process.execPath, args: ["scripts/test_manual_studio_ai_credentials.mjs"], timeoutMs: 60_000 },
+  { name: 'preview navigation unit checks', command: 'npx', args: ['tsx', 'apps/manual-studio/src/previewNavigation.test.ts'], timeoutMs: 60_000 },
   { name: 'editor history unit checks', command: process.execPath, args: ['scripts/test_manual_studio_editor_history.mjs'], timeoutMs: 60_000 },
   { name: 'file tree rendering checks', command: process.execPath, args: ['scripts/test_manual_studio_file_tree.mjs'], timeoutMs: 60_000 },
   { name: 'Markdown AI tag checks', command: process.execPath, args: ['scripts/test_manual_studio_markdown_tags.mjs'], timeoutMs: 60_000 },
@@ -13,12 +15,19 @@ const steps = [
 ];
 
 steps.push(
+  { name: 'durable execution browser checks', command: process.execPath, args: ['scripts/test_manual_studio_execution.mjs'], timeoutMs: 180_000 },
+  { name: 'UI improvements browser checks', command: process.execPath, args: ['scripts/test_manual_studio_ui_improvements.mjs'], timeoutMs: 120_000 },
   { name: 'Manual Studio frontend build', command: npm, args: ['run', 'manual:build'], timeoutMs: 240_000 },
+  { name: 'preview link browser checks', command: process.execPath, args: ['scripts/test_manual_studio_preview_navigation.mjs'], timeoutMs: 120_000 },
   { name: 'Milkdown and Mermaid browser checks', command: process.execPath, args: ['scripts/test_manual_studio_milkdown.mjs'], timeoutMs: 120_000 },
+  { name: 'recapture display refresh checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_display.mjs'], timeoutMs: 120_000 },
   { name: 'native capture UI mock checks', command: process.execPath, args: ['scripts/test_manual_studio_capture_ui.mjs'], timeoutMs: 120_000 },
   { name: 'manualctl build for browser smoke', command: 'cargo', args: ['build', '-p', 'manual-core', '--bin', 'manualctl', '--offline'], timeoutMs: 300_000 },
+  { name: 'MkDocs build input checks', command: process.execPath, args: ['scripts/test_manual_studio_build.mjs'], timeoutMs: 120_000 },
+  { name: 'MkDocs build button checks', command: process.execPath, args: ['scripts/test_manual_studio_mkdocs_button.mjs'], timeoutMs: 120_000 },
   { name: 'Milkdown AI prompt save checks', command: process.execPath, args: ['scripts/test_manual_studio_ai_prompt.mjs'], timeoutMs: 120_000 },
   { name: 'generation review integration checks', command: process.execPath, args: ['scripts/test_manual_studio_generation_review.mjs'], timeoutMs: 120_000 },
+  { name: 'generation tools browser checks', command: process.execPath, args: ['scripts/test_manual_studio_generation_tools.mjs'], timeoutMs: 120_000 },
   { name: 'browser smoke checks', command: process.execPath, args: ['scripts/smoke_manual_studio.mjs', '--start-server'], timeoutMs: 240_000 },
   { name: 'Manual Studio Rust checks', command: 'cargo', args: ['test', '--manifest-path', 'apps/manual-studio/src-tauri/Cargo.toml', '--offline'], timeoutMs: 360_000 },
   { name: 'manual-core Rust checks', command: 'cargo', args: ['test', '-p', 'manual-core', '--offline'], timeoutMs: 600_000 },

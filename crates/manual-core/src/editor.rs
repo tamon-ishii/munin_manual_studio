@@ -196,6 +196,21 @@ pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, Str
     let parser = Parser::new_ext(content, options);
     let mut body = String::new();
     html::push_html(&mut body, parser);
+    // srcdoc resolves ordinary hrefs against the app URL. Keep links inert until
+    // the parent installs its navigation handler (iframe load can be delayed).
+    let anchor_tags = regex::Regex::new(r#"(?i)<a\b[^>]*>"#).map_err(|error| error.to_string())?;
+    let href_attr = regex::Regex::new(r#"(?i)\s+href\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#)
+        .map_err(|error| error.to_string())?;
+    body = anchor_tags
+        .replace_all(&body, |anchor: &regex::Captures| {
+            href_attr
+                .replace_all(&anchor[0], |href: &regex::Captures| {
+                    let value = href[0].split_once('=').unwrap().1.trim();
+                    format!(" data-preview-href={value} role=\"link\" tabindex=\"0\"")
+                })
+                .into_owned()
+        })
+        .into_owned();
     // Markdown images and literal HTML <img> tags both reach this HTML output.
     // Embed local project images because the iframe intentionally permits data: images only.
     let image_tags = regex::Regex::new(r#"(?i)<img\b[^>]*\bsrc=["'](?P<src>[^"']+)["'][^>]*>"#)
@@ -218,7 +233,7 @@ pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, Str
     }
     inlined_body.push_str(&body[last_end..]);
     Ok(format!(
-        r#"<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>body{{font:16px/1.8 system-ui,sans-serif;color:#26342f;background:#fff;max-width:850px;margin:32px auto;padding:0 28px}}h1,h2,h3{{line-height:1.4}}h1{{font-size:30px}}h2{{border-bottom:1px solid #dbe4df;padding-bottom:8px}}a{{color:#246b54}}pre,code{{font-family:ui-monospace,monospace;background:#f2f5f3}}code{{padding:2px 4px}}pre{{padding:16px;overflow:auto}}img{{max-width:100%;height:auto}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #dbe4df;padding:8px;text-align:left}}blockquote{{border-left:3px solid #74a58a;margin-left:0;padding-left:18px;color:#52665a}}</style></head><body>{inlined_body}</body></html>"#
+        r#"<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>body{{font:16px/1.8 system-ui,sans-serif;color:#26342f;background:#fff;max-width:850px;margin:32px auto;padding:0 28px}}h1,h2,h3{{line-height:1.4}}h1{{font-size:30px}}h2{{border-bottom:1px solid #dbe4df;padding-bottom:8px}}a{{color:#246b54;cursor:pointer;text-decoration:underline}}pre,code{{font-family:ui-monospace,monospace;background:#f2f5f3}}code{{padding:2px 4px}}pre{{padding:16px;overflow:auto}}img{{max-width:100%;height:auto}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #dbe4df;padding:8px;text-align:left}}blockquote{{border-left:3px solid #74a58a;margin-left:0;padding-left:18px;color:#52665a}}</style></head><body>{inlined_body}</body></html>"#
     ))
 }
 
@@ -269,6 +284,22 @@ mod tests {
         assert!(html.contains("<strong>Bold</strong>"));
         assert!(html.contains("<table>"));
         assert!(html.contains("default-src 'none'"));
+    }
+
+    #[test]
+    fn preview_links_cannot_navigate_before_interception() {
+        let root = tempfile::tempdir().unwrap();
+        let rendered = render_html(
+            root.path(),
+            "index.md",
+            "[Heading](#heading)\n\n[Other](other.md)\n\n<a href='index.md#raw'>Raw</a>",
+        )
+        .unwrap();
+        assert!(rendered.contains("data-preview-href=\"#heading\""));
+        assert!(rendered.contains("data-preview-href=\"other.md\""));
+        assert!(rendered.contains("data-preview-href='index.md#raw'"));
+        assert!(!rendered.contains(" href="));
+        assert!(rendered.contains("role=\"link\" tabindex=\"0\""));
     }
 
     #[test]

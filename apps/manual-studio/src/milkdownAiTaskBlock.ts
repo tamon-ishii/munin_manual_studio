@@ -167,7 +167,7 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
     prompt.readOnly = !view.editable;
     const approved = attribute(rawHeader, 'approved-at') !== undefined;
     const empty = node.childCount === 1 && node.firstChild?.type.name === 'paragraph' && !node.firstChild.content.size;
-    status.textContent = approved ? '確定済み' : empty ? '未生成' : '未確定';
+    status.textContent = approved ? '確定済み' : empty ? '未生成' : '生成済み';
     confirmBtn.textContent = approved ? '確定解除' : '確定';
     confirmBtn.className = `milkdown-ai-task-confirm${approved ? ' button-approved is-approved' : ''}`;
     confirmBtn.disabled = !view.editable || Boolean(empty && !approved);

@@ -52,9 +52,13 @@ fn execute(operation: Operation) -> Result<String, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log);
+    let timeout = match &operation {
+        Operation::Request(request) => request["options"]["json"]["limits"]["timeout_seconds"].as_u64().unwrap_or(300).clamp(5,1800),
+        _ => 60,
+    };
     run_child(
         &mut command,
-        Duration::from_secs(60),
+        Duration::from_secs(timeout + 5),
         &dir.0.join("stderr.log"),
     )?;
     let response = fs::read(dir.0.join("response.json"))
