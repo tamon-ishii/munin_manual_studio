@@ -710,6 +710,14 @@ try {
   await page.locator('#project-root').fill(project);
   await page.locator('#project-form button[type=submit]').click();
   await idle();
+  // Generation itself is mocked below; choose a configured connection without
+  // depending on an AI CLI being installed on the machine running this smoke.
+  await page.locator('[data-tab="settings"]').dispatchEvent('click');
+  await page.locator('#ai-connection-type').selectOption('local_llm');
+  await page.locator('#ai-model').fill('smoke-generation-model');
+  await page.locator('#ai-endpoint-url').fill('http://127.0.0.1:11434/v1');
+  await page.waitForFunction(() => document.querySelector('#ai-save-state').textContent === '保存済み');
+  await page.locator('[data-close-dialog="panel-settings"]').click();
   let generatedPageTask = false;
   let generationDelayMs = 500;
   await page.route('**/__manual/rpc', async route => {
@@ -727,6 +735,7 @@ try {
   await page.locator('[data-generate-page="docs/ai-page.md"]').click();
   await page.locator('#generation-input-run').click();
   await page.locator('#operation-progress').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.querySelector('#progress-log').textContent.includes('ai-page.md の生成候補を準備'));
   assert.match(await page.locator('#progress-log').innerText(), /ai-page\.md の生成候補を準備/);
   await page.locator('#generation-review-dialog').waitFor({ state: 'visible' });
   assert.ok(!(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8')).includes('Generated guide'), 'candidate does not overwrite the original');
