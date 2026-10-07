@@ -68,6 +68,19 @@ jobs:
         run: |
           cargo test --locked -p manual-core -p manual-studio
           python -m unittest discover -s scripts -p "test_package_release.py"
+      - name: Install browser and manual builder for UI checks
+        if: runner.os == 'Linux'
+        run: |
+          npx playwright-core install --with-deps chrome
+          python -m pip install mkdocs-material
+      - name: Check UI, generation, capture, and integrated workflows
+        if: runner.os == 'Linux'
+        run: |
+          npm run manual:check -- --group unit
+          npm run manual:check-ui
+          npm run manual:check-generation
+          npm run manual:check-capture
+          npm run manual:check -- --group smoke
       - name: Build Manual Studio and CLI
         run: cargo build --locked --release --target ${{ matrix.target }} -p manual-studio -p manual-core
       - name: Package applications

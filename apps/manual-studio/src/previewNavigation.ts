@@ -1,3 +1,5 @@
+import { uiIcon } from './uiIcons';
+
 export interface PreviewNavigator {
   pushPage(page: string): void;
   canGoBack(): boolean;
@@ -7,6 +9,7 @@ export interface PreviewNavigator {
   setupIframeInterception(iframe: HTMLIFrameElement): void;
   attachToolbar(container: HTMLElement): void;
   updateToolbarState(): void;
+  setStatus(state: 'loading' | 'ready' | 'error' | 'empty', message?: string): void;
 }
 
 export function resolveRelativeMarkdownLink(currentPage: string, href: string): string | null {
@@ -56,6 +59,15 @@ export function createPreviewNavigator(options: {
   let forwardButton: HTMLButtonElement | null = null;
   let refreshButton: HTMLButtonElement | null = null;
   let pageIndicator: HTMLElement | null = null;
+  let statusIndicator: HTMLElement | null = null;
+  let previewStatus: 'loading' | 'ready' | 'error' | 'empty' = 'empty';
+  let previewMessage = '';
+
+  function setStatus(state: typeof previewStatus, message = ''): void {
+    previewStatus = state;
+    previewMessage = message;
+    updateToolbarState();
+  }
 
   function canGoBack(): boolean {
     return historyIndex > 0;
@@ -68,6 +80,12 @@ export function createPreviewNavigator(options: {
   function updateToolbarState(): void {
     if (backButton) backButton.disabled = !canGoBack();
     if (forwardButton) forwardButton.disabled = !canGoForward();
+    if (refreshButton) refreshButton.disabled = !options.getCurrentPage() || previewStatus === 'loading';
+    if (statusIndicator) {
+      statusIndicator.dataset.state = previewStatus;
+      statusIndicator.textContent = { loading: '読み込み中…', ready: '編集中の原稿', error: '表示に失敗', empty: '原稿を選択' }[previewStatus];
+      statusIndicator.title = previewMessage || 'リンクを開くと編集対象の原稿も切り替わります。未保存の編集も表示します。';
+    }
     if (pageIndicator) {
       const page = options.getCurrentPage();
       pageIndicator.textContent = page || "プレビュー";
@@ -210,11 +228,12 @@ export function createPreviewNavigator(options: {
     container.innerHTML = `
       <div class="preview-toolbar" role="toolbar" aria-label="プレビュー操作">
         <div class="preview-toolbar-nav">
-          <button type="button" id="preview-nav-back" class="preview-toolbar-btn" title="前の原稿に戻る" aria-label="前の原稿に戻る" disabled>◀</button>
-          <button type="button" id="preview-nav-forward" class="preview-toolbar-btn" title="次の原稿に進む" aria-label="次の原稿に進む" disabled>▶</button>
-          <button type="button" id="preview-nav-refresh" class="preview-toolbar-btn" title="プレビューを再読込" aria-label="プレビューを再読込">⟳</button>
+          <button type="button" id="preview-nav-back" class="preview-toolbar-btn" title="前の原稿に戻る" aria-label="前の原稿に戻る" disabled>${uiIcon('back')}</button>
+          <button type="button" id="preview-nav-forward" class="preview-toolbar-btn" title="次の原稿に進む" aria-label="次の原稿に進む" disabled>${uiIcon('forward')}</button>
+          <button type="button" id="preview-nav-refresh" class="preview-toolbar-btn" title="プレビューを再読込 (Ctrl/Cmd+Shift+R)" aria-label="プレビューを再読込" aria-keyshortcuts="Control+Shift+R Meta+Shift+R">${uiIcon('refresh')}</button>
         </div>
         <span id="preview-nav-page" class="preview-toolbar-title" title="プレビュー">プレビュー</span>
+        <span id="preview-nav-status" class="preview-status" role="status" aria-live="polite"></span>
       </div>
     `;
 
@@ -222,6 +241,7 @@ export function createPreviewNavigator(options: {
     forwardButton = container.querySelector<HTMLButtonElement>("#preview-nav-forward");
     refreshButton = container.querySelector<HTMLButtonElement>("#preview-nav-refresh");
     pageIndicator = container.querySelector<HTMLElement>("#preview-nav-page");
+    statusIndicator = container.querySelector<HTMLElement>("#preview-nav-status");
 
     backButton?.addEventListener("click", () => handle(goBack));
     forwardButton?.addEventListener("click", () => handle(goForward));
@@ -239,5 +259,6 @@ export function createPreviewNavigator(options: {
     setupIframeInterception,
     attachToolbar,
     updateToolbarState,
+    setStatus,
   };
 }

@@ -180,6 +180,10 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
             icon: '', active: () => false,
             selector: { activeLabel: () => '挿入・その他', options: advanced.map(item => ({ label: labels[item.key] || item.key, onSelect: ctx => item.onRun!(ctx) })) },
           });
+          const groups = builder.build();
+          for (let index = groups.length - 1; index >= 0; index--) {
+            if (!groups[index].items.length) groups.splice(index, 1);
+          }
           topBarLabels.splice(0, topBarLabels.length, ...builder.build().flatMap(group => group.items.filter(item => item.onRun).map(item => labels[item.key] || item.key)));
         },
       },

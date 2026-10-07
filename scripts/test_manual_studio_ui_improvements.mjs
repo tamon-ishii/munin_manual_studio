@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
 const base = 'http://127.0.0.1:5174';
 const tasks = [
   { id:'write', kind:'text', page:'docs/index.md', prompt:'Explain', status:'missing' },
@@ -12,7 +13,7 @@ const tasks = [
 const content = '# Guide\n\n' + tasks.map(task => `<!-- ai:task id=${task.id} kind=${task.kind} prompt="${task.prompt}" ${task.status === 'approved' ? 'approved-at=2026-10-08T00:00:00Z' : ''} -->\n${task.status === 'missing' ? '' : 'Existing result'}\n<!-- /ai:task -->`).join('\n\n');
 const state = { has_config:true, config:{docs:'docs', output:'manual', agent:'codex', model:'test', connection_type:'local_llm', endpoint_url:'http://localhost:11434/v1', mkdocs:{site_name:'Guide',theme:'material',language:'ja',use_directory_urls:true}}, brief:'', pages:['docs/index.md'], project_entries:[{path:'docs/index.md',directory:false}], tasks, capture_sources:{}, image_assets:{}, ui_map:null, agents:[] };
 const inputFor = ids => ({page:'docs/index.md',revision:'r1',existing_content:content,tasks:tasks.filter(task => task.status !== 'approved' && (!ids || ids.includes(task.id))),references:[],source_note:'Test',feedback:'',connection_type:'local_llm',agent:'codex',model:'test',requests:[]});
-let browser, server;
+let browser, server, saveFails=false, saveDelay=0, previewFails=false, previewDelay=0;
 const actions=[];
 try {
   server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
@@ -27,7 +28,16 @@ try {
     if(action==='state') result=state;
     else if(action==='page-tasks') result=tasks;
     else if(action==='editor-read') result={page:'docs/index.md',content,revision:'r1'};
-    else if(action==='editor-preview') result='<html><body><h1>Guide</h1></body></html>';
+    else if(action==='editor-preview') {
+      if(previewDelay)await new Promise(resolve=>setTimeout(resolve,previewDelay));
+      if(previewFails){await route.fulfill({status:500,json:{error:'Preview unavailable'}});return;}
+      result='<html><body><h1>Guide</h1></body></html>';
+    }
+    else if(action==='editor-save') {
+      if(saveDelay)await new Promise(resolve=>setTimeout(resolve,saveDelay));
+      if(saveFails){await route.fulfill({status:500,json:{error:'原稿が変更されています'}});return;}
+      result={page:options.page,content:options.json.content,revision:'r2'};
+    }
     else if(action==='generation-input') result=inputFor(options.json?.ids);
     else if(action==='execution-begin') result={id:'123-1',entries:[]};
     else if(action==='agent-progress') result={logs:[]};
@@ -38,6 +48,30 @@ try {
   await page.goto(`${base}/?root=${encodeURIComponent('/tmp/munin-ui-fixture')}`);
   await page.waitForFunction(()=>document.querySelector('#editor-title').textContent==='docs/index.md');
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await idle();
+  // Shared outline icons stay visible and unfilled in the real editor toolbar.
+  const iconStyles=await page.locator('.milkdown-top-bar .ui-icon, .preview-toolbar .ui-icon').evaluateAll(nodes=>nodes.map(node=>({fill:getComputedStyle(node.querySelector('path')).fill,width:node.getBoundingClientRect().width,height:node.getBoundingClientRect().height})));
+  assert.ok(iconStyles.length>=5);
+  for(const icon of iconStyles){assert.equal(icon.fill,'none');assert.equal(icon.width,20);assert.equal(icon.height,20);}
+  const emptyDividers=await page.locator('.top-bar-divider').evaluateAll(nodes=>nodes.filter(node=>!node.previousElementSibling||node.previousElementSibling.classList.contains('top-bar-divider')||!node.nextElementSibling).length);
+  assert.equal(emptyDividers,0,'empty toolbar groups do not leave separators');
+  await page.waitForFunction(()=>document.querySelector('#preview-nav-status').dataset.state==='ready');
+  previewDelay=600;await page.locator('#preview-nav-refresh').click();
+  await page.waitForFunction(()=>document.querySelector('#preview-nav-status').dataset.state==='loading');
+  assert.equal(await page.locator('#preview-nav-refresh').isDisabled(),true);await idle();previewDelay=0;
+  previewFails=true;await page.locator('#preview-nav-refresh').click();await idle();
+  assert.equal(await page.locator('#preview-nav-status').getAttribute('data-state'),'error');
+  previewFails=false;await page.locator('#preview-nav-refresh').click();await idle();
+  await page.locator('#shortcut-help').click();assert.equal(await page.locator('#shortcut-help-dialog').isVisible(),true);
+  await page.locator('#shortcut-help-dialog [data-close]').click();
+  const priorView=await page.locator('#panel-editor').getAttribute('data-editor-view');
+  await page.keyboard.press('Control+Shift+P');assert.notEqual(await page.locator('#panel-editor').getAttribute('data-editor-view'),priorView);
+  await page.locator('[data-editor-view=split]').click();
+  saveDelay=600;saveFails=true;await page.locator('#save-page').click();
+  await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saving');await idle();
+  assert.equal(await page.locator('#save-state').getAttribute('data-state'),'error');
+  assert.match(await page.locator('#save-state').getAttribute('title'),/原稿が変更/);
+  saveFails=false;saveDelay=0;await page.keyboard.press('Control+s');await idle();
+  assert.equal(await page.locator('#save-state').getAttribute('data-state'),'saved');
   await page.locator('[data-tab=publish]').click();
   assert.equal(await page.locator('#build-draft').isVisible(),true);
   assert.equal(await page.locator('#ai-connection-type').isVisible(),false);
@@ -45,6 +79,9 @@ try {
   await page.locator('#settings-menu summary').click();await page.locator('[data-tab=settings]').click();
   assert.equal(await page.locator('#ai-connection-type').isVisible(),true);
   assert.equal(await page.locator('#save-launch-commands').isVisible(),true);
+  const savesBefore=actions.filter(action=>action==='editor-save').length;
+  await page.locator('#ai-model').focus();await page.keyboard.press('Control+s');
+  assert.equal(actions.filter(action=>action==='editor-save').length,savesBefore,'settings shortcuts do not save the document');
   await page.locator('[data-close-dialog=panel-settings]').click();
   await page.locator('[data-tab=tasks]').click();
   assert.equal(await page.locator('#task-list article').count(),4);
@@ -91,5 +128,18 @@ try {
   await page.locator('[data-format=mermaid]').click();
   const duplicateIds=await page.evaluate(()=>{const ids=[...document.querySelectorAll('[id]')].filter(el=>el instanceof HTMLElement && el.id).map(el=>el.id);return ids.filter((id,i)=>ids.indexOf(id)!==i);});
   assert.deepEqual(duplicateIds,[]);assert.deepEqual(errors,[]);
+  await mkdir('/tmp/munin-ui-review',{recursive:true});
+  for(const [theme,width] of [['forest',1440],['midnight',1440],['forest',900]]){
+    await page.setViewportSize({width,height:960});
+    await page.locator('[data-tab=appearance]').dispatchEvent('click');await page.locator('#ui-theme').selectOption(theme);await page.locator('[data-close-dialog=panel-appearance]').click();
+    await page.screenshot({path:`/tmp/munin-ui-review/${theme}-${width}.png`});
+  }
+  // AI setup is optional, and dismissing the guide is scoped to the workspace.
+  state.config.connection_type='none';await page.reload();await idle();
+  assert.equal(await page.locator('#workspace-guide').isVisible(),true);
+  await page.locator('#workspace-guide summary').click();await page.locator('[data-guide-settings]').click();
+  assert.equal(await page.locator('#panel-settings').isVisible(),true);await page.locator('[data-close-dialog=panel-settings]').click();
+  await page.locator('[data-guide-dismiss]').click();await page.reload();await idle();
+  assert.equal(await page.locator('#workspace-guide').isVisible(),false);
   console.log('UI improvements passed: settings separation, filters, protected counts, cancellation, bulk selection, failure states, rich insert menu and capture step.');
 } finally { await browser?.close();server?.kill(); }

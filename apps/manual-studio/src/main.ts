@@ -1,6 +1,9 @@
 import { showPartialFailure, showExecutionHistory, showCaptureExpectations, type ExecutionRun, type ExecutionLimits } from './executionHistory';
 import { selectGenerationPages, taskStatusLabels, taskKindLabels } from './taskPresentation';
 import { uiIcon } from './uiIcons';
+import { showImageComparison } from './imageComparison';
+import { showShortcutHelp } from './shortcutHelp';
+import { setAiPhase, renderExecutionResult, type AiPhase } from './workflowPresentation';
 import { readAiCredential, saveAiCredential, hasUnassignedAiCredential, assignLegacyAiCredential } from "./aiCredentials";
 import { applyEditorFontSize, isEditorFontSize, setupEditorFontSize } from "./editorFontSize";
 import { setupMilkdownEditor, renderMermaid } from "./milkdownEditor";
@@ -84,8 +87,12 @@ let projectRoot = "";
 let workspace: State | null = null;
 let documentState: Document | null = null;
 let dirty = false;
+let documentSaveState: { owner: Document; state: 'saving' | 'error'; message?: string } | null = null;
+const lastExecutions = new Map<string, ExecutionRun>();
+const aiPhases = new Map<string, AiPhase>();
 let busy = false;
 let previewVersion = 0;
+let previewRequestPending = false;
 let previewScrollWindow: Window | null = null;
 let syncingScroll = false;
 let progressTimer: ReturnType<typeof setInterval> | undefined;
@@ -575,18 +582,54 @@ function chooseTab(name: string): void {
   }
 }
 function updateSaveState(): void {
-  element("save-state").textContent = documentState ? dirty ? "● 未保存の変更" : "保存済み" : "原稿を選択してください";
+  const ownerState = documentSaveState?.owner === documentState ? documentSaveState : null;
+  const badge = element("save-state");
+  badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
+  const conflicted = ownerState?.state === 'error' && /変更されています|conflict|revision/i.test(ownerState.message || '');
+  badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
+  badge.title = ownerState?.message || (dirty ? '保存してからAI更新・出力を実行してください。' : '原稿の保存状態');
+  badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
+  renderLastExecution();
+  updateWorkspaceGuide();
+}
+function updateWorkspaceGuide(): void {
+  const guide = element<HTMLElement>('workspace-guide');
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(`manual-studio-guide:${projectRoot}`) === 'hidden'; } catch { /* Optional preference. */ }
+  guide.hidden = detached || !workspace || dismissed || workspace.config.connection_type !== 'none' && workspace.has_config;
+}
+function showAiPhase(phase: AiPhase, root = projectRoot, page = documentState?.page || ''): void {
+  aiPhases.set(JSON.stringify([root, page]), phase);
+  if (root === projectRoot && page === documentState?.page) setAiPhase(element('ai-workflow-status'), phase);
+}
+function renderLastExecution(): void {
+  const key = JSON.stringify([projectRoot, documentState?.page]);
+  const run = documentState ? lastExecutions.get(key) : undefined;
+  setAiPhase(element('ai-workflow-status'), aiPhases.get(key) || 'idle');
+  renderExecutionResult(element('execution-result'), run, {
+    resume: id => { void work(async () => {
+      savedBeforeOperation();
+      const root = projectRoot;
+      const plan = JSON.parse(await rpc('execution-resume', { id }, root)) as {page:string;ids:string[];limits:ExecutionLimits};
+      if (root !== projectRoot) return;
+      await openPage(plan.page, false); await generateDocument(plan.page, plan.ids, plan.limits);
+    }); },
+    history: () => element<HTMLButtonElement>('execution-history-open').click(),
+  });
 }
 async function renderPreview(): Promise<void> {
   if (!documentState) return;
   const version = ++previewVersion;
+  previewRequestPending = true;
+  previewNavigator.setStatus('loading');
   try {
     const html = await rpc("editor-preview", { page: documentState.page, body: editor.value });
     if (version === previewVersion) {
+      previewRequestPending = false;
       element<HTMLIFrameElement>("markdown-preview").srcdoc = html;
       previewNavigator.updateToolbarState();
     }
-  } catch (error) { if (version === previewVersion) status(`プレビュー: ${String(error)}`, true); }
+  } catch (error) { if (version === previewVersion) { previewRequestPending = false; previewNavigator.setStatus('error', String(error)); status(`プレビュー: ${String(error)}`, true); } }
 }
 function updateCursor(): void {
   const lines = editor.value.slice(0, editor.selectionStart).split("\n");
@@ -633,6 +676,18 @@ async function openPage(page: string, check = true): Promise<void> {
   await renderPreview();
   previewNavigator.pushPage(page);
   chooseTab("editor");
+  const previousExecution = lastExecutions.get(JSON.stringify([root,page]));
+  void rpc('execution-history', { page }, root).then(output => {
+    if (root !== projectRoot || version !== documentRequestVersion || documentState?.page !== page) return;
+    if (lastExecutions.get(JSON.stringify([root,page])) !== previousExecution) return;
+    const history = JSON.parse(output) as {runs?:ExecutionRun[]};
+    const latest = history.runs?.[0];
+    if (!latest || !Array.isArray(latest.entries)) return;
+    const key = JSON.stringify([root, page]);
+    lastExecutions.set(key, latest);
+    if (!['generating','review','capturing','restored'].includes(aiPhases.get(key) || '')) aiPhases.set(key, latest.status === 'rolled_back' ? 'restored' : latest.status === 'completed' ? 'completed' : 'partial');
+    renderLastExecution();
+  }).catch(() => { /* Opening a document remains available if history cannot be read. */ });
 }
 function renderPages(): void {
   const entries = workspace?.project_entries || [];
@@ -655,7 +710,7 @@ async function refreshWorkspace(reloadPage = false): Promise<void> {
   const loaded = JSON.parse(await rpc("state", {}, root)) as State;
   if (root !== projectRoot || version !== workspaceRequestVersion) return;
   workspace = loaded;
-  renderPages(); renderTasks(); renderMap();
+  renderPages(); renderTasks(); renderMap(); updateWorkspaceGuide();
   element("task-count").textContent = String(workspace.tasks.length);
   if (reloadPage && current) {
     if (documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
@@ -901,6 +956,9 @@ async function openProject(root: string, check = true): Promise<void> {
   if (projectRoot !== root) expandedFolders.clear();
   if (terminalController && projectRoot !== root) await terminalController.kill();
   projectRoot = root; workspace = loaded; documentState = null; dirty = false;
+  documentSaveState = null;
+  setAiPhase(element('ai-workflow-status'), 'idle');
+  previewNavigator.setStatus('empty');
   clearTimeout(previewTimer); ++previewVersion;
   editor.value = "";
   resetEditHistory();
@@ -929,7 +987,7 @@ async function openProject(root: string, check = true): Promise<void> {
   if (page) await openPage(page, false);
   else { editor.value = ""; updateSaveState(); status("「＋」から最初のMarkdownページを作ってください。"); }
   if (page) status(`プロジェクトを開きました。${page}を編集できます。`);
-  if (!loaded.has_config && !detached) status("AI機能は利用できるCLIを自動選択します。変更する場合は「設定の「AI・撮影設定」」で選べます。");
+  if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は「設定 → AI・撮影設定」で確認できます。");
 
 }
 async function saveDocument(refresh = true): Promise<void> {
@@ -939,8 +997,18 @@ async function saveDocument(refresh = true): Promise<void> {
   const page = current.page;
   const content = editor.value;
   const version = documentRequestVersion;
-  const saved = JSON.parse(await rpc("editor-save", { page, json: { content, revision: current.revision } }, root)) as Document;
+  documentSaveState = { owner: current, state: 'saving' }; updateSaveState();
+  let saved: Document;
+  try {
+    saved = JSON.parse(await rpc("editor-save", { page, json: { content, revision: current.revision } }, root)) as Document;
+  } catch (error) {
+    if (root === projectRoot && current === documentState && version === documentRequestVersion) {
+      documentSaveState = { owner: current, state: 'error', message: String(error) }; updateSaveState();
+    }
+    throw error;
+  }
   if (root !== projectRoot || current !== documentState || version !== documentRequestVersion) return;
+  documentSaveState = null;
   documentState = saved; dirty = editor.value !== content; updateSaveState();
   if (refresh) await refreshWorkspace();
   status(`${page}を保存しました。`);
@@ -982,6 +1050,12 @@ function renderTasks(): void {
     void rpc("preview-asset", { page: task.page, asset: workspace.image_assets[task.id] || `assets/${task.id}.png` }).then((src) => {
       if (generationRoot !== projectRoot || !img?.isConnected) return;
       if (img) { img.src = src; img.hidden = false; }
+      if (img) {
+        img.tabIndex = 0; img.setAttribute('role', 'button'); img.setAttribute('aria-label', `${task.id}の撮影画像を拡大`);
+        const inspect = () => { void showImageComparison([{ label: task.id, src: img.src }]); };
+        img.addEventListener('click', inspect);
+        img.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); inspect(); } });
+      }
     }).catch(() => { /* An unregistered screenshot has no image yet. */ });
   }
 }
@@ -1086,6 +1160,7 @@ async function generateReviewed(page: string, id?: string, initialFeedback = "",
     }
     if (execution) await rpc("execution-checkpoint",{id:execution.id,json:{results:ids.map(id=>({id,status:"running"}))}},root);
     logProgress(`${page} の生成候補を準備しています。`);
+    showAiPhase('generating', root, page);
     activeGenerationRoot = root;
     generationCancelled = false;
     element("progress-cancel").hidden = false;
@@ -1108,6 +1183,7 @@ async function generateReviewed(page: string, id?: string, initialFeedback = "",
     } catch (error) {
       if (!generationCancelled) for (const task of input.tasks.filter(task => task.kind !== "screenshot")) recordTaskResult(task, String(error), root);
       renderTasks();
+      showAiPhase(generationCancelled ? 'cancelled' : 'partial', root, page);
       await stopAiProgress(false);
       if (execution && !generationCancelled && operationAttempt <= (input.limits?.retries || 0)) {
         logProgress(`生成を再試行します（${operationAttempt}/${input.limits?.retries}）。`);
@@ -1118,23 +1194,26 @@ async function generateReviewed(page: string, id?: string, initialFeedback = "",
     if (projectRoot !== root) throw new Error("ワークスペースが切り替わったため、生成候補の反映を中止しました。");
     for (const task of input.tasks.filter(task => task.kind !== "screenshot")) recordTaskResult(task, undefined, root);
     renderTasks();
-    if (candidate.before.content === candidate.content) { executionSucceeded = true; status("AI生成による変更はありません。"); return true; }
+    if (candidate.before.content === candidate.content) { executionSucceeded = true; showAiPhase('completed', root, page); status("AI生成による変更はありません。"); return true; }
+    showAiPhase('review', root, page);
     const decision = await showGenerationReview(page, candidate.before.content, candidate.content);
-    if (decision.action === "restore") { status("生成候補を破棄し、現在の原稿を保持しました。"); return false; }
+    if (decision.action === "restore") { showAiPhase('cancelled', root, page); status("生成候補を破棄し、現在の原稿を保持しました。"); return false; }
     if (decision.action === "retry") { feedback = decision.feedback; operationAttempt = 0; continue; }
     const after = JSON.parse(await rpc("editor-save", { page, json: { content: candidate.content, revision: candidate.before.revision } }, root)) as Document;
     aiReviews.set(aiReviewKey(page), { before: candidate.before, after, id, updated: candidate.updated });
     await refreshWorkspace(documentState?.page === page);
     renderDocumentTags();
     executionSucceeded = true;
+    showAiPhase('completed', root, page);
     status(`${page}の生成結果を採用して保存しました。`);
     return true;
   }
-  } catch(error) { executionError=String(error); throw error; }
+  } catch(error) { executionError=String(error); showAiPhase(generationCancelled ? 'cancelled' : 'partial', root, page); throw error; }
   finally {
     if (execution) {
       await rpc("execution-checkpoint",{id:execution.id,json:{results:ids.map(id=>({id,status:executionSucceeded?"succeeded":executionError&&!generationCancelled?"failed":"cancelled",error:executionError}))}},root);
-      await rpc("execution-finish",{id:execution.id},root);
+      const finished = JSON.parse(await rpc("execution-finish",{id:execution.id},root)) as ExecutionRun;
+      if (Array.isArray(finished.entries)) { lastExecutions.set(JSON.stringify([root,page]),finished); renderLastExecution(); }
     }
   }
 }
@@ -1149,7 +1228,12 @@ element("execution-history-open").addEventListener("click",()=>{void work(async(
       await openPage(plan.page,false);await generateDocument(plan.page,plan.ids,plan.limits);
     },
     restore:async id=>{
-      await rpc("execution-finish",{id,rollback:true},root);await refreshWorkspace(true);status("文書と画像を更新前へ復元しました。");
+      const restored = JSON.parse(await rpc("execution-finish",{id,rollback:true},root)) as ExecutionRun;
+      if (Array.isArray(restored.entries)) {
+        lastExecutions.set(JSON.stringify([root,restored.page]),restored);
+        showAiPhase('restored',root,restored.page);
+      }
+      await refreshWorkspace(true);status("文書と画像を更新前へ復元しました。");
     },
   });
 });});
@@ -1191,6 +1275,8 @@ element("review-ai-update").addEventListener("click", () => { void work(async ()
   if (decision.action === "restore") {
     await rpc("editor-save", { page, json: { content: snapshot.before.content, revision: current.revision } });
     aiReviews.delete(key);
+    lastExecutions.delete(JSON.stringify([projectRoot,page]));
+    showAiPhase('restored');
     await refreshWorkspace(true);
     renderDocumentTags();
     status("AI更新前の原稿に戻して保存しました。");
@@ -1215,9 +1301,13 @@ async function generateDocument(page: string, resumeIds?: string[], defaults?: E
   const limits = input.limits || {timeout_seconds:300,retries:0};
   const run = JSON.parse(await rpc("execution-begin", {page,json:{ids:tasks.map(task=>task.id),limits}}, root)) as ExecutionRun;
   const failures: Array<{id:string;reason:string}> = [];
+  const executionEntries = tasks.map(task => ({task:{id:task.id,kind:task.kind,prompt:task.prompt},status:'pending',attempts:0,input:null,references:{},capture:null}));
   let cancelled = false;
   generationCancelled = false;
-  const checkpoint = (ids: string[], state: string, error?: string) => rpc("execution-checkpoint", {id:run.id,json:{results:ids.map(id=>({id,status:state,error}))}},root);
+  const checkpoint = (ids: string[], state: string, error?: string) => {
+    for (const entry of executionEntries) if (ids.includes(entry.task.id)) entry.status = state;
+    return rpc("execution-checkpoint", {id:run.id,json:{results:ids.map(id=>({id,status:state,error}))}},root);
+  };
   const attempt = async <T>(selected: Task[], action: () => Promise<T>): Promise<T> => {
     for (let count=0;;count++) {
       if (generationCancelled) throw new Error("AI更新を中断しました。");
@@ -1234,6 +1324,7 @@ async function generateDocument(page: string, resumeIds?: string[], defaults?: E
   try {
     try { await rpc("agent-progress-clear"); } catch { /* Optional logging. */ }
     startAiProgress("generate-page");
+    showAiPhase('generating', root, page);
     const generated = tasks.filter(task=>task.kind!=="screenshot");
     if (generated.length) {
       try {
@@ -1249,6 +1340,7 @@ async function generateDocument(page: string, resumeIds?: string[], defaults?: E
       element<HTMLButtonElement>("progress-cancel").disabled=false;
       for (const task of tasks.filter(task=>task.kind==="screenshot")) {
         if (generationCancelled) { cancelled=true; break; }
+        showAiPhase('capturing', root, page);
         try {
           await attempt([task],async()=>{
             const result=JSON.parse(await rpc("generate-page-captures",{page,json:{ids:[task.id],limits,execution_id:run.id}},root)) as {capture_errors?:Array<{id:string;reason:string}>};
@@ -1259,8 +1351,12 @@ async function generateDocument(page: string, resumeIds?: string[], defaults?: E
       }
     }
     let rollback=false;
-    if(failures.length) rollback=input.failure_policy==="rollback" || input.failure_policy!=="keep" && await showPartialFailure(failures);
-    await rpc("execution-finish",{id:run.id,rollback},root);
+    if(failures.length) rollback=input.failure_policy==="rollback" || input.failure_policy!=="keep" && await showPartialFailure(failures, executionEntries);
+    const finished = JSON.parse(await rpc("execution-finish",{id:run.id,rollback},root)) as ExecutionRun;
+    if (Array.isArray(finished.entries)) lastExecutions.set(JSON.stringify([root,page]),finished);
+    showAiPhase(rollback ? 'restored' : cancelled || generationCancelled ? 'cancelled' : failures.length ? 'partial' : 'completed', root, page);
+    renderLastExecution();
+    element<HTMLDetailsElement>('execution-result').open = Boolean(failures.length || cancelled || generationCancelled);
     status(rollback ? "文書と画像を更新前へ戻しました。実行記録から再開できます。" : cancelled || generationCancelled ? "AI更新を中断しました。未実行分は実行記録から再開できます。" : `AI更新を完了しました。失敗${failures.length}件。`,failures.length>0);
     return cancelled || generationCancelled ? null : failures.length;
   } finally {
@@ -1620,9 +1716,11 @@ document.getElementById("document-tag-list")?.addEventListener("click", (event) 
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 milkdown.host.addEventListener("scroll", () => syncScroll(milkdown.host, previewScrollElement()));
 element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
+  if (documentState && !previewRequestPending) previewNavigator.setStatus('ready');
   previewNavigator.setupIframeInterception(element<HTMLIFrameElement>("markdown-preview"));
   previewNavigator.updateToolbarState();
   const previewDocument = element<HTMLIFrameElement>("markdown-preview").contentDocument;
+  previewDocument?.addEventListener('keydown', handleDocumentShortcut);
   previewDocument?.querySelectorAll<HTMLElement>('code.language-mermaid, pre.mermaid, .highlight.language-mermaid pre').forEach(code => {
     const target = previewDocument.createElement("div");
     target.className = "mermaid-preview";
@@ -1748,9 +1846,37 @@ editor.addEventListener("keydown", (event) => {
     else replaceMarkdown(editor.selectionStart, editor.selectionEnd, "  ", 2);
   }
 });
-document.addEventListener("keydown", (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void work(saveDocument); }
+function handleDocumentShortcut(event: KeyboardEvent): void {
+  if (event.isComposing || event.repeat || event.defaultPrevented || event.altKey || !(event.ctrlKey || event.metaKey)) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (document.querySelector('dialog[open]') || target?.closest('#panel-terminal')) return;
+  if (target?.matches('input,select,textarea') && target !== editor && !milkdown.host.contains(target)) return;
+  const key = event.key.toLowerCase();
+  if (key === 's' && !event.shiftKey) { event.preventDefault(); if (documentState) void work(saveDocument); return; }
+  if (!event.shiftKey || !['p', 'r', 'g'].includes(key)) return;
+  event.preventDefault();
+  if (!documentState || busy) return;
+  if (key === 'p') {
+    const views: EditorView[] = ['edit', 'split', 'preview'];
+    const next = views[(views.indexOf(element('panel-editor').dataset.editorView as EditorView) + 1) % views.length];
+    document.querySelector<HTMLButtonElement>(`[data-editor-view="${next}"]`)!.click();
+  } else if (key === 'r') { void work(renderPreview); }
+  else { void work(generateCurrentPage); }
+}
+document.addEventListener('keydown', handleDocumentShortcut);
+element('shortcut-help').addEventListener('click', showShortcutHelp);
+element('workspace-guide').querySelector('[data-guide-settings]')!.addEventListener('click', () => chooseTab('settings'));
+element('workspace-guide').querySelector('[data-guide-dismiss]')!.addEventListener('click', () => {
+  try { localStorage.setItem(`manual-studio-guide:${projectRoot}`, 'hidden'); } catch { /* Optional preference. */ }
+  element('workspace-guide').hidden = true;
 });
+element('generate-page').setAttribute('aria-keyshortcuts', 'Control+Shift+G Meta+Shift+G');
+element('generate-page').title += ' (Ctrl/Cmd+Shift+G)';
+element('save-page').setAttribute('aria-keyshortcuts', 'Control+S Meta+S');
+element('save-page').innerHTML = `${uiIcon('save')} 保存 <kbd>⌘ / Ctrl S</kbd>`;
+element('open-workspace-settings').innerHTML = `${uiIcon('settings')} ワークスペース設定`;
+element('open-workspace-settings').title = '原稿・画像の保存先とHTML出力先を設定';
+document.querySelectorAll<HTMLElement>('[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
 let closingApproved = false;
 let closingPrompt = false;
 window.addEventListener("beforeunload", (event) => { if (dirty && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
