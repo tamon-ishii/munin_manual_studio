@@ -83,6 +83,7 @@ try {
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(), /rich edit/);
   assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives text Undo');
+  await page.locator('.milkdown-top-bar .top-bar-heading-button').filter({ hasText: '挿入・その他' }).click();
   await page.locator('.milkdown-top-bar').getByRole('button', { name: 'Mermaidの図を挿入', exact: true }).click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives diagram insertion');
   await page.locator('#milkdown-editor .mermaid-preview svg').waitFor();
