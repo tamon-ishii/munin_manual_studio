@@ -185,6 +185,7 @@ pub fn asset_destination(
         root,
         &format!("{}/{filename}", folder.trim_end_matches('/')),
     )?;
+    let page = project_page_path(root, page)?;
     let page = page.parent().ok_or("原稿の保存先が不正です。")?;
     let from: Vec<_> = page.components().collect();
     let to: Vec<_> = destination.components().collect();
@@ -202,6 +203,16 @@ pub fn asset_destination(
             .join("/")
     );
     Ok((destination, link))
+}
+
+/// Normalize the project root alias before comparing page and asset paths.
+pub(crate) fn project_page_path(root: &Path, page: &Path) -> Result<PathBuf, String> {
+    let canonical = root.canonicalize().map_err(|e| e.to_string())?;
+    let relative = page
+        .strip_prefix(root)
+        .or_else(|_| page.strip_prefix(&canonical))
+        .map_err(|_| "原稿がプロジェクトの外を指しています。")?;
+    project_path(root, &relative.to_string_lossy())
 }
 
 pub fn project_path(root: &Path, value: &str) -> Result<PathBuf, String> {
@@ -387,6 +398,29 @@ pub fn save_settings(
 mod asset_tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn project_root_aliases_produce_local_links_without_allowing_escape() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        fs::create_dir_all(root.join("docs/sub")).unwrap();
+        let alias = temp.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let canonical = root.canonicalize().unwrap();
+        let page = alias.join("docs/sub/index.md");
+        let (destination, link) = asset_destination(&alias, &page, "shot.png").unwrap();
+        assert_eq!(destination, canonical.join("docs/assets/shot.png"));
+        assert_eq!(link, "../assets/shot.png");
+        assert_eq!(
+            crate::quality::local_path(&alias, &page, "../b.md").unwrap(),
+            canonical.join("docs/b.md")
+        );
+        assert!(crate::quality::local_path(&alias, &page, "../../../outside.md").is_err());
+        assert!(asset_destination(&alias, &temp.path().join("outside.md"), "shot.png").is_err());
+        std::os::unix::fs::symlink(temp.path(), root.join("escape")).unwrap();
+        assert!(crate::quality::local_path(&alias, &page, "../../escape/outside.md").is_err());
+    }
+
     #[test]
     fn asset_links_follow_configuration_and_page_location() {
         let root = tempfile::tempdir().unwrap();
@@ -398,7 +432,13 @@ mod asset_tests {
             let (destination, link) =
                 asset_destination(root.path(), &root.path().join(page), "shot.png").unwrap();
             assert_eq!(link, expected);
-            assert_eq!(destination, root.path().join("docs/assets/shot.png"));
+            assert_eq!(
+                destination,
+                root.path()
+                    .canonicalize()
+                    .unwrap()
+                    .join("docs/assets/shot.png")
+            );
         }
         fs::write(
             root.path().join("manual_setting.json"),
@@ -411,7 +451,13 @@ mod asset_tests {
             "shot.png",
         )
         .unwrap();
-        assert_eq!(destination, root.path().join("media/shots/shot.png"));
+        assert_eq!(
+            destination,
+            root.path()
+                .canonicalize()
+                .unwrap()
+                .join("media/shots/shot.png")
+        );
         assert_eq!(link, "../../media/shots/shot.png");
         assert!(
             asset_destination(root.path(), &root.path().join("README.md"), "../shot.png").is_err()

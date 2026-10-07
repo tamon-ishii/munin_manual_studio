@@ -101,7 +101,21 @@ try {
     node.dispatchEvent(new Event('input', {bubbles:true}));
   });
   const cursorParagraph = page.locator('.ProseMirror p').filter({hasText:'Before capture cursor.'});
-  await cursorParagraph.click(); await cursorParagraph.press('End');
+  await cursorParagraph.click();
+  // End moves to the visual line end, which varies with fonts and wrapping.
+  // Place the caret at the paragraph end to test the same insertion on CI.
+  await cursorParagraph.evaluate(node => {
+    const range = document.createRange(); range.selectNodeContents(node); range.collapse(false);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+  // Chromium reports DOM selection changes asynchronously. Wait for the editor
+  // bridge to observe the keyboard cursor before opening a toolbar dialog.
+  await page.waitForFunction(() => {
+    const source = document.querySelector('#markdown-editor');
+    const end = source.value.indexOf('Before capture cursor.') + 'Before capture cursor.'.length;
+    return source.selectionStart === end && source.selectionEnd === end;
+  });
   await openInstructionToolbar();
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '撮影の指示', exact: true }).click();
   // Move the live editor selection while the dialog is open. Insertion must

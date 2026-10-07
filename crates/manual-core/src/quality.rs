@@ -1,5 +1,5 @@
 use crate::{
-    config::{project_path, read_config},
+    config::{project_page_path, project_path, read_config},
     task,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -14,8 +14,10 @@ pub(crate) fn local_path(root: &Path, page: &Path, url: &str) -> Result<PathBuf,
     let decoded = percent_encoding::percent_decode_str(url.split(['?', '#']).next().unwrap_or(url))
         .decode_utf8()
         .map_err(|e| e.to_string())?;
+    let canonical = root.canonicalize().map_err(|e| e.to_string())?;
+    let page = project_page_path(root, page)?;
     let mut resolved = if decoded.starts_with('/') {
-        root.to_path_buf()
+        canonical.clone()
     } else {
         page.parent().ok_or("Invalid page")?.to_path_buf()
     };
@@ -29,7 +31,6 @@ pub(crate) fn local_path(root: &Path, page: &Path, url: &str) -> Result<PathBuf,
             _ => return Err("Invalid link path".into()),
         }
     }
-    let canonical = root.canonicalize().map_err(|e| e.to_string())?;
     let rel = resolved
         .strip_prefix(&canonical)
         .map_err(|_| "リンクがプロジェクトの外を指しています。")?;
@@ -198,7 +199,7 @@ mod tests {
         let page = root.path().join("docs/sub/a.md");
         assert_eq!(
             local_path(root.path(), &page, "../b.md").unwrap(),
-            root.path().join("docs/b.md")
+            root.path().canonicalize().unwrap().join("docs/b.md")
         );
         assert!(local_path(root.path(), &page, "../../../etc/passwd").is_err());
     }
