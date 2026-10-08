@@ -12,7 +12,7 @@ const tasks = [
 ];
 const content = '# Guide\n\n' + tasks.map(task => `<!-- ai:task id=${task.id} kind=${task.kind} prompt="${task.prompt}" ${task.status === 'approved' ? 'approved-at=2026-10-08T00:00:00Z' : ''} -->\n${task.status === 'missing' ? '' : 'Existing result'}\n<!-- /ai:task -->`).join('\n\n');
 const state = { has_config:true, config:{docs:'docs', output:'manual', agent:'codex', model:'test', connection_type:'local_llm', endpoint_url:'http://localhost:11434/v1', mkdocs:{site_name:'Guide',theme:'material',language:'ja',use_directory_urls:true}}, brief:'', pages:['docs/index.md'], project_entries:[{path:'docs/index.md',directory:false}], tasks, capture_sources:{}, image_assets:{}, ui_map:null, agents:[] };
-const inputFor = ids => ({page:'docs/index.md',revision:'r1',existing_content:content,tasks:tasks.filter(task => task.status !== 'approved' && (!ids || ids.includes(task.id))),references:[],source_note:'Test',feedback:'',connection_type:'local_llm',agent:'codex',model:'test',requests:[]});
+const inputFor = ids => ({page:'docs/index.md',revision:'r1',existing_content:content,tasks:tasks.filter(task => task.kind !== 'screenshot' && task.status !== 'approved' && (!ids || ids.includes(task.id))),references:[],source_note:'Test',feedback:'',connection_type:'local_llm',agent:'codex',model:'test',requests:[]});
 let browser, server, saveFails=false, saveDelay=0, previewFails=false, previewDelay=0;
 const actions=[];
 try {
@@ -78,14 +78,14 @@ try {
   await page.locator('[data-close-dialog=panel-publish]').click();
   await page.locator('#settings-menu summary').click();await page.locator('[data-tab=settings]').click();
   assert.equal(await page.locator('#ai-connection-type').isVisible(),true);
-  assert.equal(await page.locator('#save-launch-commands').isVisible(),true);
+  assert.equal(await page.locator('#save-launch-commands').isVisible(),false);
   const savesBefore=actions.filter(action=>action==='editor-save').length;
   await page.locator('#ai-model').focus();await page.keyboard.press('Control+s');
   assert.equal(actions.filter(action=>action==='editor-save').length,savesBefore,'settings shortcuts do not save the document');
   await page.locator('[data-close-dialog=panel-settings]').click();
   await page.locator('[data-tab=tasks]').click();
-  assert.equal(await page.locator('#task-list article').count(),4);
-  for(const [filter,id,label] of [['missing','write','未生成'],['current','screen','生成済み'],['stale','diagram','更新候補'],['approved','protected','確定済み']]) {
+  assert.equal(await page.locator('#task-list article').count(),3);
+  for(const [filter,id,label] of [['missing','write','未生成'],['stale','diagram','更新候補'],['approved','protected','確定済み']]) {
     await page.locator('#task-status-filter').selectOption(filter);
     assert.equal(await page.locator('#task-list article').count(),1);
     assert.equal(await page.locator('#task-list article').getAttribute('data-task'),id);
@@ -96,10 +96,10 @@ try {
   await page.locator('#task-kind-filter').selectOption('all');
   await page.locator('[data-tab=editor]').click();
   await page.locator('#generate-page').click();
-  assert.match(await page.locator('#generation-input-summary').textContent(),/文章1件・画像1件・図1件を更新／確定済み1件は維持/);
+  assert.match(await page.locator('#generation-input-summary').textContent(),/文章1件・図1件を更新／確定済み1件は維持/);
   assert.equal(await page.locator('#generation-input-tasks input[value=protected]').count(),0);
-  await page.locator('#generation-input-tasks input[value=screen]').uncheck();
-  await page.waitForFunction(()=>document.querySelector('#generation-input-summary').textContent.includes('画像0件'));
+  assert.equal(await page.locator('#generation-input-tasks input[value=screen]').count(),0);
+  assert.doesNotMatch(await page.locator('#generation-input-summary').textContent(),/画像/);
   await page.locator('#generation-input-cancel').click();await idle();
   assert.ok(!actions.includes('generate-review'),'cancel does not generate');
   await page.locator('#generate-all-pages').click();
@@ -117,11 +117,11 @@ try {
   assert.equal(await rich.getByText('Mermaidの図を挿入',{exact:true}).isVisible(),true);
   await rich.getByText('Mermaidの図を挿入',{exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('graph TD'));
-  // Capture stages are shown before recording, including browser-only guidance.
-  await rich.getByText('AIタグを追加',{exact:true}).click();await rich.getByRole('button',{name:'撮影の指示',exact:true}).click();
-  assert.equal(await page.locator('[data-capture-step][aria-current=step]').getAttribute('data-capture-step'),'1');
-  assert.match(await page.locator('#capture-step-help').textContent(),/起動コマンド/);
-  await page.locator('#cancel-screenshot-task').click();
+  // Capture is an independent panel and AI instructions contain no screenshot operation.
+  await page.locator('[data-tab=screenshots]').click();
+  assert.equal(await page.locator('#screenshot-library-record').isVisible(),true);
+  assert.equal(await page.locator('#screenshot-library-recapture-all').isVisible(),true);
+  await page.locator('[data-tab=editor]').click();
   await page.locator('.column-label button').click();
   await page.locator('.format-insert-menu summary').click();
   assert.equal(await page.locator('[data-format=mermaid]').isVisible(),true);

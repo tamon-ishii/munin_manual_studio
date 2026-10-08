@@ -52,6 +52,18 @@ export function showGenerationReview(page: string, before: string, after: string
     dialog.querySelectorAll('p')[1].textContent = '生成履歴の内容を比較します。原稿は変更しません。';
   }
   document.body.append(dialog); dialog.showModal();
+  if (!applied && !readOnly) {
+    const adopt = dialog.querySelector<HTMLButtonElement>('[data-review-action="adopt"]')!;
+    adopt.disabled = true;
+    void (async () => {
+      try {
+        for (const diagram of after.matchAll(/```mermaid\s*\n([\s\S]*?)\n```/g)) await (await import('mermaid')).default.parse(diagram[1]);
+        adopt.disabled = false;
+      } catch (error) {
+        const message = document.createElement('p'); message.setAttribute('role', 'alert'); message.textContent = `Mermaidの構文を確認してください: ${String(error)}`; dialog.querySelector('.actions')!.before(message);
+      }
+    })();
+  }
   return new Promise(resolve => {
     const finish = (action: ReviewDecision['action']) => {
       const feedback = dialog.querySelector<HTMLTextAreaElement>('#generation-review-feedback')?.value.trim() || '';

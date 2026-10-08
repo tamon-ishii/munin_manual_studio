@@ -17,6 +17,7 @@ export interface PanelDef {
 }
 
 export const PANELS: PanelDef[] = [
+  { id: "screenshots", name: "スクリーンショット一覧", elementId: "panel-screenshots" },
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "ai-tags", name: "AIタグ一覧", elementId: "panel-tasks" },

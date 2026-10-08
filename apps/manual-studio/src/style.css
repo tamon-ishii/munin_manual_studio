@@ -880,3 +880,20 @@ dialog.panel-dialog .actions {
 .format-insert-menu{flex:none}
 .format-insert-menu>summary{white-space:nowrap}
 @media(max-width:1100px){.editor-tools{flex-wrap:wrap;align-items:flex-start}.formatting-toolbar{flex:1 1 100%;flex-wrap:wrap;overflow:visible;max-width:100%}.instruction-toolbar{margin-bottom:0}}
+
+#milkdown-editor .milkdown-ai-task-instructions{margin-top:8px}
+#milkdown-editor .milkdown-ai-task-instructions summary{cursor:pointer;font-size:12px;padding:4px 0}
+#milkdown-editor .milkdown-ai-task-instructions input{margin-top:8px;width:100%}
+#milkdown-editor .milkdown-ai-task-prompt{max-height:30vh;overflow:auto;resize:vertical}
+#milkdown-editor .milkdown-ai-task-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:12px;max-width:35%}
+#milkdown-editor .milkdown-ai-task-summary{flex-wrap:wrap}
+.milkdown .milkdown-toolbar,.milkdown .milkdown-link-preview,.milkdown .milkdown-link-edit{max-width:calc(100vw - 24px);max-height:40vh;overflow:auto}
+.milkdown .milkdown-link-preview>.link-preview,.milkdown .milkdown-link-edit>.link-edit{box-sizing:border-box;max-width:calc(100vw - 24px)}
+.milkdown .milkdown-link-preview>.link-preview>.link-display,.milkdown .milkdown-link-edit>.link-edit>.input-area{min-width:0;flex:1 1 auto}
+.milkdown .milkdown-link-preview>.link-preview>.button,.milkdown .milkdown-link-preview>.link-preview>.link-icon,.milkdown .milkdown-link-edit>.link-edit>.button{flex-shrink:0}
+.screenshot-library-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; padding: 12px; }
+.screenshot-library-card img { display: block; max-width: 100%; max-height: 240px; object-fit: contain; }
+.screenshot-comparison { max-width: 90vw; max-height: 90vh; overflow: auto; }
+.screenshot-comparison img { max-width: 100%; display: block; }
+.task-prompt-label textarea { max-height: 30vh; overflow: auto; }
+.recapture-history { max-width: 90vw; max-height: 85vh; overflow: auto; }

@@ -26,8 +26,9 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`${base}/?root=${encodeURIComponent(root)}`);
-  const prompt = page.getByRole('textbox', { name: 'AIへの指示 guide', exact: true });
-  await prompt.waitFor();
+  const prompt = page.locator('[data-ai-task-id=\"guide\"] textarea.milkdown-ai-task-prompt');
+  await prompt.waitFor({ state: 'attached' });
+  if (!await prompt.isVisible()) await prompt.locator('..').locator('..').locator('summary').click();
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
   assert.equal(await prompt.inputValue(), '初心者向けに説明');
   await prompt.fill('"保存"を説明してください\nA --> B の順で操作');
@@ -43,7 +44,8 @@ try {
   assert.match(markdown, /タグ外の文章/);
   assert.equal((markdown.match(/<!-- ai:task /g) || []).length, 1);
   await page.reload();
-  await prompt.waitFor();
+  await prompt.waitFor({ state: 'attached' });
+  if (!await prompt.isVisible()) await prompt.locator('..').locator('..').locator('summary').click();
   assert.equal(await prompt.inputValue(), '"保存"を説明してください\nA --> B の順で操作');
   assert.equal(await page.locator('.milkdown-ai-task-body strong').innerText(), '太字');
   await page.screenshot({ path: path.join(os.tmpdir(), 'manual-ai-prompt.png') });

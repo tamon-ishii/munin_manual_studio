@@ -6,7 +6,7 @@ export const taskStatusLabels: Record<string, string> = {
 };
 export const taskKindLabels: Record<string, string> = { text: '文章', screenshot: '画像', diagram: '図' };
 export function generationSummary(tasks: Task[], approved = 0): string {
-  return ['text', 'screenshot', 'diagram'].map(kind => `${taskKindLabels[kind]}${tasks.filter(task => task.kind === kind).length}件`).join('・')
+  return ['text', 'diagram'].map(kind => `${taskKindLabels[kind]}${tasks.filter(task => task.kind === kind).length}件`).join('・')
     + `を更新／確定済み${approved}件は維持`;
 }
 

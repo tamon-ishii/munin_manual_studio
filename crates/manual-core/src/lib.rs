@@ -7,26 +7,27 @@ pub mod author;
 pub mod builder;
 mod capture_lifecycle;
 pub mod capture_source;
+pub mod capture_validation;
 pub mod config;
 pub mod context;
 pub mod deps;
 mod desktop_scenario;
 pub mod editor;
 pub mod fact;
-pub mod preview;
+mod generation_review;
 pub mod platform;
+pub mod preview;
 pub mod pty;
+pub mod quality;
 pub mod scenario;
+pub mod screenshots;
 pub mod task;
 pub mod template;
 pub mod ui_explore;
 pub mod uimap;
 pub mod window_capture;
-mod workspace;
-mod generation_review;
 pub mod workflow;
-pub mod capture_validation;
-pub mod quality;
+mod workspace;
 
 use std::collections::HashSet;
 use std::fs;
@@ -52,62 +53,150 @@ fn crop_margin(crop: bool, margin: Option<&str>) -> Result<Option<u32>, String> 
         .map_err(|_| "--crop-margin must be a non-negative integer".to_string())
 }
 
-pub fn run(root: &Path,action: &str,options: &[(&str,&str)]) -> Result<String,String> {
-    let raw_json: serde_json::Value = serde_json::from_str(options.iter().find(|(key,_)|*key=="--json").map(|(_,value)|*value).unwrap_or("{}")).map_err(|e|e.to_string())?;
-    let timeout=raw_json["limits"]["timeout_seconds"].as_u64();
-    if timeout.is_some_and(|seconds| !(5..=1800).contains(&seconds)){return Err("制限時間は5〜1800秒で指定してください。".into());}
-    let _timeout_scope=agent::request_timeout(timeout);
-    if action=="editor-save" {
-        let page=options.iter().find(|(key,_)|*key=="--page").map(|(_,value)|*value).ok_or("原稿を指定してください。")?;
-        let _lock=workflow::page_lock(root,page)?;
-        return run_inner(root,action,options);
+pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
+    let raw_json: serde_json::Value = serde_json::from_str(
+        options
+            .iter()
+            .find(|(key, _)| *key == "--json")
+            .map(|(_, value)| *value)
+            .unwrap_or("{}"),
+    )
+    .map_err(|e| e.to_string())?;
+    let timeout = raw_json["limits"]["timeout_seconds"].as_u64();
+    if timeout.is_some_and(|seconds| !(5..=1800).contains(&seconds)) {
+        return Err("制限時間は5〜1800秒で指定してください。".into());
     }
-    let tracked = matches!(action,"generate-task"|"generate-page"|"generate-page-captures"|"recapture"|"capture-window"|"record-screenshot"|"record-diagram"|"update-task");
-    if !tracked { return run_inner(root,action,options); }
-    let get = |key: &str| options.iter().find(|(k,_)|*k==key).map(|(_,v)|*v);
-    let all=task::tasks_for_config(root,&read_config(root))?;
-    let selected_json: serde_json::Value=serde_json::from_str(get("--json").unwrap_or("{}")).map_err(|e|e.to_string())?;
+    let _timeout_scope = agent::request_timeout(timeout);
+    if action == "editor-save" {
+        let page = options
+            .iter()
+            .find(|(key, _)| *key == "--page")
+            .map(|(_, value)| *value)
+            .ok_or("原稿を指定してください。")?;
+        let _lock = workflow::page_lock(root, page)?;
+        return run_inner(root, action, options);
+    }
+    let tracked = matches!(
+        action,
+        "generate-task"
+            | "generate-page"
+            | "generate-page-captures"
+            | "recapture"
+            | "capture-window"
+            | "record-screenshot"
+            | "record-diagram"
+            | "update-task"
+    );
+    if !tracked {
+        return run_inner(root, action, options);
+    }
+    let get = |key: &str| options.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+    let all = task::tasks_for_config(root, &read_config(root))?;
+    let selected_json: serde_json::Value =
+        serde_json::from_str(get("--json").unwrap_or("{}")).map_err(|e| e.to_string())?;
     if let Some(id) = selected_json["execution_id"].as_str() {
-        let run = workflow::load(root,id)?;
-        if run.status != "running" { return Err("実行記録が終了しています。".into()); }
-        let ids = selected_json["ids"].as_array().ok_or("実行対象を指定してください。")?;
-        if ids.iter().any(|id| !run.entries.iter().any(|entry|Some(entry.task.id.as_str())==id.as_str())) {return Err("実行記録の対象外です。".into());}
-        let _lock=workflow::page_lock(root,&run.page)?;
-        let result=run_inner(root,action,options);
-        let parsed=result.as_ref().ok().and_then(|output|serde_json::from_str::<serde_json::Value>(output).ok());
+        let run = workflow::load(root, id)?;
+        if run.status != "running" {
+            return Err("実行記録が終了しています。".into());
+        }
+        let ids = selected_json["ids"]
+            .as_array()
+            .ok_or("実行対象を指定してください。")?;
+        if ids.iter().any(|id| {
+            !run.entries
+                .iter()
+                .any(|entry| Some(entry.task.id.as_str()) == id.as_str())
+        }) {
+            return Err("実行記録の対象外です。".into());
+        }
+        let _lock = workflow::page_lock(root, &run.page)?;
+        let result = run_inner(root, action, options);
+        let parsed = result
+            .as_ref()
+            .ok()
+            .and_then(|output| serde_json::from_str::<serde_json::Value>(output).ok());
         let results:Vec<_>=ids.iter().map(|id|{
             let failure=parsed.as_ref().and_then(|value|value["capture_errors"].as_array()).and_then(|errors|errors.iter().find(|e|e["id"]==*id)).and_then(|e|e["reason"].as_str()).map(str::to_owned).or_else(||result.as_ref().err().cloned());
             serde_json::json!({"id":id,"status":if failure.is_some(){"failed"}else{"succeeded"},"error":failure})
         }).collect();
-        workflow::checkpoint(root,id,&serde_json::json!({"results":results}))?;
+        workflow::checkpoint(root, id, &serde_json::json!({"results":results}))?;
         return result;
     }
-    let selected:Vec<_>=all.into_iter().filter(|task| {
-        get("--id").map_or_else(||task.status!="approved" && get("--page").is_some_and(|page| task::tasks_for_page(root,page).is_ok_and(|tasks|tasks.iter().any(|item|item.id==task.id))),|id|task.id==id)
-        && (action!="generate-page-captures" || task.kind=="screenshot")
-        && selected_json["ids"].as_array().is_none_or(|ids|ids.iter().any(|id|id==&task.id))
-    }).collect();
-    if selected.is_empty() {return run_inner(root,action,options);}
-    let page=get("--page").unwrap_or(&selected[0].page);
-    let _lock=workflow::page_lock(root,page)?;
-    let asset_names:Vec<_>=get("--image").and_then(|image|Path::new(image).file_name()).map(|name|vec![name.to_string_lossy().into_owned()]).unwrap_or_default();
-    let run=workflow::begin(root,page,&serde_json::json!({"asset_names":asset_names,"ids":selected.iter().map(|t|&t.id).collect::<Vec<_>>(),"limits":selected_json["limits"]}))?;
-    let id=run["id"].as_str().ok_or("Invalid run")?;
-    workflow::checkpoint(root,id,&serde_json::json!({"results":selected.iter().map(|task|serde_json::json!({"id":task.id,"status":"running"})).collect::<Vec<_>>()}))?;
-    let result=run_inner(root,action,options);
-    let mut failures=std::collections::HashMap::new();
-    if let Ok(output)=&result {if let Ok(value)=serde_json::from_str::<serde_json::Value>(output){if let Some(errors)=value["capture_errors"].as_array(){for error in errors{if let Some(id)=error["id"].as_str(){failures.insert(id.to_owned(),error["reason"].as_str().unwrap_or("撮影失敗").to_owned());}}}}}
+    let selected: Vec<_> = all
+        .into_iter()
+        .filter(|task| {
+            get("--id").map_or_else(
+                || {
+                    task.status != "approved"
+                        && get("--page").is_some_and(|page| {
+                            task::tasks_for_page(root, page)
+                                .is_ok_and(|tasks| tasks.iter().any(|item| item.id == task.id))
+                        })
+                },
+                |id| task.id == id,
+            ) && (action != "generate-page-captures" || task.kind == "screenshot")
+                && selected_json["ids"]
+                    .as_array()
+                    .is_none_or(|ids| ids.iter().any(|id| id == &task.id))
+        })
+        .collect();
+    if selected.is_empty() {
+        return run_inner(root, action, options);
+    }
+    let page = get("--page").unwrap_or(&selected[0].page);
+    let _lock = workflow::page_lock(root, page)?;
+    let asset_names: Vec<_> = get("--image")
+        .and_then(|image| Path::new(image).file_name())
+        .map(|name| vec![name.to_string_lossy().into_owned()])
+        .unwrap_or_default();
+    let run = workflow::begin(
+        root,
+        page,
+        &serde_json::json!({"asset_names":asset_names,"ids":selected.iter().map(|t|&t.id).collect::<Vec<_>>(),"limits":selected_json["limits"]}),
+    )?;
+    let id = run["id"].as_str().ok_or("Invalid run")?;
+    workflow::checkpoint(
+        root,
+        id,
+        &serde_json::json!({"results":selected.iter().map(|task|serde_json::json!({"id":task.id,"status":"running"})).collect::<Vec<_>>()}),
+    )?;
+    let result = run_inner(root, action, options);
+    let mut failures = std::collections::HashMap::new();
+    if let Ok(output) = &result {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+            if let Some(errors) = value["capture_errors"].as_array() {
+                for error in errors {
+                    if let Some(id) = error["id"].as_str() {
+                        failures.insert(
+                            id.to_owned(),
+                            error["reason"].as_str().unwrap_or("撮影失敗").to_owned(),
+                        );
+                    }
+                }
+            }
+        }
+    }
     let results:Vec<_>=selected.iter().map(|task|{
         let error=result.as_ref().err().cloned().or_else(||failures.get(&task.id).cloned());
         serde_json::json!({"id":task.id,"status":if error.is_some(){"failed"}else{"succeeded"},"error":error})
     }).collect();
-    workflow::checkpoint(root,id,&serde_json::json!({"results":results}))?;
-    workflow::finish(root,id,false)?;
+    workflow::checkpoint(root, id, &serde_json::json!({"results":results}))?;
+    workflow::finish(root, id, false)?;
     result
 }
 
 fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
     let allowed = [
+        "screenshots-migration-plan",
+        "screenshots-migrate",
+        "screenshots-list",
+        "screenshots-register",
+        "screenshots-change",
+        "screenshots-image",
+        "screenshots-reference",
+        "screenshots-recapture-plan",
+        "screenshots-recapture",
+        "screenshots-recapture-history",
         "state",
         "agent-progress",
         "agent-progress-clear",
@@ -330,10 +419,56 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
     let generated_path = root.join("manual").join("ai");
 
     match action {
+        "screenshots-migration-plan" => Ok(screenshots::migration_plan(root)?.to_string()),
+        "screenshots-migrate" => Ok(screenshots::migrate_page(
+            root,
+            page_opt.ok_or("原稿を選択してください。")?,
+            &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}"))
+                .map_err(|e| e.to_string())?,
+        )?
+        .to_string()),
+        "screenshots-recapture-plan" => Ok(screenshots::plan_recapture(root, id_opt)?.to_string()),
+        "screenshots-recapture-history" => Ok(screenshots::recapture_history(root)?.to_string()),
+        "screenshots-recapture" => Ok(screenshots::recapture(
+            root,
+            &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}"))
+                .map_err(|e| e.to_string())?,
+        )?
+        .to_string()),
+        "screenshots-list" => Ok(screenshots::list(root)?.to_string()),
+        "screenshots-register" => Ok(screenshots::register(
+            root,
+            &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}"))
+                .map_err(|e| e.to_string())?,
+        )?
+        .to_string()),
+        "screenshots-change" => Ok(screenshots::change(
+            root,
+            id_opt.ok_or("画像を選択してください。")?,
+            &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}"))
+                .map_err(|e| e.to_string())?,
+        )?
+        .to_string()),
+        "screenshots-image" => {
+            let value: serde_json::Value =
+                serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
+            Ok(screenshots::image(
+                root,
+                id_opt.ok_or("画像を選択してください。")?,
+                value["revision"].as_str(),
+                value["original"] == true,
+            )?
+            .to_string())
+        }
+        "screenshots-reference" => Ok(screenshots::reference(
+            root,
+            id_opt.ok_or("画像を選択してください。")?,
+            page_opt.ok_or("文書を選択してください。")?,
+        )?),
         "agent-cancel" => {
             agent::cancel(root)?;
             Ok("{}".into())
-        },
+        }
         "agent-progress" => Ok(agent::progress(root)),
         "agent-progress-clear" => {
             agent::clear_progress(root);
@@ -509,18 +644,35 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
         "generation-input" => {
-            let options: generation_review::GenerationOptions = serde_json::from_str(json_opt.unwrap_or("{}" )).map_err(|e| e.to_string())?;
-            Ok(generation_review::input(root, page_opt.ok_or("generation-input requires page")?, id_opt, feedback_opt.unwrap_or(""), &options)?.to_string())
+            let options: generation_review::GenerationOptions =
+                serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
+            Ok(generation_review::input(
+                root,
+                page_opt.ok_or("generation-input requires page")?,
+                id_opt,
+                feedback_opt.unwrap_or(""),
+                &options,
+            )?
+            .to_string())
         }
-        "generation-history" => Ok(generation_review::history(root, page_opt.ok_or("generation-history requires page")?)?.to_string()),
-        "generation-history-entry" => Ok(generation_review::history_entry(root, id_opt.ok_or("generation-history-entry requires id")?)?.to_string()),
+        "generation-history" => Ok(generation_review::history(
+            root,
+            page_opt.ok_or("generation-history requires page")?,
+        )?
+        .to_string()),
+        "generation-history-entry" => Ok(generation_review::history_entry(
+            root,
+            id_opt.ok_or("generation-history-entry requires id")?,
+        )?
+        .to_string()),
         "generate-review" => {
             let bodies_map = if let Some(b_json) = bodies_opt {
                 serde_json::from_str::<std::collections::HashMap<String, String>>(b_json).ok()
             } else {
                 None
             };
-            let options: generation_review::GenerationOptions = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
+            let options: generation_review::GenerationOptions =
+                serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
             generation_review::generate_with_options(
                 root,
                 page_opt.ok_or("generate-review requires --page")?,
@@ -533,9 +685,21 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         }
         "generate-page-captures" => {
             let page = page_opt.ok_or("generate-page-captures requires --page")?;
-            let options: generation_review::GenerationOptions = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
+            let options: generation_review::GenerationOptions =
+                serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
             generation_review::selected_tasks(root, page, None, &options)?;
-            Ok(author::generate_page_at_selected(root, page, "", &templates_path, &generated_path, true, false, "", options.ids.as_deref())?.to_string())
+            Ok(author::generate_page_at_selected(
+                root,
+                page,
+                "",
+                &templates_path,
+                &generated_path,
+                true,
+                false,
+                "",
+                options.ids.as_deref(),
+            )?
+            .to_string())
         }
         "generate-task" => {
             let task_id = id_opt.ok_or("generate-task requires --id")?;
@@ -634,8 +798,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             Ok(String::new())
         }
         "build" | "build-mkdocs" => {
-            let result =
-            if let Some(audience) = audience_opt {
+            let result = if let Some(audience) = audience_opt {
                 audience::build(
                     root,
                     &templates_path,
@@ -965,16 +1128,33 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
     let workflow_result = match action {
         "execution-begin" => Some(workflow::begin(project, page()?, &options["json"])),
         "execution-checkpoint" => Some(workflow::checkpoint(project, id()?, &options["json"])),
-        "execution-finish" => Some(workflow::finish(project, id()?, options["rollback"].as_bool().unwrap_or(false))),
+        "execution-finish" => Some(workflow::finish(
+            project,
+            id()?,
+            options["rollback"].as_bool().unwrap_or(false),
+        )),
         "execution-history" => Some(workflow::history(project, options["page"].as_str())),
-        "execution-resume" => Some(workflow::resume(project,id()?)),
-        "execution-entry" => Some(workflow::load(project,id()?).and_then(|run| serde_json::to_value(run).map_err(|e|e.to_string()))),
-        "capture-expectations-read" => Some(capture_validation::read(project,id()?).and_then(|v|serde_json::to_value(v).map_err(|e|e.to_string()))),
-        "capture-expectations-save" => Some(serde_json::from_value(options["json"].clone()).map_err(|e|e.to_string()).and_then(|v|capture_validation::save(project,id()?,v)).map(|_|serde_json::json!({}))),
+        "execution-resume" => Some(workflow::resume(project, id()?)),
+        "execution-entry" => Some(
+            workflow::load(project, id()?)
+                .and_then(|run| serde_json::to_value(run).map_err(|e| e.to_string())),
+        ),
+        "capture-expectations-read" => Some(
+            capture_validation::read(project, id()?)
+                .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())),
+        ),
+        "capture-expectations-save" => Some(
+            serde_json::from_value(options["json"].clone())
+                .map_err(|e| e.to_string())
+                .and_then(|v| capture_validation::save(project, id()?, v))
+                .map(|_| serde_json::json!({})),
+        ),
         "quality-check" => Some(quality::check(project)),
         _ => None,
     };
-    if let Some(result) = workflow_result { return result.map(|v|v.to_string()); }
+    if let Some(result) = workflow_result {
+        return result.map(|v| v.to_string());
+    }
     if action == "create-workspace" {
         return workspace::create(Path::new(root), &request["options"]);
     }
@@ -985,7 +1165,9 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         return pty::handle_pty_request(action, Path::new(root), &request["options"]);
     }
     let timeout = options["json"]["limits"]["timeout_seconds"].as_u64();
-    if timeout.is_some_and(|seconds| !(5..=1800).contains(&seconds)) { return Err("制限時間は5〜1800秒で指定してください。".into()); }
+    if timeout.is_some_and(|seconds| !(5..=1800).contains(&seconds)) {
+        return Err("制限時間は5〜1800秒で指定してください。".into());
+    }
     let _timeout_scope = agent::request_timeout(timeout);
     let mut owned = Vec::new();
     if let Some(options) = request
@@ -1128,7 +1310,10 @@ mod tests {
         assert_eq!(cfg.endpoint_url, "https://api.openai.com/v1");
         assert_eq!(cfg.model, "gpt-4o-mini");
         assert_eq!(cfg.assets, "custom_assets");
-        assert_ne!(std::env::var("MUNIN_AI_API_KEY").ok().as_deref(), Some("test-secret-key"));
+        assert_ne!(
+            std::env::var("MUNIN_AI_API_KEY").ok().as_deref(),
+            Some("test-secret-key")
+        );
 
         // Verify api_key is NOT written to manual_setting.json
         let raw_setting = fs::read_to_string(root.join("manual_setting.json")).unwrap();
@@ -1871,28 +2056,56 @@ mod tests {
             let root = tmp.path();
             fs::create_dir_all(root.join("docs/sub")).unwrap();
             fs::create_dir_all(root.join("media")).unwrap();
-            fs::write(root.join("manual_setting.json"), r#"{"docs":"docs","assets":"media","targets":["docs"]}"#).unwrap();
+            fs::write(
+                root.join("manual_setting.json"),
+                r#"{"docs":"docs","assets":"media","targets":["docs"]}"#,
+            )
+            .unwrap();
             let scene = r#"{"canvas":{"width":100,"height":80},"annotations":[{"type":"spotlight","target":[10,10,30,20],"style":"primary"}]}"#;
             let old_image = root.join("media/old.png");
-            image::RgbaImage::from_pixel(100, 80, image::Rgba([255,255,255,255])).save(&old_image).unwrap();
+            image::RgbaImage::from_pixel(100, 80, image::Rgba([255, 255, 255, 255]))
+                .save(&old_image)
+                .unwrap();
             let prompt = if embedded {
                 let bytes = fs::read(&old_image).unwrap();
-                fs::write(&old_image, markits::raster::embed_png_text_chunk(&bytes, "markits:annotations", scene).unwrap()).unwrap();
+                fs::write(
+                    &old_image,
+                    markits::raster::embed_png_text_chunk(&bytes, "markits:annotations", scene)
+                        .unwrap(),
+                )
+                .unwrap();
                 "Capture the app".to_string()
-            } else { format!("Capture the app\n\nMarkIts アノテーション仕様:\n```json\n{scene}\n```") };
+            } else {
+                format!("Capture the app\n\nMarkIts アノテーション仕様:\n```json\n{scene}\n```")
+            };
             let manuscript = format!("<!-- ai:task id=spot kind=screenshot prompt=\"{}\" -->\n![spot](../../media/old.png)\n<!-- /ai:task -->\n", task::escape_prompt(&prompt));
             fs::write(root.join("docs/sub/index.md"), manuscript).unwrap();
             let fresh = root.join("fresh.png");
-            image::RgbaImage::from_pixel(200,160,image::Rgba([255,255,255,255])).save(&fresh).unwrap();
+            image::RgbaImage::from_pixel(200, 160, image::Rgba([255, 255, 255, 255]))
+                .save(&fresh)
+                .unwrap();
             author::record_screenshot(root, "spot", &fresh).unwrap();
             let output = fs::read(root.join("media/fresh.png")).unwrap();
             let image = image::load_from_memory(&output).unwrap().to_rgb8();
-            assert!(image.get_pixel(40,40).0[0] > 240, "inside spotlight stays bright");
-            assert!(image.get_pixel(180,120).0[0] < 200, "outside spotlight must be darkened");
-            let metadata = markits::raster::read_png_text_chunk(&output,"markits:annotations").unwrap().unwrap();
+            assert!(
+                image.get_pixel(40, 40).0[0] > 240,
+                "inside spotlight stays bright"
+            );
+            assert!(
+                image.get_pixel(180, 120).0[0] < 200,
+                "outside spotlight must be darkened"
+            );
+            let metadata = markits::raster::read_png_text_chunk(&output, "markits:annotations")
+                .unwrap()
+                .unwrap();
             let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
-            assert_eq!(metadata["annotations"][0]["target"], serde_json::json!([20.0,20.0,60.0,40.0]));
-            assert!(fs::read_to_string(root.join("docs/sub/index.md")).unwrap().contains("../../media/fresh.png"));
+            assert_eq!(
+                metadata["annotations"][0]["target"],
+                serde_json::json!([20.0, 20.0, 60.0, 40.0])
+            );
+            assert!(fs::read_to_string(root.join("docs/sub/index.md"))
+                .unwrap()
+                .contains("../../media/fresh.png"));
         }
     }
 
@@ -1906,14 +2119,18 @@ mod tests {
         let document = root.join("docs/index.md");
         fs::write(&document, &manuscript).unwrap();
         let old_image = root.join("docs/assets/old.png");
-        image::RgbaImage::from_pixel(100,80,image::Rgba([255,255,255,255])).save(&old_image).unwrap();
+        image::RgbaImage::from_pixel(100, 80, image::Rgba([255, 255, 255, 255]))
+            .save(&old_image)
+            .unwrap();
         let original_image = fs::read(&old_image).unwrap();
         let capture = root.join("capture.png");
-        image::RgbaImage::from_pixel(100,80,image::Rgba([255,255,255,255])).save(&capture).unwrap();
-        let error = author::record_screenshot(root,"spot",&capture).unwrap_err();
+        image::RgbaImage::from_pixel(100, 80, image::Rgba([255, 255, 255, 255]))
+            .save(&capture)
+            .unwrap();
+        let error = author::record_screenshot(root, "spot", &capture).unwrap_err();
         assert!(error.contains("canvas幅"));
-        assert_eq!(fs::read_to_string(document).unwrap(),manuscript);
-        assert_eq!(fs::read(old_image).unwrap(),original_image);
+        assert_eq!(fs::read_to_string(document).unwrap(), manuscript);
+        assert_eq!(fs::read(old_image).unwrap(), original_image);
         assert!(!root.join("docs/assets/capture.png").exists());
     }
 
@@ -2386,6 +2603,7 @@ mod tests {
         };
         let make_task = |id: &str, kind: &str, status: &str| task::Task {
             id: id.into(),
+            name: String::new(),
             kind: kind.into(),
             page: "guide.md".into(),
             prompt: String::new(),
@@ -2709,9 +2927,7 @@ mod tests {
             "生成された本文"
         );
         assert_eq!(
-            task::clean_generated_body(
-                "<!-- ai:task id=foo kind=text\n指示内の本文\n-->"
-            ),
+            task::clean_generated_body("<!-- ai:task id=foo kind=text\n指示内の本文\n-->"),
             "指示内の本文"
         );
         // Nested unwrapping

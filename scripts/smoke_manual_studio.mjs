@@ -98,12 +98,10 @@ try {
     await addNativeAiTag(label);
     assert.match(await page.locator('#markdown-editor').inputValue(), new RegExp(`ai:task id=[^\\s]+ kind=${kind}`));
     assert.equal(await page.locator('#markdown-editor').isVisible(), false);
-    assert.match(await page.locator('.milkdown-ai-task-summary').innerText(), /task-index/);
+    assert.doesNotMatch(await page.locator('.milkdown-ai-task-summary').innerText(), /task-index/);
     await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   }
-  await addNativeAiTag('撮影の指示');
-  await page.locator('#screenshot-task-dialog[open]').waitFor();
-  await page.locator('#cancel-screenshot-task').click();
+  assert.equal(await page.locator('.milkdown-top-bar').getByRole('button', {name:'撮影の指示',exact:true}).count(),0);
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   assert.equal(await page.locator('#generate-page').innerText(), 'この文書をAI更新');
   const editorHeight = await page.locator('#markdown-editor').evaluate(node => node.clientHeight);
@@ -508,7 +506,7 @@ try {
 
   const generatedPrompt = '画面を開いてからボタンを押す';
   const generatedPromptB64 = Buffer.from(generatedPrompt, 'utf8').toString('base64');
-  const generatedExample = `# New guide\n\n<!-- ai:generated id=smoke-generated kind=screenshot prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n`;
+  const generatedExample = `# New guide\n\n<!-- ai:generated id=smoke-generated kind=text prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n`;
   await (await sourceEditor(page)).fill(generatedExample);
   let delayedSaveSeen = false;
   await page.route('**/__manual/rpc', async route => {
@@ -554,7 +552,7 @@ try {
   const otherGenerated = '<!-- ai:generated id=other-generated kind=text -->\nOther generated text\n<!-- /ai:generated -->\n';
   await (await sourceEditor(page)).fill(`${generatedExample}\n${otherGenerated}`);
   await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
-  const otherCard = page.locator('.milkdown-ai-task').filter({ hasText: 'other-generated' });
+  const otherCard = page.locator('[data-ai-task-id=\"other-generated\"]');
   await otherCard.waitFor();
   await otherCard.locator('.milkdown-ai-task-confirm').click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
@@ -582,7 +580,7 @@ try {
   const unifiedBlock = `<!-- ai:task id=unified-guide kind=text prompt="${unifiedPrompt}" -->\nGenerated unified body\n<!-- /ai:task -->`;
   await (await sourceEditor(page)).fill(`# New guide\n\n${unifiedBlock}\n\nKeep manual text\n`);
   await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
-  const unifiedCard = page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' });
+  const unifiedCard = page.locator('[data-ai-task-id=\"unified-guide\"]');
   await unifiedCard.waitFor();
   assert.match(await unifiedCard.locator('.milkdown-ai-task-status').innerText(), /生成済み/);
   await unifiedCard.locator('.milkdown-ai-task-confirm').click();
@@ -610,13 +608,13 @@ try {
   if (await page.locator('#markdown-editor').isVisible()) {
     await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
   }
-  const unifiedCardDelete = page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' }).locator('.milkdown-ai-task-delete');
+  const unifiedCardDelete = page.locator('[data-ai-task-id=\"unified-guide\"]').locator('.milkdown-ai-task-delete');
   await unifiedCardDelete.click();
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Generated unified body/);
   await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
-  await page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' }).locator('.milkdown-ai-task-delete').click();
+  await page.locator('[data-ai-task-id=\"unified-guide\"]').locator('.milkdown-ai-task-delete').click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   unifiedMarkdown = await page.locator('#markdown-editor').inputValue();
   assert.doesNotMatch(unifiedMarkdown, /unified-guide/);
@@ -686,12 +684,9 @@ try {
   assert.equal(droppedFile.subarray(1, 4).toString(), 'PNG');
   await page.frameLocator('#markdown-preview').locator('img[alt="dropped-shot"]').waitFor();
 
-  await page.locator('.instruction-toolbar summary').click();
-  await page.locator('[data-insert="screenshot"]').click();
-  await page.locator('#screenshot-task-dialog').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#start-operation-recording').isVisible(), true);
-  await page.locator('#cancel-screenshot-task').click();
-  await page.locator('#screenshot-task-dialog').waitFor({ state: 'hidden' });
+  await page.locator('[data-tab="screenshots"]').click();
+  assert.equal(await page.locator('#screenshot-library-import').isVisible(),true);
+  await page.locator('[data-tab="editor"]').click();
   await page.locator('#save-page').click();
   await idle();
   await page.locator('[data-tab="publish"]').click();
@@ -783,7 +778,9 @@ try {
   await idle();
   const beforeCancel = await readFile(path.join(project, 'docs/ai-page.md'), 'utf8');
   await page.locator('#generate-page').click();
+  const cancelRequest = page.waitForRequest(request => request.url().includes('/__manual/rpc') && request.postDataJSON()?.action === 'generate-review');
   await page.locator('#generation-input-run').click();
+  await cancelRequest.catch(async error => { throw new Error(`Cancellation did not start generation: ${await page.locator('#execution-failure-dialog').textContent()}; ${error.message}`); });
   await page.locator('#progress-cancel').waitFor({ state: 'visible' });
   await page.locator('#progress-cancel').click();
   await page.locator('#execution-failure-dialog [data-keep]').click();
@@ -947,7 +944,7 @@ try {
   assert.equal(await readFile(instructionFile, 'utf8'), instructionSource);
 
   assert.deepEqual(errors, []);
-  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot dialog, new page, AI terminal, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
+  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot library, new page, AI terminal, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
 } finally {
   await browser?.close();
   if (server && server.exitCode === null) {

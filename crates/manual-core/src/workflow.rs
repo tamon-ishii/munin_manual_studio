@@ -136,8 +136,13 @@ fn resources(root: &Path, page: &str, entries: &[Entry]) -> Result<BTreeSet<Stri
     for entry in entries {
         let id = &entry.task.id;
         let (asset, _) = crate::config::asset_destination(root, &page_path, &format!("{id}.png"))?;
-        names.insert(relative(root, &asset)?);
+        if entry.task.kind == "screenshot" {
+            names.insert(relative(root, &asset)?);
+        }
         for prefix in ["manual/ai/answers", "manual/ai/assets"] {
+            if prefix.ends_with("assets") && entry.task.kind != "screenshot" {
+                continue;
+            }
             names.insert(format!(
                 "{prefix}/{id}.{}",
                 if prefix.ends_with("answers") {

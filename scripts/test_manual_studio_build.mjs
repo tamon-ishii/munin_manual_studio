@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,chmod,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,chmod,rm,symlink,readdir} from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
@@ -16,15 +16,22 @@ try {
   await writeFile(path.join(root,'README.md'),'# Project\n\n![Shot](media/shots/shot.png)\n');
   await writeFile(path.join(root,'media/shots/shot.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXWQAAAAASUVORK5CYII=','base64'));
   await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',output:'manual',assets:'media/shots',targets:['docs','README.md']}));
+  await mkdir(path.join(root,'docs/.munin/screenshots/secret/originals'),{recursive:true});
+  await writeFile(path.join(root,'docs/.munin/screenshots/secret/originals/private.png'),'private original');
+  await writeFile(path.join(root,'docs/.munin/screenshots/secret/session.json'),'private operations');
   const report = path.join(root,'report.json');
   const mkdocs = path.join(root,'.venv/bin/mkdocs');
   // Record the exact input handed to MkDocs, without depending on its installation.
-  await writeFile(mkdocs,`#!/usr/bin/python3\nimport pathlib,sys,json\ndocs=pathlib.Path.cwd()/'docs'\nfiles={str(p.relative_to(docs)):p.read_text() for p in docs.rglob('*') if p.is_file() and p.suffix=='.md'}\nassets=[str(p.relative_to(docs)) for p in docs.rglob('*.png')]\npathlib.Path(${JSON.stringify(report)}).write_text(json.dumps({'pages':files,'assets':assets}))\nout=pathlib.Path(sys.argv[sys.argv.index('-d')+1]);out.mkdir();(out/'index.html').write_text('<h1>Site</h1>')\n`);
+  await writeFile(mkdocs,`#!/usr/bin/python3\nimport pathlib,sys,json,shutil\ndocs=pathlib.Path.cwd()/'docs'\nfiles={str(p.relative_to(docs)):p.read_text() for p in docs.rglob('*') if p.is_file() and p.suffix=='.md'}\nassets=[str(p.relative_to(docs)) for p in docs.rglob('*.png')]\npathlib.Path(${JSON.stringify(report)}).write_text(json.dumps({'pages':files,'assets':assets,'files':[str(p.relative_to(docs)) for p in docs.rglob('*') if p.is_file()]}))\nout=pathlib.Path(sys.argv[sys.argv.index('-d')+1]);shutil.copytree(docs,out);(out/'index.html').write_text('<h1>Site</h1>')\n`);
   await chmod(mkdocs,0o755);
   const rpc = async action => execute(path.resolve('target/debug/manualctl'),['--request',JSON.stringify({root,action,options:{draft:true}})]);
   const {stdout} = await rpc('build-mkdocs'); assert.match(stdout,/Site:/);
   const staged = JSON.parse(await readFile(report,'utf8'));
   assert.ok(staged.pages['_external/README.md']);
+  assert.ok(staged.files.every(file => !file.includes('.munin')), 'private originals, scenes and sessions excluded from published input');
+  const publishedFiles = await readdir(path.join(root,'manual'),{recursive:true});
+  assert.ok(publishedFiles.every(file => !file.includes('.munin')), 'generated site excludes private management files');
+  assert.ok(publishedFiles.includes('_assets/media/shots/shot.png'));
   assert.ok(staged.assets.includes('_assets/media/shots/shot.png'));
   const guide = staged.pages['sub/index.md'];
   assert.match(guide,/\.\.\/_external\/README.md#feature/);

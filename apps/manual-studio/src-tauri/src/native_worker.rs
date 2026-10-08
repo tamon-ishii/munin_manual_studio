@@ -53,7 +53,10 @@ fn execute(operation: Operation) -> Result<String, String> {
         .stdout(Stdio::null())
         .stderr(log);
     let timeout = match &operation {
-        Operation::Request(request) => request["options"]["json"]["limits"]["timeout_seconds"].as_u64().unwrap_or(300).clamp(5,1800),
+        Operation::Request(request) => request["options"]["json"]["limits"]["timeout_seconds"]
+            .as_u64()
+            .unwrap_or(300)
+            .clamp(5, 1800),
         _ => 60,
     };
     run_child(
@@ -103,7 +106,11 @@ pub fn window_processes() -> Result<Vec<markits::ui_elements::DetectedUiElement>
     serde_json::from_str(&execute(Operation::WindowProcesses)?).map_err(|e| e.to_string())
 }
 
-pub fn capture_window(window: &str, destination: &Path, close_after_capture: bool) -> Result<(), String> {
+pub fn capture_window(
+    window: &str,
+    destination: &Path,
+    close_after_capture: bool,
+) -> Result<(), String> {
     execute(Operation::Capture {
         window: window.into(),
         destination: destination.into(),
@@ -121,6 +128,7 @@ pub fn requires_worker(action: &str) -> bool {
             | "activate-window"
             | "capture-window"
             | "recapture"
+            | "screenshots-recapture"
             | "capture-source-auto"
             | "markits-capture"
             | "ui-map-from-desktop"
@@ -144,14 +152,21 @@ pub fn run(dir: &Path) -> Result<(), String> {
             #[cfg(target_os = "linux")]
             let windows = markits::ui_elements::capture_desktop_windows(0, 0);
             #[cfg(any(target_os = "macos", target_os = "windows"))]
-            let windows = manual_core::window_capture::window_process_ids()?.into_iter().map(|(id, pid)| {
-                markits::ui_elements::DetectedUiElement {
-                    role: "window".into(), name: None, window_id: Some(id), pid: Some(pid),
-                    x: 0.0, y: 0.0, width: 0.0, height: 0.0,
-                }
-            }).collect::<Vec<_>>();
+            let windows = manual_core::window_capture::window_process_ids()?
+                .into_iter()
+                .map(|(id, pid)| markits::ui_elements::DetectedUiElement {
+                    role: "window".into(),
+                    name: None,
+                    window_id: Some(id),
+                    pid: Some(pid),
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.0,
+                    height: 0.0,
+                })
+                .collect::<Vec<_>>();
             serde_json::to_string(&windows).map_err(|e| e.to_string())
-        },
+        }
         Operation::Capture {
             window,
             destination,

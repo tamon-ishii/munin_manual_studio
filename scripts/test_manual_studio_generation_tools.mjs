@@ -75,6 +75,21 @@ try {
   assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /Keep second/);
   await page.locator('#generation-history-close').click(); await idle();
 
+  await page.evaluate(async () => {
+    const { showGenerationReview } = await import('/src/generationReview.ts');
+    void showGenerationReview('diagram.md', '', '```mermaid\nflowchart TD\n A --> [broken\n```');
+  });
+  await page.locator('#generation-review-dialog [role=alert]').waitFor();
+  assert.match(await page.locator('#generation-review-dialog [role=alert]').textContent(), /Mermaid/);
+  assert.equal(await page.locator('[data-review-action=adopt]').isDisabled(), true, 'invalid Mermaid cannot be adopted');
+  await page.locator('[data-review-action=restore]').click();
+  await page.evaluate(async () => {
+    const { showGenerationReview } = await import('/src/generationReview.ts');
+    void showGenerationReview('diagram.md', '', '```mermaid\nflowchart TD\n A --> B\n```');
+  });
+  await page.waitForFunction(() => document.querySelector('[data-review-action=adopt]')?.disabled === false);
+  await page.locator('[data-review-action=restore]').click();
+
   const ordinaryRequests = [];
   page.on('request', request => {
     if (!request.url().includes('/__manual/rpc')) return;

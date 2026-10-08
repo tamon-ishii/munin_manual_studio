@@ -114,6 +114,15 @@ pub fn save(
     if existing.as_deref().map(revision).as_deref() != expected_revision {
         return Err("別の画面やツールで原稿が更新されています。編集内容をコピーしてから原稿を読み直してください。".into());
     }
+    let docs = crate::config::project_path(root, &crate::config::read_config(root).docs)?;
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let identity_page = path
+        .strip_prefix(&docs)
+        .or_else(|_| path.strip_prefix(&canonical_root))
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let content = super::task::normalize_identifiers(&identity_page, content)?;
     let parent = path.parent().ok_or("Invalid Markdown path")?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let mut temporary = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;

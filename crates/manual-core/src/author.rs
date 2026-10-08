@@ -230,6 +230,10 @@ pub(crate) fn task_request(
         task.prompt
     );
 
+    if task.kind == "diagram" {
+        prompt.push_str("\nOutput format: Mermaid. Return exactly one fenced ```mermaid diagram following the instruction. Use valid Mermaid syntax; no surrounding prose.");
+    }
+
     let answer_path = generated.join("answers").join(format!("{task_id}.md"));
     if answer_path.is_file() {
         if let Ok((_, prev_body, _)) = read_answer(&answer_path, &task) {
@@ -274,7 +278,7 @@ fn append_page_context(root: &Path, page: &str, prompt: &mut String) -> Result<(
 pub(crate) fn generate_task_body(
     root: &Path,
     task: &super::task::Task,
-    cli: &str,
+    _cli: &str,
     feedback: &str,
 ) -> Result<String, String> {
     let task_id = &task.id;
@@ -283,11 +287,6 @@ pub(crate) fn generate_task_body(
     }
 
     super::task::ensure_unlocked(task)?;
-    if task.kind == "diagram" {
-        log_progress(root, &format!("タスク {task_id} の依存図を作成しています"));
-        return diagram_body(task, cli, root);
-    }
-
     let config = read_config(root);
     let (prompt, schema) = task_request(root, task, feedback)?;
 
@@ -308,6 +307,9 @@ pub(crate) fn generate_task_body(
     }
 
     let body = checked_generated_body(root, body, Some(&task.id))?;
+    if task.kind == "diagram" {
+        validate_mermaid_body(&body)?;
+    }
     Ok(body)
 }
 
@@ -319,12 +321,12 @@ pub(crate) fn page_text_request(
 ) -> Result<(String, Value), String> {
     let instructions: Vec<_> = tasks
         .iter()
-        .map(|task| json!({ "id": task.id, "instruction": task.prompt }))
+        .map(|task| json!({ "id": task.id, "instruction": task.prompt, "output_format": if task.kind == "diagram" { "mermaid" } else { "markdown" } }))
         .collect();
     let mut prompt = format!(
             "Answer the following tasks for the same Markdown page in one pass, in concise professional Japanese Markdown. \
             Read {page} as the primary context. Inspect only source files needed to verify concrete claims; avoid repository-wide exploration unless a task requires it. \
-            Return one answer for every ID, with no extra IDs. Do not copy existing generated sections or other tasks' answers. Verify UI names from source. \
+            For output_format mermaid, return exactly one fenced mermaid diagram; for markdown, return prose Markdown. Return one answer for every ID, with no extra IDs. Do not copy existing generated sections or other tasks' answers. Verify UI names from source. \
             Do not wrap answers in <!-- ai:generated --> or <!-- ai:task --> tags, and do not place documentation text inside comments. \
             Do not output the full page or surrounding document structure in each task's markdown field; return only the documentation content for that specific task. \
             For concrete UI or source claims, add a compact HTML comment immediately after the claim in the form \
@@ -381,7 +383,7 @@ pub(crate) fn generate_page_at(
 pub(crate) fn generate_page_at_selected(
     root: &Path,
     page: &str,
-    cli: &str,
+    _cli: &str,
     templates: &Path,
     generated: &Path,
     capture: bool,
@@ -395,7 +397,7 @@ pub(crate) fn generate_page_at_selected(
         .filter(|task| {
             task.status != "approved"
                 && selected_ids.map_or(true, |ids| ids.contains(&task.id))
-                && (task.kind == "text" || task.kind == "diagram" || task.kind == "screenshot")
+                && (task.kind == "text" || task.kind == "diagram")
         })
         .collect();
     let selected: Vec<_> = page_tasks
@@ -410,11 +412,7 @@ pub(crate) fn generate_page_at_selected(
     if selected.is_empty() && screenshot_tasks.is_empty() {
         return Err(format!("No AI tasks in {page}"));
     }
-    let text_tasks: Vec<_> = selected.iter().filter(|task| task.kind == "text").collect();
-    let diagram_tasks: Vec<_> = selected
-        .iter()
-        .filter(|task| task.kind == "diagram")
-        .collect();
+    let text_tasks: Vec<_> = selected.iter().collect();
     let mut updated = Vec::new();
 
     if !text_tasks.is_empty() {
@@ -459,6 +457,9 @@ pub(crate) fn generate_page_at_selected(
                 return Err(format!("AI returned an empty answer for task {}", task.id));
             }
             let body = checked_generated_body(root, body, Some(&task.id))?;
+            if task.kind == "diagram" {
+                validate_mermaid_body(&body)?;
+            }
             checked.push((task, body));
         }
         log_progress(
@@ -473,14 +474,6 @@ pub(crate) fn generate_page_at_selected(
             save_answer(&generated, task, &body)?;
             updated.push(task.id.clone());
         }
-    }
-    for task in diagram_tasks {
-        log_progress(
-            root,
-            &format!("{page} の依存図 {} を作成しています", task.id),
-        );
-        record_diagram_task(&templates, &generated, &task, cli, root)?;
-        updated.push(task.id.clone());
     }
     let mut captured = Vec::new();
     let mut capture_errors = Vec::new();
@@ -569,7 +562,10 @@ pub(crate) fn record_screenshot_task(
     image: &Path,
 ) -> Result<(), String> {
     super::task::ensure_unlocked(task)?;
-    let current = super::task::tasks_for_page(root, &task.page)?.into_iter().find(|item| item.id == task.id).ok_or("撮影タグが原稿から削除されています。")?;
+    let current = super::task::tasks_for_page(root, &task.page)?
+        .into_iter()
+        .find(|item| item.id == task.id)
+        .ok_or("撮影タグが原稿から削除されています。")?;
     super::task::ensure_unlocked(&current)?;
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
@@ -665,9 +661,14 @@ pub(crate) fn record_screenshot_task(
 }
 
 fn prompt_markits_scene(prompt: &str) -> Result<Option<Value>, String> {
-    let Some((_, specification)) = prompt.split_once("MarkIts アノテーション仕様:") else { return Ok(None); };
-    let json_fence = Regex::new(r"(?s)```json\s*\n(.*?)\n\s*```").map_err(|error| error.to_string())?;
-    let json = json_fence.captures(specification).and_then(|capture| capture.get(1))
+    let Some((_, specification)) = prompt.split_once("MarkIts アノテーション仕様:") else {
+        return Ok(None);
+    };
+    let json_fence =
+        Regex::new(r"(?s)```json\s*\n(.*?)\n\s*```").map_err(|error| error.to_string())?;
+    let json = json_fence
+        .captures(specification)
+        .and_then(|capture| capture.get(1))
         .ok_or("AI撮影タグのMarkIts注釈仕様にJSONコードブロックがありません")?;
     let scene: Value = serde_json::from_str(json.as_str())
         .map_err(|error| format!("AI撮影タグのMarkIts注釈仕様が不正です: {error}"))?;
@@ -709,10 +710,21 @@ fn previous_markits_scene(
         return Ok(None);
     };
     let linked = Path::new(link.as_str());
-    if linked.is_absolute() { return Ok(None); }
-    let Ok(old_image) = page_path.parent().unwrap_or(root).join(linked).canonicalize() else { return Ok(None); };
+    if linked.is_absolute() {
+        return Ok(None);
+    }
+    let Ok(old_image) = page_path
+        .parent()
+        .unwrap_or(root)
+        .join(linked)
+        .canonicalize()
+    else {
+        return Ok(None);
+    };
     let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
-    if !old_image.starts_with(&canonical_root) { return Ok(None); }
+    if !old_image.starts_with(&canonical_root) {
+        return Ok(None);
+    }
     let Ok(bytes) = fs::read(old_image) else {
         return Ok(None);
     };
@@ -827,10 +839,21 @@ fn diagram_body(task: &super::task::Task, cli: &str, project: &Path) -> Result<S
         let result = crate::analyze_directory(project)?;
         crate::mkdocs::generate_with_lang(&result, &output_dir, "ja")?;
     } else {
-        let status = super::agent::run_process(project, cli, &[
-            "--mkdocs".into(), output_dir.to_string_lossy().into_owned(), "--lang".into(), "ja".into(),
-            project.canonicalize().unwrap_or_else(|_|project.to_path_buf()).to_string_lossy().into_owned(),
-        ])?;
+        let status = super::agent::run_process(
+            project,
+            cli,
+            &[
+                "--mkdocs".into(),
+                output_dir.to_string_lossy().into_owned(),
+                "--lang".into(),
+                "ja".into(),
+                project
+                    .canonicalize()
+                    .unwrap_or_else(|_| project.to_path_buf())
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+        )?;
 
         if !status.status.success() {
             let err = String::from_utf8_lossy(&status.stderr);
@@ -855,6 +878,47 @@ fn diagram_body(task: &super::task::Task, cli: &str, project: &Path) -> Result<S
     let body = format!("```mermaid\n{diagram}\n```");
 
     Ok(body)
+}
+
+pub(crate) fn validate_mermaid_body(body: &str) -> Result<(), String> {
+    let re = Regex::new(r"(?s)^\s*```mermaid\s*\n(.+?)\n```\s*$").unwrap();
+    let diagram = re
+        .captures(body)
+        .and_then(|c| c.get(1))
+        .ok_or("Mermaidのコードブロックを1つ返してください。")?;
+    let first = diagram
+        .as_str()
+        .lines()
+        .find(|line| !line.trim().is_empty() && !line.trim().starts_with("%%"))
+        .unwrap_or_default()
+        .trim();
+    if ![
+        "graph ",
+        "flowchart ",
+        "sequenceDiagram",
+        "classDiagram",
+        "stateDiagram",
+        "erDiagram",
+        "gantt",
+        "pie",
+        "mindmap",
+        "timeline",
+        "gitGraph",
+        "journey",
+        "block-beta",
+        "C4",
+        "quadrantChart",
+        "sankey-beta",
+        "xychart",
+        "packet",
+        "architecture",
+    ]
+    .iter()
+    .any(|prefix| first.starts_with(prefix))
+    {
+        return Err("Mermaidの図の種類が不正です。".into());
+    }
+    Ok(())
 }
 
 pub(crate) fn checked_generated_body(

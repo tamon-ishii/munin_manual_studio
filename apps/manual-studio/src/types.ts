@@ -1,5 +1,5 @@
 export type CaptureSource = { kind: "window"; title: string; inset: number } | { kind: "scenario"; input: string };
-export interface Task { id: string; kind: string; page: string; prompt: string; status: string }
+export interface Task { name?: string; id: string; kind: string; page: string; prompt: string; status: string }
 export interface UIMap { total_elements: number; views: Array<{ id: string; name: string; observed_from?: string; elements: Array<{ name: string; role: string; selector: string }> }> }
 export interface State {
   has_config: boolean;
@@ -13,4 +13,4 @@ export interface State {
 export interface Document { page: string; content: string; revision: string }
 export interface NativeWindow { id: string; title: string; width: number; height: number }
 export interface RecordingResult { scenarioFile: string; events: number; operationText: string; sourceFile: string; annotationFile: string; completionFile: string; markitsStarted: boolean; message: string }
-export interface LaunchCommand { name: string; program: string; args: string[] }
+export interface LaunchCommand { id?: string; name: string; program: string; args: string[] }

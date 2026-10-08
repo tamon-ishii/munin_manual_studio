@@ -413,7 +413,11 @@ fn build_inner(
     root: Option<&Path>,
     no_mkdocs: bool,
 ) -> Result<String, String> {
-    if !draft { if let Some(root) = root { crate::quality::require_ready(root)?; } }
+    if !draft {
+        if let Some(root) = root {
+            crate::quality::require_ready(root)?;
+        }
+    }
     let pages = build_pages(templates, root)?;
     let mut paths = std::collections::HashSet::new();
     for page in &pages {
@@ -516,7 +520,11 @@ fn build_inner(
     }
 
     // markdown 以外の静的ファイルをコピー
-    for entry in WalkDir::new(templates).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(templates)
+        .into_iter()
+        .filter_entry(|entry| entry.file_name() != ".munin")
+        .filter_map(|e| e.ok())
+    {
         if entry.file_type().is_file() {
             if entry.path().extension().map_or(true, |ext| ext != "md") {
                 let rel = entry.path().strip_prefix(templates).unwrap_or(entry.path());

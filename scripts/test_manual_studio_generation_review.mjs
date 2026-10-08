@@ -72,6 +72,19 @@ try {
   assert.equal(await readFile(path.join(root, page), 'utf8'), retry.content);
   await rpc('editor-save', { page, json: { content: original, revision: adopted.revision } });
 
+  // Text and Mermaid use the same provider and preserve the source until adoption.
+  const diagramPage = 'manual/docs/diagram.md';
+  const diagramSource = '<!-- ai:task id=diagram kind=diagram prompt="Draw flow" -->\n```mermaid\ngraph TD\n A --> B\n```\n<!-- /ai:task -->\n';
+  await writeFile(path.join(root, diagramPage), diagramSource);
+  answer = { answers: [{ id: 'diagram', markdown: '```mermaid\nflowchart TD\n A --> C\n```' }] };
+  const diagramReview = await rpc('generate-review', { page: diagramPage });
+  assert.match(diagramReview.content, /A --> C/);
+  assert.match(requests.at(-1).messages[1].content, /"output_format":"mermaid"/);
+  assert.equal(await readFile(path.join(root, diagramPage), 'utf8'), diagramSource);
+  await assert.rejects(rpc('generate-review', { page: diagramPage, id: 'diagram', body: 'Plain text' }), /Mermaid/);
+  await assert.rejects(rpc('generate-review', { page: diagramPage, bodies: JSON.stringify({ diagram: 'Plain text' }) }), /Mermaid/);
+  answer = { markdown: 'Revised guide' };
+
   // Direct terminal single-task body injection
   const directSingle = await rpc('generate-review', { page, id: 'guide', body: 'Direct terminal body' });
   assert.equal(directSingle.before.content, original);

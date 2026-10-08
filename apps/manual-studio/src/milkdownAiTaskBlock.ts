@@ -142,7 +142,13 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
   const header = document.createElement('div'); header.className = 'milkdown-ai-task-header'; header.contentEditable = 'false';
   const summary = document.createElement('div'); summary.className = 'milkdown-ai-task-summary';
   const name = document.createElement('strong');
-  const id = document.createElement('code');
+  const id = document.createElement('span'); id.className = 'milkdown-ai-task-name';
+  const details = document.createElement('details'); details.className = 'milkdown-ai-task-instructions';
+  const disclosure = document.createElement('summary'); disclosure.textContent = '指示を編集'; disclosure.setAttribute('aria-expanded', 'false');
+  const displayName = document.createElement('input'); displayName.placeholder = '名前（省略可）'; displayName.setAttribute('aria-label', 'AI指示の名前（省略可）');
+  details.append(disclosure, displayName);
+  let disclosureKey = '';
+  details.addEventListener('toggle', () => { disclosure.setAttribute('aria-expanded', String(details.open)); if (disclosureKey) { try { localStorage.setItem(disclosureKey, String(details.open)); } catch { /* UI state is optional. */ } } });
   const regenerateBtn = document.createElement('button'); regenerateBtn.type = 'button'; regenerateBtn.className = 'milkdown-ai-task-regenerate';
   const confirmBtn = document.createElement('button'); confirmBtn.type = 'button'; confirmBtn.className = 'milkdown-ai-task-confirm';
   const deleteBtn = document.createElement('button'); deleteBtn.type = 'button'; deleteBtn.className = 'milkdown-ai-task-delete';
@@ -150,18 +156,25 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
   summary.append(name, id, regenerateBtn, confirmBtn, deleteBtn, status);
   const label = document.createElement('label'); label.className = 'milkdown-ai-task-prompt-label'; label.append('AIへの指示');
   const prompt = document.createElement('textarea'); prompt.className = 'milkdown-ai-task-prompt'; prompt.rows = 2; prompt.placeholder = '生成する内容を指示してください';
-  label.append(prompt); header.append(summary, label);
+  label.append(prompt); details.append(label); header.append(summary, details);
   const bodyLabel = document.createElement('div'); bodyLabel.className = 'milkdown-ai-task-body-label'; bodyLabel.contentEditable = 'false'; bodyLabel.textContent = '本文';
   const contentDOM = document.createElement('div'); contentDOM.className = 'milkdown-ai-task-body';
   dom.append(header, bodyLabel, contentDOM);
-  const resize = () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.max(58, prompt.scrollHeight)}px`; };
+  const resize = () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(Math.max(58, prompt.scrollHeight), Math.max(100, window.innerHeight * .3))}px`; };
   const refresh = () => {
     const rawHeader = String(node.attrs.header);
     dom.dataset.aiTaskHeader = rawHeader;
     const kind = attribute(rawHeader, 'kind') || 'text';
-    name.textContent = kind === 'screenshot' ? 'AI撮影' : kind === 'diagram' ? 'AI図' : 'AI文章';
-    id.textContent = attribute(rawHeader, 'id') || '';
-    prompt.setAttribute('aria-label', `AIへの指示 ${id.textContent}`);
+    name.textContent = kind === 'screenshot' ? 'スクリーンショット（旧形式）' : kind === 'diagram' ? 'Mermaidの図' : 'AI文章';
+    const taskId = attribute(rawHeader, 'id') || '';
+    dom.dataset.aiTaskId = taskId;
+    const nextName = decode(attribute(rawHeader, 'name') || '');
+    if (displayName.value !== nextName) displayName.value = nextName;
+    id.textContent = nextName || decode(attribute(rawHeader, 'prompt') || '').replace(/\s+/g, ' ').slice(0, 48);
+    const nextKey = `manual-ai-disclosure:${document.querySelector('#markdown-editor')?.getAttribute('data-owner') || location.href}:${taskId || getPos()}`;
+    if (nextKey !== disclosureKey) { disclosureKey = nextKey; try { details.open = localStorage.getItem(nextKey) === 'true'; } catch { details.open = false; } }
+    displayName.readOnly = !view.editable;
+    prompt.setAttribute('aria-label', `AIへの指示 ${nextName || name.textContent}`);
     const nextPrompt = decode(attribute(rawHeader, 'prompt') || '');
     if (prompt.value !== nextPrompt) prompt.value = nextPrompt;
     prompt.readOnly = !view.editable;
@@ -174,7 +187,7 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
     confirmBtn.title = approved ? '確定を解除します' : empty ? '生成結果がある場合に確定できます' : '生成結果を確定します';
 
     regenerateBtn.textContent = empty ? '生成' : '再生成';
-    regenerateBtn.disabled = !view.editable || approved;
+    regenerateBtn.disabled = !view.editable || approved || kind === 'screenshot';
     regenerateBtn.title = approved ? '確定を解除すると再生成できます' : empty ? 'AIで生成します' : 'AIで再生成します';
 
     deleteBtn.textContent = '削除';
@@ -198,10 +211,14 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
     const rawHeader = String(node.attrs.header);
     const approved = attribute(rawHeader, 'approved-at') !== undefined;
     if (approved) return;
-    const taskId = attribute(rawHeader, 'id') || '';
+    let taskId = attribute(rawHeader, 'id') || '';
     const taskKind = attribute(rawHeader, 'kind') || 'text';
-    if (!taskId) return;
-    window.dispatchEvent(new CustomEvent('manual-studio-regenerate-task', {
+    if (!taskId) {
+      const position=getPos(); if (position===undefined) return;
+      taskId=`task-${crypto.randomUUID()}`;
+      view.dispatch(view.state.tr.setNodeMarkup(position,undefined,{...node.attrs,header:rawHeader.replace(/ai:task\b/,`ai:task id=${taskId}`)}));
+    }
+    window.dispatchEvent(new CustomEvent('manual-studio-regenerate-task' , {
       detail: { id: taskId, kind: taskKind }
     }));
   });
@@ -231,15 +248,25 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
       detail: { message: `AIタグ「${taskId}」を削除しました。Undo で戻せます。` }
     }));
   });
+  const editName = () => {
+    if (!view.editable) return; const position = getPos(); if (position === undefined) return;
+    const raw = String(node.attrs.header);
+    const next = attribute(raw, 'name') === undefined ? raw.replace(/\s*-->$/, ` name="${encode(displayName.value)}" -->`) : raw.replace(attributes, (token, key: string) => key === 'name' ? ` name="${encode(displayName.value)}"` : token);
+    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, header: next }));
+  };
+  displayName.addEventListener('input', event => { if (!(event as InputEvent).isComposing) editName(); });
+  displayName.addEventListener('compositionend', editName);
   prompt.addEventListener('input', event => { if (!(event as InputEvent).isComposing) editPrompt(); });
   prompt.addEventListener('compositionend', editPrompt);
   prompt.addEventListener('focus', () => { if (view.editable) view.dispatch(closeHistory(view.state.tr)); });
   prompt.addEventListener('blur', () => { if (view.editable) view.dispatch(closeHistory(view.state.tr)); });
-  prompt.addEventListener('keydown', event => {
+  const undoField = (event: KeyboardEvent) => {
     if (!view.editable || event.isComposing || !(event.ctrlKey || event.metaKey) || !['z', 'y'].includes(event.key.toLowerCase())) return;
     event.preventDefault();
     (event.key.toLowerCase() === 'y' || event.shiftKey ? redo : undo)(view.state, view.dispatch);
-  });
+  };
+  prompt.addEventListener('keydown', undoField);
+  displayName.addEventListener('keydown', undoField);
   window.addEventListener('manual-studio-editor-font-size-change', resize);
   refresh();
   const observer = new MutationObserver(refresh);

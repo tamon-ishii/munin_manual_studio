@@ -155,6 +155,9 @@ pub fn check(root: &Path) -> Result<Value, String> {
     for run in runs["runs"].as_array().unwrap() {
         if let Some(entries) = run["entries"].as_array() {
             for entry in entries {
+                if entry["task"]["kind"] == "screenshot" {
+                    continue;
+                }
                 let key = (
                     run["page"].as_str().unwrap_or_default(),
                     entry["task"]["id"].as_str().unwrap_or_default(),

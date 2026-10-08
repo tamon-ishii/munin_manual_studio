@@ -14,7 +14,10 @@ pub fn selected_tasks(
     id: Option<&str>,
     options: &GenerationOptions,
 ) -> Result<Vec<crate::task::Task>, String> {
-    let tasks = crate::task::tasks_for_page(root, page)?;
+    let tasks: Vec<_> = crate::task::tasks_for_page(root, page)?
+        .into_iter()
+        .filter(|task| task.kind == "text" || task.kind == "diagram")
+        .collect();
     if let Some(ids) = &options.ids {
         if ids.is_empty() {
             return Err("生成するAIタグを選んでください。".into());
@@ -74,13 +77,13 @@ pub fn input(
     if let Some(id) = id {
         if let Some(task) = tasks
             .iter()
-            .find(|task| task.id == id && task.kind == "text")
+            .find(|task| task.id == id && (task.kind == "text" || task.kind == "diagram"))
         {
             let (prompt, schema) = crate::author::task_request(root, task, feedback)?;
             requests.push(json!({"ids":[id], "prompt":prompt, "schema":schema}));
         }
     } else {
-        let text_tasks: Vec<_> = tasks.iter().filter(|task| task.kind == "text").collect();
+        let text_tasks: Vec<_> = tasks.iter().collect();
         if !text_tasks.is_empty() {
             let (prompt, schema) =
                 crate::author::page_text_request(root, page, &text_tasks, feedback)?;
@@ -136,6 +139,9 @@ pub fn generate_with_options(
         } else {
             crate::author::generate_task_body(root, task, "", feedback)?
         };
+        if task.kind == "diagram" {
+            crate::author::validate_mermaid_body(&task_body)?;
+        }
         crate::task::update_task_in_docs(&templates, task, &task_body, None)?;
         vec![id.to_string()]
     } else if let Some(bodies_map) = bodies.filter(|m| !m.is_empty()) {
@@ -146,6 +152,9 @@ pub fn generate_with_options(
                     if !task_body.trim().is_empty() {
                         let checked =
                             crate::author::checked_generated_body(root, task_body, Some(&task.id))?;
+                        if task.kind == "diagram" {
+                            crate::author::validate_mermaid_body(&checked)?;
+                        }
                         crate::task::update_task_in_docs(&templates, task, &checked, None)?;
                         updated_ids.push(task.id.clone());
                     }

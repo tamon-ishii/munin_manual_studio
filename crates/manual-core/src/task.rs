@@ -26,6 +26,8 @@ pub fn encode_prompt(prompt: &str) -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Task {
+    #[serde(default)]
+    pub name: String,
     pub id: String,
     pub kind: String,
     pub page: String,
@@ -35,7 +37,12 @@ pub struct Task {
 }
 
 pub fn ensure_unlocked(task: &Task) -> Result<(), String> {
-    if task.status == "approved" { return Err(format!("確定済みのAIタグは更新できません: {}。先に確定を解除してください。", task.id)); }
+    if task.status == "approved" {
+        return Err(format!(
+            "確定済みのAIタグは更新できません: {}。先に確定を解除してください。",
+            task.id
+        ));
+    }
     Ok(())
 }
 
@@ -247,7 +254,12 @@ pub fn render_task_block(task: &Task, body: &str, created: &str, approved: Optio
     let approval = approved
         .map(|value| format!(" approved-at={value}"))
         .unwrap_or_default();
-    format!("<!-- ai:task id={} kind={} prompt=\"{}\" created-at={created} source-sha256={}{approval} -->\n{}\n<!-- /ai:task -->",
+    let name = if task.name.is_empty() {
+        String::new()
+    } else {
+        format!(" name=\"{}\"", escape_prompt(&task.name))
+    };
+    format!("<!-- ai:task id={} kind={}{name} prompt=\"{}\" created-at={created} source-sha256={}{approval} -->\n{}\n<!-- /ai:task -->",
         task.id, task.kind, escape_prompt(&task.prompt), task.source_sha256, body.trim())
 }
 
@@ -422,7 +434,15 @@ pub fn parse_page_tags(
                 attrs,
                 content[body_start..marker.start()].trim().to_string(),
             ));
-        } else if cap.name("attrs").unwrap().as_str().split('\n').next().unwrap_or("").contains("prompt=") {
+        } else if cap
+            .name("attrs")
+            .unwrap()
+            .as_str()
+            .split('\n')
+            .next()
+            .unwrap_or("")
+            .contains("prompt=")
+        {
             if open.is_some() {
                 return Err(format!("Nested ai:task tags in page: {page_rel}"));
             }
@@ -523,6 +543,17 @@ pub fn parse_page_tags(
         raw_gens.push(RawGenerated { range, attrs, body });
     }
 
+    let mut reserved_ids = existing_ids.clone();
+    for attrs in raw_tasks
+        .iter()
+        .map(|t| &t.attrs)
+        .chain(raw_gens.iter().map(|g| &g.attrs))
+        .chain(blocks.iter().map(|(_, attrs, _)| attrs))
+    {
+        if let Some(id) = extract_attr(&id_re, attrs) {
+            reserved_ids.insert(id.to_owned());
+        }
+    }
     for (range, mut attrs, body) in blocks {
         let prompt = decode_prompt(
             extract_attr(&plain_prompt_re, &attrs)
@@ -536,7 +567,8 @@ pub fn parse_page_tags(
             return Err(format!("Invalid task kind: '{kind}'"));
         }
         if extract_attr(&id_re, &attrs).is_none() {
-            let id = generate_auto_id(kind, page_rel, &prompt, existing_ids);
+            let id = generate_auto_id(kind, page_rel, &prompt, &reserved_ids);
+            reserved_ids.insert(id.clone());
             attrs = format!(" id={id}{attrs}");
         }
         if body.is_empty() {
@@ -627,6 +659,7 @@ pub fn parse_page_tags(
 
         let hash = source_hash(&kind, &t.prompt);
         let task = Task {
+            name: display_name(&t.attrs),
             id: task_id,
             kind,
             page: page_rel.to_string(),
@@ -675,6 +708,7 @@ pub fn parse_page_tags(
             "current".to_string()
         };
         let task = Task {
+            name: display_name(&g.attrs),
             id: id_str,
             kind: kind.clone(),
             page: page_rel.to_string(),
@@ -850,9 +884,7 @@ pub fn find_task(templates: &Path, task_id: &str) -> Result<Task, String> {
 pub fn update_task_prompt(templates: &Path, task_id: &str, prompt: &str) -> Result<(), String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
-        return Err(
-            "Task instruction must be nonempty".to_string(),
-        );
+        return Err("Task instruction must be nonempty".to_string());
     }
     let task = find_task(templates, task_id)?;
     let page_path = if templates.join(&task.page).is_file() {
@@ -940,7 +972,10 @@ pub fn extract_single_task_block(content: &str, target_id: &str) -> Result<Optio
         }
         let attrs = cap.name("attrs").unwrap().as_str();
         let explicit_id = id_re.captures(attrs).and_then(|c| {
-            c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)).map(|m| m.as_str())
+            c.get(1)
+                .or_else(|| c.get(2))
+                .or_else(|| c.get(3))
+                .map(|m| m.as_str())
         });
         if explicit_id == Some(target_id) {
             let body = cap.name("body").unwrap().as_str();
@@ -1059,8 +1094,12 @@ pub fn update_task_in_docs(
     let mut ids = HashSet::new();
     let tags = parse_page_tags(&page_rel, &content, &mut ids)?;
     for tag in &tags {
-        let current = match tag { PageTag::Task { task, .. } | PageTag::Generated { task, .. } => task };
-        if current.id == task.id { ensure_unlocked(current)?; }
+        let current = match tag {
+            PageTag::Task { task, .. } | PageTag::Generated { task, .. } => task,
+        };
+        if current.id == task.id {
+            ensure_unlocked(current)?;
+        }
     }
 
     if let Some(target_tag) = tags.iter().find(|t| {
@@ -1363,5 +1402,89 @@ mod unified_task_tests {
         assert!(!saved.contains("ai:generated"));
         assert!(saved.contains("prompt=\"説明\""));
         assert_eq!(parse(&saved).unwrap().len(), 1);
+    }
+}
+
+fn display_name(attrs: &str) -> String {
+    let pattern = Regex::new(r#"(?:^|\s)name=(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap();
+    pattern
+        .captures(attrs)
+        .and_then(|c| c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)))
+        .map(|m| decode_prompt(m.as_str()))
+        .unwrap_or_default()
+}
+/// Persist automatic identities only during an explicit document save.
+pub fn normalize_identifiers(page: &str, content: &str) -> Result<String, String> {
+    let Ok(tags) = parse_page_tags(page, content, &mut HashSet::new()) else {
+        return Ok(content.to_owned());
+    };
+    let id = Regex::new(r#"(?:^|\s)id=(?:"[^"]+"|'[^']+'|[^\s>]+)"#).unwrap();
+    let mut result = content.to_owned();
+    for tag in tags.iter().rev() {
+        let (range, task) = match tag {
+            PageTag::Task { range, task } | PageTag::Generated { range, task, .. } => (range, task),
+        };
+        let header_end = content[range.clone()]
+            .find("-->")
+            .ok_or("Invalid task header")?
+            + range.start;
+        if !id.is_match(&content[range.start..header_end]) {
+            let position = range.start
+                + content[range.start..header_end]
+                    .find("ai:task")
+                    .ok_or("Invalid task header")?
+                + "ai:task".len();
+            result.insert_str(position, &format!(" id={}", task.id));
+        }
+    }
+    Ok(result)
+}
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn reading_and_preview_parsing_do_not_write_identifiers() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("docs")).unwrap();
+        let path = root.path().join("docs/index.md");
+        let source = "<!-- ai:task kind=text prompt=\"説明\" -->\n本文\n<!-- /ai:task -->";
+        fs::write(&path, source).unwrap();
+        let document = crate::editor::read(root.path(), "index.md").unwrap();
+        parse_page_tags("index.md", &document.content, &mut HashSet::new()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        let saved =
+            crate::editor::save(root.path(), "index.md", source, Some(&document.revision)).unwrap();
+        assert!(saved.content.contains(" id="));
+        assert_eq!(
+            normalize_identifiers("index.md", &saved.content).unwrap(),
+            saved.content
+        );
+    }
+    #[test]
+    fn anonymous_identity_persists_and_names_are_optional() {
+        let source="<!-- ai:task kind=text name=\"同じ名前\" prompt=\"説明\" -->\n\n<!-- /ai:task -->\n\n<!-- ai:task kind=text name=\"同じ名前\" prompt=\"説明\" -->\n\n<!-- /ai:task -->";
+        let saved = normalize_identifiers("index.md", source).unwrap();
+        let tags = parse_page_tags("index.md", &saved, &mut HashSet::new()).unwrap();
+        let ids: Vec<_> = tags
+            .iter()
+            .map(|tag| match tag {
+                PageTag::Task { task, .. } | PageTag::Generated { task, .. } => task.id.clone(),
+            })
+            .collect();
+        assert_ne!(ids[0], ids[1]);
+        assert_eq!(saved, normalize_identifiers("index.md", &saved).unwrap());
+        if let PageTag::Task { task, .. } | PageTag::Generated { task, .. } = &tags[0] {
+            assert!(render_task_block(task, "生成した本文", &utc_now(), None)
+                .contains("name=\"同じ名前\""));
+        }
+        let renamed = saved
+            .replace("同じ名前", "別名")
+            .replace("説明", "新しい説明");
+        let tasks = parse_page_tags("index.md", &renamed, &mut HashSet::new()).unwrap();
+        assert!(tasks.iter().all(|t| match t {
+            PageTag::Task { task, .. } | PageTag::Generated { task, .. } =>
+                task.name == "別名" && ids.contains(&task.id),
+        }));
+        assert!(normalize_identifiers("index.md", "# 通常の文章").is_ok());
     }
 }

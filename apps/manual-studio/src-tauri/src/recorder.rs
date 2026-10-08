@@ -1,7 +1,7 @@
 use rdev::{listen, Button, Event, EventType, Key};
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     fs::{self, File},
@@ -41,6 +41,7 @@ pub enum RecordedEvent {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordingResult {
+    pub screenshot_id: String,
     pub scenario_file: String,
     pub operation_text: String,
     pub source_file: String,
@@ -117,8 +118,11 @@ const MARKITS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MARKITS_STDERR_TAIL_BYTES: u64 = 4096;
 
 fn launch_markits(mut command: Command, log_path: &Path) -> Result<(), String> {
-    let completion_file = command.get_args().collect::<Vec<_>>()
-        .windows(2).find(|args| args[0] == "--manual-studio-completion")
+    let completion_file = command
+        .get_args()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find(|args| args[0] == "--manual-studio-completion")
         .map(|args| PathBuf::from(args[1]));
     let log = File::create(log_path).map_err(|error| {
         format!(
@@ -442,10 +446,20 @@ pub fn start(
             let windows: Vec<Value> = serde_json::from_str(&raw)
                 .map_err(|error| format!("ウィンドウ一覧を読み取れません: {error}"))?;
             let app_ids = if window_title.trim().is_empty() {
-                launched_app_window_ids(&crate::native_worker::window_processes()?, &executable, app.id())
-            } else { HashSet::new() };
-            if let Some(found) = select_launched_window(&windows, &existing_ids, &window_title, &app_ids) {
-                reused_window = found["id"].as_str().is_some_and(|id| existing_ids.contains(id));
+                launched_app_window_ids(
+                    &crate::native_worker::window_processes()?,
+                    &executable,
+                    app.id(),
+                )
+            } else {
+                HashSet::new()
+            };
+            if let Some(found) =
+                select_launched_window(&windows, &existing_ids, &window_title, &app_ids)
+            {
+                reused_window = found["id"]
+                    .as_str()
+                    .is_some_and(|id| existing_ids.contains(id));
                 return Ok((
                     WindowBounds {
                         id: found["id"].as_str().unwrap_or_default().to_string(),
@@ -470,7 +484,11 @@ pub fn start(
             {
                 if status.success() {
                     let processes = crate::native_worker::window_processes()?;
-                    if let Some(found) = select_existing_app_window(&windows, &processes, &executable.to_string_lossy()) {
+                    if let Some(found) = select_existing_app_window(
+                        &windows,
+                        &processes,
+                        &executable.to_string_lossy(),
+                    ) {
                         reused_window = true;
                         return Ok((
                             WindowBounds {
@@ -489,7 +507,6 @@ pub fn start(
                 }
                 // Single-instance launchers can exit before their existing window
                 // is ready. Keep polling until the original deadline.
-
             }
             thread::sleep(Duration::from_millis(500));
         }
@@ -539,7 +556,8 @@ pub fn start(
     let _ = markits_program;
     let markits_program = std::env::current_exe()
         .map_err(|error| format!("注釈エディタの実行ファイルを確認できません: {error}"))?
-        .to_string_lossy().into_owned();
+        .to_string_lossy()
+        .into_owned();
     let mut lock = match state.0.lock() {
         Ok(lock) => lock,
         Err(error) => {
@@ -618,14 +636,21 @@ fn select_launched_window<'a>(
 
 fn process_descends_from(mut pid: u32, launched_pid: u32) -> bool {
     for _ in 0..64 {
-        if pid == launched_pid { return true; }
+        if pid == launched_pid {
+            return true;
+        }
         #[cfg(target_os = "linux")]
         {
-            let Some(parent) = fs::read_to_string(format!("/proc/{pid}/stat")).ok()
+            let Some(parent) = fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
                 .and_then(|stat| stat.rsplit_once(')').map(|(_, fields)| fields.to_string()))
                 .and_then(|fields| fields.split_whitespace().nth(1)?.parse::<u32>().ok())
-            else { return false; };
-            if parent == 0 || parent == pid { return false; }
+            else {
+                return false;
+            };
+            if parent == 0 || parent == pid {
+                return false;
+            }
             pid = parent;
         }
         #[cfg(not(target_os = "linux"))]
@@ -640,19 +665,28 @@ fn launched_app_window_ids(
     launched_pid: u32,
 ) -> HashSet<String> {
     let executable = executable.canonicalize().ok();
-    processes.iter().filter_map(|window| {
-        let pid = window.pid?;
-        let same_executable = executable.as_ref().is_some_and(|expected| {
-            manual_core::platform::process_executable(pid)
-                .and_then(|path| path.canonicalize().ok()).as_ref() == Some(expected)
-        });
-        if !process_descends_from(pid, launched_pid) && !same_executable { return None; }
-        let raw_id = window.window_id.as_deref()?;
-        let id = if let Some(hex) = raw_id.strip_prefix("0x") {
-            u64::from_str_radix(hex, 16).ok()?
-        } else { raw_id.parse::<u64>().ok()? };
-        Some(format!("0x{id:x}"))
-    }).collect()
+    processes
+        .iter()
+        .filter_map(|window| {
+            let pid = window.pid?;
+            let same_executable = executable.as_ref().is_some_and(|expected| {
+                manual_core::platform::process_executable(pid)
+                    .and_then(|path| path.canonicalize().ok())
+                    .as_ref()
+                    == Some(expected)
+            });
+            if !process_descends_from(pid, launched_pid) && !same_executable {
+                return None;
+            }
+            let raw_id = window.window_id.as_deref()?;
+            let id = if let Some(hex) = raw_id.strip_prefix("0x") {
+                u64::from_str_radix(hex, 16).ok()?
+            } else {
+                raw_id.parse::<u64>().ok()?
+            };
+            Some(format!("0x{id:x}"))
+        })
+        .collect()
 }
 
 fn select_existing_app_window<'a>(
@@ -660,21 +694,36 @@ fn select_existing_app_window<'a>(
     processes: &[markits::ui_elements::DetectedUiElement],
     program: &str,
 ) -> Option<&'a Value> {
-    let executable = manual_core::platform::application_executable(program).ok()?.canonicalize().ok()?;
-    let matching_ids: HashSet<String> = processes.iter().filter_map(|window| {
-        let pid = window.pid?;
-        let process_executable = manual_core::platform::process_executable(pid)?.canonicalize().ok()?;
-        if process_executable != executable { return None; }
-        let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
-        Some(format!("0x{id:x}"))
-    }).collect();
-    windows.iter().filter(|window| {
-        window["id"].as_str().is_some_and(|id| matching_ids.contains(id))
-            && window["width"].as_u64().unwrap_or(0) >= 120
-            && window["height"].as_u64().unwrap_or(0) >= 80
-    }).max_by_key(|window| {
-        window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
-    })
+    let executable = manual_core::platform::application_executable(program)
+        .ok()?
+        .canonicalize()
+        .ok()?;
+    let matching_ids: HashSet<String> = processes
+        .iter()
+        .filter_map(|window| {
+            let pid = window.pid?;
+            let process_executable = manual_core::platform::process_executable(pid)?
+                .canonicalize()
+                .ok()?;
+            if process_executable != executable {
+                return None;
+            }
+            let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
+            Some(format!("0x{id:x}"))
+        })
+        .collect();
+    windows
+        .iter()
+        .filter(|window| {
+            window["id"]
+                .as_str()
+                .is_some_and(|id| matching_ids.contains(id))
+                && window["width"].as_u64().unwrap_or(0) >= 120
+                && window["height"].as_u64().unwrap_or(0) >= 80
+        })
+        .max_by_key(|window| {
+            window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
+        })
 }
 
 pub fn is_running(state: &RecorderState) -> Result<bool, String> {
@@ -696,7 +745,10 @@ pub fn finish(state: &RecorderState) -> Result<RecordingResult, String> {
     finish_excluding_control(state, None)
 }
 
-pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f64, f64, f64, f64)>) -> Result<RecordingResult, String> {
+pub fn finish_excluding_control(
+    state: &RecorderState,
+    control_bounds: Option<(f64, f64, f64, f64)>,
+) -> Result<RecordingResult, String> {
     let mut session = state
         .0
         .lock()
@@ -712,8 +764,10 @@ pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f
         return Err("記録された操作がありません。".into());
     }
     if let Some((left, top, width, height)) = control_bounds {
-        events.retain(|event| !matches!(event, RecordedEvent::Click { x, y, .. }
-            if *x >= left && *x < left + width && *y >= top && *y < top + height));
+        events.retain(|event| {
+            !matches!(event, RecordedEvent::Click { x, y, .. }
+            if *x >= left && *x < left + width && *y >= top && *y < top + height)
+        });
     }
     let scenario = build_scenario(&session, &events);
     let operation_text = events_to_text(&events, &session.window);
@@ -741,6 +795,20 @@ pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f
         &screenshot_path,
         session.app_child.is_some(),
     )?;
+    use base64::Engine;
+    let original_bytes = fs::read(&screenshot_path).map_err(|e| e.to_string())?;
+    let registered = manual_core::screenshots::register(
+        &session.root,
+        &json!({
+            "id": if session.task_id.starts_with("shot-") { Some(session.task_id.clone()) } else { None },
+            "source": base64::engine::general_purpose::STANDARD.encode(&original_bytes),
+            "recipe": scenario, "adopt": false
+        }),
+    )?;
+    let screenshot_id = registered["screenshot"]["id"]
+        .as_str()
+        .ok_or("画像の保存に失敗しました。")?
+        .to_owned();
     if let Some(child) = session.app_child.take() {
         stop_child(child);
     }
@@ -756,10 +824,11 @@ pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f
         .arg(&completion_path);
     let markits_result = launch_markits(command, &log_path);
     let (markits_started, message) = match markits_result {
-        Ok(()) => (true, "操作シナリオを保存し、撮影画像をMarkIts Desktopで開きました。注釈を保存するとAIタグへ自動で取り込みます。".into()),
+        Ok(()) => (true, "操作シナリオを保存し、撮影画像をMarkIts Desktopで開きました。注釈を保存するとスクリーンショット一覧へ取り込みます。".into()),
         Err(error) => (false, format!("操作シナリオと撮影画像は保存しましたが、MarkIts Desktop を起動できませんでした。{error}")),
     };
     Ok(RecordingResult {
+        screenshot_id,
         scenario_file: format!("manual/scenarios/{file_name}"),
         operation_text,
         source_file: screenshot_path.to_string_lossy().into_owned(),
@@ -936,7 +1005,10 @@ pub fn annotation_if_complete(
     if !marker.is_file() {
         let exit_marker = marker.with_extension("exit");
         if exit_marker.is_file() {
-            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| "MarkIts Desktop が編集完了前に終了しました。撮影画像と入力は保持しています。".into()));
+            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| {
+                "MarkIts Desktop が編集完了前に終了しました。撮影画像と入力は保持しています。"
+                    .into()
+            }));
         }
         return Ok(None);
     }
@@ -945,9 +1017,9 @@ pub fn annotation_if_complete(
     // drew no marks. Keep that distinct from importing an annotation spec,
     // where an empty spec is almost certainly an accidental selection.
     let normalized = normalize_annotation_spec_for_capture(&annotation)?;
-    let _ = fs::remove_file(marker);
-    let _ = fs::remove_file(marker.with_extension("exit"));
-    let _ = fs::remove_file(source_file);
+    // Keep completion markers until adoption so a failed import can retry.
+    // Original staging file remains available for completion retries.
+    let _ = source_file;
     Ok(Some(normalized))
 }
 
@@ -978,8 +1050,15 @@ pub fn preserve_annotated_capture(
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("MarkIts出力がPNG画像ではありません。".into());
     }
-    let (initial_asset, _) = manual_core::config::asset_destination(root, &page_path, &format!("markits-{task_id}.png"))?;
-    let asset_dir = initial_asset.parent().ok_or("Invalid asset destination")?.to_path_buf();
+    let (initial_asset, _) = manual_core::config::asset_destination(
+        root,
+        &page_path,
+        &format!("markits-{task_id}.png"),
+    )?;
+    let asset_dir = initial_asset
+        .parent()
+        .ok_or("Invalid asset destination")?
+        .to_path_buf();
     fs::create_dir_all(&asset_dir).map_err(|e| e.to_string())?;
     let base_filename = format!("markits-{task_id}.png");
     let digest = format!("{:x}", Sha256::digest(&bytes));
@@ -997,7 +1076,10 @@ pub fn preserve_annotated_capture(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_nanos();
-    let temporary = asset_dir.join(format!(".{base_filename}.tmp-{}-{nonce}", std::process::id()));
+    let temporary = asset_dir.join(format!(
+        ".{base_filename}.tmp-{}-{nonce}",
+        std::process::id()
+    ));
     let mut staged = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -1011,7 +1093,9 @@ pub fn preserve_annotated_capture(
     drop(staged);
     loop {
         let asset_path = asset_dir.join(&filename);
-        match publish_image(&temporary, &asset_path, &bytes, |source, destination| fs::hard_link(source, destination)) {
+        match publish_image(&temporary, &asset_path, &bytes, |source, destination| {
+            fs::hard_link(source, destination)
+        }) {
             Ok(()) => break,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let existing = match fs::read(&asset_path) {
@@ -1028,7 +1112,10 @@ pub fn preserve_annotated_capture(
                     filename = format!("markits-{task_id}-{digest}.png");
                 } else {
                     let _ = fs::remove_file(&temporary);
-                    return Err(format!("撮影画像のハッシュ名が既存画像と衝突しました: {}", asset_path.display()));
+                    return Err(format!(
+                        "撮影画像のハッシュ名が既存画像と衝突しました: {}",
+                        asset_path.display()
+                    ));
                 }
             }
             Err(error) => {
@@ -1057,10 +1144,15 @@ fn publish_image(
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err(error),
         Err(_) => {}
     }
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(destination)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
     let result = file.write_all(bytes).and_then(|_| file.sync_all());
     drop(file);
-    if result.is_err() { let _ = fs::remove_file(destination); }
+    if result.is_err() {
+        let _ = fs::remove_file(destination);
+    }
     result
 }
 
@@ -1133,7 +1225,8 @@ mod tests {
         let source = dir.join("source.png");
         let destination = dir.join("capture.png");
         fs::write(&source, b"new image").unwrap();
-        let unsupported = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+        let unsupported =
+            |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
         publish_image(&source, &destination, b"new image", unsupported).unwrap();
         assert_eq!(fs::read(&destination).unwrap(), b"new image");
         let error = publish_image(&source, &destination, b"replacement", unsupported).unwrap_err();
@@ -1169,8 +1262,15 @@ mod tests {
         launch_markits(command, &dir.join("markits.log")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            match annotation_if_complete(source.to_str().unwrap(), dir.join("annotated.png").to_str().unwrap(), completion.to_str().unwrap()) {
-                Err(error) => { assert!(error.contains("編集完了前")); break; }
+            match annotation_if_complete(
+                source.to_str().unwrap(),
+                dir.join("annotated.png").to_str().unwrap(),
+                completion.to_str().unwrap(),
+            ) {
+                Err(error) => {
+                    assert!(error.contains("編集完了前"));
+                    break;
+                }
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
                 other => panic!("missing exit notification: {other:?}"),
             }
@@ -1249,7 +1349,7 @@ mod tests {
             "docs/guide.md",
             "screen-one",
             different.to_str().unwrap(),
-            "annotated"
+            "annotated",
         )
         .unwrap();
         let different_retry = preserve_annotated_capture(
@@ -1287,13 +1387,27 @@ mod tests {
         let root = test_dir("capture-configured-assets");
         fs::create_dir_all(root.join("docs/sub")).unwrap();
         fs::write(root.join("docs/sub/guide.md"), "# Guide\n").unwrap();
-        fs::write(root.join("manual_setting.json"), r#"{"docs":"docs","assets":"media/shots"}"#).unwrap();
+        fs::write(
+            root.join("manual_setting.json"),
+            r#"{"docs":"docs","assets":"media/shots"}"#,
+        )
+        .unwrap();
         let source = root.join("capture.png");
         let bytes = b"\x89PNG\r\n\x1a\nimage";
         fs::write(&source, bytes).unwrap();
-        let block = preserve_annotated_capture(root.to_str().unwrap(), "docs/sub/guide.md", "nested-shot", source.to_str().unwrap(), "capture").unwrap();
+        let block = preserve_annotated_capture(
+            root.to_str().unwrap(),
+            "docs/sub/guide.md",
+            "nested-shot",
+            source.to_str().unwrap(),
+            "capture",
+        )
+        .unwrap();
         assert!(block.contains("../../media/shots/markits-nested-shot.png"));
-        assert_eq!(fs::read(root.join("media/shots/markits-nested-shot.png")).unwrap(), bytes);
+        assert_eq!(
+            fs::read(root.join("media/shots/markits-nested-shot.png")).unwrap(),
+            bytes
+        );
         assert!(!root.join("docs/sub/assets").exists());
         fs::remove_dir_all(root).unwrap();
     }
@@ -1317,7 +1431,10 @@ mod tests {
         )
         .unwrap();
         assert!(block.contains("assets/markits-index-shot.png"));
-        assert_eq!(fs::read(docs.join("assets/markits-index-shot.png")).unwrap(), bytes);
+        assert_eq!(
+            fs::read(docs.join("assets/markits-index-shot.png")).unwrap(),
+            bytes
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1389,8 +1506,17 @@ mod tests {
         let value: Value = serde_json::from_str(&normalized).unwrap();
         assert_eq!(value["annotations"], json!([]));
         assert_eq!(value["canvas"]["width"], 800);
-        assert!(!marker.exists());
-        assert!(!source.exists());
+        assert!(marker.exists());
+        assert!(source.exists());
+        assert_eq!(
+            annotation_if_complete(
+                source.to_str().unwrap(),
+                annotation.to_str().unwrap(),
+                marker.to_str().unwrap()
+            )
+            .unwrap(),
+            Some(normalized.clone())
+        );
 
         let block = preserve_annotated_capture(
             root.to_str().unwrap(),
@@ -1579,12 +1705,19 @@ mod tests {
             json!({"id":"new-app","title":"Settings","width":1000,"height":700}),
         ];
         assert_eq!(
-            select_launched_window(&windows, &existing, "", &HashSet::from(["new-splash".into(), "new-app".into()])).unwrap()["id"],
+            select_launched_window(
+                &windows,
+                &existing,
+                "",
+                &HashSet::from(["new-splash".into(), "new-app".into()])
+            )
+            .unwrap()["id"],
             "new-app"
         );
         assert!(select_launched_window(&windows, &existing, "", &HashSet::new()).is_none());
         assert_eq!(
-            select_launched_window(&windows, &existing, "Manual Studio", &HashSet::new()).unwrap()["id"],
+            select_launched_window(&windows, &existing, "Manual Studio", &HashSet::new()).unwrap()
+                ["id"],
             "manual-studio-window"
         );
     }
@@ -1607,10 +1740,15 @@ mod tests {
             height: 600.0,
         }];
         assert_eq!(
-            select_existing_app_window(&windows, &detected, executable.to_str().unwrap())
-                .unwrap()["id"],
+            select_existing_app_window(&windows, &detected, executable.to_str().unwrap()).unwrap()
+                ["id"],
             "0x10"
         );
-        assert!(select_existing_app_window(&windows, &detected, "manual-studio-missing-test-executable").is_none());
+        assert!(select_existing_app_window(
+            &windows,
+            &detected,
+            "manual-studio-missing-test-executable"
+        )
+        .is_none());
     }
 }

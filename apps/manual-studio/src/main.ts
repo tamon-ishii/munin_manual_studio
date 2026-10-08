@@ -1,3 +1,4 @@
+import { setupScreenshotLibrary } from "./screenshotLibrary";
 import { showPartialFailure, showExecutionHistory, showCaptureExpectations, type ExecutionRun, type ExecutionLimits } from './executionHistory';
 import { selectGenerationPages, taskStatusLabels, taskKindLabels } from './taskPresentation';
 import { uiIcon } from './uiIcons';
@@ -563,7 +564,7 @@ function tabToComponentId(name: string): string {
   }
 }
 function chooseTab(name: string): void {
-  if (name === "uimap" || name === "publish" || name === "appearance" || name === "settings") {
+  if (name === "uimap" || name === "publish" || name === "appearance" || name === "settings" || name === "applications") {
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
     element<HTMLDetailsElement>("settings-menu").open = false;
     openPanelDialog(`panel-${name}`);
@@ -664,12 +665,14 @@ async function openPage(page: string, check = true): Promise<void> {
   const previousPage = documentState?.page;
   ++previewVersion;
   documentState = opened;
+  editor.dataset.owner = JSON.stringify([root, page]);
   editor.value = opened.content;
   resetEditHistory();
   if (previousPage !== page) editor.scrollTop = 0;
   editor.disabled = false;
   dirty = false;
   element("editor-title").textContent = page;
+  editor.dataset.owner = JSON.stringify([projectRoot, page]);
   document.title = `${page} — Munin Manual Studio`;
   updateSaveState(); updateCursor(); renderPages(); renderDocumentTags();
   element("page-list").querySelector("[aria-current=page]")?.scrollIntoView({ block: "nearest" });
@@ -701,6 +704,11 @@ function renderPages(): void {
     { query: input("tree-search").value, markdownOnly: element<HTMLSelectElement>("tree-filter").value === "markdown" },
   );
 }
+const screenshotLibrary = setupScreenshotLibrary({
+  root: () => projectRoot, request: rpc, work, applications: () => launchCommands,
+  page: () => documentState?.page,
+  insert: (markdown) => { const start = editor.selectionStart; editor.value = editor.value.slice(0, start) + "\n\n" + markdown + "\n\n" + editor.value.slice(editor.selectionEnd); dirty = true; updateSaveState(); void renderPreview(); },
+});
 async function refreshWorkspace(reloadPage = false): Promise<void> {
   const root = projectRoot;
   const current = documentState;
@@ -708,9 +716,11 @@ async function refreshWorkspace(reloadPage = false): Promise<void> {
   const documentVersion = documentRequestVersion;
   const version = ++workspaceRequestVersion;
   const loaded = JSON.parse(await rpc("state", {}, root)) as State;
+  loaded.tasks = loaded.tasks.filter(task => task.kind !== "screenshot");
   if (root !== projectRoot || version !== workspaceRequestVersion) return;
   workspace = loaded;
   renderPages(); renderTasks(); renderMap(); updateWorkspaceGuide();
+  await screenshotLibrary.refresh();
   element("task-count").textContent = String(workspace.tasks.length);
   if (reloadPage && current) {
     if (documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
@@ -951,6 +961,7 @@ async function openProject(root: string, check = true): Promise<void> {
   status("プロジェクトを開いています…");
   const version = ++projectRequestVersion;
   const loaded = JSON.parse(await rpc("state", {}, root)) as State;
+  loaded.tasks = loaded.tasks.filter(task => task.kind !== "screenshot");
   if (version !== projectRequestVersion) return;
   ++documentRequestVersion; ++workspaceRequestVersion;
   if (projectRoot !== root) expandedFolders.clear();
@@ -1009,7 +1020,8 @@ async function saveDocument(refresh = true): Promise<void> {
   }
   if (root !== projectRoot || current !== documentState || version !== documentRequestVersion) return;
   documentSaveState = null;
-  documentState = saved; dirty = editor.value !== content; updateSaveState();
+  if (editor.value === content && saved.content !== content) editor.value = saved.content;
+  documentState = saved; dirty = editor.value !== saved.content; updateSaveState();
   if (refresh) await refreshWorkspace();
   status(`${page}を保存しました。`);
 }
@@ -1039,7 +1051,7 @@ function renderTasks(): void {
   element("task-list").innerHTML = visibleTasks.length ? visibleTasks.map((task) => {
     const source = workspace!.capture_sources[task.id];
     const description = source?.kind === "window" ? `${escape(source.title)} · 外枠 ${source.inset}px` : source?.kind === "scenario" ? "撮影元と撮影前の操作を設定済み" : "撮影元はまだ設定されていません。文書のAI更新で自動設定できます。";
-    return `<article class="card${task.status === "approved" ? " card-approved is-approved" : ""}" data-task="${escape(task.id)}"><div class="task-header"><h2>${escape(task.id)} <small>${escape(task.page)}</small></h2><span data-task-status="${taskDisplayStatus(task)}" class="badge${task.status === "approved" ? " badge-approved is-approved" : ""}">${kindLabel[task.kind]} · ${statusLabel[taskDisplayStatus(task)] || escape(task.status)}</span></div>${workspace!.update_reasons?.[task.id]?.length ? `<p class="update-reasons">更新候補の理由: ${workspace!.update_reasons[task.id].map(escape).join("・")}${task.status === "approved" ? "（確定済みのため自動更新しません）" : ""}</p>` : ""}${taskDisplayStatus(task) === "failed" ? `<p class="task-failure" role="status">${escape(taskFailures.get(taskFailureKey(task)) || workspace?.execution_results?.[task.id]?.error || "前回の更新に失敗しました。実行記録から再開できます。")}</p>` : ""}<label class="task-prompt-label">AIへの指示<textarea data-prompt="${escape(task.id)}" rows="3">${escape(task.prompt)}</textarea></label><div class="actions"><button data-save-prompt="${escape(task.id)}">指示を保存</button><button data-toggle-approved="${escape(task.id)}"${task.status === "approved" ? ' class="button-approved is-approved"' : ""}${task.status === "missing" ? " disabled title=\"生成結果がある場合に確定できます\"" : ""}>${task.status === "approved" ? "確定解除" : "確定"}</button>${task.kind !== "screenshot" ? `<button data-generate="${escape(task.id)}" class="primary">${task.kind === "diagram" ? "図をAI更新" : "文章をAI更新"}</button>` : ""}</div>${task.kind === "screenshot" ? `
+    return `<article class="card${task.status === "approved" ? " card-approved is-approved" : ""}" data-task="${escape(task.id)}"><div class="task-header"><h2>${escape(task.name || task.prompt.replace(/\s+/g, " ").slice(0, 48))} <small>${escape(task.page)}</small></h2><span data-task-status="${taskDisplayStatus(task)}" class="badge${task.status === "approved" ? " badge-approved is-approved" : ""}">${kindLabel[task.kind]} · ${statusLabel[taskDisplayStatus(task)] || escape(task.status)}</span></div>${workspace!.update_reasons?.[task.id]?.length ? `<p class="update-reasons">更新候補の理由: ${workspace!.update_reasons[task.id].map(escape).join("・")}${task.status === "approved" ? "（確定済みのため自動更新しません）" : ""}</p>` : ""}${taskDisplayStatus(task) === "failed" ? `<p class="task-failure" role="status">${escape(taskFailures.get(taskFailureKey(task)) || workspace?.execution_results?.[task.id]?.error || "前回の更新に失敗しました。実行記録から再開できます。")}</p>` : ""}<label class="task-prompt-label">AIへの指示<textarea data-prompt="${escape(task.id)}" rows="3">${escape(task.prompt)}</textarea></label><div class="actions"><button data-save-prompt="${escape(task.id)}">指示を保存</button><button data-toggle-approved="${escape(task.id)}"${task.status === "approved" ? ' class="button-approved is-approved"' : ""}${task.status === "missing" ? " disabled title=\"生成結果がある場合に確定できます\"" : ""}>${task.status === "approved" ? "確定解除" : "確定"}</button>${task.kind !== "screenshot" ? `<button data-generate="${escape(task.id)}" class="primary">${task.kind === "diagram" ? "図をAI更新" : "文章をAI更新"}</button>` : ""}</div>${task.kind === "screenshot" ? `
       <p class="muted">${description}</p><img class="task-image" data-thumb="${escape(task.id)}" alt="${escape(task.id)}の登録画像" hidden />
       <div class="actions">${source ? `<button class="primary" data-recapture="${escape(task.id)}">${source.kind === "scenario" ? "設定した手順で更新" : "同じ撮影元で更新"}</button>` : ""}<button data-source-config="${escape(task.id)}">${source ? "撮影元を変更" : "撮影元を選ぶ"}</button><button data-capture-expectations="${escape(task.id)}">撮影成功の条件</button><button data-register-image="${escape(task.id)}">既存のPNGを登録</button></div>
       <details class="capture-settings"><summary>撮影元の設定</summary><p class="muted">アプリの対象画面を開いて一覧を更新してください。タイトルで記憶するので、アプリを再起動しても使えます。同じタイトルが複数ある場合は自動で選びません。Waylandでは毎回OSの撮影ダイアログで対象を選びます。</p><div class="actions"><select data-window-select="${escape(task.id)}"><option value="">一覧を更新してください</option></select><button data-window-list="${escape(task.id)}">一覧を更新</button></div><div class="actions"><label>外枠を除く（px）<input type="number" min="0" max="64" data-inset="${escape(task.id)}" value="${source?.kind === "window" ? source.inset : 0}" /></label><button data-capture="${escape(task.id)}" class="primary">撮影元を保存して撮影</button></div></details>` : ""}<button class="edit-task" data-edit-page="${escape(task.page)}">原稿を開く</button></article>`;
@@ -1133,7 +1145,14 @@ async function confirmGenerationInput(page: string, id?: string, feedback = "", 
   const load = async (ids?: string[], revision?: string) => JSON.parse(await rpc("generation-input", {
     page, id, feedback, json: { ...(ids ? { ids } : {}), ...(revision ? { revision } : {}) },
   }, root)) as GenerationInput;
-  const initial = await load(selectedIds);
+  let initial = await load(selectedIds);
+  const anonymous = [...initial.existing_content.matchAll(/<!--\s*ai:task\b((?:"[^"]*"|'[^']*'|[^>"'])*)-->/g)].some(match => !tagAttribute(match[1], 'id'));
+  if (anonymous) {
+    if (root !== projectRoot) throw new Error("プロジェクトが切り替わりました。");
+    if (documentState?.page === page) await saveDocument(false);
+    else await rpc('editor-save', {page,json:{content:initial.existing_content,revision:initial.revision}},root);
+    await refreshWorkspace(); initial = await load(selectedIds);
+  }
   initial.limits = defaults;
   const input = await showGenerationInput(initial, (ids, revision) => load(ids, revision), tasksForPage(page).filter(task => task.status === "approved").length);
   if (root !== projectRoot) throw new Error("ワークスペースが切り替わりました。生成入力を確認し直してください。");
@@ -1292,7 +1311,7 @@ async function generateDocument(page: string, resumeIds?: string[], defaults?: E
   const root = projectRoot;
   const allTasks = JSON.parse(await rpc("page-tasks", { page }, root)) as Task[];
   if (root !== projectRoot) throw new Error("プロジェクトが切り替わりました。");
-  const supported = allTasks.filter(task => ["text", "diagram", "screenshot"].includes(task.kind));
+  const supported = allTasks.filter(task => ["text", "diagram"].includes(task.kind));
   if (!supported.some(task => task.status !== "approved")) { status("更新できる未確定のAIタグがありません。"); return 0; }
   await ensureAiSettings();
   const input = await confirmGenerationInput(page, undefined, "", resumeIds, defaults);
@@ -1377,7 +1396,7 @@ async function generateAllDocuments(): Promise<void> {
   const candidates = [];
   for (const page of pages) {
     const tasks = JSON.parse(await rpc("page-tasks", { page }, root)) as Task[];
-    candidates.push({ page, tasks: tasks.filter(task => ["text", "diagram", "screenshot"].includes(task.kind)) });
+    candidates.push({ page, tasks: tasks.filter(task => ["text", "diagram"].includes(task.kind)) });
   }
   const selectedPages = await selectGenerationPages(candidates);
   if (!selectedPages) { status("AI更新をキャンセルしました。"); return; }
@@ -2034,7 +2053,7 @@ element("start-operation-recording").addEventListener("click", () => {
     const message = "別の処理が終わってから操作記録を開始してください。";
     element("operation-recording-status").textContent = message; status(message, true); return;
   }
-  const selectedCommand = launchCommands.find((command) => command.name === element<HTMLSelectElement>("screenshot-launch-command").value);
+  const selectedCommand = launchCommands.find((command) => (command.id || command.name) === element<HTMLSelectElement>("screenshot-launch-command").value);
   const program = selectedCommand?.program.trim() || input("screenshot-launch-program").value.trim();
   const issue = !native ? "操作記録はデスクトップアプリで利用できます。"
     : !program ? "起動するアプリを選択してください。"
@@ -2044,7 +2063,7 @@ element("start-operation-recording").addEventListener("click", () => {
   const session = captureSessions.active;
   if (!session || operationRecording || recordingStarting || recordingFinishActive) return;
   const generation = session.generation;
-  const args = selectedCommand?.args ?? element<HTMLTextAreaElement>("screenshot-launch-args").value.split("\n").map((value) => value.trim()).filter(Boolean);
+  const args = selectedCommand?.args ?? element<HTMLTextAreaElement>("screenshot-launch-args").value.split("\n").filter((value) => value.length > 0);
   pendingLaunchProgram = program;
   pendingLaunchArgs = args;
   const progress = "アプリを起動し、ウィンドウを自動検出しています（最大30秒）。";
@@ -2089,15 +2108,15 @@ function updateLaunchSelection(): void {
   element<HTMLElement>("custom-launch-command").hidden = !custom;
   element<HTMLElement>("custom-launch-args-label").hidden = !custom;
   const summary = element("screenshot-launch-summary");
-  const command = launchCommands.find((item) => item.name === select.value);
+  const command = launchCommands.find((item) => (item.id || item.name) === select.value);
   summary.textContent = command ? `起動アプリ: ${command.program}${command.args.length ? `（引数 ${command.args.length} 件）` : ""}` : custom ? "アプリの実行ファイルと必要な引数を指定してください。" : "共通コマンドを登録すると、ここから選べます。";
 }
 function refreshLaunchCommandOptions(): void {
   const select = element<HTMLSelectElement>("screenshot-launch-command");
   const previous = select.value;
-  select.replaceChildren(...launchCommands.map((command) => new Option(command.name, command.name)));
+  select.replaceChildren(...launchCommands.map((command) => new Option(command.name || command.program.split(/[\\/]/).pop() || "対象アプリ", command.id || command.name)));
   select.add(new Option("カスタム起動コマンド", "__custom__"));
-  select.value = previous && (previous === "__custom__" || launchCommands.some((item) => item.name === previous)) ? previous : launchCommands[0]?.name ?? "__custom__";
+  select.value = previous && (previous === "__custom__" || launchCommands.some((item) => (item.id || item.name) === previous)) ? previous : launchCommands[0]?.id || launchCommands[0]?.name || "__custom__";
   updateLaunchSelection();
 }
 function renderLaunchCommands(): void {
@@ -2105,7 +2124,7 @@ function renderLaunchCommands(): void {
   list.replaceChildren();
   launchCommands.forEach((command, index) => {
     const row = document.createElement("div"); row.className = "launch-command-row";
-    const nameLabel = document.createElement("label"); nameLabel.textContent = "表示名";
+    const nameLabel = document.createElement("label"); nameLabel.textContent = "表示名（省略可）";
     const name = document.createElement("input"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name);
     const programLabel = document.createElement("label"); programLabel.textContent = "起動コマンド / アプリ";
     const programWrap = document.createElement("div"); programWrap.className = "app-picker-row";
@@ -2115,7 +2134,9 @@ function renderLaunchCommands(): void {
     const argsLabel = document.createElement("label"); argsLabel.textContent = "起動引数（1行に1つ）";
     const args = document.createElement("textarea"); args.rows = 2; args.value = command.args.join("\n"); args.dataset.launchArgs = String(index); argsLabel.append(args);
     const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "削除"; remove.dataset.launchRemove = String(index);
-    row.append(nameLabel, programLabel, argsLabel, remove); list.append(row);
+    const test = document.createElement("button"); test.type = "button"; test.textContent = "起動確認";
+    test.addEventListener("click", () => { void work(async () => { if (!native) throw new Error("起動確認はデスクトップ版で利用できます。"); await invoke("test_launch_application", { program: program.value, args: args.value.split("\n").filter(value => value.length > 0) }); status("対象アプリを起動しました。"); }); });
+    row.append(nameLabel, programLabel, argsLabel, test, remove); list.append(row);
   });
   list.querySelectorAll<HTMLButtonElement>("[data-launch-browse]").forEach((button) => button.addEventListener("click", () => { void work(async () => {
     if (!native) throw new Error("アプリ選択はデスクトップアプリで利用できます。");
@@ -2253,9 +2274,9 @@ element("screenshot-task-form").addEventListener("submit", async (event) => {
     }
     const recordedOperations = pendingRecordedOperations ? `記録した操作:\n${pendingRecordedOperations.replaceAll("<", "&lt;").replaceAll(">", "&gt;")}` : "";
     const hasRecordedCapture = Boolean(pendingRecordedOperations || pendingScenarioFile || pendingAnnotatedImageFile);
-    const selectedCommand = launchCommands.find((command) => command.name === element<HTMLSelectElement>("screenshot-launch-command").value);
+    const selectedCommand = launchCommands.find((command) => (command.id || command.name) === element<HTMLSelectElement>("screenshot-launch-command").value);
     const configuredProgram = selectedCommand?.program.trim() || input("screenshot-launch-program").value.trim();
-    const configuredArgs = selectedCommand?.args ?? element<HTMLTextAreaElement>("screenshot-launch-args").value.split("\n").map((value) => value.trim()).filter(Boolean);
+    const configuredArgs = selectedCommand?.args ?? element<HTMLTextAreaElement>("screenshot-launch-args").value.split("\n").filter((value) => value.length > 0);
     const launchProgram = hasRecordedCapture ? pendingLaunchProgram : configuredProgram;
     const launchArgs = hasRecordedCapture ? pendingLaunchArgs : configuredArgs;
     const launch = launchProgram ? `起動アプリ: ${launchProgram}${launchArgs.length ? `\n起動引数:\n${launchArgs.map((arg) => `- ${arg}`).join("\n")}` : ""}` : "";
@@ -2925,14 +2946,15 @@ themePicker.addEventListener("change", () => {
   if (native) void emit("manual-studio-theme-changed", themePicker.value);
 });
 element("add-launch-command").addEventListener("click", () => {
-  launchCommands.push({ name: "", program: "", args: [] }); renderLaunchCommands();
+  launchCommands.push({ id: `app-${crypto.randomUUID()}`, name: "", program: "", args: [] }); renderLaunchCommands();
   document.querySelector<HTMLInputElement>(`[data-launch-name="${launchCommands.length - 1}"]`)?.focus();
 });
 element("save-launch-commands").addEventListener("click", () => { void work(async () => {
   launchCommands = launchCommands.map((_command, index) => ({
+    id: _command.id || `app-${crypto.randomUUID()}`,
     name: document.querySelector<HTMLInputElement>(`[data-launch-name="${index}"]`)!.value.trim(),
     program: document.querySelector<HTMLInputElement>(`[data-launch-program="${index}"]`)!.value.trim(),
-    args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args="${index}"]`)!.value.split("\n").map((value) => value.trim()).filter(Boolean),
+    args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args="${index}"]`)!.value.split("\n").filter((value) => value.length > 0),
   }));
   await invoke<void>("save_launch_commands", { commands: launchCommands });
   renderLaunchCommands(); refreshLaunchCommandOptions(); status("共通起動コマンドを保存しました。");
