@@ -69,3 +69,18 @@ Linuxでは `scripts/smoke_manual_studio_native_library.py` によりStudio本�
 変更後のLinux/X11で `npm run manual:smoke-native` を再実行し成功。実アプリへの引数保持・クリック記録、MarkItsのクロップ拡張、原本保持、Studioの設定から撮影・再編集・文書挿入・AI未設定のHTML公開まで通過した。
 
 ネイティブ検証の待機処理は、MarkIts・入力記録・対象アプリの起動失敗／異常終了を即座に検知するよう修正した。存在しないテスト用Pythonを指定した異常系が即座に失敗すること、および修正後のLinux実画面で設定・撮影・再編集・公開まで成功することを確認した。OpenSpec strict validationも成功。
+
+## 2026-10-09 クロスプラットフォームCI
+
+実装コミット `0cc761de46df0f998b7629844a04b6bca4a3a93d` を作業ブランチへプッシュし、[Build and releaseの手動実行](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37846298547)が全体成功した。
+
+| 構成 | Core Rust | Studio Rust | ビルド・ZIP作成 |
+| --- | --- | --- | --- |
+| Linux x64 | 142成功・1 ignored | 23成功 | 成功 |
+| Windows x64 | 130成功 | 16成功 | 成功 |
+| macOS ARM64 | 139成功 | 21成功 | 成功 |
+| macOS x64 | 139成功 | 21成功 | 成功 |
+
+各構成でパッケージ構成のPythonテスト2件も成功。OS固有テストの条件によりRustの件数は異なる。LinuxのUI・生成・撮影・統合ワークフローも成功した。4構成のZIPを検証用CI成果物として保存し、Windows ZIPをダウンロードしてCRC検査、Studio／CLIの存在、プロジェクト管理データの不在を確認した。
+
+この実行は作業ブランチの検証であり、バージョン更新・タグ作成・公開リリース更新は行っていない。Windows WebView2の巨大表示・OS倍率別確認とWindows/macOSの実GUIでの記録／再編集の確認は引き続き未実施。CIのビルド・Rust成功はGUI実機確認の代替ではない。
