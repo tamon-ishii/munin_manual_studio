@@ -171,10 +171,13 @@ struct BuildPage {
 
 fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, String> {
     if let Some(root) = root {
-        let config = read_config(root);
-        let docs = super::config::project_path(root, &config.docs)?;
-        if templates == docs {
-            return super::task::collect_target_markdown_files(root, &config)
+        // Windows canonical paths use the extended-length prefix. Use the same
+        // root for collected pages and guarded assets before comparing paths.
+        let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+        let config = read_config(&canonical_root);
+        let docs = super::config::project_path(&canonical_root, &config.docs)?;
+        if templates.canonicalize().map_err(|e| e.to_string())? == docs {
+            return super::task::collect_target_markdown_files(&canonical_root, &config)
                 .into_iter()
                 .map(|(name, source)| {
                     let destination = if let Ok(relative) = source.strip_prefix(&docs) {
@@ -182,7 +185,7 @@ fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, 
                     } else {
                         Path::new("_external").join(
                             source
-                                .strip_prefix(root.canonicalize().map_err(|e| e.to_string())?)
+                                .strip_prefix(&canonical_root)
                                 .map_err(|e| e.to_string())?,
                         )
                     };
@@ -695,6 +698,41 @@ fn build_inner(
 #[cfg(test)]
 mod site_tests {
     use super::*;
+
+    #[test]
+    fn canonical_pages_publish_links_from_noncanonical_project_root() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join(".");
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(
+            root.join("manual_setting.json"),
+            r#"{"docs":"docs","targets":["docs","README.md"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "# Readme").unwrap();
+        fs::write(
+            root.join("docs/index.md"),
+            "![Shot](image.png)\n[Readme](../README.md)",
+        )
+        .unwrap();
+        fs::write(root.join("docs/image.png"), b"fixture").unwrap();
+        let pages = build_pages(&root.join("docs"), Some(&root)).unwrap();
+        let page = pages
+            .iter()
+            .find(|page| page.destination == Path::new("index.md"))
+            .unwrap();
+        assert!(page.original.starts_with(root.canonicalize().unwrap()));
+        let staged = tmp.path().join("staged");
+        fs::create_dir(&staged).unwrap();
+        let body = fs::read_to_string(&page.source).unwrap();
+        let rendered = stage_page_links(&root, page, &pages, &body, &staged).unwrap();
+        assert!(rendered.contains("_assets/docs/image.png"));
+        assert!(rendered.contains("_external/README.md"));
+        assert_eq!(
+            fs::read(staged.join("_assets/docs/image.png")).unwrap(),
+            b"fixture"
+        );
+    }
 
     #[test]
     fn publish_removes_only_previously_generated_files() {
