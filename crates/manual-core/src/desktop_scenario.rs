@@ -16,6 +16,27 @@ fn nonempty(value: &Value) -> Option<&str> {
     value.as_str().filter(|text| !text.trim().is_empty())
 }
 
+fn retry_unavailable_ui_element<T>(
+    timeout: Duration,
+    mut read: impl FnMut(Duration) -> Result<T, String>,
+) -> Result<T, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let result = read(deadline.saturating_duration_since(Instant::now()));
+        match result {
+            // UIA_E_ELEMENTNOTAVAILABLE: a WebView2 node was replaced while
+            // resolving the locator. Re-resolve only this read-only operation.
+            Err(error) if error.contains("Platform error (-2147220991):")
+                && Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(100).min(
+                        deadline.saturating_duration_since(Instant::now()),
+                    ));
+                }
+            result => return result,
+        }
+    }
+}
+
 fn key_for(name: &str) -> Option<Key> {
     match name.to_ascii_lowercase().as_str() {
         "enter" | "return" => Some(Key::Enter),
@@ -710,7 +731,16 @@ pub fn run(
                 "expect_window" => {
                     wait_any_window(value.as_str().unwrap())?;
                 }
-                "press" | "focus" | "toggle" | "select" | "scroll_into_view" | "expect_visible"
+                "expect_visible" => {
+                    retry_unavailable_ui_element(Duration::from_secs(10), |remaining| {
+                        let window = selected.accessible()?;
+                        locator(&window, value.as_str().unwrap())
+                            .wait_visible(remaining)
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    })?;
+                }
+                "press" | "focus" | "toggle" | "select" | "scroll_into_view"
                 | "expect_hidden" | "expect_enabled" | "expect_disabled" | "expect_focused" => {
                     let window = selected.accessible()?;
                     let target = locator(&window, value.as_str().unwrap());
@@ -722,11 +752,6 @@ pub fn run(
                         "scroll_into_view" => target
                             .scroll_into_view()
                             .map_err(|error| error.to_string())?,
-                        "expect_visible" => {
-                            target
-                                .wait_visible(Duration::from_secs(10))
-                                .map_err(|error| error.to_string())?;
-                        }
                         "expect_hidden" => target
                             .wait_hidden(Duration::from_secs(10))
                             .map_err(|error| error.to_string())?,
@@ -911,6 +936,29 @@ pub fn run(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn visible_wait_retries_replaced_uia_node_and_preserves_other_errors() {
+        let unavailable = "Platform error (-2147220991): reading UIA control type failed";
+        let mut reads = 0;
+        let result = retry_unavailable_ui_element(Duration::from_secs(1), |_| {
+            reads += 1;
+            if reads == 1 { Err(unavailable.into()) } else { Ok("visible") }
+        });
+        assert_eq!(result.unwrap(), "visible");
+        assert_eq!(reads, 2);
+
+        let mut reads = 0;
+        let result: Result<(), String> = retry_unavailable_ui_element(Duration::from_secs(1), |_| {
+            reads += 1;
+            Err("permission denied".into())
+        });
+        assert_eq!(result.unwrap_err(), "permission denied");
+        assert_eq!(reads, 1);
+
+        let result: Result<(), String> = retry_unavailable_ui_element(Duration::ZERO, |_| Err(unavailable.into()));
+        assert_eq!(result.unwrap_err(), unavailable);
+    }
 
     #[test]
     fn launched_window_selection_excludes_ide_with_matching_title() {
