@@ -3298,6 +3298,7 @@ dependencies = [
  "markits",
  "markits-desktop",
  "open",
+ "raw-window-handle",
  "rdev",
  "rfd 0.15.4",
  "serde",

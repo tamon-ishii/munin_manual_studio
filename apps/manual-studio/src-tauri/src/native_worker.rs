@@ -13,6 +13,8 @@ pub const FLAG: &str = "--manual-studio-native-worker";
 enum Operation {
     Request(serde_json::Value),
     WindowProcesses,
+    #[cfg(target_os = "linux")]
+    ActivateWindow(String),
     Capture {
         window: String,
         destination: PathBuf,
@@ -102,6 +104,11 @@ pub fn request(value: serde_json::Value) -> Result<String, String> {
     execute(Operation::Request(value))
 }
 
+#[cfg(target_os = "linux")]
+pub fn activate_window(id: &str) -> Result<(), String> {
+    execute(Operation::ActivateWindow(id.into())).map(|_| ())
+}
+
 pub fn window_processes() -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
     serde_json::from_str(&execute(Operation::WindowProcesses)?).map_err(|e| e.to_string())
 }
@@ -148,6 +155,9 @@ pub fn run(dir: &Path) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     let response = match operation {
         Operation::Request(value) => manual_core::request(value),
+        #[cfg(target_os = "linux")]
+        Operation::ActivateWindow(id) => manual_core::window_capture::activate_window(&id)
+            .and_then(|window| serde_json::to_string(&window).map_err(|error| error.to_string())),
         Operation::WindowProcesses => {
             #[cfg(target_os = "linux")]
             let windows = markits::ui_elements::capture_desktop_windows(0, 0);

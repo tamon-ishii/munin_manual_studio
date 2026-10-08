@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Real Studio workflow in an isolated X11 session application and project.
 
-Requires the built Studio/manualctl, system Python GI/GTK3/AT-SPI, and MkDocs.
+Requires the built Studio/manualctl, system Python GI/GTK3/AT-SPI, wmctrl/xprop, and MkDocs.
 Only descendants of the spawned Studio are inspected or terminated.
 """
 import os, subprocess, tempfile, time, json, shutil, ctypes, hashlib, sys
@@ -56,6 +56,16 @@ def nodes(node, depth=0):
     except:
         pass
 
+def node_text(node):
+    name = node.get_name()
+    if name:
+        return name
+    try:
+        return Atspi.Text.get_text(node, 0, -1)
+    except Exception:
+        pass
+    return ''
+
 def find(name, role=None, prefix=False):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -67,7 +77,7 @@ def find(name, role=None, prefix=False):
                 continue
             for n in nodes(a):
                 try:
-                    if (n.get_name().startswith(name) if prefix else n.get_name() == name) and (role is None or n.get_role_name() == role) and n.get_state_set().contains(Atspi.StateType.SHOWING):
+                    if (node_text(n).startswith(name) if prefix else node_text(n) == name) and (role is None or n.get_role_name() == role) and n.get_state_set().contains(Atspi.StateType.SHOWING):
                         matches.append(n)
                 except:
                     pass
@@ -140,9 +150,6 @@ try:
             box = Atspi.Component.get_extents(field, Atspi.CoordType.SCREEN)
             assert Atspi.generate_mouse_event(box.x + box.width // 2, box.y + box.height // 2, 'b1c')
             assert field.get_component_iface().grab_focus()
-            scenario = root + '/focus.json'
-            open(scenario, 'w').write(json.dumps({'version': 1, 'platform': 'desktop', 'window': 'pid:%d:Munin Manual Studio' % app.pid, 'steps': [{'key': 'Ctrl+a'}]}))
-            subprocess.run([str(BIN / 'manualctl'), 'scenario-run', '--root', root, '--input', scenario], check=True, stdout=subprocess.DEVNULL, timeout=15)
             x11 = ctypes.CDLL('libX11.so.6')
             xtst = ctypes.CDLL('libXtst.so.6')
             x11.XOpenDisplay.restype = ctypes.c_void_p
@@ -156,42 +163,58 @@ try:
             xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
             xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
             shift = x11.XKeysymToKeycode(display, 65505)
-            for ch in root:
-                key = x11.XKeysymToKeycode(display, ord(ch))
-                assert key
-                shifted = x11.XkbKeycodeToKeysym(display, key, 0, 0) != ord(ch)
-                if shifted:
-                    assert x11.XkbKeycodeToKeysym(display, key, 0, 1) == ord(ch)
-                if shifted:
-                    xtst.XTestFakeKeyEvent(display, shift, 1, 0)
-                xtst.XTestFakeKeyEvent(display, key, 1, 0)
-                xtst.XTestFakeKeyEvent(display, key, 0, 0)
-                if shifted:
-                    xtst.XTestFakeKeyEvent(display, shift, 0, 0)
-                x11.XFlush(display)
-                time.sleep(0.04)
-            time.sleep(1)
-            assert Atspi.Text.get_text(field, 0, -1) == root
+            subprocess.run(['wmctrl', '-Fa', 'Munin Manual Studio'], check=True)
+            time.sleep(0.3)
+            fill('プロジェクトのフォルダー', root)
             click('開く', 'push button')
             time.sleep(2)
             click('設定')
             click('対象アプリ', 'push button')
             click('＋ コマンドを追加', 'push button')
-            fixture = root + '/target.py'
-            report = root + '/arguments.json'
-            open(fixture, 'w').write('import gi,sys,json\nfrom pathlib import Path\ngi.require_version("Gtk","3.0")\nfrom gi.repository import Gtk\nPath(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\nw=Gtk.Window(title="Munin Native Recording Target");w.set_default_size(640,400)\nb=Gtk.Button(label="Record target");b.connect("clicked",lambda b:b.set_label("Clicked"));w.add(b);w.connect("destroy",Gtk.main_quit);w.show_all();Gtk.main()\n')
-            fill('起動コマンド / アプリ', '/usr/bin/python3', True)
-            fill('起動引数（1行に1つ）', '\n'.join([fixture, report, ' value with spaces ', '$(literal)']))
+            target_studio = os.environ.get('MANUAL_NATIVE_TARGET_STUDIO')
+            if target_studio:
+                target_root = root + '/target-project'
+                nested = Path(target_root) / 'docs/recording-chapter/recording-section'
+                nested.mkdir(parents=True)
+                (Path(target_root) / 'docs/index.md').write_text('# Target home\n')
+                (Path(target_root) / 'manual_setting.json').write_text(json.dumps({'docs':'docs','connection_type':'none'}))
+                (nested / 'detail.md').write_text('# Hierarchy captured\n\nNested screen replay fixture.\n')
+                fill('起動コマンド / アプリ', target_studio, True)
+            else:
+                fixture = root + '/target.py'
+                report = root + '/arguments.json'
+                open(fixture, 'w').write('import gi,sys,json\nfrom pathlib import Path\ngi.require_version("Gtk","3.0")\nfrom gi.repository import Gtk\nPath(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\nw=Gtk.Window(title="Munin Native Recording Target");w.set_default_size(640,400)\nb=Gtk.Button(label="Record target");b.connect("clicked",lambda b:b.set_label("Clicked"));w.add(b);w.connect("destroy",Gtk.main_quit);w.show_all();Gtk.main()\n')
+                fill('起動コマンド / アプリ', '/usr/bin/python3', True)
+                fill('起動引数（1行に1つ）', '\n'.join([fixture, report, ' value with spaces ', '$(literal)']))
             click('共通コマンドを保存', 'push button')
             click('閉じる', 'push button')
             click('スクリーンショット一覧', 'push button')
             click('操作を記録して撮影', 'push button')
             click('記録を開始', 'push button')
             time.sleep(3)
-            assert json.load(open(report)) == [' value with spaces ', '$(literal)']
-            operation = root + '/target-click.json'
-            open(operation, 'w').write(json.dumps({'version': 1, 'platform': 'desktop', 'window': 'Munin Native Recording Target', 'steps': [{'wait_ms': 400}, {'click': {'x': 80, 'y': 80}}, {'wait_ms': 400}]}))
-            subprocess.run([str(BIN / 'manualctl'), 'scenario-run', '--root', root, '--input', operation], check=True, stdout=subprocess.DEVNULL, timeout=15)
+            if target_studio:
+                def physical_click(name):
+                    subprocess.run(['wmctrl', '-Fa', 'Manual Studio'], check=True)
+                    time.sleep(0.2)
+                    node = find(name)
+                    box = Atspi.Component.get_extents(node, Atspi.CoordType.SCREEN)
+                    xtst.XTestFakeMotionEvent(display, -1, box.x + box.width // 2, box.y + box.height // 2, 0)
+                    xtst.XTestFakeButtonEvent(display, 1, 1, 0)
+                    xtst.XTestFakeButtonEvent(display, 1, 0, 0)
+                    x11.XFlush(display)
+                    time.sleep(0.8)
+                physical_click('⚙ ワークスペース')
+                fill('プロジェクトのフォルダー', target_root)
+                physical_click('開く')
+                physical_click('recording-chapter フォルダー')
+                physical_click('recording-section フォルダー')
+                physical_click('▦ detail.md')
+                print('RECORDED: real Manual Studio hierarchy recording-chapter/recording-section/detail.md', flush=True)
+            else:
+                assert json.load(open(report)) == [' value with spaces ', '$(literal)']
+                operation = root + '/target-click.json'
+                open(operation, 'w').write(json.dumps({'version': 1, 'platform': 'desktop', 'window': 'Munin Native Recording Target', 'steps': [{'wait_ms': 400}, {'click': {'x': 80, 'y': 80}}, {'wait_ms': 400}]}))
+                subprocess.run([str(BIN / 'manualctl'), 'scenario-run', '--root', root, '--input', operation], check=True, stdout=subprocess.DEVNULL, timeout=15)
             click('スクリーンショットを実行', 'push button')
             click('⬜ 矩形', 'push button')
             canvas = find('Background Canvas', 'image')
@@ -211,15 +234,22 @@ try:
             x11.XFlush(display)
             time.sleep(0.3)
             click('編集終了', 'push button')
-            time.sleep(3)
-            manifests = list(__import__('pathlib').Path(root).glob('.munin/screenshots/*/manifest.json'))
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                manifests = list(Path(root).glob('.munin/screenshots/*/manifest.json'))
+                if len(manifests) == 1:
+                    shot = json.load(open(manifests[0]))
+                    if shot['adopted']:
+                        break
+                time.sleep(0.3)
             assert len(manifests) == 1
-            shot = json.load(open(manifests[0]))
             assert shot['adopted'] and len(shot['recipe']['steps']) > 1
             assert shot['edits'][-1]['scene']['annotations'], 'a native drag must create an annotation'
             scene_before = shot['edits'][-1]['scene']
             source_files = list(manifests[0].parent.glob('originals/*.png'))
             hashes_before = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in source_files}
+            if target_studio:
+                shutil.copyfile(source_files[0], '/tmp/munin-native-hierarchy-before.png')
             print('REGISTERED NATIVE CAPTURE', shot['id'], flush=True)
             click('MarkItsで編集', 'push button')
             click('編集終了', 'push button')
@@ -227,6 +257,29 @@ try:
             after = json.load(open(manifests[0]))
             assert after['edits'][-1]['scene'] == scene_before, 're-edit must restore the annotations exactly'
             assert {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in source_files} == hashes_before
+            subprocess.run(['wmctrl', '-Fa', 'Munin Manual Studio'], check=True)
+            time.sleep(0.3)
+            click('再撮影', 'push button')
+            # WebKit's JavaScript dialog is not exposed as AT-SPI children.
+            # Use its OK button in this fixture's fixed native window geometry.
+            frame = find('Munin Manual Studio', 'frame')
+            box = Atspi.Component.get_extents(frame, Atspi.CoordType.SCREEN)
+            xtst.XTestFakeMotionEvent(display, -1, box.x + box.width // 2 + 135, box.y + box.height // 2 + 81, 0)
+            xtst.XTestFakeButtonEvent(display, 1, 1, 0)
+            xtst.XTestFakeButtonEvent(display, 1, 0, 0)
+            x11.XFlush(display)
+            completion = find('再撮影が完了しました。', prefix=True)
+            assert '成功 1件' in node_text(completion), node_text(completion)
+            active = subprocess.check_output(['xprop', '-root', '_NET_ACTIVE_WINDOW'], text=True).strip().split()[-1]
+            active_name = subprocess.check_output(['xprop', '-id', active, '_NET_WM_NAME'], text=True)
+            assert 'Munin Manual Studio' in active_name, active_name
+            runs = list(Path(root).glob('.munin/recaptures/*.json'))
+            assert len(runs) == 1 and json.load(open(runs[0]))['items'][0]['status'] == 'succeeded'
+            if target_studio:
+                candidates = list(manifests[0].parent.glob('originals/*.png'))
+                latest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+                shutil.copyfile(latest, '/tmp/munin-native-hierarchy-after.png')
+            print('PASS: real recapture completes, shows its result, and returns Studio to the foreground.', flush=True)
             click('文書に挿入', 'push button')
             click('原稿を編集', 'push button')
             click('保存 ⌘ / Ctrl S', 'push button')
@@ -255,4 +308,7 @@ finally:
         app.wait()
     for event_file in __import__('pathlib').Path('/tmp').glob('manual-studio-recorder-%d-*.jsonl' % app.pid):
         event_file.unlink(missing_ok=True)
-    shutil.rmtree(root, ignore_errors=True)
+    if os.environ.get('MANUAL_NATIVE_KEEP_FIXTURE'):
+        print('NATIVE FIXTURE:', root, flush=True)
+    else:
+        shutil.rmtree(root, ignore_errors=True)

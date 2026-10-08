@@ -251,6 +251,21 @@ fn restore_manual_studio(
         let reset = main.set_always_on_top(was_on_top);
         focused.map_err(|error| error.to_string())?;
         reset.map_err(|error| error.to_string())?;
+        #[cfg(target_os = "linux")]
+        {
+            // GTK focus requests can be denied after the replay raised another
+            // application. Activate our own X11 window through the isolated worker.
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            let handle = main.window_handle().map_err(|error| error.to_string())?;
+            let id = match handle.as_raw() {
+                RawWindowHandle::Xlib(handle) => Some(handle.window as u64),
+                RawWindowHandle::Xcb(handle) => Some(handle.window.get() as u64),
+                _ => None,
+            };
+            if let Some(id) = id {
+                native_worker::activate_window(&format!("0x{id:x}"))?;
+            }
+        }
     }
     Ok(())
 }
@@ -275,6 +290,7 @@ async fn manual_request(
     request: serde_json::Value,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let recapture = request["action"].as_str() == Some("screenshots-recapture");
         let capture_app = app.clone();
         let attempted_capture = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let attempted = attempted_capture.clone();
@@ -308,7 +324,7 @@ async fn manual_request(
         .unwrap_or_else(|_| {
             Err("処理中に予期しないエラーが発生しました。Munin Manual Studioへ戻ります。".into())
         });
-        if attempted_capture.load(std::sync::atomic::Ordering::Relaxed) {
+        if recapture || attempted_capture.load(std::sync::atomic::Ordering::Relaxed) {
             let restored = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
             match (result, restored) {
                 (Err(error), Err(restore_error)) => Err(format!(
