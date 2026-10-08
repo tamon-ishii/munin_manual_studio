@@ -1,5 +1,7 @@
 # 長いAI指示の表示調査
 
+2026-10-09にLinuxでも「エディタ上で巨大な表示が点滅する。発生の法則は不明」と報告された。Windows固有と仮定せず、共通の浮動UIとネイティブtitleを調査する。Linux Chromeで120行のAI指示と長い生成本文上をマウス移動した試験では、表示されたブロックハンドルは66×32px、エディタ内のtitle属性は最大23文字で、巨大表示は未再現。この試験はLinuxネイティブWebKitGTK上での再現結果ではない。
+
 調査対象は旧撮影AIタグです。起動条件、録画した操作、MarkIts注釈JSONを指示へ連結するため、数十〜数百行になり得ます。
 
 旧Milkdownノードは指示textareaの高さを毎回scrollHeightへ拡大していました。Linux上のChromeで80行の指示を読み込むと、720pxのビューポートに対し約3376pxのtextareaになります。これは原稿内の指示欄の拡大を再現した結果であり、Windowsのネイティブツールチップの原因特定ではありません。
@@ -23,6 +25,7 @@ Windows WebView2の実機確認は未実施です。以下を対象OSで確認�
 
 - 対象へホバーして800ms待つと、その要素と祖先の寸法、titleの文字数、textareaの文字数、表示中のMilkdown浮動UIを採取します。
 - 巨大表示が出た時点で `Ctrl+Shift+Y` を押すと追加採取します。
+- 点滅する要素を取り逃さないよう、エディタ内の表示・位置・クラスの変更時にも採取します。ブロックハンドル、スラッシュメニュー、CodeMirrorなどを含むabsolute／fixedの浮動要素を対象とし、非表示・透明の要素は除きます。
 - Consoleで `copy(JSON.stringify(muninDisplayProbe.report(), null, 2))` を実行し、記録を保存します。終了時は `muninDisplayProbe.stop()` を実行します。
 - Windowsのバージョン、WebView2 Runtimeのバージョン、OS表示倍率、アプリのバージョン、試した操作、再現有無は別途記録します。devicePixelRatioはOS表示倍率とブラウザズームの影響を受けるため、OS表示倍率として断定しません。
 

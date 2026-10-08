@@ -29,14 +29,31 @@
       viewport: { width: innerWidth, height: innerHeight, devicePixelRatio,
         visualScale: window.visualViewport?.scale },
       ancestors,
-      floating: [...document.querySelectorAll('.milkdown-toolbar,.milkdown-link-preview,.milkdown-link-edit,[role="tooltip"]')]
-        .filter((node) => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden')
+      floating: [...document.querySelectorAll('#milkdown-editor *,[role="tooltip"]')]
+        .filter((node) => {
+          const style = getComputedStyle(node);
+          return ['absolute', 'fixed'].includes(style.position) && node.getClientRects().length
+            && style.visibility !== 'hidden' && style.opacity !== '0';
+        })
         .slice(0, 20).map(describe),
     });
     if (samples.length > 100) samples.shift();
   };
   let lastTarget;
   let timer;
+  let frame;
+  // Hover delay alone misses overlays that appear and disappear while moving.
+  const mutations = new MutationObserver((records) => {
+    if (!records.some(({ target }) => target instanceof Element &&
+      (target.closest('#milkdown-editor') || target.closest('[role="tooltip"]')))) return;
+    if (frame !== undefined) return;
+    frame = requestAnimationFrame(() => {
+      frame = undefined;
+      snapshot(lastTarget || document.activeElement, 'overlay-change');
+    });
+  });
+  mutations.observe(document.body, { subtree: true, childList: true, attributes: true,
+    attributeFilter: ['data-show', 'style', 'class', 'hidden'] });
   const hover = (event) => {
     lastTarget = event.target;
     clearTimeout(timer);
@@ -56,6 +73,8 @@
     report: () => ({ userAgent: navigator.userAgent, samples: structuredClone(samples) }),
     stop: () => {
       clearTimeout(timer);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      mutations.disconnect();
       document.removeEventListener('pointerover', hover, true);
       document.removeEventListener('keydown', key, true);
     },
