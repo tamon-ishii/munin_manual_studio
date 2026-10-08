@@ -673,7 +673,9 @@ where
             if let Some(reason) = eligibility(root, &shot) {
                 return Err(reason);
             }
+            crate::agent::log_progress(root, &format!("再撮影 {}/{}：{} — 操作を再生しています", index + 1, run.items.len(), if shot.name.is_empty() { "スクリーンショット" } else { &shot.name }));
             let source = capture(root, &shot.recipe, &id)?;
+            crate::agent::log_progress(root, "撮影完了 — 注釈・クロップを適用し、候補画像を保存しています");
             let previous = shot
                 .adopted
                 .as_deref()
@@ -754,6 +756,7 @@ where
             }
         }
         save_run(root, &run)?;
+        crate::agent::log_progress(root, &format!("画像の再撮影：{}{}", match run.items[index].status.as_str() { "succeeded" => "成功", "cancelled" => "中断", _ => "失敗" }, run.items[index].reason.as_ref().map(|reason| format!(" — {reason}")).unwrap_or_default()));
     }
     serde_json::to_value(run).map_err(|e| e.to_string())
 }
@@ -995,7 +998,9 @@ mod lifecycle_tests {
         let second = register(root.path(), &json!({"source":png(2),"recipe":recipe})).unwrap();
         let b = second["screenshot"]["id"].as_str().unwrap();
         let before = image(root.path(), a, None, false).unwrap();
-        let run = recapture_with(root.path(), &json!({}), |_, _, id| {
+        let run = recapture_with(root.path(), &json!({}), |capture_root, _, id| {
+            let progress: Value = serde_json::from_str(&crate::agent::progress(capture_root)).unwrap();
+            assert!(progress["logs"].as_array().unwrap().last().unwrap()["message"].as_str().unwrap().contains("操作を再生しています"));
             if id == b {
                 Err("failure".into())
             } else {

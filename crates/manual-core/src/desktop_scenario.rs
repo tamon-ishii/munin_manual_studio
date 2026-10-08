@@ -657,6 +657,24 @@ pub fn run(
         let (action, value) = step.as_object().unwrap().iter().next().unwrap();
         super::agent::check_cancelled(root, &checkpoint)?;
         if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+        let label = match action.as_str() {
+            "launch" => "アプリを起動", "window" => "対象ウィンドウを探して前面へ移動",
+            "wait_ms" => "記録された待機", "screenshot" => "画面を撮影",
+            "click" => "クリック", "text" | "fill" => "文字を入力", "key" => "キーを入力",
+            "expect_window" => "対象ウィンドウの表示を待機",
+            "expect_hidden" => "対象要素が隠れるまで待機（最大10秒）",
+            "expect_enabled" => "対象要素が有効になるまで待機（最大10秒）",
+            "expect_disabled" => "対象要素が無効になるまで待機（最大10秒）",
+            "expect_focused" => "対象要素のフォーカスを待機（最大10秒）",
+            "expect_value" => "対象要素の値を待機（最大10秒）",
+            "scroll" | "scroll_into_view" => "スクロール",
+            "press" => "ボタンを押す", "focus" => "対象要素へフォーカス",
+            "toggle" => "切り替え", "select" => "選択",
+            "expect_visible" => "対象要素の表示を待機（最大10秒）",
+            _ => action.as_str(),
+        };
+        let detail = if action == "wait_ms" { format!("（{}秒）", value.as_u64().unwrap_or(0) as f64 / 1000.0) } else { String::new() };
+        super::agent::log_progress(root, &format!("操作 {}/{}：{label}{detail}", index + 1, steps.len()));
         let result: Result<(), String> = (|| {
             match action.as_str() {
                 "launch" => {

@@ -17,6 +17,7 @@ export function setupScreenshotLibrary(options: Options) {
   let generation = 0;
   async function refresh() {
     const root = options.root(), version = ++generation;
+    if (recaptureOwnerRoot && recaptureOwnerRoot !== root) recaptureStatus.textContent = "";
     if (!root) { list.textContent = 'プロジェクトを開いてください。'; return; }
     const result = JSON.parse(await options.request('screenshots-list', {}, root)) as { items: Screenshot[] };
     if (root !== options.root() || version !== generation) return;
@@ -59,17 +60,57 @@ export function setupScreenshotLibrary(options: Options) {
       list.append(card);
     }
   }
-  async function recapture(json: Record<string, unknown>, root = options.root()) {
-    const plan = JSON.parse(await options.request('screenshots-recapture-plan', typeof json.id === 'string' ? { id: json.id } : {}, root)) as { items: { status: string; reason: string | null }[] };
-    const ready = plan.items.filter(item => item.status === 'pending').length;
-    if (!window.confirm(`再撮影: ${ready}件、対象外: ${plan.items.length - ready}件\n${plan.items.filter(item => item.reason).map(item => item.reason).join('\n')}\n順番にアプリを操作します。採用済みの画像は保持されます。`)) return;
-    const run = JSON.parse(await options.request('screenshots-recapture', { json }, root));
+  const recaptureStatus = document.getElementById('screenshot-recapture-status')!;
+  let activeRecaptureRoot: string | null = null;
+  let recaptureOwnerRoot: string | null = null;
+  let cancellationRequested = false;
+  async function executeRecapture(json: Record<string, unknown>, root: string) {
     if (root !== options.root()) return;
-    await refresh();
-    const failures = run.items.filter((item: {status: string}) => item.status === 'failed');
-    if (failures.length && window.confirm(`${failures.length}件の再撮影に失敗しました。失敗分だけ再試行しますか？`)) {
-      await options.request('screenshots-recapture', { json: { run: run.id, retry_failed: true } }, root); await refresh();
+    await options.request('agent-progress-clear', {}, root);
+    if (root !== options.root()) return;
+    activeRecaptureRoot = root; recaptureOwnerRoot = root; cancellationRequested = false;
+    const started = Date.now();
+    let stopped = false, lastMessage = '撮影手順を準備しています';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const result = JSON.parse(await options.request('agent-progress', {}, root)) as {logs: {message: string}[]};
+        const current = result.logs.at(-1)?.message;
+        const image = [...result.logs].reverse().find(entry => /^再撮影 \d+\//.test(entry.message))?.message;
+        lastMessage = current ? (image && current !== image ? `${image} ／ ${current}` : current) : lastMessage;
+        if (!stopped && root === options.root()) recaptureStatus.textContent = `${cancellationRequested ? "中断要求済み・操作の停止を待っています" : "再撮影中"}（経過 ${Math.floor((Date.now() - started) / 1000)}秒）：${lastMessage}`;
+      } catch { /* Keep the last task visible during transient read failures. */ }
+      if (!stopped) timer = setTimeout(() => { void poll(); }, 700);
+    };
+    recaptureStatus.textContent = '再撮影を開始しました。撮影手順を準備しています。';
+    void poll();
+    try {
+      const run = JSON.parse(await options.request('screenshots-recapture', {json}, root)) as {id: string; items: {status: string; reason?: string}[]};
+      stopped = true; clearTimeout(timer);
+      if (root === options.root()) {
+        const count = (status: string) => run.items.filter(item => item.status === status).length;
+        const interrupted = count('cancelled') > 0 || count('pending') > 0;
+        recaptureStatus.textContent = `再撮影${interrupted ? 'を中断しました' : 'が完了しました'}。成功 ${count('succeeded')}件・失敗 ${count('failed')}件・未完了 ${count('cancelled') + count('pending')}件・対象外 ${count('skipped')}件。成功した画像は候補として保存しました。比較して採用してください。`;
+        await refresh();
+      }
+      return run;
+    } catch (error) {
+      if (root === options.root()) recaptureStatus.textContent = `再撮影に失敗しました：${String(error)}`;
+      throw error;
+    } finally {
+      stopped = true; clearTimeout(timer); activeRecaptureRoot = null;
     }
+  }
+  async function recapture(json: Record<string, unknown>, root = options.root()) {
+    const plan = JSON.parse(await options.request('screenshots-recapture-plan', typeof json.id === 'string' ? {id: json.id} : {}, root)) as {items: {status: string; reason: string | null}[]};
+    if (root !== options.root()) return;
+    const ready = plan.items.filter(item => item.status === 'pending').length;
+    if (!ready) { recaptureStatus.textContent = '再撮影できる画像がありません。撮影手順と保護状態を確認してください。'; return; }
+    if (!window.confirm(`再撮影: ${ready}件、対象外: ${plan.items.length - ready}件\n順番にアプリを操作します。採用済みの画像は保持されます。`)) return;
+    const run = await executeRecapture(json, root);
+    if (!run || root !== options.root()) return;
+    const failures = run.items.filter(item => item.status === 'failed');
+    if (failures.length && window.confirm(`${failures.length}件の再撮影に失敗しました。失敗分だけ再試行しますか？`)) await executeRecapture({run: run.id, retry_failed: true}, root);
   }
   document.getElementById('screenshot-library-recapture-all')!.addEventListener('click', () => { void options.work(() => recapture({})); });
   document.getElementById('screenshot-library-migrate')!.addEventListener('click', () => { void options.work(async () => {
@@ -81,15 +122,15 @@ export function setupScreenshotLibrary(options: Options) {
     for (const page of plan.pages) await options.request('screenshots-migrate', {page:page.page,json:page}, root);
     if (root === options.root()) await refresh();
   }); });
-  document.getElementById('screenshot-library-cancel')!.addEventListener('click', () => { void options.request('agent-cancel', {}, options.root()); });
+  document.getElementById('screenshot-library-cancel')!.addEventListener('click', () => { if (activeRecaptureRoot) { cancellationRequested = true; recaptureStatus.textContent = '中断を要求しました。実行中の操作が停止するまでお待ちください。'; void options.request('agent-cancel', {}, activeRecaptureRoot).catch(error => { recaptureStatus.textContent = `中断要求に失敗しました：${String(error)}`; }); } });
   document.getElementById('screenshot-library-history')!.addEventListener('click', () => { void options.work(async () => {
     const root=options.root(); const history=JSON.parse(await options.request('screenshots-recapture-history',{},root)) as {runs:{id:string;created_at:string;items:{id:string;status:string;reason:string|null;revision:string|null}[]}[]};
     const dialog=document.createElement('dialog');dialog.className='recapture-history';
     const close=document.createElement('button');close.textContent='閉じる';close.onclick=()=>dialog.close();dialog.append(close);
     for(const run of history.runs){const card=document.createElement('article');card.className='card';const title=document.createElement('h2');title.textContent=run.created_at;card.append(title);
       for(const item of run.items){const line=document.createElement('p');line.textContent=`${item.id}: ${item.status} ${item.reason||''}`;card.append(line);}
-      const resume=document.createElement('button');resume.textContent='未完了を再開';resume.onclick=()=>{dialog.close();void options.work(async()=>{await options.request('screenshots-recapture',{json:{run:run.id}},root);if(root===options.root())await refresh();});};card.append(resume);
-      const retry=document.createElement('button');retry.textContent='失敗だけ再試行';retry.onclick=()=>{dialog.close();void options.work(async()=>{await options.request('screenshots-recapture',{json:{run:run.id,retry_failed:true}},root);if(root===options.root())await refresh();});};card.append(retry);
+      const resume=document.createElement('button');resume.textContent='未完了を再開';resume.onclick=()=>{dialog.close();void options.work(async()=>{await executeRecapture({run:run.id},root);if(root===options.root())await refresh();});};card.append(resume);
+      const retry=document.createElement('button');retry.textContent='失敗だけ再試行';retry.onclick=()=>{dialog.close();void options.work(async()=>{await executeRecapture({run:run.id,retry_failed:true},root);if(root===options.root())await refresh();});};card.append(retry);
       const adopt=document.createElement('button');adopt.textContent='成功分を採用';adopt.onclick=()=>{if(!window.confirm('各候補の寸法と注釈の位置を比較しましたか？成功した候補を採用し、使用する全原稿へ反映します。'))return;dialog.close();void options.work(async()=>{for(const item of run.items)if(item.status==='succeeded'&&item.revision)await options.request('screenshots-change',{id:item.id,json:{adopt:item.revision}},root);if(root===options.root())await refresh();});};card.append(adopt);dialog.append(card);
     }
     dialog.addEventListener('close',()=>dialog.remove());document.body.append(dialog);dialog.showModal();

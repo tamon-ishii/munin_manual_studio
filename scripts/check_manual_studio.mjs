@@ -23,6 +23,7 @@ steps.push(
   { group: 'build', name: 'Manual Studio frontend build', command: npm, args: ['run', 'manual:build'], timeoutMs: 240_000 },
   { group: 'ui', name: 'preview link browser checks', command: process.execPath, args: ['scripts/test_manual_studio_preview_navigation.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'Milkdown and Mermaid browser checks', command: process.execPath, args: ['scripts/test_manual_studio_milkdown.mjs'], timeoutMs: 120_000 },
+  { group: 'capture', name: 'screenshot recapture task progress checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_progress.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'recapture display refresh checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_display.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'MarkIts crop restoration checks', command: process.execPath, args: ['scripts/test_manual_markits_crop.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'screenshot library and instruction disclosure checks', command: process.execPath, args: ['scripts/test_manual_studio_capture_ui.mjs'], timeoutMs: 120_000 },
