@@ -48,6 +48,22 @@ try {
   await page.goto(`${base}/?root=${encodeURIComponent('/tmp/munin-ui-fixture')}`);
   await page.waitForFunction(()=>document.querySelector('#editor-title').textContent==='docs/index.md');
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await idle();
+  // The panel shares data-editor-view with the controls, but must never inherit
+  // a native tooltip containing the entire editor UI and document.
+  const editorPanel=page.locator('#panel-editor');
+  assert.equal(await editorPanel.getAttribute('title'),null);
+  assert.equal(await editorPanel.getAttribute('aria-pressed'),null);
+  const viewControls=page.locator('.editor-view-controls button[data-editor-view]');
+  assert.equal(await viewControls.count(),3);
+  for(const mode of ['edit','preview','split']) {
+    const control=page.locator(`.editor-view-controls button[data-editor-view="${mode}"]`);
+    await control.click();
+    assert.equal(await editorPanel.getAttribute('data-editor-view'),mode);
+    assert.equal(await editorPanel.getAttribute('title'),null);
+    assert.equal(await editorPanel.getAttribute('aria-pressed'),null);
+    assert.equal(await control.getAttribute('aria-pressed'),'true');
+    assert.ok((await control.getAttribute('title')).length<60);
+  }
   // Shared outline icons stay visible and unfilled in the real editor toolbar.
   const iconStyles=await page.locator('.milkdown-top-bar .ui-icon, .preview-toolbar .ui-icon').evaluateAll(nodes=>nodes.map(node=>({fill:getComputedStyle(node.querySelector('path')).fill,width:node.getBoundingClientRect().width,height:node.getBoundingClientRect().height})));
   assert.ok(iconStyles.length>=5);
@@ -65,7 +81,7 @@ try {
   await page.locator('#shortcut-help-dialog [data-close]').click();
   const priorView=await page.locator('#panel-editor').getAttribute('data-editor-view');
   await page.keyboard.press('Control+Shift+P');assert.notEqual(await page.locator('#panel-editor').getAttribute('data-editor-view'),priorView);
-  await page.locator('[data-editor-view=split]').click();
+  await page.locator('.editor-view-controls button[data-editor-view=split]').click();
   saveDelay=600;saveFails=true;await page.locator('#save-page').click();
   await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saving');await idle();
   assert.equal(await page.locator('#save-state').getAttribute('data-state'),'error');

@@ -84,3 +84,11 @@ Linuxでは `scripts/smoke_manual_studio_native_library.py` によりStudio本�
 各構成でパッケージ構成のPythonテスト2件も成功。OS固有テストの条件によりRustの件数は異なる。LinuxのUI・生成・撮影・統合ワークフローも成功した。4構成のZIPを検証用CI成果物として保存し、Windows ZIPをダウンロードしてCRC検査、Studio／CLIの存在、プロジェクト管理データの不在を確認した。
 
 この実行は作業ブランチの検証であり、バージョン更新・タグ作成・公開リリース更新は行っていない。Windows WebView2の巨大表示・OS倍率別確認とWindows/macOSの実GUIでの記録／再編集の確認は引き続き未実施。CIのビルド・Rust成功はGUI実機確認の代替ではない。
+
+## 2026-10-09 Windows実ウィンドウ検証と巨大ツールチップ修正
+
+`windows_native_smoke` を有効にしたCIでWindows Server 2025（10.0.26100、Python/Tk 8.6）の実アプリを検証した。初回は撮影・MarkIts操作後のHTML公開でパス接頭辞の不一致を検出し、原稿と資産の正規化ルートを統一した。次の実行ではWebView2のUI要素置換による `UIA_E_ELEMENTNOTAVAILABLE` を検出し、読み取り専用の表示待機に限って10秒以内に取り直すよう修正した。通常エラーと期限到達時は元のエラーを保持し、クリック等の操作は繰り返さない。
+
+修正コミット `610cb21` の[Windowsネイティブ検証ステップ](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37852099421)は成功した。実アプリへの空白・特殊文字の引数渡し、Studio記録ヘルパーのクリック記録、MarkItsの保存・再起動・クロップ・再起動・クロップ解除、原本と注釈座標の保持、資産採用・Markdown挿入・AI未設定のMkDocs HTML公開を確認した。このテストはStudio設定画面から全操作をWindowsで通すものではなく、WebView2のホバー／OS倍率別検証も含まない。
+
+利用者のLinux Mint Cinnamon録画で、約12.93秒の巨大表示にエディタ全体の案内・書式・プレビューの文字と表示切替ショートカット説明が含まれることを確認した。表示切替の `[data-editor-view]` セレクターが `#panel-editor` にも一致し、パネルのtextContentをネイティブtitleへ渡していた。すべての表示切替セレクターをボタンへ限定して修正。初期表示と3表示モードでパネルにtitle／aria-pressedが付かず、ボタンだけに短いtitleと選択状態が付く回帰テストとTypeScript型チェックが成功した。修正後の利用者環境でのホバー確認は再起動後に実施する。

@@ -1650,11 +1650,11 @@ let editorPanelWidth = 0;
 function applyEditorView(): void {
   const view = preferredEditorView || (editorPanelWidth < 850 ? "edit" : "split");
   element("panel-editor").dataset.editorView = view;
-  document.querySelectorAll<HTMLButtonElement>("[data-editor-view]").forEach(button => {
+  document.querySelectorAll<HTMLButtonElement>(".editor-view-controls button[data-editor-view]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.editorView === view));
   });
 }
-document.querySelectorAll<HTMLButtonElement>("[data-editor-view]").forEach(button => {
+document.querySelectorAll<HTMLButtonElement>(".editor-view-controls button[data-editor-view]").forEach(button => {
   button.addEventListener("click", () => {
     preferredEditorView = button.dataset.editorView as EditorView;
     try { localStorage.setItem("manual-studio-editor-view", preferredEditorView); } catch { /* Optional persistence. */ }
@@ -1878,7 +1878,7 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
   if (key === 'p') {
     const views: EditorView[] = ['edit', 'split', 'preview'];
     const next = views[(views.indexOf(element('panel-editor').dataset.editorView as EditorView) + 1) % views.length];
-    document.querySelector<HTMLButtonElement>(`[data-editor-view="${next}"]`)!.click();
+    document.querySelector<HTMLButtonElement>(`.editor-view-controls button[data-editor-view="${next}"]`)!.click();
   } else if (key === 'r') { void work(renderPreview); }
   else { void work(generateCurrentPage); }
 }
@@ -1895,7 +1895,7 @@ element('save-page').setAttribute('aria-keyshortcuts', 'Control+S Meta+S');
 element('save-page').innerHTML = `${uiIcon('save')} 保存 <kbd>⌘ / Ctrl S</kbd>`;
 element('open-workspace-settings').innerHTML = `${uiIcon('settings')} ワークスペース設定`;
 element('open-workspace-settings').title = '原稿・画像の保存先とHTML出力先を設定';
-document.querySelectorAll<HTMLElement>('[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
+document.querySelectorAll<HTMLButtonElement>('.editor-view-controls button[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
 let closingApproved = false;
 let closingPrompt = false;
 window.addEventListener("beforeunload", (event) => { if (dirty && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
