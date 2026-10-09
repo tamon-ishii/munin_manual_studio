@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 mod clipboard_paths;
 mod native_worker;
@@ -684,12 +684,35 @@ async fn finish_operation_recording(
                 size.height as f64 / scale,
             ))
         });
+    // Hidden WebKit views can suspend timers and IPC continuations. Keep
+    // capture preparation and both success/error recovery in the native host.
+    hide_recording_control(app.clone())?;
+    hide_manual_studio(app.clone(), app.state::<HiddenStudioWindows>())?;
     let state = state.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(350));
         recorder::finish_excluding_control(&state, control_bounds)
     })
     .await
-    .map_err(|error| error.to_string())??;
+    .map_err(|error| error.to_string())
+    .and_then(|result| result);
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            let restored = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
+            let _ = show_recording_control_again(app.clone());
+            return Err(match restored {
+                Ok(()) => error,
+                Err(restore_error) => format!("{error}\nMunin Manual Studioの再表示にも失敗しました: {restore_error}"),
+            });
+        }
+    };
+    app.emit_to("main", "manual-studio-screenshot-finished", &result)
+        .map_err(|error| error.to_string())?;
+    close_recording_control(app.clone())?;
+    if !result.markits_started {
+        restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>())?;
+    }
     if result.markits_started {
         let completion = PathBuf::from(&result.completion_file);
         let source = PathBuf::from(&result.source_file);

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -388,7 +389,24 @@ fn a11y_window(query: &str) -> Result<Element, String> {
         .and_then(|rest| rest.split_once("::"));
     let mut exact = Vec::new();
     let mut partial = Vec::new();
-    for app in App::list().map_err(|error| error.to_string())? {
+    // A freshly launched macOS process can be reachable by AX before it
+    // participates in global GUI application discovery. Keep PID queries
+    // attached to the requested process; the caller already polls readiness.
+    #[cfg(target_os = "macos")]
+    let apps = if let Some((pid, _)) = scoped {
+        match App::by_pid(pid, Duration::ZERO) {
+            Ok(app) => vec![app],
+            Err(xa11y::Error::SelectorNotMatched { .. } | xa11y::Error::Timeout { .. }) => {
+                return Err(format!("Accessibility window not found: {query}"));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    } else {
+        App::list().map_err(|error| error.to_string())?
+    };
+    #[cfg(not(target_os = "macos"))]
+    let apps = App::list().map_err(|error| error.to_string())?;
+    for app in apps {
         if scoped.is_some_and(|(pid, _)| app.pid.is_some_and(|actual| actual != pid)) { continue; }
         // An unrelated app may close while the desktop is being enumerated.
         let Ok(windows) = app.windows() else { continue };
@@ -460,14 +478,14 @@ pub(super) fn inspect_window(query: &str) -> Result<String, String> {
         return Err("inspect-window requires --window".into());
     }
     a11y_window(query)?
-        .dump(Some(5))
+        .dump(Some(12))
         .map_err(|error| error.to_string())
 }
 
 struct SelectedWindow {
     query: String,
     native_id: Option<String>,
-    accessible: Option<Element>,
+    accessible: RefCell<Option<Element>>,
 }
 
 impl SelectedWindow {
@@ -475,17 +493,19 @@ impl SelectedWindow {
         Self {
             query: query.to_string(),
             native_id: None,
-            accessible: None,
+            accessible: RefCell::new(None),
         }
     }
 
     fn accessible(&self) -> Result<Element, String> {
-        if let Some(window) = &self.accessible {
+        if let Some(window) = self.accessible.borrow().as_ref() {
             if window.children().is_ok() {
                 return Ok(window.clone());
             }
         }
-        selected_a11y_window(&self.query)
+        let window = selected_a11y_window(&self.query)?;
+        *self.accessible.borrow_mut() = Some(window.clone());
+        Ok(window)
     }
 
     fn native(&self) -> Result<WindowInfo, String> {
@@ -802,7 +822,7 @@ pub fn run(
                         match located {
                             LocatedWindow::Native(window) => {
                                 selected = SelectedWindow {
-                                    accessible: None,
+                                    accessible: RefCell::new(None),
                                     query: if launched_window.is_some() {
                                         window_capture::window_process_ids()?.into_iter()
                                             .find(|(id, _)| id == &window.id)
@@ -826,7 +846,7 @@ pub fn run(
                                 selected = SelectedWindow {
                                     query: query.to_string(),
                                     native_id,
-                                    accessible: Some(window),
+                                    accessible: RefCell::new(Some(window)),
                                 };
                             }
                         }

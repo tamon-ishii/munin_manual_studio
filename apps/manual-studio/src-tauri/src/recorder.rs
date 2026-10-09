@@ -597,6 +597,11 @@ pub fn start(
             return Err(error.to_string());
         }
     };
+    let recorder_log = event_file.with_extension("log");
+    let stderr = match File::create(&recorder_log) {
+        Ok(file) => file,
+        Err(error) => { stop_child(app); return Err(error.to_string()); }
+    };
     let child = match Command::new(recorder)
         .arg("--manual-studio-record-input")
         .arg(&event_file)
@@ -612,7 +617,7 @@ pub fn start(
         }).map_err(|error| error.to_string())?)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(stderr))
         .spawn()
     {
         Ok(child) => child,
@@ -827,8 +832,14 @@ pub fn finish_excluding_control(
         .session
         .take()
         .ok_or("操作記録がありません")?;
-    if let Some(child) = session.recorder.take() {
-        stop_child(child);
+    if let Some(mut child) = session.recorder.take() {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            if !status.success() {
+                return Err(format!("入力記録プロセスが終了しました ({status})。{}", read_file_tail(&session.event_file.with_extension("log"), MARKITS_STDERR_TAIL_BYTES)));
+            }
+        } else {
+            stop_child(child);
+        }
     }
     let mut events = read_events(&session.event_file)?;
     if events.is_empty() {

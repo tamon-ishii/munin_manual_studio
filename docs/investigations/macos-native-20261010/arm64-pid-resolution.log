@@ -1,0 +1,8 @@
+
+> munin-manual-studio@0.5.0 manual:smoke-native
+> node scripts/smoke_manual_markits_native.mjs
+
+PASS: real application launch preserves spaced/special arguments; Studio recorder captures a darwin click.
+MarkIts pid=6589, window=0x26 (MarkIts Editor)
+PASS: completion marker, annotation JSON, and UI metadata verified in 2540ms
+PASS: real MarkIts crop/save/reopen/expand, immutable library original, Markdown insertion and HTML publication (AI disabled).

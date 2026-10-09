@@ -1,0 +1,123 @@
+{
+  "run": 37994475502,
+  "commit": "caedd65",
+  "expectedDpi": 192,
+  "checks": [
+    {
+      "native": {
+        "dpi": 192,
+        "scale": 2,
+        "pid": 2796,
+        "bounds": {
+          "left": 0,
+          "right": 1440,
+          "bottom": 940,
+          "top": 0
+        }
+      },
+      "viewport": {
+        "width": 707,
+        "height": 435,
+        "devicePixelRatio": 2
+      },
+      "mode": 0
+    },
+    {
+      "native": {
+        "dpi": 192,
+        "scale": 2,
+        "pid": 2796,
+        "bounds": {
+          "left": 0,
+          "right": 1440,
+          "bottom": 940,
+          "top": 0
+        }
+      },
+      "viewport": {
+        "width": 707,
+        "height": 435,
+        "devicePixelRatio": 2
+      },
+      "mode": 1
+    },
+    {
+      "native": {
+        "dpi": 192,
+        "scale": 2,
+        "pid": 2796,
+        "bounds": {
+          "left": 0,
+          "right": 1440,
+          "bottom": 940,
+          "top": 0
+        }
+      },
+      "viewport": {
+        "width": 707,
+        "height": 435,
+        "devicePixelRatio": 2
+      },
+      "mode": 2
+    },
+    {
+      "native": {
+        "dpi": 192,
+        "scale": 2,
+        "pid": 2796,
+        "bounds": {
+          "left": 0,
+          "right": 1000,
+          "bottom": 700,
+          "top": 0
+        }
+      },
+      "viewport": {
+        "width": 487,
+        "height": 315,
+        "devicePixelRatio": 2
+      },
+      "mode": 0
+    },
+    {
+      "native": {
+        "dpi": 192,
+        "scale": 2,
+        "pid": 2796,
+        "bounds": {
+          "left": 0,
+          "right": 1000,
+          "bottom": 700,
+          "top": 0
+        }
+      },
+      "viewport": {
+        "width": 487,
+        "height": 315,
+        "devicePixelRatio": 2
+      },
+      "mode": 1
+    },
+    {
+      "native": {
+        "dpi": 192,
+        "scale": 2,
+        "pid": 2796,
+        "bounds": {
+          "left": 0,
+          "right": 1000,
+          "bottom": 700,
+          "top": 0
+        }
+      },
+      "viewport": {
+        "width": 487,
+        "height": 315,
+        "devicePixelRatio": 2
+      },
+      "mode": 2
+    }
+  ],
+  "errors": [],
+  "scope": "Actual Windows Studio/WebView2, OS DPI reported per window; no DPI emulation and no untested DPI claimed."
+}

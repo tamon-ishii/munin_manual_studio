@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const bin = path.join(repo, 'target/debug');
+const bin = path.resolve(process.env.MANUAL_NATIVE_BIN_DIR || path.join(repo, 'target/debug'));
 const markits = path.join(bin, process.platform === 'win32' ? 'manual-studio.exe' : 'manual-studio');
 const manualctl = path.join(bin, process.platform === 'win32' ? 'manualctl.exe' : 'manualctl');
 const fixturePython = process.env.MANUAL_NATIVE_PYTHON || (process.platform === 'linux' ? '/usr/bin/python3' : process.platform === 'win32' ? 'python' : 'python3');
@@ -172,7 +172,8 @@ try {
       if (!targetWindow) await new Promise(resolve=>setTimeout(resolve,100));
     }
     assert.deepEqual(JSON.parse(await readFile(argsFile,'utf8')),argumentsSnapshot,'real application receives exact argument boundaries');
-    const recorder = spawnTracked(markits,['--manual-studio-record-input',eventsFile],{stdio:'ignore'});
+    const recorder = spawnTracked(markits,['--manual-studio-record-input',eventsFile],{env:{...process.env,MUNIN_RECORDING_WINDOW:JSON.stringify({role:'window',name:targetWindow.title,window_id:process.platform==='linux'?String(BigInt(targetWindow.id)):targetWindow.id,pid:target.pid,x:targetWindow.x,y:targetWindow.y,width:targetWindow.width,height:targetWindow.height})}});
+    recorder.stderr.on('data',chunk=>process.stderr.write(chunk));recorder.stdout.resume();
     while (true) { try { await readFile(eventsFile); break; } catch {} requireRunning(recorder, 'Input recorder'); remaining();await new Promise(resolve=>setTimeout(resolve,100)); }
     const recordingScenario = path.join(tempRoot,'record-input.json');
     await writeFile(recordingScenario,JSON.stringify({version:1,platform:'desktop',window:"Munin Recording Fixture",steps:[{wait_ms:600},{click:{x:80,y:80}},{wait_ms:500}]}));

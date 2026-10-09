@@ -183,6 +183,8 @@ The application SHALL provide application settings with distinct target-applicat
 **Reason**: A combined modal conflates application registration, AI connection, and project paths.
 **Migration**: Retain stored settings while providing distinct target-application, appearance, AI-connection, and project entries.
 
+## ADDED Requirements
+
 ### Requirement: Make AI instruction disclosure visible and actionable
 The rich text editor and AI task list SHALL label instruction disclosure as Expand instruction or Collapse instruction with a visible directional indicator. Disclosure SHALL work with pointer clicks, Enter, and Space, preserve document text, and keep generated content visible.
 

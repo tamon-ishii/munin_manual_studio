@@ -7,8 +7,20 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      build_matrix:
+        description: Optional JSON matrix include entries for targeted verification
+        type: string
+        default: ''
       windows_native_smoke:
         description: Run real Windows recording and MarkIts window checks
+        type: boolean
+        default: false
+      macos_native_smoke:
+        description: Run real macOS recording and MarkIts window checks
+        type: boolean
+        default: false
+      windows_scale_smoke:
+        description: Change real Windows display settings and verify 150/200 percent DPI
         type: boolean
         default: false
 
@@ -24,19 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            platform: linux-x64
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            platform: windows-x64
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-            platform: macos-arm64
-          - runner: macos-latest
-            target: x86_64-apple-darwin
-            platform: macos-x64
+        include: ${{ fromJSON(inputs.build_matrix || '[{"runner":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","platform":"linux-x64"},{"runner":"windows-latest","target":"x86_64-pc-windows-msvc","platform":"windows-x64"},{"runner":"macos-latest","target":"aarch64-apple-darwin","platform":"macos-arm64"},{"runner":"macos-latest","target":"x86_64-apple-darwin","platform":"macos-x64"}]') }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +56,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          cache-on-failure: true
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -107,6 +108,63 @@ jobs:
             webview2-results/
             native-smoke-results/
           if-no-files-found: warn
+      - name: Check real Windows display scales
+        if: runner.os == 'Windows' && inputs.windows_scale_smoke && steps.windows_native_build.outcome == 'success'
+        shell: pwsh
+        run: |
+          try {
+            foreach ($scale in @(150, 200)) {
+              & scripts/set_native_windows_scale.ps1 -Scale $scale
+              $env:MANUAL_WEBVIEW2_EXPECTED_DPI = [string]($scale * 96 / 100)
+              $env:MANUAL_WEBVIEW2_RESULTS = "webview2-results/$scale"
+              node scripts/test_manual_studio_webview2.mjs
+              if ($LASTEXITCODE -ne 0) { throw "WebView2 check failed at $scale percent" }
+            }
+          } finally {
+            try { & scripts/set_native_windows_scale.ps1 -Scale 100 } catch { Write-Warning $_ }
+          }
+      - name: Save Windows scale check evidence
+        if: always() && runner.os == 'Windows' && inputs.windows_scale_smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-scale-smoke-results
+          path: |
+            webview2-results/
+            native-smoke-results/
+          if-no-files-found: warn
+      - name: Prepare macOS native checks
+        id: macos_native_build
+        if: runner.os == 'macOS' && inputs.macos_native_smoke
+        run: |
+          python -m pip install mkdocs-material
+          python -c "import platform, tkinter; print(platform.platform()); print('Tk', tkinter.TkVersion)"
+          cargo build --locked -p manual-studio -p manual-core
+      - name: Check real macOS recording and MarkIts windows
+        if: runner.os == 'macOS' && inputs.macos_native_smoke
+        env:
+          MANUAL_NATIVE_PYTHON: python
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run manual:smoke-native 2>&1 | tee macos-native-smoke.log
+      - name: Check real macOS Studio UI workflow
+        if: always() && runner.os == 'macOS' && inputs.macos_native_smoke && steps.macos_native_build.outcome == 'success'
+        env:
+          MANUAL_NATIVE_PYTHON: python
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/smoke_manual_studio_macos.mjs 2>&1 | tee macos-studio-smoke.log
+      - name: Save macOS native check log
+        if: always() && runner.os == 'macOS' && inputs.macos_native_smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-native-smoke-log
+          path: |
+            macos-native-smoke.log
+            macos-studio-smoke.log
+            native-smoke-results/
+          if-no-files-found: warn
       - name: Install browser and manual builder for UI checks
         if: runner.os == 'Linux'
         run: |
@@ -139,6 +197,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release
@@ -150,6 +209,11 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --title "Munin Manual Studio $RELEASE_TAG" --generate-notes
+            release_notes_path="docs/release-notes-${RELEASE_TAG#v}.md"
+            if [ -f "$release_notes_path" ]; then
+              gh release create "$RELEASE_TAG" --verify-tag --title "Munin Manual Studio $RELEASE_TAG" --notes-file "$release_notes_path"
+            else
+              gh release create "$RELEASE_TAG" --verify-tag --title "Munin Manual Studio $RELEASE_TAG" --generate-notes
+            fi
           fi
           gh release upload "$RELEASE_TAG" release/*.zip --clobber
