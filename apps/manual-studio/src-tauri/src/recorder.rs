@@ -20,6 +20,10 @@ pub enum RecordedEvent {
         elapsed_ms: u64,
         x: f64,
         y: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<manual_core::semantic_target::Target>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visual: Option<manual_core::visual_target::Target>,
     },
     Text {
         elapsed_ms: u64,
@@ -230,6 +234,50 @@ impl Drop for StartReservation {
 pub fn run_helper(path: &Path) -> Result<(), String> {
     let file = File::create(path).map_err(|error| error.to_string())?;
     let output = Arc::new(Mutex::new(BufWriter::new(file)));
+    #[cfg(target_os = "linux")]
+    let point_context = std::env::var("MUNIN_RECORDING_WINDOW").ok()
+        .and_then(|context| serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context).ok());
+    let visual_window = std::env::var("MUNIN_RECORDING_WINDOW").ok()
+        .and_then(|context| serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context).ok())
+        .and_then(|context| context.window_id)
+        .and_then(|id| {
+            #[cfg(target_os = "linux")]
+            { id.parse::<u64>().ok().map(|id| format!("0x{id:x}")) }
+            #[cfg(not(target_os = "linux"))]
+            { Some(id) }
+        });
+    // Keep a pre-click image. Capturing after ButtonPress can record a changed
+    // label or a newly opened menu instead of the control that was clicked.
+    let visual_snapshot = Arc::new(Mutex::new(None));
+    if let Some(id) = visual_window {
+        let cache = Arc::clone(&visual_snapshot);
+        thread::spawn(move || loop {
+            let observed_at = Instant::now();
+            if let Ok(windows) = manual_core::window_capture::list_windows() {
+                if let Some(window) = windows.into_iter().find(|window| window.id == id) {
+                    if let Ok(picture) = manual_core::window_capture::read_window_pixels(&id, None) {
+                        if let Ok(mut cache) = cache.lock() { *cache = Some((observed_at, window, picture)); }
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(200));
+        });
+    }
+    let snapshot = Arc::new(Mutex::new((Instant::now(), Vec::new())));
+    if let Ok(context) = std::env::var("MUNIN_RECORDING_WINDOW") {
+        if let Ok(target) = serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context) {
+            let snapshot = Arc::clone(&snapshot);
+            thread::spawn(move || loop {
+                let observed_at = Instant::now();
+                let current = markits::ui_elements::capture_desktop_windows(0, 0).into_iter()
+                    .find(|window| window.window_id == target.window_id);
+                let elements = current.map(|window| markits::ui_elements::observe_desktop_targets(&window))
+                    .unwrap_or_default();
+                if let Ok(mut cache) = snapshot.lock() { *cache = (observed_at, elements); }
+                thread::sleep(Duration::from_millis(200));
+            });
+        }
+    }
     let started = Instant::now();
     let mut ctrl = false;
     let mut shift = false;
@@ -313,6 +361,23 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
                 elapsed_ms,
                 x: pointer.0,
                 y: pointer.1,
+                visual: visual_snapshot.lock().ok().and_then(|cache| {
+                    let (observed_at, window, picture) = cache.as_ref()?;
+                    if observed_at.elapsed() > Duration::from_millis(800) { return None; }
+                    manual_core::visual_target::record_snapshot(window, picture, pointer.0, pointer.1).ok()
+                }),
+                target: {
+                    let cached = snapshot.lock().ok().and_then(|cache| {
+                        (cache.0.elapsed() < Duration::from_millis(2200))
+                            .then(|| manual_core::semantic_target::at_point(&cache.1, pointer.0, pointer.1)).flatten()
+                    });
+                    #[cfg(target_os = "linux")]
+                    let cached = cached.or_else(|| point_context.as_ref().and_then(|context| {
+                        let element = markits::ui_elements::desktop_target_at_point(context, pointer.0 as i32, pointer.1 as i32)?;
+                        Some(manual_core::semantic_target::Target { role: element.role, name: element.name?, reveals: None })
+                    }));
+                    cached
+                },
             }),
             EventType::Wheel { delta_x, delta_y } => Some(RecordedEvent::Scroll {
                 elapsed_ms,
@@ -539,6 +604,16 @@ pub fn start(
     let child = match Command::new(recorder)
         .arg("--manual-studio-record-input")
         .arg(&event_file)
+        .env("MUNIN_RECORDING_WINDOW", serde_json::to_string(&markits::ui_elements::DetectedUiElement {
+            role: "window".into(), name: Some(window_title.clone()), window_id: Some({
+                #[cfg(target_os = "linux")]
+                { u64::from_str_radix(window.id.trim_start_matches("0x"), 16).map_err(|error| error.to_string())?.to_string() }
+                #[cfg(not(target_os = "linux"))]
+                { window.id.clone() }
+            }),
+            pid: None, x: window.x as f64, y: window.y as f64,
+            width: window.width as f64, height: window.height as f64,
+        }).map_err(|error| error.to_string())?)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -769,7 +844,19 @@ pub fn finish_excluding_control(
             if *x >= left && *x < left + width && *y >= top && *y < top + height)
         });
     }
-    let scenario = build_scenario(&session, &events);
+    let mut scenario = build_scenario(&session, &events);
+    let observed = super::native_worker::observe_window(&session.window.id).unwrap_or_default();
+    let headings: Vec<_> = observed.iter().filter(|element| element.role == "heading")
+        .filter_map(|element| {
+            let target = manual_core::semantic_target::Target {
+                role: element.role.clone(), name: element.name.clone()?, reveals: None,
+            };
+            (!target.name.trim().is_empty() && target.resolve(&observed).ok().flatten().is_some()).then_some(target)
+        }).take(10).collect();
+    if !headings.is_empty() {
+        let steps = scenario["steps"].as_array_mut().unwrap();
+        steps.insert(steps.len() - 1, json!({"expect_targets": headings}));
+    }
     let operation_text = events_to_text(&events, &session.window);
     let scenario_dir = session.root.join("manual/scenarios");
     fs::create_dir_all(&scenario_dir).map_err(|e| e.to_string())?;
@@ -845,6 +932,9 @@ fn events_to_text(events: &[RecordedEvent], window: &WindowBounds) -> String {
         .iter()
         .enumerate()
         .map(|(index, event)| match event {
+            RecordedEvent::Click { target: Some(target), .. } =>
+                format!("{}. 「{}」（{}）をクリック", index + 1, target.name, target.role),
+            RecordedEvent::Click { visual: Some(_), .. } => format!("{}. 画像照合でクリック", index + 1),
             RecordedEvent::Click { x, y, .. } => format!(
                 "{}. クリック: ({}, {})",
                 index + 1,
@@ -894,12 +984,18 @@ fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
                 flush_text(&mut steps, &mut text_buffer);
                 steps.push(json!({"key":value}));
             }
-            RecordedEvent::Click { x, y, .. } => {
+            RecordedEvent::Click { x, y, target, visual, .. } => {
                 flush_text(&mut steps, &mut text_buffer);
                 let x = (*x as i32 - session.window.x).max(0) as u32;
                 let y = (*y as i32 - session.window.y).max(0) as u32;
                 if x < session.window.width && y < session.window.height {
-                    steps.push(json!({"click":{"x":x,"y":y}}));
+                    let mut click = match target {
+                        Some(target) => json!({"target":target}),
+                        None if visual.is_some() => json!({}),
+                        None => json!({"x":x,"y":y}),
+                    };
+                    if let Some(visual) = visual { click["visual"] = json!(visual); }
+                    steps.push(json!({"click":click}));
                 }
             }
             RecordedEvent::Scroll { x, y, dx, dy, .. } => {
@@ -913,6 +1009,37 @@ fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
         }
     }
     flush_text(&mut steps, &mut text_buffer);
+    let mut focused_input: Option<Value> = None;
+    let mut input_visual: Option<Value> = None;
+    let mut index = 0;
+    while index < steps.len() {
+        if let Some(target) = steps[index]["click"].get("target") {
+            focused_input = (target["role"].as_str() == Some("input")).then(|| target.clone());
+            input_visual = steps[index]["click"].get("visual").cloned();
+        } else if steps[index].get("click").is_some() || steps[index].get("scroll").is_some() {
+            focused_input = None;
+        }
+        let selects_all = steps[index]["key"].as_str().is_some_and(|key| key.eq_ignore_ascii_case("Control+a") || key.eq_ignore_ascii_case("Meta+a"));
+        if selects_all && index + 1 < steps.len() {
+            if let (Some(target), Some(value)) = (focused_input.clone(), steps[index + 1]["text"].as_str()) {
+                steps[index] = json!({"fill_target":{"target":target,"value":value}});
+                if let Some(visual) = &input_visual { steps[index]["fill_target"]["visual"] = visual.clone(); }
+                steps.remove(index + 1);
+            }
+        }
+        if steps[index]["key"].as_str().is_some_and(|key| matches!(key, "Tab" | "Enter" | "Escape")) {
+            focused_input = None;
+        }
+        index += 1;
+    }
+    for index in 0..steps.len().saturating_sub(1) {
+        let is_folder = steps[index]["click"]["target"]["name"].as_str()
+            .is_some_and(|name| name.ends_with(" フォルダー"));
+        let next = steps[index + 1]["click"]["target"].clone();
+        if is_folder && next.is_object() {
+            steps[index]["click"]["target"]["reveals"] = next;
+        }
+    }
     steps.push(json!({"screenshot":{"task":session.task_id}}));
     json!({"version":1,"platform":"desktop","window":session.window_title,"steps":steps})
 }
@@ -1657,6 +1784,8 @@ mod tests {
                     elapsed_ms: 500,
                     x: 120.0,
                     y: 80.0,
+                    target: None,
+                    visual: None,
                 },
                 RecordedEvent::Text {
                     elapsed_ms: 900,
@@ -1668,6 +1797,38 @@ mod tests {
                 },
             ],
         );
+        let named = build_scenario(&session, &[RecordedEvent::Click {
+            elapsed_ms: 500, x: 120.0, y: 80.0,
+            target: Some(manual_core::semantic_target::Target { role: "button".into(), name: "Open".into(), reveals: None }), visual: None,
+        }]);
+        let patch = image::RgbImage::from_fn(32, 24, |x, y|
+            image::Rgb([((x*73+y*19)%251) as u8, ((x*17+y*61)%253) as u8, ((x*29+y*31)%247) as u8]));
+        let visual = manual_core::visual_target::Target::from_image(&patch, 12.0, 10.0).unwrap();
+        let visual_only = build_scenario(&session, &[RecordedEvent::Click {
+            elapsed_ms: 500, x: 120.0, y: 80.0, target: None, visual: Some(visual),
+        }]);
+        assert!(visual_only["steps"][2]["click"].get("visual").is_some());
+        assert!(visual_only["steps"][2]["click"].get("x").is_none());
+        assert_eq!(named["steps"][2]["click"]["target"]["name"], "Open");
+        assert!(named["steps"][2]["click"].get("x").is_none());
+        let readable = events_to_text(&[RecordedEvent::Click {
+            elapsed_ms: 500, x: 120.0, y: 80.0,
+            target: Some(manual_core::semantic_target::Target { role: "button".into(), name: "Open".into(), reveals: None }), visual: None,
+        }], &session.window);
+        assert!(readable.contains("「Open」"));
+        assert!(!readable.contains("(20, 30)"));
+        let legacy: RecordedEvent = serde_json::from_str(r#"{"kind":"click","elapsed_ms":1,"x":120,"y":80}"#).unwrap();
+        assert!(matches!(legacy, RecordedEvent::Click { target: None, visual: None, .. }));
+        let input = manual_core::semantic_target::Target { role: "input".into(), name: "Project root".into(), reveals: None };
+        let input_scenario = build_scenario(&session, &[
+            RecordedEvent::Click { elapsed_ms: 1, x: 120.0, y: 80.0, target: Some(input), visual: None },
+            RecordedEvent::Key { elapsed_ms: 2, value: "Control+a".into() },
+            RecordedEvent::Text { elapsed_ms: 3, value: "path with spaces".into() },
+        ]);
+        assert_eq!(input_scenario["steps"][3]["fill_target"]["target"]["name"], "Project root");
+        assert_eq!(input_scenario["steps"][3]["fill_target"]["value"], "path with spaces");
+        assert!(!input_scenario["steps"].as_array().unwrap().iter().any(|step| step.get("key").is_some()));
+
         assert_eq!(scenario["steps"][0]["launch"]["program"], "demo");
         assert_eq!(scenario["steps"][1]["window"], "Demo");
         assert_eq!(scenario["steps"][2]["click"]["x"], 20);

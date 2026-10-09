@@ -125,6 +125,15 @@ pub(crate) fn validate_with_tasks(
                     nonempty(value).ok_or_else(|| format!("Step {number} needs a selector"))?;
                 Selector::parse(selector).map_err(|error| format!("Step {number}: {error}"))?;
             }
+            "fill_target" => {
+                serde_json::from_value::<super::semantic_target::Target>(value["target"].clone())
+                    .map_err(|error| error.to_string())?.validate()?;
+                if value["value"].as_str().is_none() { return Err("入力欄の値は文字列で指定してください。".into()); }
+                if let Some(visual) = value.get("visual") {
+                    serde_json::from_value::<super::visual_target::Target>(visual.clone())
+                        .map_err(|error| error.to_string())?.decode()?;
+                }
+            }
             "fill" | "expect_value" => {
                 if value.get("value").and_then(Value::as_str).is_none() {
                     return Err(format!("{action} step {number} needs selector and value"));
@@ -177,6 +186,20 @@ pub(crate) fn validate_with_tasks(
                 }
             }
             "click" => {
+                if value.get("target").is_some() || value.get("visual").is_some() {
+                    if value.get("x").is_some() || value.get("y").is_some() {
+                        return Err(format!("Click step {number} cannot combine a target and coordinates"));
+                    }
+                    if let Some(target) = value.get("target") {
+                        serde_json::from_value::<super::semantic_target::Target>(target.clone())
+                            .map_err(|error| error.to_string())?.validate()?;
+                    }
+                    if let Some(visual) = value.get("visual") {
+                        serde_json::from_value::<super::visual_target::Target>(visual.clone())
+                            .map_err(|error| error.to_string())?.decode()?;
+                    }
+                    continue;
+                }
                 if value
                     .get("x")
                     .and_then(Value::as_u64)
@@ -189,6 +212,14 @@ pub(crate) fn validate_with_tasks(
                     return Err(format!(
                         "Click step {number} needs nonnegative x and y coordinates"
                     ));
+                }
+            }
+            "expect_targets" => {
+                let targets = value.as_array().filter(|targets| !targets.is_empty() && targets.len() <= 10)
+                    .ok_or("到達確認の対象は1〜10件必要です。")?;
+                for target in targets {
+                    serde_json::from_value::<super::semantic_target::Target>(target.clone())
+                        .map_err(|error| error.to_string())?.validate()?;
                 }
             }
             "wait_ms" => {
@@ -358,6 +389,7 @@ fn a11y_window(query: &str) -> Result<Element, String> {
     let mut exact = Vec::new();
     let mut partial = Vec::new();
     for app in App::list().map_err(|error| error.to_string())? {
+        if scoped.is_some_and(|(pid, _)| app.pid.is_some_and(|actual| actual != pid)) { continue; }
         // An unrelated app may close while the desktop is being enumerated.
         let Ok(windows) = app.windows() else { continue };
         for window in windows {
@@ -526,6 +558,58 @@ fn locator(window: &Element, selector: &str) -> Locator {
     )
 }
 
+fn wait_click_target(
+    selected: &SelectedWindow, target: Option<&super::semantic_target::Target>,
+    visual: Option<&super::visual_target::Target>, root: &Path, checkpoint: &str,
+    started: Instant, timeout: Duration,
+) -> Result<(markits::ui_elements::DetectedUiElement, Vec<markits::ui_elements::DetectedUiElement>), String> {
+    let name = target.map(|target| target.name.as_str()).unwrap_or("画像の対象");
+    super::agent::log_progress(root, &format!("「{name}」の表示を待機（最大10秒）"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let check = || {
+        super::agent::check_cancelled(root, checkpoint)?;
+        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".to_string()); }
+        if Instant::now() >= deadline { return Err(format!("クリック対象が見つかりません：{name}")); }
+        Ok(())
+    };
+    loop {
+        check()?;
+        let window = selected.native()?;
+        let elements = match super::semantic_target::observe_window(&window.id) {
+            Ok(elements) => elements,
+            Err(_) if visual.is_some() => Vec::new(),
+            Err(error) => return Err(error),
+        };
+        check()?;
+        if let Some(target) = target {
+            // An ambiguous semantic identity is an error, never a reason to guess visually.
+            if let Some(element) = target.resolve(&elements)? { return Ok((element.clone(), elements)); }
+        }
+        if let Some(visual) = visual {
+            super::agent::log_progress(root, &format!("画像照合で「{name}」の位置を確認"));
+            let picture = window_capture::read_window_pixels(&window.id, None)?;
+            if let Some((x,y)) = super::visual_target::locate(visual, &picture, check)? {
+                check()?;
+                return Ok((markits::ui_elements::DetectedUiElement {
+                    role: "visual".into(), name: Some(name.into()), window_id: Some(window.id), pid: None,
+                    x: window.x as f64 + x * window.width as f64 / picture.width() as f64 - 0.5,
+                    y: window.y as f64 + y * window.height as f64 / picture.height() as f64 - 0.5,
+                    width: 1.0, height: 1.0,
+                }, elements));
+            }
+        }
+        check()?;
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn click_observed(selected: &SelectedWindow, element: &markits::ui_elements::DetectedUiElement) -> Result<(), String> {
+    if !window_capture::is_wayland_session() { activate(selected)?; }
+    let point = Point::new((element.x + element.width / 2.0) as i32, (element.y + element.height / 2.0) as i32);
+    xa11y::input_sim().map_err(|error| error.to_string())?.mouse().click(point)
+        .map_err(|error| error.to_string())
+}
+
 fn activate(selected: &SelectedWindow) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if !window_capture::is_wayland_session() {
@@ -544,10 +628,12 @@ fn activate(selected: &SelectedWindow) -> Result<(), String> {
 
 fn activate_for_input(selected: &SelectedWindow) -> Result<(), String> {
     #[cfg(target_os = "linux")]
-    if !window_capture::is_wayland_session() && selected.native().is_ok() {
-        return activate(selected);
+    if !window_capture::is_wayland_session() {
+        if let Ok(window) = selected.native() {
+            if window_capture::is_window_active(&window.id)? { return Ok(()); }
+            return activate(selected);
+        }
     }
-
     if a11y_window(&selected.query).is_ok_and(|window| window.states.active) {
         return Ok(());
     }
@@ -660,8 +746,9 @@ pub fn run(
         let label = match action.as_str() {
             "launch" => "アプリを起動", "window" => "対象ウィンドウを探して前面へ移動",
             "wait_ms" => "記録された待機", "screenshot" => "画面を撮影",
-            "click" => "クリック", "text" | "fill" => "文字を入力", "key" => "キーを入力",
+            "click" => "クリック", "text" | "fill" | "fill_target" => "文字を入力", "key" => "キーを入力",
             "expect_window" => "対象ウィンドウの表示を待機",
+            "expect_targets" => "撮影前に目的の画面への到達を確認",
             "expect_hidden" => "対象要素が隠れるまで待機（最大10秒）",
             "expect_enabled" => "対象要素が有効になるまで待機（最大10秒）",
             "expect_disabled" => "対象要素が無効になるまで待機（最大10秒）",
@@ -848,6 +935,21 @@ pub fn run(
                         .map_err(|error| error.to_string())?;
                 }
                 "click" => {
+                    if value.get("target").is_some() || value.get("visual").is_some() {
+                        let target: Option<super::semantic_target::Target> = value.get("target").cloned()
+                            .map(serde_json::from_value).transpose().map_err(|error| error.to_string())?;
+                        let visual: Option<super::visual_target::Target> = value.get("visual").cloned()
+                            .map(serde_json::from_value).transpose().map_err(|error| error.to_string())?;
+                        let (element, elements) = wait_click_target(&selected, target.as_ref(), visual.as_ref(), root, &checkpoint, started, timeout)?;
+                        let name = target.as_ref().map(|target| target.name.as_str()).unwrap_or("画像の対象");
+                        if target.as_ref().map(|target| target.needs_click(&elements)).transpose()?.unwrap_or(true) {
+                            super::agent::log_progress(root, &format!("「{name}」をクリック"));
+                            click_observed(&selected, &element)?;
+                        } else {
+                            super::agent::log_progress(root, &format!("「{name}」は展開済みです"));
+                        }
+                        return Ok(());
+                    }
                     let bounds = selected.bounds_for_input()?;
                     let x = value["x"].as_u64().unwrap() as u32;
                     let y = value["y"].as_u64().unwrap() as u32;
@@ -870,6 +972,21 @@ pub fn run(
                         .mouse()
                         .click(Point::new(screen_x, screen_y))
                         .map_err(|error| error.to_string())?;
+                }
+                "fill_target" => {
+                    let target: super::semantic_target::Target = serde_json::from_value(value["target"].clone())
+                        .map_err(|error| error.to_string())?;
+                    let visual: Option<super::visual_target::Target> = value.get("visual").cloned()
+                        .map(serde_json::from_value).transpose().map_err(|error| error.to_string())?;
+                    let (element, _) = wait_click_target(&selected, Some(&target), visual.as_ref(), root, &checkpoint, started, timeout)?;
+                    super::agent::log_progress(root, &format!("入力欄「{}」の値を設定", target.name));
+                    click_observed(&selected, &element)?;
+                    let input = xa11y::input_sim().map_err(|error| error.to_string())?;
+                    input.keyboard().chord(Key::Char('a'), &[if cfg!(target_os = "macos") { Key::Meta } else { Key::Ctrl }]).map_err(|error| error.to_string())?;
+                    super::agent::check_cancelled(root, &checkpoint)?;
+                    let text = value["value"].as_str().unwrap();
+                    if text.is_empty() { input.keyboard().chord(Key::Backspace, &[]).map_err(|error| error.to_string())?; }
+                    else { input.keyboard().type_text(text).map_err(|error| error.to_string())?; }
                 }
                 "text" | "key" => {
                     if action == "text" && value.is_object() {
@@ -907,6 +1024,27 @@ pub fn run(
                             .keyboard()
                             .chord(keys.last().unwrap().clone(), &keys[..keys.len() - 1])
                             .map_err(|error| error.to_string())?;
+                    }
+                }
+                "expect_targets" => {
+                    let targets: Vec<super::semantic_target::Target> = serde_json::from_value(value.clone())
+                        .map_err(|error| error.to_string())?;
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    loop {
+                        super::agent::check_cancelled(root, &checkpoint)?;
+                        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                        let elements = super::semantic_target::observe_window(&selected.native()?.id)?;
+                        super::agent::check_cancelled(root, &checkpoint)?;
+                        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                        let missing: Vec<_> = targets.iter().filter_map(|target| match target.resolve(&elements) {
+                            Ok(Some(_)) => None,
+                            Ok(None) => Some(Ok(target.name.clone())),
+                            Err(error) => Some(Err(error)),
+                        }).collect::<Result<_, _>>()?;
+                        if missing.is_empty() { break; }
+                        super::agent::log_progress(root, &format!("撮影する画面の表示を待機：{}", missing.join("、")));
+                        if Instant::now() >= deadline { return Err(format!("目的の画面に到達していません：{}", missing.join("、"))); }
+                        thread::sleep(Duration::from_millis(100));
                     }
                 }
                 "wait_ms" => {
@@ -954,6 +1092,19 @@ pub fn run(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn named_click_validation_keeps_legacy_and_rejects_mixed_targets() {
+        let dir = tempdir().unwrap();
+        assert!(validate(&[serde_json::json!({"click":{"target":{"role":"button","name":"Open"}}})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"click":{"target":{"role":"button","name":""}}})], dir.path()).is_err());
+        assert!(validate(&[serde_json::json!({"click":{"target":{"role":"button","name":"Open"},"x":10,"y":20}})], dir.path()).is_err());
+        assert!(validate(&[serde_json::json!({"click":{"x":10,"y":20}})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"expect_targets":[{"role":"heading","name":"Nested page"}]})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"expect_targets":[]})], dir.path()).is_err());
+        assert!(validate(&[serde_json::json!({"fill_target":{"target":{"role":"input","name":"Project root"},"value":"path"}})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"fill_target":{"target":{"role":"input","name":"Project root"},"value":1}})], dir.path()).is_err());
+    }
 
     #[test]
     fn visible_wait_retries_replaced_uia_node_and_preserves_other_errors() {

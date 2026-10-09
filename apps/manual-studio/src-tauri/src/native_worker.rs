@@ -13,6 +13,7 @@ pub const FLAG: &str = "--manual-studio-native-worker";
 enum Operation {
     Request(serde_json::Value),
     WindowProcesses,
+    ObserveWindow(String),
     #[cfg(target_os = "linux")]
     ActivateWindow(String),
     Capture {
@@ -149,6 +150,11 @@ pub fn requires_hiding(action: &str) -> bool {
     )
 }
 
+pub fn observe_window(id: &str) -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
+    let value = execute(Operation::ObserveWindow(id.to_string()))?;
+    serde_json::from_str(&value).map_err(|error| error.to_string())
+}
+
 pub fn run(dir: &Path) -> Result<(), String> {
     let operation: Operation =
         serde_json::from_slice(&fs::read(dir.join("request.json")).map_err(|e| e.to_string())?)
@@ -158,6 +164,8 @@ pub fn run(dir: &Path) -> Result<(), String> {
         #[cfg(target_os = "linux")]
         Operation::ActivateWindow(id) => manual_core::window_capture::activate_window(&id)
             .and_then(|window| serde_json::to_string(&window).map_err(|error| error.to_string())),
+        Operation::ObserveWindow(id) => manual_core::semantic_target::observe_window(&id)
+            .and_then(|elements| serde_json::to_string(&elements).map_err(|error| error.to_string())),
         Operation::WindowProcesses => {
             #[cfg(target_os = "linux")]
             let windows = markits::ui_elements::capture_desktop_windows(0, 0);

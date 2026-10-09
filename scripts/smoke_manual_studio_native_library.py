@@ -32,6 +32,17 @@ def owned(pid):
             return False
     return False
 
+def replay_owned(pid):
+    # Replay workers exit before the target application. Check only processes
+    # in this fixture directory before reading the fixture ownership marker.
+    try:
+        if os.readlink('/proc/%d/cwd' % pid) != root:
+            return False
+        entries = Path('/proc/%d/environ' % pid).read_bytes().split(b'\0')
+        return ('XDG_DATA_HOME=' + root + '/data').encode() in entries
+    except OSError:
+        return False
+
 def visit(node, depth=0):
     if depth > 18:
         return
@@ -66,14 +77,14 @@ def node_text(node):
         pass
     return ''
 
-def find(name, role=None, prefix=False):
-    deadline = time.monotonic() + 15
+def find(name, role=None, prefix=False, timeout=15, include_replay_target=False):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         desktop = Atspi.get_desktop(0)
         matches = []
         for i in range(desktop.get_child_count()):
             a = desktop.get_child_at_index(i)
-            if a is None or not owned(a.get_process_id()):
+            if a is None or not (owned(a.get_process_id()) or include_replay_target and replay_owned(a.get_process_id())):
                 continue
             for n in nodes(a):
                 try:
@@ -131,12 +142,16 @@ def fill(name, value, prefix=False):
         if shifted:
             xtst.XTestFakeKeyEvent(display, shift, 1, 0)
         xtst.XTestFakeKeyEvent(display, key, 1, 0)
+        x11.XFlush(display)
+        time.sleep(0.01)
         xtst.XTestFakeKeyEvent(display, key, 0, 0)
         if shifted:
             xtst.XTestFakeKeyEvent(display, shift, 0, 0)
         x11.XFlush(display)
         time.sleep(0.04)
-    time.sleep(0.5)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and Atspi.Text.get_text(field, 0, -1) != value:
+        time.sleep(0.1)
     assert Atspi.Text.get_text(field, 0, -1) == value, (name, Atspi.Text.get_text(field, 0, -1))
 try:
     for _ in range(60):
@@ -259,7 +274,17 @@ try:
             assert {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in source_files} == hashes_before
             subprocess.run(['wmctrl', '-Fa', 'Munin Manual Studio'], check=True)
             time.sleep(0.3)
+            if os.environ.get('MANUAL_NATIVE_FORCE_IMAGE_TARGET'):
+                # Alter only this temporary fixture's recipe to exercise the
+                # visual fallback when a control is absent from accessibility.
+                fixture_shot = json.loads(manifests[0].read_text())
+                first_click = next(step['click'] for step in fixture_shot['recipe']['steps'] if 'click' in step)
+                assert first_click.get('visual'), 'recording must retain a pre-click image'
+                first_click['target'] = {'role': 'button', 'name': 'Not exposed by this fixture'}
+                manifests[0].write_text(json.dumps(fixture_shot))
+                print('CHECK: real recapture includes an image-only target fallback', flush=True)
             click('再撮影', 'push button')
+            time.sleep(2)
             # WebKit's JavaScript dialog is not exposed as AT-SPI children.
             # Use its OK button in this fixture's fixed native window geometry.
             frame = find('Munin Manual Studio', 'frame')
@@ -268,7 +293,7 @@ try:
             xtst.XTestFakeButtonEvent(display, 1, 1, 0)
             xtst.XTestFakeButtonEvent(display, 1, 0, 0)
             x11.XFlush(display)
-            completion = find('再撮影が完了しました。', prefix=True)
+            completion = find('再撮影が完了しました。', prefix=True, timeout=45)
             assert '成功 1件' in node_text(completion), node_text(completion)
             active = subprocess.check_output(['xprop', '-root', '_NET_ACTIVE_WINDOW'], text=True).strip().split()[-1]
             active_name = subprocess.check_output(['xprop', '-id', active, '_NET_WM_NAME'], text=True)
@@ -279,6 +304,8 @@ try:
                 candidates = list(manifests[0].parent.glob('originals/*.png'))
                 latest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
                 shutil.copyfile(latest, '/tmp/munin-native-hierarchy-after.png')
+                target_nodes = [node_text(node) for node in nodes(find('Manual Studio', 'frame', include_replay_target=True))]
+                assert any('Hierarchy captured' in text for text in target_nodes), 'recapture must reach the nested document, not merely save a PNG'
             print('PASS: real recapture completes, shows its result, and returns Studio to the foreground.', flush=True)
             click('文書に挿入', 'push button')
             click('原稿を編集', 'push button')

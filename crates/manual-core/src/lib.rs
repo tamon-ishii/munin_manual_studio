@@ -12,6 +12,8 @@ pub mod config;
 pub mod context;
 pub mod deps;
 mod desktop_scenario;
+pub mod semantic_target;
+pub mod visual_target;
 pub mod editor;
 pub mod fact;
 mod generation_review;

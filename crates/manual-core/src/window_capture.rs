@@ -472,6 +472,19 @@ mod linux {
         }).collect())
     }
 
+    pub fn is_window_active(window_id: &str) -> Result<bool, String> {
+        let id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16)
+            .map_err(|_| format!("Invalid X11 window ID: {window_id}"))? as xlib::Window;
+        let conn = DisplayConnection::open()?;
+        let (format, bytes) = conn.property(conn.root, "_NET_ACTIVE_WINDOW")
+            .ok_or("The window manager does not expose its active window")?;
+        let size = std::mem::size_of::<c_ulong>();
+        if format != 32 || bytes.len() < size { return Err("Unexpected active window format".into()); }
+        let mut value = [0u8; std::mem::size_of::<c_ulong>()];
+        value.copy_from_slice(&bytes[..size]);
+        Ok(c_ulong::from_ne_bytes(value) == id)
+    }
+
     pub fn activate_window(window_id: &str) -> Result<WindowInfo, String> {
         if is_wayland_session() {
             return Err("Wayland does not allow ModuleLoom to activate arbitrary windows".into());
@@ -572,43 +585,16 @@ mod linux {
         }
     }
 
-    fn capture_visible(
-        conn: &DisplayConnection,
-        id: xlib::Window,
-        inset: u32,
-        destination: &Path,
-        include_uimap: bool,
-        target_window_id: Option<&str>,
-    ) -> Result<WindowInfo, String> {
-        let info = conn.info(id).ok_or("The selected window is not visible")?;
-        let margin = inset as i32;
-        let x = info.x + margin;
-        let y = info.y + margin;
-        let width = info
-            .width
-            .checked_sub(inset.saturating_mul(2))
-            .ok_or("Inset exceeds window width")?;
-        let height = info
-            .height
-            .checked_sub(inset.saturating_mul(2))
-            .ok_or("Inset exceeds window height")?;
-        if width == 0 || height == 0 {
-            return Err("Capture area is empty".into());
-        }
-        let screen = unsafe { (conn.api.XDefaultScreen)(conn.display) };
-        let screen_width = unsafe { (conn.api.XDisplayWidth)(conn.display, screen) };
-        let screen_height = unsafe { (conn.api.XDisplayHeight)(conn.display, screen) };
-        if x < 0 || y < 0 || x + width as i32 > screen_width || y + height as i32 > screen_height {
-            return Err("The entire window must be visible on the screen before capture".into());
-        }
+    fn read_region_pixels(conn: &DisplayConnection, id: xlib::Window,
+        offset_x: i32, offset_y: i32, width: u32, height: u32) -> Result<image::RgbImage, String> {
         let pixmap = WindowPixmap::open(id as u32);
         let drawable = pixmap.as_ref().map_or(id, |pixmap| pixmap.drawable as xlib::Drawable);
         let raw = unsafe {
             (conn.api.XGetImage)(
                 conn.display,
                 drawable,
-                margin,
-                margin,
+                offset_x,
+                offset_y,
                 width,
                 height,
                 !0,
@@ -649,6 +635,14 @@ mod linux {
                 })
             })
         };
+        if let Some((data, stride, 4, _)) = raw_layout.filter(|(_, _, _, order)|
+            *order == xlib::LSBFirst && masks == (0xff0000, 0xff00, 0xff)) {
+            for row in data.chunks_exact(stride).take(height as usize) {
+                for pixel in row.chunks_exact(4).take(width as usize) {
+                    pixels.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+                }
+            }
+        } else {
         for row in 0..height {
             for col in 0..width {
                 let pixel = raw_layout
@@ -665,17 +659,65 @@ mod linux {
                 ]);
             }
         }
+        }
         unsafe {
             (conn.api.XDestroyImage)(raw);
         }
+        ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, pixels).ok_or("Invalid screenshot dimensions".into())
+    }
+
+    pub fn read_window_pixels(window_id: &str, region: Option<(u32, u32, u32, u32)>) -> Result<image::RgbImage, String> {
+        if is_wayland_session() { return Err("Wayland requires explicit portal capture".into()); }
+        let id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16)
+            .map_err(|_| "Invalid window ID")? as xlib::Window;
+        let conn = DisplayConnection::open()?;
+        if !conn.client_windows()?.contains(&id) { return Err("Selected window is no longer open".into()); }
+        let info = conn.info(id).ok_or("Selected window is not visible")?;
+        let (x, y, width, height) = region.unwrap_or((0, 0, info.width, info.height));
+        if width == 0 || height == 0 || x.checked_add(width).is_none_or(|right| right > info.width)
+            || y.checked_add(height).is_none_or(|bottom| bottom > info.height) {
+            return Err("Capture region is outside the selected window".into());
+        }
+        read_region_pixels(&conn, id, x as i32, y as i32, width, height)
+    }
+
+    fn capture_visible(
+        conn: &DisplayConnection,
+        id: xlib::Window,
+        inset: u32,
+        destination: &Path,
+        include_uimap: bool,
+        target_window_id: Option<&str>,
+    ) -> Result<WindowInfo, String> {
+        let info = conn.info(id).ok_or("The selected window is not visible")?;
+        let margin = inset as i32;
+        let x = info.x + margin;
+        let y = info.y + margin;
+        let width = info
+            .width
+            .checked_sub(inset.saturating_mul(2))
+            .ok_or("Inset exceeds window width")?;
+        let height = info
+            .height
+            .checked_sub(inset.saturating_mul(2))
+            .ok_or("Inset exceeds window height")?;
+        if width == 0 || height == 0 {
+            return Err("Capture area is empty".into());
+        }
+        let screen = unsafe { (conn.api.XDefaultScreen)(conn.display) };
+        let screen_width = unsafe { (conn.api.XDisplayWidth)(conn.display, screen) };
+        let screen_height = unsafe { (conn.api.XDisplayHeight)(conn.display, screen) };
+        if x < 0 || y < 0 || x + width as i32 > screen_width || y + height as i32 > screen_height {
+            return Err("The entire window must be visible on the screen before capture".into());
+        }
+        let picture = read_region_pixels(conn, id, margin, margin, width, height)?;
+        let pixels = picture.as_raw();
         // GTK/WebKit can show a uniform background before its UI is ready.
         let background = &pixels[..3];
         if background.iter().max().unwrap() - background.iter().min().unwrap() <= 4
             && pixels.chunks_exact(3).all(|pixel| pixel == background) {
             return Err("Selected window has not finished painting".into());
         }
-        let picture = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, pixels)
-            .ok_or("Invalid screenshot dimensions")?;
         super::save_image_with_uimap(
             &image::DynamicImage::ImageRgb8(picture),
             Some((x as f64, y as f64, width as f64, height as f64)),
@@ -810,6 +852,7 @@ mod linux {
 
 #[cfg(target_os = "linux")]
 pub use linux::{
+    is_window_active, read_window_pixels,
     activate_window, capture_window as platform_capture_window, close_window, list_windows, window_process_ids,
 };
 
@@ -875,6 +918,23 @@ mod native {
         }
         thread::sleep(Duration::from_millis(150));
         info(&window)
+    }
+
+    pub fn read_window_pixels(window_id: &str, region: Option<(u32, u32, u32, u32)>) -> Result<image::RgbImage, String> {
+        let id = u32::from_str_radix(window_id.trim_start_matches("0x"), 16).map_err(|_| "Invalid window ID")?;
+        let window = Window::all().map_err(|error| error.to_string())?.into_iter()
+            .find(|window| window.id().is_ok_and(|candidate| candidate == id)).ok_or("Selected window is no longer open")?;
+        let details = info(&window)?;
+        let image = window.capture_image().map_err(|error| error.to_string())?;
+        let (x, y, width, height) = region.unwrap_or((0, 0, details.width, details.height));
+        if width == 0 || height == 0 || x.checked_add(width).is_none_or(|right| right > details.width)
+            || y.checked_add(height).is_none_or(|bottom| bottom > details.height) { return Err("Capture region is outside the selected window".into()); }
+        let sx = image.width() as f64 / details.width as f64;
+        let sy = image.height() as f64 / details.height as f64;
+        let (x, y, width, height) = ((x as f64 * sx) as u32, (y as f64 * sy) as u32,
+            (width as f64 * sx) as u32, (height as f64 * sy) as u32);
+        let cropped = image::imageops::crop_imm(&image, x, y, width, height).to_image();
+        Ok(image::DynamicImage::ImageRgba8(cropped).to_rgb8())
     }
 
     pub fn capture_window(
@@ -976,7 +1036,7 @@ mod native {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub use native::{activate_window, capture_window as platform_capture_window, close_window, list_windows, window_process_ids};
+pub use native::{read_window_pixels, activate_window, capture_window as platform_capture_window, close_window, list_windows, window_process_ids};
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub fn list_windows() -> Result<Vec<WindowInfo>, String> {

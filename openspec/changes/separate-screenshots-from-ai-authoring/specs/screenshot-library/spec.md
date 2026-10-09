@@ -149,3 +149,34 @@ Manual Studio SHALL read legacy screenshot tags and offer an explicit, repeatabl
 #### Scenario: Cancel or repeat migration
 - **WHEN** migration is cancelled, fails, or is run again
 - **THEN** existing documents and images are retained, backups remain available, and completed migrations are not duplicated.
+
+### Requirement: Semantic desktop replay targets
+The system SHALL prefer named accessible targets over recorded coordinates when a fresh, unique target is available. Replay SHALL resolve the current target position, wait at most ten seconds for its appearance, report its name in progress, and reject ambiguous matches. Existing coordinate-only recipes SHALL remain readable.
+
+#### Scenario: A named control moves
+- **WHEN** a uniquely named recorded control has moved before recapture
+- **THEN** replay clicks its current position rather than its old coordinates
+
+#### Scenario: A target has multiple matches
+- **WHEN** multiple controls match the recorded name and role
+- **THEN** replay fails without choosing an arbitrary control
+
+#### Scenario: A target is missing
+- **WHEN** the named control does not appear within the bounded wait
+- **THEN** recapture reports failure and keeps the adopted image
+
+#### Scenario: Named control is unavailable but its visual target is unique
+- **WHEN** a recorded named control cannot be resolved and its saved visual template uniquely matches the selected window
+- **THEN** replay SHALL click the current matched position within the selected window without modifying any screenshot original
+
+#### Scenario: Visual target matches multiple controls
+- **WHEN** a visual template matches multiple distinct locations
+- **THEN** replay SHALL stop with an ambiguity error rather than choose a location using recorded coordinates
+
+#### Scenario: Recorded folder is already expanded
+- **WHEN** the next recorded child of a folder is already visible
+- **THEN** replay SHALL preserve the expanded folder and continue to the child without toggling the folder closed
+
+#### Scenario: Final recorded heading is missing
+- **WHEN** a recorded arrival heading does not appear before the deadline
+- **THEN** replay SHALL report a failure before saving the final screenshot
