@@ -37,7 +37,11 @@ if ($dpi -eq 0) { throw 'Cannot read the window DPI' }
 Start-Sleep -Milliseconds 100
 if ([FixtureWindow]::GetForegroundWindow() -ne $handle) { throw 'The owned Studio window is not in the foreground' }
 if ($Action -eq 'resize') {
-  if (-not [FixtureWindow]::MoveWindow($handle,0,0,$Width,$Height,$true)) { throw 'Cannot resize fixture window' }
+  Add-Type -AssemblyName System.Windows.Forms
+  $available=[System.Windows.Forms.Screen]::FromHandle($handle).WorkingArea
+  $fixtureWidth=[Math]::Min($Width,$available.Width)
+  $fixtureHeight=[Math]::Min($Height,$available.Height)
+  if (-not [FixtureWindow]::MoveWindow($handle,$available.Left,$available.Top,$fixtureWidth,$fixtureHeight,$true)) { throw 'Cannot resize fixture window' }
   Start-Sleep -Milliseconds 400
 }
 $origin=New-Object FixtureWindow+Point
