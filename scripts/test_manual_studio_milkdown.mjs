@@ -204,6 +204,24 @@ try {
   await page.waitForFunction(() => document.querySelector('#source').value.includes('approved-at='));
   assert.match(await page.locator('#source').inputValue(), /<!-- ai:task id="legacy-task" kind="text" prompt="レガシーな指示文"[^>]*approved-at=/);
 
+  // Generated duplicate markers and unmatched markers stay in Markdown, but never occupy the prose view.
+  await page.addStyleTag({ url: '/src/style.css' });
+  await page.evaluate(() => {
+    source.value = '# Metadata\n\n<!-- ai:task id=orphan kind=text prompt="目次" created-at=2026-10-07T21:04:29Z -->\n\n目次本文\n\n<!-- /ai:task -->。\n\n<!-- ai:task id=duplicate kind=text prompt="機能" -->\n\n<!-- ai:task id=duplicate kind=text prompt="機能" -->\n\n生成本文\n\n<!-- /ai:task -->\n';
+  });
+  await page.waitForFunction(() => document.querySelector('.ProseMirror').innerText.includes('生成本文'));
+  const visibleProse = await page.locator('.ProseMirror').innerText();
+  assert.doesNotMatch(visibleProse, /<!--|created-at=|ai:task/);
+  assert.match(visibleProse, /目次本文/);
+  assert.match(visibleProse, /。/);
+  await page.locator('.milkdown-ai-task-body p').filter({ hasText: '生成本文' }).click();
+  await page.keyboard.press('End'); await page.keyboard.type('追記');
+  const savedMetadata = await page.locator('#source').inputValue();
+  assert.equal((savedMetadata.match(/<!-- ai:task /g) || []).length, 3);
+  assert.equal((savedMetadata.match(/<!-- \/ai:task -->/g) || []).length, 2);
+  assert.match(savedMetadata, /生成本文追記/);
+  assert.match(savedMetadata, /-->。/);
+
   assert.deepEqual(errors, []);
   console.log('Milkdown editable AI prompt/body cards, confirm/unconfirm button, legacy format support, Crepe standard top bar, AI tag plugin/menu, selection toolbar, table, code editor, Undo, images/comments, source switching, Mermaid and read-only checks passed.');
 } finally { await browser?.close(); if (server) process.kill(-server.pid, 'SIGTERM'); }
