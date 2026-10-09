@@ -20,3 +20,13 @@
 - AI作画はローカルHTTPフィクスチャを使い、リクエスト、画像保存、キー非保存、プレビュー後の挿入、401応答時の原稿保持を確認した。実際のOpenAI APIへの画像生成は実行していない。
 
 Windows WebView2のホバー表示とOS表示倍率100／150／200%、macOSの権限を伴う実GUIの一連の操作は未確認。Linux・ブラウザの成功を対象OSの実機確認として扱わない。これらの確認と次のリリース・アーカイブは未完了として残す。
+
+## WindowsとクロスプラットフォームCIの追加結果
+
+実装コミット `175f032` の[CI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37971533070)で、macOS arm64／x64のRust検証とビルド・ZIP作成、Linuxの画面・統合テストが成功した。Windowsでは実アプリへの空白・特殊文字を含む引数、クリック録画、MarkItsのクロップ・保存・再起動・拡張、原本保持、Markdown挿入、AI未設定のHTML出力が成功した。ダウンロードした `windows-native-smoke.log` の各PASSを確認した。
+
+このCIは追加したWebView2チェックの実行へ切り替えるため、Linux／Windowsの配布用ビルド中に取消となった。4構成すべての最終パッケージが完成したとは扱わない。
+
+コミット `1e4ede9` では、実際のStudio/WebView2でプロジェクトを開き、AI指示の開閉、表示切替、OSポインターのホバー、ウィンドウ画像と実際のDPIの記録を行うチェックを追加した。[追加チェックを含むCI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37972828644)の結果と画像はまだ取得していない。表示倍率別の確認とmacOSの実GUI確認は引き続き未完了。
+
+その後Windowsジョブの終了を確認し、成果物の `windows-webview2.log` を取得した。実録画・MarkItsチェックは成功したが、WebView2チェックはデバッグ接続開始前に失敗し、画像は生成されなかった。管理者権限での環境変数指定が無視されるというMicrosoftの説明と整合するため、Debug／Windows専用の起動モードからWebView2の作成APIへポートと一時プロファイルを渡すよう修正した。表示不具合の検証成功とは扱わず、修正後の実行結果を待つ。

@@ -113,8 +113,10 @@ Linuxでは `scripts/smoke_manual_studio_native_library.py` によりStudio本�
 
 ### Windows WebView2の実画面チェック
 
-`node scripts/test_manual_studio_webview2.mjs` はWindowsでビルドした `target/debug/manual-studio.exe` を一時プロジェクトで起動する。WebView2の接続は[Microsoftが案内するリモートデバッグ設定](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/debug-visual-studio-code)を起動したプロセスだけに渡す。接続先はそのプロセスの専用ポートで、実際のTauri画面と専用原稿が開いたことを確認する。
+`node scripts/test_manual_studio_webview2.mjs` はWindowsでビルドした `target/debug/manual-studio.exe` を一時プロジェクトで起動する。WebView2の接続は[Microsoftが案内するリモートデバッグ設定](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/debug-visual-studio-code)を起動したプロセスだけに渡す。DebugビルドのWindows専用起動モードが、専用ポートと一時プロファイルをWebView2の作成APIへ指定する。通常起動とReleaseビルドではこのモードを有効にしない。接続先はそのプロセスの専用ポートで、実際のTauri画面と専用原稿が開いたことを確認する。
 
 90行のAI指示を開閉し、高さ制限とMarkdownの保持を検証する。2種類のウィンドウ寸法と3つの編集表示で、パネルにtitleがなく、表示切替ボタンの説明が短いことを検証する。OSのポインターを動かしてホバーし、実際のウィンドウ画像と `GetDpiForWindow` のDPI、WebView2の表示寸法、診断記録を `webview2-results/` に保存する。ブラウザ倍率のエミュレーションは使わない。ウィンドウが画面外に切れている場合は成功にしない。
 
 このチェックは `windows_native_smoke=true` のCIに含む。確認済みのOS倍率は出力されたDPIから判断し、100／150／200%すべてを試したとは扱わない。追加時点ではスクリプトの構文確認のみ完了しており、Windowsでの実行結果と画像確認はまだ取得していない。
+
+最初のCI実行ではデバッグ接続が開始せず、画像は取得できなかった。[Microsoftの説明](https://github.com/MicrosoftEdge/WebView2Feedback/issues/5645)では、WebView2 150以降の管理者権限での起動時は環境変数の指定を無視し、作成APIによる指定を利用できる。失敗はこれと整合するため、環境変数だけに依存した起動からAPI指定へ変更した。CIのWindows実行結果が得られるまで表示確認済みとは扱わない。

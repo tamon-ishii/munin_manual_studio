@@ -24,17 +24,17 @@ try{
   const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
   const executable=path.join(repo,'target/debug/manual-studio.exe');await access(executable);
   let launchError;
-  app=spawn(executable,[],{cwd:root,env:{...process.env,WEBVIEW2_USER_DATA_FOLDER:path.join(root,'webview-profile'),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${port}`},stdio:['ignore','ignore','pipe']});
+  app=spawn(executable,['--manual-studio-webview2-test',String(port),path.join(root,'webview-profile')],{cwd:root,env:{...process.env,WEBVIEW2_USER_DATA_FOLDER:path.join(root,'webview-profile')},stdio:['ignore','ignore','pipe']});
   app.on('error',error=>{launchError=error;});
   app.stderr.on('data',chunk=>{diagnostics=(diagnostics+chunk).slice(-4000);});
-  let endpoint;
+  let endpoint,lastProbeFailure='';
   for(let i=0;i<150;i++){
     if(launchError)throw launchError;
     if(app.exitCode!==null)throw new Error(`Studio exited (${app.exitCode}): ${diagnostics}`);
-    try{const response=await fetch(`http://127.0.0.1:${port}/json/version`);if(response.ok){endpoint=(await response.json()).webSocketDebuggerUrl;break;}}catch{/* startup */}
+    try{const response=await fetch(`http://127.0.0.1:${port}/json/version`);if(response.ok){endpoint=(await response.json()).webSocketDebuggerUrl;if(endpoint)break;lastProbeFailure='Debugger response had no browser endpoint';}else lastProbeFailure=`HTTP ${response.status}`;}catch(error){lastProbeFailure=String(error.cause||error);}
     await pause(200);
   }
-  assert.ok(endpoint,'The owned WebView2 debugging endpoint must start');
+  assert.ok(endpoint,`The owned WebView2 debugging endpoint must start. Last probe: ${lastProbeFailure}. Studio diagnostics: ${diagnostics}`);
   browser=await chromium.connectOverCDP(endpoint);
   const context=browser.contexts()[0];assert.ok(context,'WebView2 must expose its native context');
   context.setDefaultTimeout(15000);

@@ -974,6 +974,26 @@ fn main() {
         }
         return;
     }
+    let context = tauri::generate_context!();
+    #[cfg(all(debug_assertions, target_os = "windows"))]
+    let context = {
+        let mut context = context;
+        if mode.as_deref() == Some(std::ffi::OsStr::new("--manual-studio-webview2-test")) {
+            let port: u16 = args.next().expect("test debug port is required")
+                .to_string_lossy().parse().expect("test debug port must be a number");
+            assert!(port != 0, "test debug port must not be zero");
+            let profile = PathBuf::from(args.next().expect("test WebView2 profile is required"));
+            assert!(profile.is_absolute(), "test WebView2 profile must be absolute");
+            let window = context.config_mut().app.windows.first_mut().expect("main window is required");
+            // Keep Wry's standard disabled features. Elevated WebView2 hosts
+            // ignore environment overrides, so pass fixture options via API.
+            window.additional_browser_args = Some(format!(
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-address=127.0.0.1 --remote-debugging-port={port}"
+            ));
+            window.data_directory = Some(profile);
+        }
+        context
+    };
     tauri::Builder::default()
         .manage(recorder::RecorderState::default())
         .manage(HiddenStudioWindows::default())
@@ -1010,7 +1030,7 @@ fn main() {
             open_editor,
             open_output
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("Failed to start Munin Manual Studio");
 }
 
