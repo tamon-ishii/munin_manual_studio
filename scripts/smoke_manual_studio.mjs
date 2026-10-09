@@ -417,6 +417,7 @@ try {
   await page.locator('[data-tab="settings"]').dispatchEvent('click');
   assert.equal(await page.locator('#panel-publish #docs-path').count(), 0, 'workspace paths are not in AI settings');
   await page.locator('[data-close-dialog="panel-settings"]').click();
+  await page.locator('#project-menu summary').click();
   await page.locator('#open-workspace-settings').click();
   await page.locator('#docs-path').fill('unfinished-folder');
   await page.locator('#cancel-workspace-settings').click();
@@ -451,6 +452,7 @@ try {
   assert.equal(await page.locator('#ai-model').inputValue(), 'retry-test-model');
   assert.equal(await page.locator('#ai-connection-type').inputValue(), 'local_llm');
   assert.equal(await page.locator('#ai-api-key').inputValue(), 'smoke-local-key');
+  await page.locator('#project-menu summary').click();
   await page.locator('#open-workspace-settings').click();
   await page.locator('#site-name').fill('Workspace smoke site');
   await page.locator('#save-workspace-settings').click();
@@ -865,6 +867,7 @@ try {
   await page.locator('#project-root').fill(root);
   await page.locator('#project-form button[type=submit]').click();
   await idle();
+  await page.locator('#project-menu summary').click();
   await page.locator('#open-workspace-settings').click();
   assert.equal(await page.locator('#workspace-settings-dialog #project-root').count(), 0);
   await page.locator('#cancel-workspace-settings').click();

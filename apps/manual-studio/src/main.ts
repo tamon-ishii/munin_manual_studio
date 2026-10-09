@@ -564,6 +564,8 @@ function tabToComponentId(name: string): string {
   }
 }
 function chooseTab(name: string): void {
+  if (name === "applications" && !workspace) return;
+  element<HTMLDetailsElement>("project-menu").open = false;
   if (name === "uimap" || name === "publish" || name === "appearance" || name === "settings" || name === "applications") {
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
     element<HTMLDetailsElement>("settings-menu").open = false;
@@ -835,6 +837,7 @@ function renderSettings(): void {
   element("workspace-settings-root").textContent = projectRoot;
   setButtonDisabled(element<HTMLButtonElement>("save-workspace-settings"), false);
   setButtonDisabled(element<HTMLButtonElement>("open-workspace-settings"), false);
+  setButtonDisabled(element<HTMLButtonElement>("open-applications"), false);
   element("workspace-save-state").textContent = "";
   input("ai-model").value = workspace.config.model;
   element<HTMLTextAreaElement>("manual-brief").value = workspace.brief;
@@ -966,7 +969,10 @@ async function openProject(root: string, check = true): Promise<void> {
   ++documentRequestVersion; ++workspaceRequestVersion;
   if (projectRoot !== root) expandedFolders.clear();
   if (terminalController && projectRoot !== root) await terminalController.kill();
+  closeAllPanelDialogs();
   projectRoot = root; workspace = loaded; documentState = null; dirty = false;
+  await loadLaunchCommands();
+  if (version !== projectRequestVersion) return;
   documentSaveState = null;
   setAiPhase(element('ai-workflow-status'), 'idle');
   previewNavigator.setStatus('empty');
@@ -1518,6 +1524,7 @@ document.querySelectorAll<HTMLDialogElement>("dialog.panel-dialog").forEach((dia
 
 element("open-workspace-settings").addEventListener("click", () => {
   if (!workspace) return;
+  element<HTMLDetailsElement>("project-menu").open = false;
   input("docs-path").value = workspace.config.docs;
   input("output-path").value = workspace.config.output;
   input("site-name").value = workspace.config.mkdocs.site_name;
@@ -1625,6 +1632,8 @@ document.addEventListener("click", event => {
   if (!menu.contains(event.target as Node)) menu.open = false;
   const settings = element<HTMLDetailsElement>("settings-menu");
   if (!settings.contains(event.target as Node)) settings.open = false;
+  const projectMenu = element<HTMLDetailsElement>("project-menu");
+  if (!projectMenu.contains(event.target as Node)) projectMenu.open = false;
 });
 element("editor-more").addEventListener("keydown", event => {
   if (event.key === "Escape") {
@@ -1634,7 +1643,7 @@ element("editor-more").addEventListener("keydown", event => {
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
-  const openMenu = document.querySelector<HTMLDetailsElement>("#settings-menu[open], .format-insert-menu[open]");
+  const openMenu = document.querySelector<HTMLDetailsElement>("#project-menu[open], #settings-menu[open], .format-insert-menu[open]");
   if (openMenu) { openMenu.open = false; openMenu.querySelector<HTMLElement>("summary")?.focus(); }
 });
 document.querySelector(".format-insert-actions")?.addEventListener("click", event => {
@@ -2109,7 +2118,7 @@ function updateLaunchSelection(): void {
   element<HTMLElement>("custom-launch-args-label").hidden = !custom;
   const summary = element("screenshot-launch-summary");
   const command = launchCommands.find((item) => (item.id || item.name) === select.value);
-  summary.textContent = command ? `起動アプリ: ${command.program}${command.args.length ? `（引数 ${command.args.length} 件）` : ""}` : custom ? "アプリの実行ファイルと必要な引数を指定してください。" : "共通コマンドを登録すると、ここから選べます。";
+  summary.textContent = command ? `起動アプリ: ${command.program}${command.args.length ? `（引数 ${command.args.length} 件）` : ""}` : custom ? "アプリの実行ファイルと必要な引数を指定してください。" : "アプリを登録すると、ここから選べます。";
 }
 function refreshLaunchCommandOptions(): void {
   const select = element<HTMLSelectElement>("screenshot-launch-command");
@@ -2148,8 +2157,13 @@ function renderLaunchCommands(): void {
   }));
 }
 async function loadLaunchCommands(): Promise<void> {
-  if (!native) { refreshLaunchCommandOptions(); return; }
-  launchCommands = await invoke<LaunchCommand[]>("load_launch_commands");
+  const root = projectRoot;
+  launchCommands = [];
+  renderLaunchCommands(); refreshLaunchCommandOptions();
+  if (!native || !root) return;
+  const commands = await invoke<LaunchCommand[]>("load_launch_commands", { root });
+  if (projectRoot !== root) return;
+  launchCommands = commands;
   renderLaunchCommands(); refreshLaunchCommandOptions();
 }
 function insertAiTask(kind: string, custom?: { id: string; prompt: string }, selection?: { start: number; end: number }, insertTag?: (markdown: string) => boolean): boolean {
@@ -2945,6 +2959,15 @@ themePicker.addEventListener("change", () => {
   applyTheme(themePicker.value);
   if (native) void emit("manual-studio-theme-changed", themePicker.value);
 });
+element("import-launch-commands").addEventListener("click", () => { void work(async () => {
+  if (!workspace || !native) throw new Error("プロジェクトを開いてデスクトップ版で取り込んでください。");
+  const root = projectRoot;
+  const commands = await invoke<LaunchCommand[]>("import_launch_commands", { root });
+  if (projectRoot !== root) return;
+  launchCommands = commands;
+  renderLaunchCommands(); refreshLaunchCommandOptions();
+  status("以前の共通設定をこのプロジェクトへ取り込みました。");
+}); });
 element("add-launch-command").addEventListener("click", () => {
   launchCommands.push({ id: `app-${crypto.randomUUID()}`, name: "", program: "", args: [] }); renderLaunchCommands();
   document.querySelector<HTMLInputElement>(`[data-launch-name="${launchCommands.length - 1}"]`)?.focus();
@@ -2956,8 +2979,8 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
     program: document.querySelector<HTMLInputElement>(`[data-launch-program="${index}"]`)!.value.trim(),
     args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args="${index}"]`)!.value.split("\n").filter((value) => value.length > 0),
   }));
-  await invoke<void>("save_launch_commands", { commands: launchCommands });
-  renderLaunchCommands(); refreshLaunchCommandOptions(); status("共通起動コマンドを保存しました。");
+  await invoke<void>("save_launch_commands", { root: projectRoot, commands: launchCommands });
+  renderLaunchCommands(); refreshLaunchCommandOptions(); status("このプロジェクトのアプリ登録を保存しました。");
 }); });
 element("generate-draft").addEventListener("click", () => { void work(async () => {
   savedBeforeOperation();
@@ -3041,7 +3064,6 @@ if (recordingControlMode) {
   }
 }
 if (!recordingControlMode) {
-  void loadLaunchCommands().catch((error) => status(`共通起動コマンドを読み込めません: ${String(error)}`, true));
   const initialRoot = params.get("root") || localStorage.getItem("manual-studio-project");
   if (initialRoot) void work(() => openProject(initialRoot));
 }

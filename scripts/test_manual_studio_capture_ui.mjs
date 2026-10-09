@@ -50,15 +50,15 @@ try {
   // Native calls are mocked here; this verifies the UI contract without claiming OS capture.
   const nativePage=await browser.newPage();
   await nativePage.addInitScript(({png})=>{
-    const calls=[];let profile=[],shot=null,recordedId='',recordedRoot='',imports=0,next=1;
+    const calls=[];let profiles={},shot=null,recordedId='',recordedRoot='',imports=0,next=1;
     window.__libraryMock={calls};window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
     window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'main'}},transformCallback(){return next++;},unregisterCallback(){},convertFileSrc:path=>path,invoke(command,args={}){
       calls.push({command,args});
       if(command==='plugin:event|listen')return Promise.resolve(next++);
       if(command==='choose_application')return Promise.resolve('/path with spaces/app');
       if(command==='test_launch_application')return args.program==='/missing/app'?Promise.reject(new Error('起動パスが見つかりません')):Promise.resolve();
-      if(command==='load_launch_commands')return Promise.resolve(profile);
-      if(command==='save_launch_commands'){profile=args.commands;return Promise.resolve();}
+      if(command==='load_launch_commands')return Promise.resolve(profiles[args.root]||[]);
+      if(command==='save_launch_commands'){if(!args.root)return Promise.reject(new Error("project required"));profiles[args.root]=args.commands;return Promise.resolve();}
       if(command==='start_operation_recording'){recordedId=args.taskId;recordedRoot=args.root;return Promise.resolve('recording');}
       if(command==='finish_operation_recording'){shot={ownerRoot:recordedRoot,id:recordedId,name:'',adopted:null,protected:false,edits:[{id:'edit-one',created_at:'now',flattened:false}],usage:[],thumbnail:null,recipe:{steps:[]}};return Promise.resolve({screenshotId:recordedId,sourceFile:'/tmp/source',annotationFile:'/tmp/output',completionFile:'/tmp/complete',markitsStarted:true,message:'edited'});}
       if(command==='markits_annotation_ready')return Promise.resolve('{"annotations":[]}');
@@ -73,9 +73,12 @@ try {
       return Promise.resolve(null);
     }};
   },{png:original.data});
+  await nativePage.goto(base);
+  assert.equal(await nativePage.locator('#open-applications').isDisabled(),true,'application registration requires an opened project');
+  assert.equal(await nativePage.locator('#settings-menu [data-tab=applications]').count(),0,'registration belongs to the Project menu');
   await nativePage.goto(`${base}/?root=${encodeURIComponent('/tmp/library-native-fixture')}`);
   await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  await nativePage.locator('[data-tab=applications]').dispatchEvent('click');await nativePage.locator('#add-launch-command').click();
+  await nativePage.locator('#project-menu summary').click();await nativePage.getByRole('button',{name:'アプリ登録',exact:true}).click();await nativePage.locator('#add-launch-command').click();
   await nativePage.locator('[data-launch-program="0"]').fill('/missing/app');
   await nativePage.getByRole('button',{name:'起動確認',exact:true}).click();
   await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('起動パスが見つかりません'));
@@ -95,13 +98,15 @@ try {
   await nativePage.waitForFunction(()=>typeof window.__libraryMock.release==='function');
   await nativePage.evaluate(()=>{document.querySelector('#project-root').value='/tmp/another-library-project';document.querySelector('#project-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
   await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  assert.equal(await nativePage.locator('#screenshot-launch-command option').count(),1,'another project cannot use the previous application registrations');
   await nativePage.evaluate(()=>window.__libraryMock.release());
   await nativePage.waitForFunction(()=>localStorage.getItem('manual-library-handoffs')==='[]');
   assert.equal(await nativePage.locator('.screenshot-library-card').count(),0,'late completion cannot populate another project');
   assert.doesNotMatch(await nativePage.locator('#screenshot-library-status').textContent(),/編集内容を画像一覧へ保存しました/);
   await nativePage.evaluate(()=>{document.querySelector('#project-root').value='/tmp/library-native-fixture';document.querySelector('#project-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
   await nativePage.locator('.screenshot-library-card img').waitFor();
-  const nativeCalls=await nativePage.evaluate(()=>window.__libraryMock.calls);const start=nativeCalls.find(call=>call.command==='start_operation_recording');assert.equal(start.args.program,'/path with spaces/app');assert.deepEqual(start.args.args,['--flag',' value with spaces $(literal) ']);assert.match(start.args.taskId,/^shot-/);
+  await nativePage.waitForFunction(()=>document.querySelector('#screenshot-launch-command').options.length===2);
+  const nativeCalls=await nativePage.evaluate(()=>window.__libraryMock.calls);assert.equal(nativeCalls.find(call=>call.command==='save_launch_commands').args.root,'/tmp/library-native-fixture');assert.ok(nativeCalls.some(call=>call.command==='load_launch_commands'&&call.args.root==='/tmp/another-library-project'));const start=nativeCalls.find(call=>call.command==='start_operation_recording');assert.equal(start.args.program,'/path with spaces/app');assert.deepEqual(start.args.args,['--flag',' value with spaces $(literal) ']);assert.match(start.args.taskId,/^shot-/);
   assert.equal(nativeCalls.filter(call=>call.command==='import_library_capture').length,2,'failed handoff can retry without recording again');assert.equal(nativeCalls.filter(call=>call.command==='start_operation_recording').length,1);assert.equal(nativeCalls.filter(call=>call.command==='manual_request'&&call.args.request.action==='editor-save').length,0,'capture has no selected document dependency');
   await nativePage.close();
   assert.deepEqual(errors,[]);

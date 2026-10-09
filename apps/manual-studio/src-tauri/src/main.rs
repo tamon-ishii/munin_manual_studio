@@ -83,17 +83,15 @@ fn normalize_launch_commands(commands: &mut [LaunchCommand]) -> bool {
     changed
 }
 
-fn launch_commands_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?
-        .join("launch_commands.json"))
+fn launch_commands_path(root: &str) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    if !root.is_dir() { return Err("プロジェクトのフォルダーがありません。".into()); }
+    Ok(root.join(".munin").join("launch_commands.json"))
 }
 
 #[tauri::command]
-fn load_launch_commands(app: tauri::AppHandle) -> Result<Vec<LaunchCommand>, String> {
-    let path = launch_commands_path(&app)?;
+fn load_launch_commands(root: String) -> Result<Vec<LaunchCommand>, String> {
+    let path = launch_commands_path(&root)?;
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -102,15 +100,15 @@ fn load_launch_commands(app: tauri::AppHandle) -> Result<Vec<LaunchCommand>, Str
         .map_err(|error| format!("対象アプリを読み込めません: {error}"))?;
     let needs_migration = normalize_launch_commands(&mut commands);
     if needs_migration {
-        save_launch_commands(app, commands.clone())?;
+        save_launch_commands(root, commands.clone())?;
     }
     Ok(commands)
 }
 
 #[tauri::command]
-fn save_launch_commands(app: tauri::AppHandle, commands: Vec<LaunchCommand>) -> Result<(), String> {
+fn save_launch_commands(root: String, commands: Vec<LaunchCommand>) -> Result<(), String> {
     if commands.len() > 100 {
-        return Err("共通起動コマンドは100件以内にしてください。".into());
+        return Err("アプリ登録は100件以内にしてください。".into());
     }
     let mut ids = std::collections::HashSet::new();
     for command in &commands {
@@ -121,7 +119,7 @@ fn save_launch_commands(app: tauri::AppHandle, commands: Vec<LaunchCommand>) -> 
             return Err("アプリの識別情報が不正です。".into());
         }
     }
-    let path = launch_commands_path(&app)?;
+    let path = launch_commands_path(&root)?;
     let parent = path.parent().ok_or("設定フォルダーを取得できません。")?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let bytes = serde_json::to_vec_pretty(&commands).map_err(|error| error.to_string())?;
@@ -131,6 +129,24 @@ fn save_launch_commands(app: tauri::AppHandle, commands: Vec<LaunchCommand>) -> 
     temporary.as_file().sync_all().map_err(|e| e.to_string())?;
     temporary.persist(path).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn import_launch_commands(app: tauri::AppHandle, root: String) -> Result<Vec<LaunchCommand>, String> {
+    let legacy = app.path().app_config_dir().map_err(|error| error.to_string())?.join("launch_commands.json");
+    import_launch_commands_from_path(root, &legacy)
+}
+
+fn import_launch_commands_from_path(root: String, legacy: &std::path::Path) -> Result<Vec<LaunchCommand>, String> {
+    if !load_launch_commands(root.clone())?.is_empty() {
+        return Err("既存のアプリ登録があります。取り込みは空のプロジェクトで行ってください。".into());
+    }
+    if !legacy.exists() { return Err("以前の共通設定がありません。".into()); }
+    let mut commands: Vec<LaunchCommand> = serde_json::from_slice(&fs::read(legacy).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("以前の共通設定を読み込めません: {error}"))?;
+    normalize_launch_commands(&mut commands);
+    save_launch_commands(root, commands.clone())?;
+    Ok(commands)
 }
 
 #[tauri::command]
@@ -964,6 +980,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             manual_request,
             load_launch_commands,
+            import_launch_commands,
             load_workspace_history,
             record_workspace_history,
             save_launch_commands,
@@ -1078,6 +1095,37 @@ mod application_profile_tests {
             saved["revision"]
         );
     }
+    #[test]
+    fn launch_profiles_are_owned_by_each_project() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let first_root = first.path().to_str().unwrap().to_string();
+        let second_root = second.path().to_str().unwrap().to_string();
+        let commands = vec![LaunchCommand { id: "app-one".into(), name: "".into(), program: "/path with spaces/app".into(), args: vec![" value $(literal) ".into()] }];
+        save_launch_commands(first_root.clone(), commands).unwrap();
+        assert!(load_launch_commands(second_root).unwrap().is_empty());
+        let restored = load_launch_commands(first_root.clone()).unwrap();
+        assert_eq!(restored[0].args, [" value $(literal) "]);
+        assert!(first.path().join(".munin/launch_commands.json").is_file());
+        save_launch_commands(first_root.clone(), vec![]).unwrap();
+        assert!(load_launch_commands(first_root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_import_preserves_source_and_does_not_overwrite_project() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("legacy.json");
+        let original = br#"[{"name":"","program":"/old/app","args":[" a $(literal) "]}]"#;
+        fs::write(&legacy, original).unwrap();
+        let project = root.path().to_str().unwrap().to_string();
+        let imported = import_launch_commands_from_path(project.clone(), &legacy).unwrap();
+        assert_eq!(imported[0].args, [" a $(literal) "]);
+        assert!(!imported[0].id.is_empty());
+        assert_eq!(fs::read(&legacy).unwrap(), original);
+        assert!(import_launch_commands_from_path(project.clone(), &legacy).is_err());
+        assert_eq!(load_launch_commands(project).unwrap()[0].id, imported[0].id);
+    }
+
     #[test]
     fn legacy_profiles_keep_argument_boundaries_and_optional_names() {
         let mut profiles:Vec<LaunchCommand>=serde_json::from_value(serde_json::json!([

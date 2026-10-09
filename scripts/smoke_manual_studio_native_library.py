@@ -103,10 +103,18 @@ def find(name, role=None, prefix=False, timeout=15, include_replay_target=False)
     print('ASSET FILES', list(__import__('pathlib').Path(root).glob('.munin/screenshots/*/manifest.json')), flush=True)
     raise RuntimeError('Accessible control not found: ' + name)
 
+def activate_fixture():
+    for line in subprocess.check_output(['wmctrl', '-lp'], text=True).splitlines():
+        columns = line.split(None, 4)
+        if len(columns) >= 5 and columns[2].isdigit() and owned(int(columns[2])) and columns[4] == 'Munin Manual Studio':
+            subprocess.run(['wmctrl', '-ia', columns[0]], check=True)
+            return
+    raise RuntimeError('Fixture Studio window not found')
+
 def click(name, role=None):
     n = find(name, role, prefix=name == '編集終了')
     action = n.get_action_iface()
-    if not action or not action.do_action(0):
+    if name in ("プロジェクト", "設定") or not action or not action.do_action(0):
         box = Atspi.Component.get_extents(n, Atspi.CoordType.SCREEN)
         assert box.width > 0 and box.height > 0, name
         xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
@@ -178,13 +186,13 @@ try:
             xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
             xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
             shift = x11.XKeysymToKeycode(display, 65505)
-            subprocess.run(['wmctrl', '-Fa', 'Munin Manual Studio'], check=True)
+            activate_fixture()
             time.sleep(0.3)
             fill('プロジェクトのフォルダー', root)
             click('開く', 'push button')
             time.sleep(2)
-            click('設定')
-            click('対象アプリ', 'push button')
+            click('プロジェクト')
+            click('アプリ登録', 'push button')
             click('＋ コマンドを追加', 'push button')
             target_studio = os.environ.get('MANUAL_NATIVE_TARGET_STUDIO')
             if target_studio:
@@ -201,7 +209,7 @@ try:
                 open(fixture, 'w').write('import gi,sys,json\nfrom pathlib import Path\ngi.require_version("Gtk","3.0")\nfrom gi.repository import Gtk\nPath(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\nw=Gtk.Window(title="Munin Native Recording Target");w.set_default_size(640,400)\nb=Gtk.Button(label="Record target");b.connect("clicked",lambda b:b.set_label("Clicked"));w.add(b);w.connect("destroy",Gtk.main_quit);w.show_all();Gtk.main()\n')
                 fill('起動コマンド / アプリ', '/usr/bin/python3', True)
                 fill('起動引数（1行に1つ）', '\n'.join([fixture, report, ' value with spaces ', '$(literal)']))
-            click('共通コマンドを保存', 'push button')
+            click('アプリ登録を保存', 'push button')
             click('閉じる', 'push button')
             click('スクリーンショット一覧', 'push button')
             click('操作を記録して撮影', 'push button')
@@ -272,7 +280,7 @@ try:
             after = json.load(open(manifests[0]))
             assert after['edits'][-1]['scene'] == scene_before, 're-edit must restore the annotations exactly'
             assert {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in source_files} == hashes_before
-            subprocess.run(['wmctrl', '-Fa', 'Munin Manual Studio'], check=True)
+            activate_fixture()
             time.sleep(0.3)
             if os.environ.get('MANUAL_NATIVE_FORCE_IMAGE_TARGET'):
                 # Alter only this temporary fixture's recipe to exercise the
