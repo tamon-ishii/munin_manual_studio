@@ -13,3 +13,21 @@
 Linuxで特定した原因は、ボタン用の `[data-editor-view]` セレクターが編集パネルにも一致し、パネル全文をnative titleへ設定していたこと。修正はボタンだけを対象にする。Windowsでは修正後に上記範囲で未再現と確認したもので、Windowsでの修正前の再現を主張しない。Milkdown浮動UIや独自ツールチップを原因と判断する証拠は得られていない。
 
 150%・200%のOS表示倍率とユーザーの任意操作での長時間確認は未実施。browserのdeviceScaleFactorによる代替確認は行っていない。
+
+## 残る倍率の実機確認
+
+Windowsの表示設定で倍率を変更してから、ビルド済みのDebugアプリに対してPowerShellで実行する。各倍率の画像とレポートは別フォルダーへ保存する。実ウィンドウのDPIが期待値と異なる場合はテストを失敗させる。
+
+```powershell
+# OSの表示倍率を150%へ変更した後
+$env:MANUAL_WEBVIEW2_EXPECTED_DPI = '144'
+$env:MANUAL_WEBVIEW2_RESULTS = 'webview2-results/150'
+node scripts/test_manual_studio_webview2.mjs
+
+# OSの表示倍率を200%へ変更した後
+$env:MANUAL_WEBVIEW2_EXPECTED_DPI = '192'
+$env:MANUAL_WEBVIEW2_RESULTS = 'webview2-results/200'
+node scripts/test_manual_studio_webview2.mjs
+```
+
+この設定はOSの倍率を変更しない。倍率の変更自体は[Windowsの表示設定](https://support.microsoft.com/en-gb/windows/hardware/display-graphics/change-your-screen-resolution-and-layout-in-windows)で行う。実行前に `npm run manual:build` と `cargo build --locked -p manual-core -p manual-studio` が必要。

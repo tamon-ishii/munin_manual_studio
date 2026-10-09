@@ -12,6 +12,8 @@ import {chromium} from 'playwright-core';
 if(process.platform!=='win32')throw new Error('This check requires Windows and the actual Studio WebView2.');
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const run=promisify(execFile),pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const expectedDpi=process.env.MANUAL_WEBVIEW2_EXPECTED_DPI ? Number(process.env.MANUAL_WEBVIEW2_EXPECTED_DPI) : undefined;
+if(expectedDpi!==undefined)assert.ok(Number.isInteger(expectedDpi)&&expectedDpi>0,'MANUAL_WEBVIEW2_EXPECTED_DPI must be a positive integer');
 const root=await mkdtemp(path.join(tmpdir(),'munin-webview2-'));
 const output=path.resolve(process.env.MANUAL_WEBVIEW2_RESULTS||'webview2-results');
 let app,browser;let diagnostics='';
@@ -65,6 +67,7 @@ try{
   const checks=[];
   for(const [width,height] of [[1440,940],[1000,700]]){
     const native=await windowAction('resize',['-Width',String(width),'-Height',String(height)]);
+    if(expectedDpi!==undefined)assert.equal(native.dpi,expectedDpi,'The actual OS window DPI must match the requested verification scale');
     const modes=page.locator('button[data-editor-view]');
     for(let mode=0;mode<await modes.count();mode++){
       await modes.nth(mode).click();
@@ -79,7 +82,7 @@ try{
     }
   }
   const probe=await page.evaluate(()=>{const report=window.muninDisplayProbe.report();window.muninDisplayProbe.stop();return report;});
-  await writeFile(path.join(output,'report.json'),JSON.stringify({checks,probe,errors,scope:'Actual Windows Studio/WebView2, OS DPI reported per window; no DPI emulation and no untested DPI claimed.'},null,2));
+  await writeFile(path.join(output,'report.json'),JSON.stringify({expectedDpi,checks,probe,errors,scope:'Actual Windows Studio/WebView2, OS DPI reported per window; no DPI emulation and no untested DPI claimed.'},null,2));
   assert.deepEqual(errors,[]);
   console.log(`Actual WebView2 hover checks passed at OS DPI ${[...new Set(checks.map(check=>check.native.dpi))].join(', ')}; screenshots and report: ${output}`);
 }finally{
