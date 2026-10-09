@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {spawn, execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,cp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -14,7 +14,7 @@ const cli=path.join(bin,'manualctl');const run=promisify(execFile);
 const root=await mkdtemp(path.join(tmpdir(),'munin-macos-studio-'));
 const output=path.resolve('native-smoke-results/macos-studio');await mkdir(output,{recursive:true});
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const deadline=Date.now()+240000;let studio,targetPid;let stderr="";const results=[];
+const deadline=Date.now()+180000;let studio,targetPid;let stderr="";const results=[];
 const poll=async(read)=>{while(Date.now()<deadline){const value=await read();if(value)return value;await pause(200);}throw new Error('macOS Studio UI deadline exceeded');};
 async function scenario(window,steps){
  const file=path.join(root,'scenario.json');await writeFile(file,JSON.stringify({version:1,platform:'desktop',window,steps}));
@@ -57,6 +57,10 @@ try{
  pass('macOS Studio re-edit, immutable original, document insertion/autosave and HTML publication without AI');
  await writeFile(path.join(output,'report.json'),JSON.stringify({results,platform:process.platform,scope:'Actual native Studio UI, accessibility/input, MarkIts handoff and foreground; no browser mocks'},null,2));
 }catch(error){
+ console.error('Studio process state', {exitCode:studio?.exitCode,signalCode:studio?.signalCode});
+ try{const {stdout}=await run('ps',['-axo','pid,ppid,stat,command']);await writeFile(path.join(output,'processes.txt'),stdout);}catch{}
+ for(const directory of ['.munin','manual']){try{await cp(path.join(root,directory),path.join(output,directory),{recursive:true});}catch{}}
+ try{await cp(path.join(tmpdir(),'manual-studio-markits'),path.join(output,'handoff'),{recursive:true});}catch{}
  for(const action of ['list-windows','list-accessible-windows']){try{const {stdout}=await run(cli,[action,'--root',root],{timeout:10000});await writeFile(path.join(output,action+'.json'),stdout);}catch{}}
  if(studio){try{const {stdout}=await run(cli,['inspect-window','--root',root,'--window',main()],{timeout:10000});await writeFile(path.join(output,'studio-tree.txt'),stdout);}catch{}}
  await writeFile(path.join(output,'studio-stderr.txt'),stderr);

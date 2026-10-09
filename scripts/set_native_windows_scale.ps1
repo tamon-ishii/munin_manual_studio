@@ -21,6 +21,24 @@ $remote=@($controls | Where-Object {$_.Current.Name -match 'cannot be changed.*r
 if($remote.Count){throw ('Display scaling unavailable in this session: '+$remote[0].Current.Name)}
 $combos=@($controls | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox -and $_.Current.IsEnabled -and ($_.Current.Name -match 'scale|size of text|100%|150%|200%')})
 if($combos.Count -ne 1){throw "Expected one enabled display-scale combo; found $($combos.Count). See display-settings-$Scale.json"}
+# The hosted desktop starts at 1024x768, which offers only 100/125%.
+# Select a real larger display mode before requesting 150/200%.
+if ($Scale -gt 125) {
+  $resolution=@($controls | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox -and $_.Current.Name -eq 'Display resolution'})[0]
+  $resolution.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+  Start-Sleep -Milliseconds 500
+  $modes=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $modes | ForEach-Object {@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName}} | ConvertTo-Json | Set-Content -Encoding UTF8 "native-smoke-results/display-modes-$Scale.json"
+  $large=@($modes | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem -and $_.Current.Name -match '^(1920|2560|3840) [×x] (1080|1440|2160)'})
+  if (-not $large.Count) { throw 'Hosted display exposes no larger resolution for 150/200% scaling; see display-modes report' }
+  $large[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  Start-Sleep -Seconds 2
+  $buttons=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  foreach($button in $buttons){if($button.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $button.Current.Name -match '^Keep changes$'){$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}}
+  Start-Sleep -Seconds 2
+  $controls=$settings.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $combos=@($controls | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox -and $_.Current.Name -eq 'Scale'})
+}
 $combo=$combos[0]
 $expand=$combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
 $expand.Expand()
