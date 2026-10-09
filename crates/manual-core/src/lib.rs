@@ -23,6 +23,7 @@ pub mod pty;
 pub mod quality;
 pub mod scenario;
 pub mod screenshots;
+mod image_generation;
 pub mod task;
 pub mod template;
 pub mod ui_explore;
@@ -192,6 +193,10 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "screenshots-migration-plan",
         "screenshots-migrate",
         "screenshots-list",
+        "image-generation-settings",
+        "image-generate",
+        "screenshots-templates",
+        "screenshots-diagnose",
         "screenshots-register",
         "screenshots-change",
         "screenshots-image",
@@ -437,6 +442,10 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                 .map_err(|e| e.to_string())?,
         )?
         .to_string()),
+        "image-generation-settings" => Ok(image_generation::settings(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
+        "image-generate" => Ok(image_generation::generate(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
+        "screenshots-templates" => Ok(screenshots::templates(root)?.to_string()),
+        "screenshots-diagnose" => Ok(screenshots::diagnose(root)?.to_string()),
         "screenshots-list" => Ok(screenshots::list(root)?.to_string()),
         "screenshots-register" => Ok(screenshots::register(
             root,
@@ -508,10 +517,13 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             page_opt.ok_or("page-tasks requires --page")?,
         )?)
         .map_err(|error| error.to_string()),
-        "create-folder" => Ok(editor::create_folder(
-            root,
-            path_opt.ok_or("create-folder requires --path")?,
-        )?),
+        "create-folder" => {
+            let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}"))
+                .map_err(|error| error.to_string())?;
+            let folder = path_opt.ok_or("create-folder requires --path")?;
+            if options["project_relative"] == true { editor::create_folder_at(root, folder, true) }
+            else { editor::create_folder(root, folder) }
+        },
         "save-asset" => {
             let path_str = path_opt.ok_or("save-asset requires --path")?;
             let data_str = data_opt.ok_or("save-asset requires --data")?;

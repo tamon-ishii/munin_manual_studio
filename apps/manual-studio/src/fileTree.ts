@@ -90,7 +90,7 @@ export function renderFileTree(
       const isPage = pagePaths.has(path) || /\.md$/i.test(name);
       return isPage
         ? `<div class="tree-file-row"><button type="button" role="treeitem" data-page="${escapeHtml(path)}" class="tree-file ${activePath === path ? "selected" : ""}" title="${escapeHtml(path)}" ${activePath === path ? 'aria-current="page"' : ""}><span class="tree-icon">${uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></button><button type="button" class="tree-generate" data-generate-page="${escapeHtml(path)}" title="${escapeHtml(name)}のAI文章・図・撮影指示を実行" aria-label="${escapeHtml(name)}をAI更新">AI</button></div>`
-        : `<div role="treeitem" class="tree-file tree-static" title="${escapeHtml(path)}"><span class="tree-icon">${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? uiIcon("image") : uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></div>`;
+        : `<div role="treeitem" tabindex="0" data-file="${escapeHtml(path)}" ${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? `data-image="${escapeHtml(path)}" draggable="true"` : ""} class="tree-file tree-static" title="${escapeHtml(path)}"><span class="tree-icon">${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? uiIcon("image") : uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></div>`;
     }).join("");
     return folderHtml + fileHtml;
   };

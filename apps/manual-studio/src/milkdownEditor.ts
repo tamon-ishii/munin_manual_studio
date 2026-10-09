@@ -1,3 +1,5 @@
+import { TextSelection } from '@milkdown/kit/prose/state';
+import type { EditorState } from '@milkdown/kit/prose/state';
 import { uiIcon } from './uiIcons';
 import { aiTaskBlockPlugins } from './milkdownAiTaskBlock';
 import { aiTagItems, createAiTagsPlugin, type AiTaskKind } from './milkdownAiTags';
@@ -250,6 +252,9 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
     return true;
   }
   return { showSource, refresh, refreshImages, host, stepHistory,
+    focus: () => { if (sourceMode) source.focus(); else instance?.action(ctx=>ctx.get(editorViewCtx).focus()); },
+    captureState: () => ready && instance ? instance.action(ctx => ctx.get(editorViewCtx).state) : null,
+    restoreState: (state: EditorState) => { if (ready && instance && state) instance.action(ctx => ctx.get(editorViewCtx).updateState(state)); },
     get isRichEditing() { return ready && !sourceMode; },
     captureAiTagInsertion: (): ((markdown: string) => boolean) | undefined => {
       if (sourceMode || !ready || !instance) return undefined;
@@ -267,6 +272,19 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
         view.focus();
         return true;
       });
+    },
+    selectInsertionHeading: (index: number|null): void => {
+      if (!ready || !instance || sourceMode) return;
+      instance.action(ctx=>{ const view=ctx.get(editorViewCtx);let found=-1,count=0;view.state.doc.descendants((node,pos)=>{if(node.type.name==='heading' && count++===index)found=pos+node.nodeSize;});const selection=found>=0?TextSelection.near(view.state.doc.resolve(found)):TextSelection.atEnd(view.state.doc);view.dispatch(view.state.tr.setSelection(selection)); });
+    },
+    insertMarkdownAt: (markdown: string, left: number, top: number): void => {
+      if (!ready || !instance) return;
+      instance.action(ctx => { const view=ctx.get(editorViewCtx); const point=view.posAtCoords({left,top}); if(point) view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(point.pos)))); insert(markdown)(ctx); view.focus(); });
+    },
+    insertMarkdown: (markdown: string): boolean => {
+      if (sourceMode || !ready || !instance) return false;
+      instance.action(ctx => { insert(markdown)(ctx); ctx.get(editorViewCtx).focus(); });
+      return true;
     },
     insertAiTag: (markdown: string): boolean => {
       if (sourceMode || !ready || !instance) return false;

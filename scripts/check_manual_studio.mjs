@@ -26,6 +26,8 @@ steps.push(
   { group: 'capture', name: 'screenshot recapture task progress checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_progress.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'recapture display refresh checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_display.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'MarkIts crop restoration checks', command: process.execPath, args: ['scripts/test_manual_markits_crop.mjs'], timeoutMs: 120_000 },
+  { group: 'ui', name: 'dialog layout at desktop and small viewport sizes', command: process.execPath, args: ['scripts/test_manual_studio_dialog_layout.mjs'], timeoutMs: 90_000 },
+  { group: 'ui', name: 'document tabs and image workflows', command: process.execPath, args: ['scripts/test_manual_studio_document_workflows.mjs'], timeoutMs: 180_000 },
   { group: 'capture', name: 'screenshot library and instruction disclosure checks', command: process.execPath, args: ['scripts/test_manual_studio_capture_ui.mjs'], timeoutMs: 120_000 },
   { prerequisite: true, group: 'build', name: 'manualctl build for browser smoke', command: 'cargo', args: ['build', '-p', 'manual-core', '--bin', 'manualctl', '--offline'], timeoutMs: 300_000 },
   { group: 'ui', name: 'MkDocs build input checks', command: process.execPath, args: ['scripts/test_manual_studio_build.mjs'], timeoutMs: 120_000 },

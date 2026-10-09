@@ -11,11 +11,11 @@ try {
   await page.goto(`${base}/progress-fixture`);
   await page.evaluate(async()=>{
     const {setupScreenshotLibrary}=await import('/src/screenshotLibrary.ts');
-    const ids=['list','status','recapture-all','migrate','cancel','history','retry','record','stop','refresh','import'];
+    const ids=['list','status','recapture-all','migrate','cancel','history','retry','record','stop','refresh','import','import-button','diagnose'];
     document.body.innerHTML=ids.map(id=>`<${id==='import'?'input':'div'} id="screenshot-library-${id}"></${id==='import'?'input':'div'}>`).join('')+'<p id="screenshot-recapture-status"></p>';
     window.confirm=()=>true;
     const state=window.progressFixture={root:'first',message:'操作 2/4：記録された待機（120秒）',cancel:false};
-    setupScreenshotLibrary({root:()=>state.root,work:op=>op().catch(error=>{state.error=String(error);}),applications:()=>[],page:()=>undefined,insert(){},async request(action){
+    setupScreenshotLibrary({root:()=>state.root,work:op=>op().catch(error=>{state.error=String(error);}),applications:()=>[],page:()=>undefined,insert(){},chooseDestination:async()=>false,openPage:async()=>{},async request(action){
       if(action==='screenshots-list')return '{"items":[]}';
       if(action==='screenshots-recapture-plan')return '{"items":[{"status":"pending"}]}';
       if(action==='agent-progress')return JSON.stringify({logs:[{message:'再撮影 1/1：設定画面 — 操作を再生しています'},{message:state.message}]});

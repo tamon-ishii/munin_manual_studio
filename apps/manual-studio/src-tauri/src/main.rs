@@ -1059,8 +1059,10 @@ mod application_profile_tests {
         let scene = serde_json::json!({"canvas":{"width":30,"height":25},"annotations":[{"type":"rect","target":[3,4,10,5],"style":"primary"}]});
         let saved=manual_core::screenshots::register(root.path(),&serde_json::json!({"source":encode(&original),"render":encode(&cropped.resize_exact(15,12,image::imageops::FilterType::Nearest)),"scene":scene,"crop":{"is_auto_cropped":false,"offset_x":20.0,"offset_y":10.0,"base_width":80,"base_height":60}})).unwrap();
         let id = saved["screenshot"]["id"].as_str().unwrap();
+        let copied = manual_core::screenshots::change(root.path(), id, &serde_json::json!({"copy":true})).unwrap();
+        let copy_id = copied["screenshot"]["id"].as_str().unwrap();
         let handoff =
-            prepare_library_screenshot(root.path().to_string_lossy().into_owned(), id.into(), None)
+            prepare_library_screenshot(root.path().to_string_lossy().into_owned(), copy_id.into(), None)
                 .unwrap();
         let loaded = markits_desktop_lib::metadata::load_image_with_metadata(
             &fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap(),

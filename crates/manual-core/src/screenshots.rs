@@ -98,6 +98,8 @@ pub struct Edit {
 pub struct Screenshot {
     pub version: u32,
     pub id: String,
+    #[serde(default)]
+    pub capture_id: String,
     pub name: String,
     pub created_at: String,
     pub adopted: Option<String>,
@@ -118,14 +120,21 @@ fn save(root: &Path, shot: &Screenshot) -> Result<(), String> {
     )
 }
 pub fn load(root: &Path, id: &str) -> Result<Screenshot, String> {
-    let shot: Screenshot = serde_json::from_slice(
+    let mut shot: Screenshot = serde_json::from_slice(
         &fs::read(directory(root, id)?.join("manifest.json")).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
     if shot.version != 1 || shot.id != id {
         return Err("未対応の画像管理形式です。".into());
     }
+    if shot.capture_id.is_empty() { shot.capture_id = shot.id.clone(); }
+    valid_id(&shot.capture_id)?;
     Ok(shot)
+}
+fn source_path(root: &Path, capture_id: &str, original: &str) -> Result<PathBuf, String> {
+    valid_id(capture_id)?;
+    valid_id(original)?;
+    project_path(root, &format!(".munin/screenshot-sources/{capture_id}/{original}.png"))
 }
 fn edit<'a>(shot: &'a Screenshot, revision: &str) -> Result<&'a Edit, String> {
     shot.edits
@@ -238,6 +247,9 @@ pub fn list(root: &Path) -> Result<Value, String> {
 }
 pub fn register(root: &Path, options: &Value) -> Result<Value, String> {
     let _lock = workflow::resource_lock(root, ".munin/screenshots")?;
+    register_locked(root, options)
+}
+fn register_locked(root: &Path, options: &Value) -> Result<Value, String> {
     let id = options["id"]
         .as_str()
         .map(str::to_owned)
@@ -250,6 +262,7 @@ pub fn register(root: &Path, options: &Value) -> Result<Value, String> {
         Screenshot {
             version: 1,
             id: id.clone(),
+            capture_id: options["capture_id"].as_str().unwrap_or(&id).to_owned(),
             name: options["name"].as_str().unwrap_or_default().into(),
             created_at: task::utc_now(),
             adopted: None,
@@ -330,7 +343,7 @@ pub fn register(root: &Path, options: &Value) -> Result<Value, String> {
         .map_err(|e| e.to_string())?,
     );
     let revision = format!("edit-{}", &revision_hash[..24]);
-    immutable(&home.join(format!("originals/{original}.png")), &source)?;
+    immutable(&source_path(root, &shot.capture_id, &original)?, &source)?;
     if !shot.edits.iter().any(|e| e.id == revision) {
         let mut entry = Edit {
             id: revision.clone(),
@@ -403,9 +416,9 @@ pub fn image(
         .ok_or("画像の版を選択してください。")?;
     let entry = edit(&shot, revision)?;
     let bytes = if original {
-        let bytes =
-            fs::read(directory(root, id)?.join(format!("originals/{}.png", entry.original)))
-                .map_err(|e| e.to_string())?;
+        let shared = source_path(root, &shot.capture_id, &entry.original)?;
+        let path = if shared.exists() { shared } else { directory(root, id)?.join(format!("originals/{}.png", entry.original)) };
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
         if hash(&bytes) != entry.original_sha256 {
             return Err("原本が外部で変更されています。".into());
         }
@@ -415,6 +428,46 @@ pub fn image(
     };
     Ok(json!({"data":data(&bytes),"edit":entry,"screenshot":shot}))
 }
+fn template_path(root: &Path, id: &str) -> Result<PathBuf, String> {
+    valid_id(id)?;
+    project_path(root, &format!(".munin/screenshot-templates/{id}.json"))
+}
+pub fn templates(root: &Path) -> Result<Value, String> {
+    let home = project_path(root, ".munin/screenshot-templates")?;
+    let mut items = Vec::<Value>::new();
+    if home.exists() { for path in fs::read_dir(home).map_err(|e| e.to_string())? {
+        let path = path.map_err(|e| e.to_string())?.path();
+        if path.extension().and_then(|s|s.to_str()) != Some("json") { continue; }
+        let template: Value = serde_json::from_slice(&fs::read(&path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        template_path(root, template["id"].as_str().ok_or("Invalid template")?)?;
+        items.push(json!({"id":template["id"],"name":template["name"],"width":template["width"],"height":template["height"]}));
+    } }
+    items.sort_by_key(|item|item["name"].as_str().unwrap_or_default().to_string());
+    Ok(json!({"items":items}))
+}
+pub fn diagnose(root: &Path) -> Result<Value, String> {
+    let listed = list(root)?;
+    let plan = plan_recapture(root, None)?;
+    let mut items = Vec::new();
+    for value in listed["items"].as_array().ok_or("Invalid screenshots")? {
+        let shot: Screenshot = serde_json::from_value(value.clone()).map_err(|e|e.to_string())?;
+        let mut checks = Vec::<String>::new();
+        if let Some(reason) = eligibility(root, &shot) { checks.push(reason); }
+        else if let Err(error) = crate::scenario::validate_json(root, &shot.recipe.to_string()) { checks.push(format!("撮影手順: {error}")); }
+        let revision = shot.adopted.as_deref().or_else(||shot.edits.last().map(|edit|edit.id.as_str()));
+        if let Err(error) = image(root,&shot.id,revision,true) { checks.push(format!("原本: {error}")); }
+        if let Err(error) = image(root,&shot.id,revision,false) { checks.push(format!("編集画像: {error}")); }
+        let status = if checks.is_empty() { "ready" } else { "blocked" };
+        if checks.is_empty() { checks.push("起動パス・撮影手順・原本・編集画像を確認しました。".into()); }
+        items.push(json!({"id":shot.id,"name":if shot.name.is_empty(){shot.id.clone()}else{shot.name},"status":status,"checks":checks}));
+    }
+    let mut environment = Vec::<String>::new();
+    #[cfg(target_os="linux")]
+    { if std::env::var_os("DISPLAY").is_none() { environment.push("X11の画面接続がありません。デスクトップ再撮影には対応する画面セッションが必要です。".into()); }
+      if std::env::var_os("WAYLAND_DISPLAY").is_some() { environment.push("Waylandでは画面取得と操作再生の権限・対応を確認してください。".into()); } }
+    environment.push("この診断は撮影もアプリ起動も行いません。操作対象が現在の画面で見つかるかは再生時に確認します。".into());
+    Ok(json!({"items":items,"environment":environment,"capture_count":plan["capture_count"]}))
+}
 pub fn change(root: &Path, id: &str, options: &Value) -> Result<Value, String> {
     let _lock = workflow::resource_lock(root, ".munin/screenshots")?;
     let mut shot = recovered(root, load(root, id)?)?;
@@ -422,6 +475,59 @@ pub fn change(root: &Path, id: &str, options: &Value) -> Result<Value, String> {
         && options["expected_revision"] != json!(shot.adopted)
     {
         return Err("画像の採用版が更新されています。候補を開き直してください。".into());
+    }
+    if let Some(template_id) = options["delete_template"].as_str() {
+        let path = template_path(root, template_id)?;
+        fs::remove_file(path).map_err(|e|e.to_string())?;
+        return Ok(json!({"deleted_template":template_id}));
+    }
+    if options["save_template"].is_string() || options["apply_template"].is_string() {
+        let revision = options["revision"].as_str().or(shot.adopted.as_deref()).or_else(||shot.edits.last().map(|edit|edit.id.as_str())).ok_or("編集版を選択してください。")?;
+        let entry = edit(&shot,revision)?;
+        let original = image(root,id,Some(revision),true)?;
+        let source = decode(original["data"].as_str().ok_or("Invalid image")?)?;
+        let background = image::load_from_memory(&source).map_err(|e|e.to_string())?;
+        if let Some(name) = options["save_template"].as_str() {
+            if name.trim().is_empty() { return Err("テンプレート名を入力してください。".into()); }
+            if entry.flattened || entry.scene["annotations"].as_array().is_none() { return Err("MarkItsで注釈を編集してからテンプレートを保存してください。".into()); }
+            let template_id = new_id("template");
+            let template = json!({"version":1,"id":template_id,"name":name.trim(),"width":background.width(),"height":background.height(),"scene":entry.scene,"crop":entry.crop});
+            atomic(&template_path(root,&template_id)?,&serde_json::to_vec_pretty(&template).map_err(|e|e.to_string())?)?;
+            return Ok(template);
+        }
+        if shot.protected { return Err("保護を解除してから適用してください。".into()); }
+        let template_id = options["apply_template"].as_str().ok_or("テンプレートを選択してください。")?;
+        let template: Value = serde_json::from_slice(&fs::read(template_path(root,template_id)?).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        if template["width"].as_u64()!=Some(background.width() as u64) || template["height"].as_u64()!=Some(background.height() as u64) { return Err("原本の寸法がテンプレートと異なります。同じ寸法の画像を選んでください。".into()); }
+        let crop = &template["crop"];
+        let mut canvas = background;
+        if !crop.is_null() {
+            let x=crop["offset_x"].as_u64().or_else(||crop["x"].as_u64()).ok_or("Invalid crop")?;
+            let y=crop["offset_y"].as_u64().or_else(||crop["y"].as_u64()).ok_or("Invalid crop")?;
+            let width=template["scene"]["canvas"]["width"].as_u64().or_else(||crop["width"].as_u64()).ok_or("Invalid crop")?;
+            let height=template["scene"]["canvas"]["height"].as_u64().or_else(||crop["height"].as_u64()).ok_or("Invalid crop")?;
+            if width==0 || height==0 || x.saturating_add(width)>canvas.width() as u64 || y.saturating_add(height)>canvas.height() as u64 {return Err("クロップが原本の範囲外です。".into());}
+            canvas=canvas.crop_imm(x as u32,y as u32,width as u32,height as u32);
+        }
+        let mut bytes=std::io::Cursor::new(Vec::new());canvas.write_to(&mut bytes,image::ImageFormat::Png).map_err(|e|e.to_string())?;
+        let render=markits::raster::render_composed_png_bytes(&template["scene"].to_string(),&bytes.into_inner()).map_err(|e|e.to_string())?;
+        return register_locked(root,&json!({"id":id,"source":data(&source),"render":data(&render),"scene":template["scene"],"crop":crop,"ui":entry.ui,"adopt":false}));
+    }
+    if options["copy"] == true {
+        let revision = options["revision"].as_str()
+            .or(shot.adopted.as_deref())
+            .or_else(|| shot.edits.last().map(|entry| entry.id.as_str()))
+            .ok_or("コピーする編集版を選択してください。")?;
+        let entry = edit(&shot, revision)?;
+        let source = image(root, id, Some(revision), true)?;
+        let rendered = image(root, id, Some(revision), false)?;
+        return register_locked(root, &json!({
+            "name": format!("{}のコピー", if shot.name.is_empty() { "スクリーンショット" } else { &shot.name }),
+            "source": source["data"], "render": rendered["data"],
+            "scene": entry.scene, "crop": entry.crop, "ui": entry.ui,
+            "flattened": entry.flattened, "requires_review": entry.requires_review,
+            "recipe": shot.recipe, "capture_id": shot.capture_id,
+        }));
     }
     if let Some(name) = options["name"].as_str() {
         shot.name = name.into();
@@ -499,6 +605,63 @@ mod tests {
         data(bytes.get_ref())
     }
     #[test]
+    fn copied_screenshots_keep_editable_source_and_branch_independently() {
+        let root = tempfile::tempdir().unwrap();
+        let scene = json!({"annotations":[{"id":"arrow-one","x":3}]});
+        let crop = json!({"offset_x":2,"offset_y":1,"base_width":16,"base_height":12});
+        let recipe = json!({"steps":[]});
+        let original = register(root.path(), &json!({"source":png(1),"render":png(2),"scene":scene,"crop":crop,"ui":{"elements":[]},"recipe":recipe})).unwrap();
+        let id = original["screenshot"]["id"].as_str().unwrap();
+        let before = image(root.path(), id, None, true).unwrap();
+        change(root.path(), id, &json!({"protected":true})).unwrap();
+        let copied = change(root.path(), id, &json!({"copy":true})).unwrap();
+        let copy_id = copied["screenshot"]["id"].as_str().unwrap();
+        assert_ne!(id, copy_id);
+        assert_ne!(original["screenshot"]["output"],copied["screenshot"]["output"]);
+        assert_eq!(copied["screenshot"]["protected"],false);
+        assert_eq!(copied["screenshot"]["recipe"],recipe);
+        assert_eq!(copied["screenshot"]["edits"][0]["scene"],scene);
+        assert_eq!(copied["screenshot"]["edits"][0]["crop"],crop);
+        assert_eq!(image(root.path(),copy_id,None,true).unwrap()["data"],before["data"]);
+        register(root.path(), &json!({"id":copy_id,"source":png(1),"render":png(3),"scene":{"annotations":[{"id":"arrow-two","x":8}]},"crop":null,"adopt":true})).unwrap();
+        assert_eq!(image(root.path(),id,None,false).unwrap()["edit"]["scene"],scene);
+        assert_eq!(image(root.path(),id,None,true).unwrap()["data"],before["data"]);
+        assert_eq!(image(root.path(),copy_id,None,true).unwrap()["data"],before["data"]);
+        change(root.path(), id, &json!({"protected":false,"delete":true})).unwrap();
+        assert_eq!(image(root.path(),copy_id,None,true).unwrap()["data"],before["data"]);
+        assert!(change(root.path(),copy_id,&json!({"copy":true,"revision":"missing"})).is_err());
+    }
+
+    #[test]
+    fn templates_apply_markits_crop_without_replacing_original_or_adoption() {
+        let root = tempfile::tempdir().unwrap();
+        let scene = json!({"canvas":{"width":8,"height":6},"annotations":[]});
+        let crop = json!({"offset_x":2,"offset_y":3,"base_width":16,"base_height":12});
+        let mut cropped = std::io::Cursor::new(Vec::new());
+        image::load_from_memory(&decode(&png(1)).unwrap()).unwrap()
+            .crop_imm(2,3,8,6).write_to(&mut cropped,image::ImageFormat::Png).unwrap();
+        let source = register(root.path(),&json!({"source":png(1),"render":data(cropped.get_ref()),"scene":scene,"crop":crop})).unwrap();
+        let id = source["screenshot"]["id"].as_str().unwrap();
+        let template = change(root.path(),id,&json!({"save_template":"Crop preset"})).unwrap();
+        let template_id = template["id"].as_str().unwrap();
+        let target = register(root.path(),&json!({"source":png(9)})).unwrap();
+        let target_id = target["screenshot"]["id"].as_str().unwrap();
+        let applied = change(root.path(),target_id,&json!({"apply_template":template_id})).unwrap();
+        assert_eq!(applied["screenshot"]["adopted"],target["screenshot"]["adopted"]);
+        let candidate = image(root.path(),target_id,applied["revision"].as_str(),false).unwrap();
+        let rendered = image::load_from_memory(&decode(candidate["data"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!((rendered.width(),rendered.height()),(8,6));
+        assert_eq!(candidate["edit"]["crop"],crop);
+        assert_eq!(candidate["edit"]["scene"],scene);
+        assert_eq!(image(root.path(),target_id,None,true).unwrap()["data"],png(9));
+        change(root.path(),target_id,&json!({"protected":true})).unwrap();
+        assert!(change(root.path(),target_id,&json!({"apply_template":template_id})).is_err());
+        change(root.path(),id,&json!({"delete_template":template_id})).unwrap();
+        assert!(templates(root.path()).unwrap()["items"].as_array().unwrap().is_empty());
+        assert_eq!(image(root.path(),target_id,None,true).unwrap()["data"],png(9));
+    }
+
+    #[test]
     fn originals_revisions_and_conflicts_are_independent() {
         let root = tempfile::tempdir().unwrap();
         let first = register(root.path(), &json!({"source":png(1)})).unwrap();
@@ -524,6 +687,25 @@ mod tests {
         .unwrap();
         assert!(change(root.path(), id, &json!({"adopt":first["revision"]})).is_err());
     }
+    #[test]
+    fn legacy_originals_remain_editable_and_copies_survive_source_deletion() {
+        let root = tempfile::tempdir().unwrap();
+        let saved = register(root.path(), &json!({"source":png(1)})).unwrap();
+        let id = saved["screenshot"]["id"].as_str().unwrap();
+        let shot = load(root.path(), id).unwrap();
+        let shared = source_path(root.path(), &shot.capture_id, &shot.edits[0].original).unwrap();
+        let legacy = directory(root.path(), id).unwrap().join(format!("originals/{}.png",shot.edits[0].original));
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::rename(shared,legacy).unwrap();
+        let mut manifest = saved["screenshot"].clone();
+        manifest.as_object_mut().unwrap().remove("capture_id");
+        atomic(&directory(root.path(),id).unwrap().join("manifest.json"),&serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert_eq!(image(root.path(),id,None,true).unwrap()["data"],png(1));
+        let copy = change(root.path(),id,&json!({"copy":true})).unwrap();
+        change(root.path(),id,&json!({"delete":true})).unwrap();
+        assert_eq!(image(root.path(),copy["screenshot"]["id"].as_str().unwrap(),None,true).unwrap()["data"],png(1));
+    }
+
     #[test]
     fn references_and_optional_names_do_not_own_assets() {
         let root = tempfile::tempdir().unwrap();
@@ -561,6 +743,8 @@ pub struct RecaptureRun {
     pub id: String,
     pub created_at: String,
     pub items: Vec<RecaptureItem>,
+    #[serde(default)]
+    pub sources: std::collections::BTreeMap<String, String>,
 }
 fn run_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     valid_id(id)?;
@@ -592,13 +776,16 @@ fn eligibility(root: &Path, shot: &Screenshot) -> Option<String> {
 }
 pub fn plan_recapture(root: &Path, id: Option<&str>) -> Result<Value, String> {
     let all = list(root)?;
+    let selected_capture = id.map(|id| load(root, id).map(|shot| shot.capture_id)).transpose()?;
+    let mut captures = std::collections::HashSet::new();
     let mut items = Vec::new();
     for value in all["items"].as_array().ok_or("Invalid screenshots")? {
         let shot: Screenshot = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
-        if id.is_some_and(|id| id != shot.id) {
+        if selected_capture.as_ref().is_some_and(|capture| capture != &shot.capture_id) {
             continue;
         }
         let reason = eligibility(root, &shot);
+        if reason.is_none() { captures.insert(shot.capture_id.clone()); }
         items.push(RecaptureItem {
             id: shot.id,
             status: if reason.is_some() {
@@ -611,7 +798,7 @@ pub fn plan_recapture(root: &Path, id: Option<&str>) -> Result<Value, String> {
             revision: None,
         });
     }
-    Ok(json!({"items":items}))
+    Ok(json!({"items":items,"capture_count":captures.len()}))
 }
 pub fn recapture(root: &Path, options: &Value) -> Result<Value, String> {
     recapture_with(root, options, crate::scenario::capture_asset)
@@ -629,6 +816,7 @@ where
             version: 1,
             id: new_id("run"),
             created_at: task::utc_now(),
+            sources: std::collections::BTreeMap::new(),
             items: serde_json::from_value(
                 plan_recapture(root, options["id"].as_str())?["items"].clone(),
             )
@@ -654,6 +842,18 @@ where
     }
     save_run(root, &run)?;
     let checkpoint = crate::agent::cancellation_checkpoint(root);
+    let mut recipes = std::collections::HashMap::<String, Value>::new();
+    let mut conflicts = std::collections::HashSet::new();
+    for item in &run.items {
+        if item.status != "pending" { continue; }
+        if let Ok(shot) = load(root, &item.id) {
+            if eligibility(root, &shot).is_some() { continue; }
+            if let Some(recipe) = recipes.insert(shot.capture_id.clone(), shot.recipe.clone()) {
+                if recipe != shot.recipe { conflicts.insert(shot.capture_id); }
+            }
+        }
+    }
+    let mut capture_results = std::collections::HashMap::<String, Result<String, String>>::new();
     for index in 0..run.items.len() {
         if run.items[index].status != "pending"
             || (failed_only && !failed_ids.contains(&run.items[index].id))
@@ -673,8 +873,32 @@ where
             if let Some(reason) = eligibility(root, &shot) {
                 return Err(reason);
             }
-            crate::agent::log_progress(root, &format!("再撮影 {}/{}：{} — 操作を再生しています", index + 1, run.items.len(), if shot.name.is_empty() { "スクリーンショット" } else { &shot.name }));
-            let source = capture(root, &shot.recipe, &id)?;
+            let group = shot.capture_id.clone();
+            let phase = if run.sources.contains_key(&group) || capture_results.contains_key(&group) { "共有原本に注釈・クロップを適用しています" } else { "操作を再生しています" };
+            crate::agent::log_progress(root, &format!("再撮影 {}/{}：{} — {}", index + 1, run.items.len(), if shot.name.is_empty() { "スクリーンショット" } else { &shot.name }, phase));
+            if conflicts.contains(&group) { return Err("同じ原本を共有する画像の撮影手順が異なります。設定を確認してください。".into()); }
+            if !capture_results.contains_key(&group) {
+                let result = if let Some(expected_hash) = run.sources.get(&group) {
+                    if expected_hash.len() != 64 || !expected_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) { return Err("共有の撮影履歴が不正です。".into()); }
+                    Ok(expected_hash.clone())
+                } else {
+                    capture(root, &shot.recipe, &id).and_then(|bytes| {
+                        decode(&data(&bytes))?;
+                        let source_hash = hash(&bytes);
+                        immutable(&source_path(root, &group, &format!("source-{}", &source_hash[..24]))?, &bytes)?;
+                        run.sources.insert(group.clone(), source_hash.clone());
+                        save_run(root, &run)?;
+                        Ok(source_hash)
+                    })
+                };
+                capture_results.insert(group.clone(), result);
+            } else {
+                crate::agent::log_progress(root, "共有の撮影結果を使って、この画像の注釈・クロップを適用しています");
+            }
+            let source_hash = capture_results.get(&group).ok_or("共有の撮影結果がありません。")?.clone()?;
+            let source = fs::read(source_path(root, &group, &format!("source-{}", &source_hash[..24]))?)
+                .map_err(|error| error.to_string())?;
+            if hash(&source) != source_hash { return Err("共有の撮影原本が変更されています。".into()); }
             crate::agent::log_progress(root, "撮影完了 — 注釈・クロップを適用し、候補画像を保存しています");
             let previous = shot
                 .adopted
@@ -965,6 +1189,56 @@ mod lifecycle_tests {
         .unwrap();
         data(bytes.get_ref())
     }
+    #[test]
+    fn three_annotation_images_share_one_capture_including_individual_recapture() {
+        let root = tempfile::tempdir().unwrap();
+        let recipe = json!({"steps":[]});
+        let first = register(root.path(), &json!({"source":png(1),"scene":{"canvas":{"width":16,"height":12},"annotations":[]},"recipe":recipe})).unwrap();
+        let id = first["screenshot"]["id"].as_str().unwrap();
+        let second = change(root.path(), id, &json!({"copy":true})).unwrap();
+        let third = change(root.path(), id, &json!({"copy":true})).unwrap();
+        for (copy, x) in [(&second, 1), (&third, 5)] {
+            register(root.path(), &json!({"id":copy["screenshot"]["id"],"source":png(1),"render":png(x),"adopt":true,"scene":{"canvas":{"width":16,"height":12},"annotations":[{"type":"rect","target":[x,1,3,3],"style":"primary"}]}})).unwrap();
+        }
+        let group = load(root.path(), id).unwrap().capture_id;
+        assert_eq!(fs::read_dir(root.path().join(format!(".munin/screenshot-sources/{group}"))).unwrap().count(),1);
+        let plan = plan_recapture(root.path(), Some(id)).unwrap();
+        assert_eq!(plan["capture_count"],1);
+        assert_eq!(plan["items"].as_array().unwrap().len(),3);
+        for options in [json!({"id":id}), json!({})] {
+            let mut calls = 0;
+            let run = recapture_with(root.path(), &options, |_,_,_| { calls += 1; decode(&png(9)) }).unwrap();
+            assert_eq!(calls,1);
+            let mut renders = std::collections::HashSet::new();
+            for item in run["items"].as_array().unwrap() {
+                assert_eq!(item["status"],"succeeded");
+                let shot_id = item["id"].as_str().unwrap();
+                let revision = item["revision"].as_str().unwrap();
+                assert_eq!(image(root.path(),shot_id,Some(revision),true).unwrap()["data"],png(9));
+                renders.insert(image(root.path(),shot_id,Some(revision),false).unwrap()["data"].as_str().unwrap().to_owned());
+                assert_eq!(image(root.path(),shot_id,None,true).unwrap()["data"],png(1));
+            }
+            assert_eq!(renders.len(),3,"each scene must be applied independently");
+        }
+        let mut calls = 0;
+        let failed = recapture_with(root.path(), &json!({}), |_,_,_| { calls+=1; Err("capture failed".into()) }).unwrap();
+        assert_eq!(calls,1,"one failure must not cause repeated captures for siblings");
+        assert!(failed["items"].as_array().unwrap().iter().all(|item| item["status"]=="failed"));
+    }
+
+    #[test]
+    fn resume_reuses_successful_shared_capture_without_recording_again() {
+        let root = tempfile::tempdir().unwrap();
+        let first = register(root.path(), &json!({"source":png(1),"recipe":{"steps":[]}})).unwrap();
+        let id = first["screenshot"]["id"].as_str().unwrap();
+        change(root.path(),id,&json!({"copy":true})).unwrap();
+        let mut calls=0;
+        let interrupted=recapture_with(root.path(),&json!({}),|root,_,_| { calls+=1; crate::agent::cancel(root)?; decode(&png(8)) }).unwrap();
+        assert_eq!(calls,1);
+        let resumed=recapture_with(root.path(),&json!({"run":interrupted["id"]}),|_,_,_| panic!("must reuse the shared captured original")).unwrap();
+        assert!(resumed["items"].as_array().unwrap().iter().all(|item| item["status"]=="succeeded"));
+    }
+
     #[test]
     fn interrupted_edit_save_and_adoption_can_resume() {
         let root = tempfile::tempdir().unwrap();

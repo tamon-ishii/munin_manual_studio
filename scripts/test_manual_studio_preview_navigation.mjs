@@ -24,7 +24,7 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const idle = () => page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
   await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=docs%2Findex.md`);
-  await page.waitForFunction(() => document.querySelector('#editor-title').textContent === 'docs/index.md');
+  await page.waitForFunction(() => document.querySelector('#editor-title').textContent === 'index.md');
   await idle();
   // Verify that a link cannot load the app even before interception is attached.
   const response = await fetch(`${base}/__manual/rpc`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({root,action:'editor-preview',options:{page:'docs/index.md',body:'# Safe\n\n[Jump](#safe)\n\n<script>parent.__previewScriptRan = true;</script>\n<a onclick="parent.__previewScriptRan = true">Inline</a>'}})});
@@ -49,29 +49,30 @@ try {
   await preview.getByRole('link',{name:'Malformed',exact:true}).click();
   await preview.getByRole('link',{name:'Heading',exact:true}).click();
   await preview.getByRole('link',{name:'Next',exact:true}).click();
-  await page.waitForFunction(() => document.querySelector('#editor-title').textContent === 'docs/日本語.md');
+  await page.waitForFunction(() => document.querySelector('#editor-title').textContent === '日本語.md');
   await idle();
   await page.waitForFunction(() => {
     const doc = document.querySelector('#markdown-preview').contentDocument;
     return doc.getElementById('target')?.getBoundingClientRect().top < 500 && doc.scrollingElement.scrollTop > 0;
   });
-  // Cancel backwards navigation without moving the history cursor or losing edits.
+  // Cancelling a dirty tab close preserves its draft and navigation history.
   await page.locator('#markdown-editor').evaluate(node => {
     node.value += '\nUnsaved'; node.dispatchEvent(new Event('input',{bubbles:true}));
   });
-  await page.locator('#preview-nav-back').click();
+  await page.getByRole('button',{name:'日本語.mdを閉じる',exact:true}).click();
   await page.locator('[data-unsaved-action=cancel]').click(); await idle();
-  assert.equal(await page.locator('#editor-title').textContent(), 'docs/日本語.md');
+  assert.equal(await page.locator('#editor-title').textContent(), '日本語.md');
   assert.equal(await page.locator('#preview-nav-back').isEnabled(), true);
   assert.equal(await page.locator('#preview-nav-forward').isEnabled(), false);
   await page.locator('#preview-nav-back').click();
-  await page.locator('[data-unsaved-action=discard]').click(); await idle();
-  assert.equal(await page.locator('#editor-title').textContent(), 'docs/index.md');
+  await idle();
+  assert.equal(await page.locator('#editor-title').textContent(), 'index.md');
   await preview.getByRole('link',{name:'Missing',exact:true}).click(); await idle();
   assert.match(await page.locator('#status').textContent(), /原稿を開けません/);
-  assert.equal(await page.locator('#editor-title').textContent(), 'docs/index.md');
+  assert.equal(await page.locator('#editor-title').textContent(), 'index.md');
   await page.locator('#preview-nav-forward').click(); await idle();
-  assert.equal(await page.locator('#editor-title').textContent(), 'docs/日本語.md');
+  assert.equal(await page.locator('#editor-title').textContent(), '日本語.md');
+  assert.match(await page.locator('#markdown-editor').inputValue(),/Unsaved/,'forward navigation restores the dirty document tab');
   assert.deepEqual(errors, []);
   console.log('Preview link checks passed: encoded paths, heading fragments, cancelled history, missing-page errors, forward navigation.');
 } finally {

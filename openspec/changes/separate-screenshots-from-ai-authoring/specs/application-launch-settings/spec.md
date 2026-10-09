@@ -7,7 +7,7 @@ Provide a dedicated application settings area for preregistering programs and th
 ## ADDED Requirements
 
 ### Requirement: Preregister target applications
-Manual Studio SHALL provide application registration in the Project menu, available after opening a project. Manual Studio SHALL provide application settings for adding, editing, selecting, and removing launch profiles containing an executable path, an ordered argument list, and an optional display name. Users SHALL NOT be required to enter a profile identifier or a display name.
+Manual Studio SHALL provide an application registration button immediately to the right of the Edit manuscript button in the workspace navigation, available after opening a project. Manual Studio SHALL provide application settings for adding, editing, selecting, and removing launch profiles containing an executable path, an ordered argument list, and an optional display name. Users SHALL NOT be required to enter a profile identifier or a display name.
 
 #### Scenario: Register an application before recording
 - **WHEN** a user registers an executable path and arguments without a name

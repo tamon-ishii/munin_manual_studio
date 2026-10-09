@@ -202,26 +202,32 @@ try {
   const originalNote = await page.locator('#markdown-editor').inputValue();
   await (await sourceEditor(page)).fill(originalNote + '\nUnsaved dialog check\n');
   await page.locator('#page-list [data-page="docs/index.md"]').click();
+  await idle();
+  assert.equal(await page.locator('#unsaved-changes-dialog').count(), 0, 'tab switches retain drafts without a discard prompt');
+  await page.locator('#page-list [data-page="notes/extra.md"]').click();
+  await idle();
+  assert.match(await page.locator('#markdown-editor').inputValue(), /Unsaved dialog check/);
+  await page.getByRole('button', { name: 'notes/extra.mdを閉じる', exact: true }).click();
   assert.equal(await page.locator('#unsaved-changes-dialog button').count(), 3);
   await page.locator('[data-unsaved-action=cancel]').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Unsaved dialog check/);
   assert.equal(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), originalNote);
-  await page.locator('#page-list [data-page="docs/index.md"]').click();
+  await page.getByRole('button', { name: 'notes/extra.mdを閉じる', exact: true }).click();
   await page.locator('[data-unsaved-action=save]').click();
   await idle();
   assert.match(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), /Unsaved dialog check/);
   await page.locator('#page-list [data-page="notes/extra.md"]').click();
   await idle();
   await (await sourceEditor(page)).fill('This change must be discarded');
-  await page.locator('#page-list [data-page="docs/index.md"]').click();
+  await page.getByRole('button', { name: 'notes/extra.mdを閉じる', exact: true }).click();
   await page.locator('[data-unsaved-action=discard]').click();
   await idle();
   assert.match(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), /Unsaved dialog check/);
   await page.locator('#page-list [data-page="docs/index.md"]').click();
   await idle();
   await page.locator('#page-list details[data-folder="docs/z-guide"] summary').click();
-  assert.equal(await page.locator('#page-list .tree-static[title="docs/z-guide/diagram.svg"]').count(), 1);
+  assert.equal(await page.locator('#page-list [data-image="docs/z-guide/diagram.svg"]').count(), 1);
   await page.locator('#page-list [data-page="docs/z-guide/intro.md"]').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Nested guide/);
@@ -258,7 +264,7 @@ try {
   let holdOldDocumentRead = true;
   await page.route('**/__manual/rpc', async route => {
     const request = route.request().postDataJSON();
-    if (holdOldDocumentRead && request.action === 'editor-read' && request.root === root && request.options.page === 'docs/index.md') {
+    if (holdOldDocumentRead && request.action === 'editor-read' && request.root === root && request.options.page === 'index.md') {
       holdOldDocumentRead = false;
       oldReadStarted();
       await oldReadGate;
@@ -339,7 +345,7 @@ try {
   releaseOldSave();
   await page.evaluate(() => window.__oldSaveResponse);
   assert.match(await page.locator('#markdown-editor').inputValue(), /Nested guide/);
-  assert.equal(await page.locator('#editor-title').innerText(), newerPage);
+  assert.equal(await page.locator('#editor-title').innerText(), newerPage.replace(/^docs\//, ''));
   assert.equal(await page.evaluate(() => window.__manualStudioRaceTest.documentState.revision), nestedRevision);
   await page.unroute('**/__manual/rpc');
 
@@ -531,6 +537,7 @@ try {
   await generatedOnlyCard.waitFor();
   assert.equal(await generatedOnlyCard.locator('[data-prompt]').inputValue(), generatedPrompt);
   const revisedGeneratedPrompt = '設定画面を開き、保存を押す';
+  await generatedOnlyCard.locator('[data-task-disclosure] summary').click();
   await generatedOnlyCard.locator('[data-prompt]').fill(revisedGeneratedPrompt);
   await generatedOnlyCard.locator('[data-save-prompt]').click();
   await idle();
@@ -600,6 +607,7 @@ try {
   await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   const unifiedCardInTasks = page.locator('[data-task="unified-guide"]');
   assert.equal(await unifiedCardInTasks.locator('[data-prompt]').inputValue(), '初心者向け "保存"\napproved-at=fake を説明');
+  await unifiedCardInTasks.locator('[data-task-disclosure] summary').click();
   await unifiedCardInTasks.locator('[data-prompt]').fill('新しい指示 "引用"\n二行目');
   await unifiedCardInTasks.locator('[data-save-prompt]').click(); await idle();
   unifiedMarkdown = await readFile(path.join(project, 'docs/new.md'), 'utf8');
@@ -687,7 +695,7 @@ try {
   await page.frameLocator('#markdown-preview').locator('img[alt="dropped-shot"]').waitFor();
 
   await page.locator('[data-tab="screenshots"]').click();
-  assert.equal(await page.locator('#screenshot-library-import').isVisible(),true);
+  assert.equal(await page.locator('#screenshot-library-import-button').isVisible(),true);
   await page.locator('[data-tab="editor"]').click();
   await page.locator('#save-page').click();
   await idle();
@@ -719,10 +727,10 @@ try {
   let generationDelayMs = 500;
   await page.route('**/__manual/rpc', async route => {
     const request = route.request().postDataJSON();
-    if (request.action === 'generate-review' && request.options.page === 'docs/ai-page.md') {
+    if (request.action === 'generate-review' && request.options.page === 'ai-page.md') {
       generatedPageTask = true;
       await new Promise(resolve => setTimeout(resolve, generationDelayMs));
-      const content = await readFile(path.join(project, request.options.page), 'utf8');
+      const content = await readFile(path.join(project, 'docs', request.options.page), 'utf8');
       const next = `${content}\n<!-- ai:generated id=smoke-text kind=text -->\n${request.options.feedback ? 'Revised guide' : 'Generated guide'}\n<!-- /ai:generated -->\n`;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ output: JSON.stringify({ before: { page: request.options.page, content, revision: createHash('sha256').update(content).digest('hex') }, content: next, updated: ['smoke-text'] }) }) });
     } else if (request.action === 'agent-progress') {
@@ -920,7 +928,7 @@ try {
 
   // Consultation instructions preserve unsaved prompts and do not save implicitly.
   const instructionPage = await page.evaluate(() => window.__manualStudioRaceTest.documentState.page);
-  const instructionFile = path.join(root, 'deferred-ai-workspace', instructionPage);
+  const instructionFile = path.join(root, 'deferred-ai-workspace', deferredConfig.docs, instructionPage);
   const instructionSource = '# Consultation\n\n<!-- ai:task id=consultation kind=text prompt="元の指示" -->\n\n<!-- /ai:task -->\n';
   await writeFile(instructionFile, instructionSource);
   await page.reload();

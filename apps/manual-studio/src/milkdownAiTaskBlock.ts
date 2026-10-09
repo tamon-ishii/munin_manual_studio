@@ -1,6 +1,9 @@
 import type { Node as MarkdownNode } from '@milkdown/kit/transformer';
-import { $node, $remark, $view } from '@milkdown/kit/utils';
+import { $node, $remark, $view, $prose } from '@milkdown/kit/utils';
 import { closeHistory, redo, undo } from '@milkdown/kit/prose/history';
+
+import { Plugin } from '@milkdown/kit/prose/state';
+import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 
 const attributes = /(?:^|\s)([a-zA-Z][a-zA-Z0-9_-]*)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
 function attribute(header: string, name: string): string | undefined {
@@ -144,11 +147,21 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
   const name = document.createElement('strong');
   const id = document.createElement('span'); id.className = 'milkdown-ai-task-name';
   const details = document.createElement('details'); details.className = 'milkdown-ai-task-instructions';
-  const disclosure = document.createElement('summary'); disclosure.textContent = '指示を編集'; disclosure.setAttribute('aria-expanded', 'false');
+  const disclosure = document.createElement('summary'); disclosure.textContent = '▶ 指示を展開'; disclosure.setAttribute('role', 'button'); disclosure.tabIndex = 0; disclosure.setAttribute('aria-expanded', 'false');
   const displayName = document.createElement('input'); displayName.placeholder = '名前（省略可）'; displayName.setAttribute('aria-label', 'AI指示の名前（省略可）');
   details.append(disclosure, displayName);
   let disclosureKey = '';
-  details.addEventListener('toggle', () => { disclosure.setAttribute('aria-expanded', String(details.open)); if (disclosureKey) { try { localStorage.setItem(disclosureKey, String(details.open)); } catch { /* UI state is optional. */ } } });
+  const updateDisclosure = () => {
+    disclosure.textContent = details.open ? '▼ 指示を折りたたむ' : '▶ 指示を展開';
+    disclosure.setAttribute('aria-expanded', String(details.open));
+    if (disclosureKey) { try { localStorage.setItem(disclosureKey, String(details.open)); } catch { /* UI state is optional. */ } }
+  };
+  const toggleDisclosure = () => { details.open = !details.open; updateDisclosure(); resize(); };
+  disclosure.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); toggleDisclosure(); });
+  disclosure.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); toggleDisclosure(); }
+  });
+  details.addEventListener('toggle', updateDisclosure);
   const regenerateBtn = document.createElement('button'); regenerateBtn.type = 'button'; regenerateBtn.className = 'milkdown-ai-task-regenerate';
   const confirmBtn = document.createElement('button'); confirmBtn.type = 'button'; confirmBtn.className = 'milkdown-ai-task-confirm';
   const deleteBtn = document.createElement('button'); deleteBtn.type = 'button'; deleteBtn.className = 'milkdown-ai-task-delete';
@@ -173,6 +186,7 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
     id.textContent = nextName || decode(attribute(rawHeader, 'prompt') || '').replace(/\s+/g, ' ').slice(0, 48);
     const nextKey = `manual-ai-disclosure:${document.querySelector('#markdown-editor')?.getAttribute('data-owner') || location.href}:${taskId || getPos()}`;
     if (nextKey !== disclosureKey) { disclosureKey = nextKey; try { details.open = localStorage.getItem(nextKey) === 'true'; } catch { details.open = false; } }
+    updateDisclosure();
     displayName.readOnly = !view.editable;
     prompt.setAttribute('aria-label', `AIへの指示 ${nextName || name.textContent}`);
     const nextPrompt = decode(attribute(rawHeader, 'prompt') || '');
@@ -279,4 +293,17 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
     destroy: () => { observer.disconnect(); window.removeEventListener('manual-studio-editor-font-size-change', resize); },
   };
 });
-export const aiTaskBlockPlugins = [...remarkAiTask, aiTaskNode, aiTaskView];
+const hideGeneratedMetadata = $prose(() => new Plugin({
+  props: { decorations(state) {
+    const hidden: Decoration[] = [];
+    state.doc.descendants((node, pos) => {
+      if (node.type.name !== 'html' || !/^<!--\s*\/?ai:(?:generated|output)\b[\s\S]*-->\s*$/.test(String(node.attrs.value).trim())) return;
+      const position = state.doc.resolve(pos);
+      for (let depth = position.depth; depth > 0; depth--) if (position.node(depth).type.name === 'manual_ai_task') {
+        hidden.push(Decoration.node(pos, pos + node.nodeSize, {class:'ai-output-metadata'})); break;
+      }
+    });
+    return DecorationSet.create(state.doc, hidden);
+  } },
+}));
+export const aiTaskBlockPlugins = [...remarkAiTask, aiTaskNode, aiTaskView, hideGeneratedMetadata];

@@ -19,10 +19,10 @@ try {
  const candidate=JSON.parse(await rpc('screenshots-register',{json:{id,source:colors[1],adopt:false}}));
  const published=path.join(root,initial.screenshot.output);const old=await readFile(published);
  assert.deepEqual(await readFile(published),old,'candidate does not replace adopted pixels');
- await page.locator('[data-tab=screenshots]').click();await page.locator('#screenshot-library-refresh').click();
- const card=page.locator('.screenshot-library-card');await card.locator('select').selectOption(candidate.revision);page.once('dialog',dialog=>dialog.accept());await card.getByRole('button',{name:'選択版を採用',exact:true}).click();
+ await page.locator('[data-tab=screenshots]').click();await page.locator('.library-tools>summary').click();await page.locator('#screenshot-library-refresh').click();
+ const card=page.locator('.screenshot-library-card');await card.locator('.screenshot-management>summary').click();await card.locator('select').selectOption(candidate.revision);page.once('dialog',dialog=>dialog.accept());await card.getByRole('button',{name:'選択版を採用',exact:true}).click();
  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');assert.notDeepEqual(await readFile(published),old);
  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original,'adoption does not rewrite prose');assert.equal(JSON.parse(await rpc('screenshots-list')).items[0].usage.length,2);
- await card.locator('select').selectOption(initial.revision);page.once('dialog',dialog=>dialog.accept());await card.getByRole('button',{name:'選択版を採用',exact:true}).click();await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');assert.deepEqual(await readFile(published),old,'previous adopted version can be restored');
+ await card.locator('.screenshot-management>summary').click();await card.locator('select').selectOption(initial.revision);page.once('dialog',dialog=>dialog.accept());await card.getByRole('button',{name:'選択版を採用',exact:true}).click();await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');assert.deepEqual(await readFile(published),old,'previous adopted version can be restored');
  console.log('Screenshot candidate adoption, two-document usage, prose preservation and previous-version restoration checks passed.');
 }finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

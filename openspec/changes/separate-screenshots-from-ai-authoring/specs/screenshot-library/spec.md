@@ -185,3 +185,38 @@ The system SHALL prefer named accessible targets over recorded coordinates when 
 - **WHEN** recorded input is sent to an accessible named field
 - **THEN** replay SHALL confirm that its value matches the recording and remains stable before proceeding to the next action
 - **AND** a mismatch or unavailable value SHALL produce a bounded failure without disclosing the field contents in progress logs
+
+### Requirement: Branch editable screenshots from one capture
+Manual Studio SHALL allow copying a selected screenshot revision as a separate library item with its immutable full-size original, editable annotations, crop, UI metadata, and capture recipe retained. The copy SHALL have independent identity, published output, edit history, adoption, and document references.
+
+#### Scenario: Create multiple annotations from one screenshot
+- **WHEN** a user copies a selected revision and edits its annotations or expands its crop in MarkIts
+- **THEN** the copy can use the full-size original and editable scene
+- **AND** the source screenshot, its annotations, and its document references remain unchanged.
+
+#### Scenario: Remove the source after copying
+- **WHEN** an unreferenced source screenshot is deleted
+- **THEN** its copies remain viewable and reeditable with their retained original pixels.
+
+#### Scenario: Recapture a shared source once
+- **WHEN** one capture has three independent annotation images and a user recaptures any of them or the whole library
+- **THEN** the application captures that source once and applies each annotation image's own scene and crop to the same new original
+- **AND** successful captures are reused when resuming or retrying rendering within the same run
+- **AND** protected variants remain unchanged and adoption remains explicit for each variant.
+
+
+### Requirement: Show shared sources and diagnose recapture before execution
+The library SHALL show the relationship between an immutable original, its annotation variants and referencing documents. A preflight action SHALL inspect capture recipes, launch paths, image integrity and available desktop environment without launching or capturing the target application, and disclose what can only be checked during replay.
+
+#### Scenario: Inspect three variants before recapturing
+- **WHEN** one source is shared by three annotation images
+- **THEN** the relationship view shows one source, three variants and their document references
+- **AND** the diagnostic reports source capture counts and actionable problems before replay.
+
+### Requirement: Reuse editable annotation and crop templates
+Users SHALL be able to save, select and delete project-owned annotation templates. Applying a template SHALL preserve the immutable original and adopted revision, and create an independently reeditable candidate with the saved annotation scene and crop. Incompatible source dimensions, invalid crops and protected images SHALL fail without changing the image.
+
+#### Scenario: Apply a cropped MarkIts template
+- **WHEN** a saved template includes MarkIts crop offsets and an editable scene
+- **THEN** the candidate uses the crop offsets and scene dimensions to render from the full original
+- **AND** MarkIts can later reopen its full source and saved editable scene.

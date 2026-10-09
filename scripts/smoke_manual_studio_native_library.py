@@ -15,7 +15,7 @@ gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 root = tempfile.mkdtemp(prefix='munin-studio-native-ui-')
 os.mkdir(root + '/docs')
-open(root + '/docs/index.md', 'w').write('# Native UI fixture\n')
+open(root + '/docs/index.md', 'w').write('# Native UI fixture\n\n<!-- ai:task id=fold-check kind=text prompt="Long instruction" approved-at="2026-10-09T00:00:00Z" -->\n本文は表示したまま\n<!-- /ai:task -->\n')
 open(root + '/manual_setting.json', 'w').write(json.dumps({'docs': 'docs', 'connection_type': 'none'}))
 env = os.environ.copy()
 for name, sub in [('XDG_DATA_HOME', 'data'), ('XDG_CONFIG_HOME', 'config'), ('XDG_CACHE_HOME', 'cache')]:
@@ -191,9 +191,13 @@ try:
             fill('プロジェクトのフォルダー', root)
             click('開く', 'push button')
             time.sleep(2)
-            click('プロジェクト')
+            click('▶ 指示を展開')
+            find('▼ 指示を折りたたむ')
+            click('▼ 指示を折りたたむ')
+            find('▶ 指示を展開')
+            print('PASS: native AI instruction disclosure opens and closes with visible labels.', flush=True)
             click('アプリ登録', 'push button')
-            click('＋ コマンドを追加', 'push button')
+            click('アプリを追加', 'push button')
             target_studio = os.environ.get('MANUAL_NATIVE_TARGET_STUDIO')
             if target_studio:
                 target_root = root + '/target-project'
@@ -202,12 +206,12 @@ try:
                 (Path(target_root) / 'docs/index.md').write_text('# Target home\n')
                 (Path(target_root) / 'manual_setting.json').write_text(json.dumps({'docs':'docs','connection_type':'none'}))
                 (nested / 'detail.md').write_text('# Hierarchy captured\n\nNested screen replay fixture.\n')
-                fill('起動コマンド / アプリ', target_studio, True)
+                fill('起動パス', target_studio, True)
             else:
                 fixture = root + '/target.py'
                 report = root + '/arguments.json'
                 open(fixture, 'w').write('import gi,sys,json\nfrom pathlib import Path\ngi.require_version("Gtk","3.0")\nfrom gi.repository import Gtk\nPath(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\nw=Gtk.Window(title="Munin Native Recording Target");w.set_default_size(640,400)\nb=Gtk.Button(label="Record target");b.connect("clicked",lambda b:b.set_label("Clicked"));w.add(b);w.connect("destroy",Gtk.main_quit);w.show_all();Gtk.main()\n')
-                fill('起動コマンド / アプリ', '/usr/bin/python3', True)
+                fill('起動パス', '/usr/bin/python3', True)
                 fill('起動引数（1行に1つ）', '\n'.join([fixture, report, ' value with spaces ', '$(literal)']))
             click('アプリ登録を保存', 'push button')
             click('閉じる', 'push button')
@@ -269,7 +273,8 @@ try:
             assert shot['adopted'] and len(shot['recipe']['steps']) > 1
             assert shot['edits'][-1]['scene']['annotations'], 'a native drag must create an annotation'
             scene_before = shot['edits'][-1]['scene']
-            source_files = list(manifests[0].parent.glob('originals/*.png'))
+            source_files = list((Path(root) / '.munin/screenshot-sources').glob('**/*.png')) + list(manifests[0].parent.glob('originals/*.png'))
+            assert source_files, 'Full-size originals must be retained'
             hashes_before = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in source_files}
             if target_studio:
                 shutil.copyfile(source_files[0], '/tmp/munin-native-hierarchy-before.png')
@@ -309,13 +314,14 @@ try:
             runs = list(Path(root).glob('.munin/recaptures/*.json'))
             assert len(runs) == 1 and json.load(open(runs[0]))['items'][0]['status'] == 'succeeded'
             if target_studio:
-                candidates = list(manifests[0].parent.glob('originals/*.png'))
+                candidates = list((Path(root) / '.munin/screenshot-sources').glob('**/*.png')) + list(manifests[0].parent.glob('originals/*.png'))
                 latest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
                 shutil.copyfile(latest, '/tmp/munin-native-hierarchy-after.png')
                 target_nodes = [node_text(node) for node in nodes(find('Manual Studio', 'frame', include_replay_target=True))]
                 assert any('Hierarchy captured' in text for text in target_nodes), 'recapture must reach the nested document, not merely save a PNG'
             print('PASS: real recapture completes, shows its result, and returns Studio to the foreground.', flush=True)
             click('文書に挿入', 'push button')
+            click('ここに挿入', 'push button')
             click('原稿を編集', 'push button')
             click('保存 ⌘ / Ctrl S', 'push button')
             time.sleep(1)

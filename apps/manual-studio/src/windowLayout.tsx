@@ -219,7 +219,8 @@ export const FlexLayoutApp: React.FC<{
 
       // Find an appropriate tabset to add to
       let targetTabsetId = "";
-      const activeTabset = model.getActiveTabset();
+      const preferredTabset = model.getNodeById(componentId === "file-tree" ? "tabset-left" : "tabset-editor");
+      const activeTabset = preferredTabset instanceof TabSetNode ? preferredTabset : model.getActiveTabset();
       if (activeTabset) {
         targetTabsetId = activeTabset.getId();
       } else {

@@ -182,3 +182,56 @@ The application SHALL provide application settings with distinct target-applicat
 ### Requirement: Centralized Settings Popup Modal
 **Reason**: A combined modal conflates application registration, AI connection, and project paths.
 **Migration**: Retain stored settings while providing distinct target-application, appearance, AI-connection, and project entries.
+
+### Requirement: Make AI instruction disclosure visible and actionable
+The rich text editor and AI task list SHALL label instruction disclosure as Expand instruction or Collapse instruction with a visible directional indicator. Disclosure SHALL work with pointer clicks, Enter, and Space, preserve document text, and keep generated content visible.
+
+#### Scenario: Identify and operate instruction disclosure
+- **WHEN** a user views an AI task in the rich text editor or task list
+- **THEN** a clearly visible disclosure control identifies whether the instruction can be expanded or collapsed
+- **AND** activating it changes instruction visibility without modifying the saved document.
+
+### Requirement: Keep dialogs and secondary operations contained
+Manual Studio SHALL constrain dialog width and height to the current viewport, allow vertical scrolling, and avoid horizontal overflow in forms. Primary screenshot operations SHALL remain visible while history and management operations are grouped in a collapsible section. Explanations SHALL be concise and avoid duplicated headings or obsolete AI capture guidance.
+
+#### Scenario: Register several applications in a small window
+- **WHEN** a user opens application registration with several profiles and long executable paths
+- **THEN** form controls remain within the dialog and the save action remains reachable without horizontal scrolling.
+
+
+### Requirement: Preserve multiple document tabs and image tabs
+Manual Studio SHALL keep open Markdown drafts, cursor positions and undo histories when switching tabs. Closing a dirty document, changing project or closing the desktop application SHALL allow saving, discarding or cancelling without silently losing drafts. Image tabs SHALL provide a visible image viewport, fitted and actual-size views, while retaining document drafts.
+
+#### Scenario: Switch from an unsaved document to an image
+- **WHEN** a user edits a document, opens a project image and returns to the document tab
+- **THEN** the image is visibly displayed while its tab is active
+- **AND** the document draft and undo history remain available on return.
+
+### Requirement: Create and insert assets from the file tree
+The file tree SHALL offer Markdown and folder creation at the selected directory through a context menu. Project image files SHALL be draggable into the rich text or source editor as relative image references without copying the original asset.
+
+#### Scenario: Create within a nested directory
+- **WHEN** a user opens the context menu for a folder and creates a Markdown document or folder
+- **THEN** the new item is created inside that folder and appears in the tree.
+
+### Requirement: Choose the destination of image insertion
+Image insertion SHALL offer a document and an insertion position comprising the current cursor where applicable, the document end, or a heading. Successful insertion SHALL reveal the destination editor and participate in undo, redo and save.
+
+#### Scenario: Insert an image into another document
+- **WHEN** the user chooses another document and its insertion position
+- **THEN** the image reference is added to that document without discarding the previously active draft.
+
+### Requirement: Keep AI metadata and toolbar preferences out of document content
+The rich text AI body SHALL hide generated-output metadata comments while preserving them in saved Markdown. Toolbar item visibility SHALL be configurable, persisted locally and resettable, without changing document content.
+
+#### Scenario: Hide output metadata
+- **WHEN** an AI body contains generated-output comments
+- **THEN** the body remains editable and its comments remain serialized while the comments are hidden from the rich text body display.
+
+### Requirement: Generate and review AI artwork
+Manual Studio SHALL support separately configured image generation, prompt and size input, ongoing status, saved image preview and explicit insertion into a selected document. API keys SHALL not be persisted in project settings or generated-image metadata. API errors SHALL preserve document content.
+
+#### Scenario: Review a generated image before insertion
+- **WHEN** image generation succeeds
+- **THEN** a project asset and generation metadata are saved and the preview becomes available
+- **AND** the document changes only after explicit insertion.

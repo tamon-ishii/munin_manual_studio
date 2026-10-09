@@ -1,3 +1,6 @@
+import { setupImageGeneration } from './imageGeneration';
+import { setupToolbarCustomization } from './toolbarCustomization';
+import { chooseDestination } from './screenshotWorkflow';
 import { setupScreenshotLibrary } from "./screenshotLibrary";
 import { showPartialFailure, showExecutionHistory, showCaptureExpectations, type ExecutionRun, type ExecutionLimits } from './executionHistory';
 import { selectGenerationPages, taskStatusLabels, taskKindLabels } from './taskPresentation';
@@ -109,8 +112,9 @@ const expandedFolders = new Set<string>();
 interface AiReviewSnapshot { before: Document; after: Document; id?: string; updated: string[] }
 const aiReviews = new Map<string, AiReviewSnapshot>();
 const aiReviewKey = (page: string) => JSON.stringify([projectRoot, page]);
-const editHistory = new EditorHistory();
+let editHistory = new EditorHistory();
 let replayingHistory = false;
+let pendingEditorFocus = false;
 let operationRecording = false;
 let recordingStarting = false;
 let externalFinishActive = false;
@@ -493,6 +497,7 @@ function setBusy(value: boolean): void {
     busyButtonStates = null;
     if (captureSessions.active && element<HTMLDialogElement>("screenshot-task-dialog").querySelector<HTMLElement>("#screenshot-submit-feedback")?.dataset.kind === "wait") clearScreenshotFeedback();
   }
+  if (!value && pendingEditorFocus) { pendingEditorFocus = false; requestAnimationFrame(()=>milkdown.focus()); }
   editor.readOnly = value;
   editor.disabled = !documentState;
   updateHistoryButtons();
@@ -584,7 +589,68 @@ function chooseTab(name: string): void {
     setTimeout(() => { terminalController?.fit(); }, 50);
   }
 }
+interface OpenDocumentTab { document: Document; content: string; start: number; end: number; scroll: number; richScroll: number; history: EditorHistory; richState: ReturnType<typeof milkdown.captureState>; }
+const documentTabs = new Map<string, OpenDocumentTab>();
+const imageTabs = new Set<string>();
+let activeImageTab: string | null = null;
+function showDocumentView(): void { activeImageTab = null; element('panel-editor').removeAttribute('data-image-open'); element('image-tab-view').hidden = true; }
+async function openImageTab(path: string): Promise<void> {
+  assertNoActiveCaptureSession(); retainDocumentTab();
+  const root = projectRoot;
+  const source = await rpc('preview-asset', { page: documentState?.page || `${workspace?.config.docs || 'docs'}/index.md`, asset: path }, root);
+  if (root !== projectRoot) return;
+  imageTabs.add(path); activeImageTab = path; chooseTab('editor'); layoutManager?.focusPanel('editor');
+  element('panel-editor').dataset.imageOpen = 'true'; element('image-tab-view').hidden = false;
+  element<HTMLImageElement>('image-tab-preview').src = source;
+  element<HTMLImageElement>('image-tab-preview').alt = path.split('/').at(-1) || '画像';
+  element('editor-title').textContent = path; renderDocumentTabs();
+}
+
+function retainDocumentTab(): void {
+  if (!documentState) return;
+  documentTabs.set(documentState.page, { document: documentState, content: editor.value, start: editor.selectionStart, end: editor.selectionEnd, scroll: editor.scrollTop, richScroll: milkdown.host.scrollTop, history: editHistory, richState: milkdown.captureState() });
+}
+function renderDocumentTabs(): void {
+  const strip = element('document-tabs'); strip.replaceChildren();
+  for (const [page, tab] of documentTabs) {
+    const active = !activeImageTab && documentState?.page === page;
+    const changed = active ? dirty : tab.content !== tab.document.content;
+    const group = document.createElement('div'); group.className = 'document-tab';
+    const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.setAttribute('aria-selected', String(active)); button.title = page;
+    button.textContent = `${changed ? '● ' : ''}${page.split('/').at(-1)}`; button.dataset.documentPage = page;
+    button.onclick = () => { void work(() => openPage(page)); };
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${page}を閉じる`);
+    close.onclick = () => { void work(async () => {
+      assertNoActiveCaptureSession();
+      if (documentState?.page !== page) await openPage(page);
+      if (!await confirmDiscard()) return;
+      documentTabs.delete(page); documentState = null; documentSaveState = null; dirty = false;
+      const next = [...documentTabs.keys()].at(-1);
+      if (next) await openPage(next);
+      else { editor.value = ''; resetEditHistory(); ++previewVersion; element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages(); renderDocumentTags(); }
+    }); };
+    group.append(button, close); strip.append(group);
+  }
+  for (const path of imageTabs) {
+    const group = document.createElement('div'); group.className = 'document-tab';
+    const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.textContent = path.split('/').at(-1) || path; button.title = path; button.dataset.imagePage = path; button.setAttribute('aria-selected', String(activeImageTab === path)); button.onclick = () => { void work(() => openImageTab(path)); };
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${path}を閉じる`);
+    close.onclick = () => { void work(async () => { imageTabs.delete(path); if (activeImageTab === path) { showDocumentView(); if (documentState) { element('editor-title').textContent = documentState.page; chooseTab('editor'); } else if (imageTabs.size) await openImageTab([...imageTabs].at(-1)!); } renderDocumentTabs(); }); };
+    group.append(button, close); strip.append(group);
+  }
+  strip.hidden = !documentTabs.size && !imageTabs.size;
+}
+async function confirmAllDocumentTabs(): Promise<boolean> {
+  retainDocumentTab();
+  for (const [page, tab] of documentTabs) {
+    if (tab.content === tab.document.content) continue;
+    if (documentState?.page !== page) await openPage(page);
+    if (!await confirmDiscard()) return false;
+  }
+  return true;
+}
 function updateSaveState(): void {
+  renderDocumentTabs();
   const ownerState = documentSaveState?.owner === documentState ? documentSaveState : null;
   const badge = element("save-state");
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
@@ -659,20 +725,31 @@ let documentRequestVersion = 0;
 let workspaceRequestVersion = 0;
 async function openPage(page: string, check = true): Promise<void> {
   assertNoActiveCaptureSession();
-  if (check && !await confirmDiscard()) return;
+  const docsPrefix = (workspace?.config.docs || 'docs').replace(/\/$/,'') + '/';
+  if (page.startsWith(docsPrefix) && workspace?.pages.includes(page.slice(docsPrefix.length))) page = page.slice(docsPrefix.length);
+  if (check && documentState?.page === page && !activeImageTab) { chooseTab('editor'); return; }
+  retainDocumentTab();
+  showDocumentView();
+  let cached = check ? documentTabs.get(page) : undefined;
   const root = projectRoot;
   const version = ++documentRequestVersion;
-  const opened = JSON.parse(await rpc("editor-read", { page }, root)) as Document;
+  const opened = cached && cached.content !== cached.document.content
+    ? cached.document
+    : JSON.parse(await rpc("editor-read", { page }, root)) as Document;
+  if (cached && cached.document.revision !== opened.revision) cached = undefined;
   if (root !== projectRoot || version !== documentRequestVersion) return;
-  const previousPage = documentState?.page;
   ++previewVersion;
   documentState = opened;
   editor.dataset.owner = JSON.stringify([root, page]);
-  editor.value = opened.content;
-  resetEditHistory();
-  if (previousPage !== page) editor.scrollTop = 0;
+  editor.value = cached?.content ?? opened.content;
+  editHistory = cached?.history || new EditorHistory();
+  if (!cached) resetEditHistory();
+  if (cached?.richState) milkdown.restoreState(cached.richState);
+  editor.setSelectionRange(cached?.start || 0, cached?.end || 0);
+  editor.scrollTop = cached?.scroll || 0; milkdown.host.scrollTop = cached?.richScroll || 0;
   editor.disabled = false;
-  dirty = false;
+  dirty = editor.value !== opened.content;
+  retainDocumentTab();
   element("editor-title").textContent = page;
   editor.dataset.owner = JSON.stringify([projectRoot, page]);
   document.title = `${page} — Munin Manual Studio`;
@@ -706,11 +783,35 @@ function renderPages(): void {
     { query: input("tree-search").value, markdownOnly: element<HTMLSelectElement>("tree-filter").value === "markdown" },
   );
 }
+function chooseImageDestination(): Promise<boolean> { return chooseDestination({
+    pages: [...new Set([...(workspace?.pages || []), ...documentTabs.keys(), ...(workspace?.project_entries.filter(entry=>!entry.directory && /\.md$/i.test(entry.path)).map(entry=>entry.path.startsWith(`${workspace!.config.docs}/`) ? entry.path.slice(workspace!.config.docs.length+1) : entry.path) || [])])],
+    current: () => documentState ? {page:documentState.page,content:editor.value} : null,
+    read: async page => documentTabs.get(page)?.content ?? (JSON.parse(await rpc('editor-read',{page})) as Document).content,
+    open: async page => { if (page!==documentState?.page || activeImageTab) await openPage(page); },
+    select: (offset,heading) => { editor.setSelectionRange(offset,offset);milkdown.selectInsertionHeading(heading); },
+  }); }
+function insertDocumentMarkdown(markdown:string): void {
+    pendingEditorFocus = true;
+    showDocumentView(); chooseTab("editor");
+    if (documentState) element("editor-title").textContent = documentState.page;
+    if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
+    if (!milkdown.insertMarkdown(markdown)) {
+      rememberCurrentSelection();
+      editor.setRangeText("\n\n" + markdown + "\n\n", editor.selectionStart, editor.selectionEnd, "end");
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+      editor.focus();
+    }
+    status("スクリーンショットを原稿に挿入しました。保存すると確定します。");
+  }
 const screenshotLibrary = setupScreenshotLibrary({
   root: () => projectRoot, request: rpc, work, applications: () => launchCommands,
   page: () => documentState?.page,
-  insert: (markdown) => { const start = editor.selectionStart; editor.value = editor.value.slice(0, start) + "\n\n" + markdown + "\n\n" + editor.value.slice(editor.selectionEnd); dirty = true; updateSaveState(); void renderPreview(); },
+  openPage: async page => { await openPage(page); },
+  chooseDestination: chooseImageDestination,
+  insert: insertDocumentMarkdown,
 });
+setupToolbarCustomization();
+setupImageGeneration({root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
 async function refreshWorkspace(reloadPage = false): Promise<void> {
   const root = projectRoot;
   const current = documentState;
@@ -959,7 +1060,7 @@ async function ensureAiSettings(): Promise<void> {
 }
 async function openProject(root: string, check = true): Promise<void> {
   assertNoActiveCaptureSession();
-  if (check && !await confirmDiscard()) return;
+  if (check && !await confirmAllDocumentTabs()) return;
   await saveAiSettings();
   status("プロジェクトを開いています…");
   const version = ++projectRequestVersion;
@@ -970,6 +1071,7 @@ async function openProject(root: string, check = true): Promise<void> {
   if (projectRoot !== root) expandedFolders.clear();
   if (terminalController && projectRoot !== root) await terminalController.kill();
   closeAllPanelDialogs();
+  documentTabs.clear(); imageTabs.clear(); showDocumentView();
   projectRoot = root; workspace = loaded; documentState = null; dirty = false;
   await loadLaunchCommands();
   if (version !== projectRequestVersion) return;
@@ -1027,7 +1129,7 @@ async function saveDocument(refresh = true): Promise<void> {
   if (root !== projectRoot || current !== documentState || version !== documentRequestVersion) return;
   documentSaveState = null;
   if (editor.value === content && saved.content !== content) editor.value = saved.content;
-  documentState = saved; dirty = editor.value !== saved.content; updateSaveState();
+  documentState = saved; dirty = editor.value !== saved.content; retainDocumentTab(); updateSaveState();
   if (refresh) await refreshWorkspace();
   status(`${page}を保存しました。`);
 }
@@ -1057,11 +1159,21 @@ function renderTasks(): void {
   element("task-list").innerHTML = visibleTasks.length ? visibleTasks.map((task) => {
     const source = workspace!.capture_sources[task.id];
     const description = source?.kind === "window" ? `${escape(source.title)} · 外枠 ${source.inset}px` : source?.kind === "scenario" ? "撮影元と撮影前の操作を設定済み" : "撮影元はまだ設定されていません。文書のAI更新で自動設定できます。";
-    return `<article class="card${task.status === "approved" ? " card-approved is-approved" : ""}" data-task="${escape(task.id)}"><div class="task-header"><h2>${escape(task.name || task.prompt.replace(/\s+/g, " ").slice(0, 48))} <small>${escape(task.page)}</small></h2><span data-task-status="${taskDisplayStatus(task)}" class="badge${task.status === "approved" ? " badge-approved is-approved" : ""}">${kindLabel[task.kind]} · ${statusLabel[taskDisplayStatus(task)] || escape(task.status)}</span></div>${workspace!.update_reasons?.[task.id]?.length ? `<p class="update-reasons">更新候補の理由: ${workspace!.update_reasons[task.id].map(escape).join("・")}${task.status === "approved" ? "（確定済みのため自動更新しません）" : ""}</p>` : ""}${taskDisplayStatus(task) === "failed" ? `<p class="task-failure" role="status">${escape(taskFailures.get(taskFailureKey(task)) || workspace?.execution_results?.[task.id]?.error || "前回の更新に失敗しました。実行記録から再開できます。")}</p>` : ""}<label class="task-prompt-label">AIへの指示<textarea data-prompt="${escape(task.id)}" rows="3">${escape(task.prompt)}</textarea></label><div class="actions"><button data-save-prompt="${escape(task.id)}">指示を保存</button><button data-toggle-approved="${escape(task.id)}"${task.status === "approved" ? ' class="button-approved is-approved"' : ""}${task.status === "missing" ? " disabled title=\"生成結果がある場合に確定できます\"" : ""}>${task.status === "approved" ? "確定解除" : "確定"}</button>${task.kind !== "screenshot" ? `<button data-generate="${escape(task.id)}" class="primary">${task.kind === "diagram" ? "図をAI更新" : "文章をAI更新"}</button>` : ""}</div>${task.kind === "screenshot" ? `
+    return `<article class="card${task.status === "approved" ? " card-approved is-approved" : ""}" data-task="${escape(task.id)}"><div class="task-header"><h2>${escape(task.name || task.prompt.replace(/\s+/g, " ").slice(0, 48))} <small>${escape(task.page)}</small></h2><span data-task-status="${taskDisplayStatus(task)}" class="badge${task.status === "approved" ? " badge-approved is-approved" : ""}">${kindLabel[task.kind]} · ${statusLabel[taskDisplayStatus(task)] || escape(task.status)}</span></div>${workspace!.update_reasons?.[task.id]?.length ? `<p class="update-reasons">更新候補の理由: ${workspace!.update_reasons[task.id].map(escape).join("・")}${task.status === "approved" ? "（確定済みのため自動更新しません）" : ""}</p>` : ""}${taskDisplayStatus(task) === "failed" ? `<p class="task-failure" role="status">${escape(taskFailures.get(taskFailureKey(task)) || workspace?.execution_results?.[task.id]?.error || "前回の更新に失敗しました。実行記録から再開できます。")}</p>` : ""}<details class="task-instructions" data-task-disclosure="${escape(task.id)}"><summary>▶ 指示を展開</summary><label class="task-prompt-label">AIへの指示<textarea data-prompt="${escape(task.id)}" rows="3">${escape(task.prompt)}</textarea></label><button data-save-prompt="${escape(task.id)}">指示を保存</button></details><div class="actions"><button data-toggle-approved="${escape(task.id)}"${task.status === "approved" ? ' class="button-approved is-approved"' : ""}${task.status === "missing" ? " disabled title=\"生成結果がある場合に確定できます\"" : ""}>${task.status === "approved" ? "確定解除" : "確定"}</button>${task.kind !== "screenshot" ? `<button data-generate="${escape(task.id)}" class="primary">${task.kind === "diagram" ? "図をAI更新" : "文章をAI更新"}</button>` : ""}</div>${task.kind === "screenshot" ? `
       <p class="muted">${description}</p><img class="task-image" data-thumb="${escape(task.id)}" alt="${escape(task.id)}の登録画像" hidden />
       <div class="actions">${source ? `<button class="primary" data-recapture="${escape(task.id)}">${source.kind === "scenario" ? "設定した手順で更新" : "同じ撮影元で更新"}</button>` : ""}<button data-source-config="${escape(task.id)}">${source ? "撮影元を変更" : "撮影元を選ぶ"}</button><button data-capture-expectations="${escape(task.id)}">撮影成功の条件</button><button data-register-image="${escape(task.id)}">既存のPNGを登録</button></div>
       <details class="capture-settings"><summary>撮影元の設定</summary><p class="muted">アプリの対象画面を開いて一覧を更新してください。タイトルで記憶するので、アプリを再起動しても使えます。同じタイトルが複数ある場合は自動で選びません。Waylandでは毎回OSの撮影ダイアログで対象を選びます。</p><div class="actions"><select data-window-select="${escape(task.id)}"><option value="">一覧を更新してください</option></select><button data-window-list="${escape(task.id)}">一覧を更新</button></div><div class="actions"><label>外枠を除く（px）<input type="number" min="0" max="64" data-inset="${escape(task.id)}" value="${source?.kind === "window" ? source.inset : 0}" /></label><button data-capture="${escape(task.id)}" class="primary">撮影元を保存して撮影</button></div></details>` : ""}<button class="edit-task" data-edit-page="${escape(task.page)}">原稿を開く</button></article>`;
   }).join("") : workspace.tasks.length ? '<p class="muted">条件に一致するAIタグがありません。</p>' : '<div class="card"><h2>更新する画像・文章・図を追加する</h2><p>原稿の編集画面で「撮影の指示」「文章の指示」「図の指示」を追加して保存してください。この一覧に表示されます。</p></div>';
+  element("task-list").querySelectorAll<HTMLDetailsElement>("[data-task-disclosure]").forEach(details => {
+    const key = `manual-task-list-disclosure:${projectRoot}:${details.dataset.taskDisclosure}`;
+    const summary = details.querySelector<HTMLElement>("summary")!;
+    const update = () => { summary.textContent = details.open ? "▼ 指示を折りたたむ" : "▶ 指示を展開"; summary.setAttribute("aria-expanded", String(details.open)); try { localStorage.setItem(key, String(details.open)); } catch { /* UI preference is optional. */ } };
+    try { details.open = localStorage.getItem(key) === "true"; } catch { details.open = false; }
+    summary.setAttribute("role", "button"); summary.tabIndex = 0;
+    summary.addEventListener("click", event => { event.preventDefault(); details.open = !details.open; update(); });
+    summary.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); details.open = !details.open; update(); } });
+    details.addEventListener("toggle", update); update();
+  });
   const generationRoot = projectRoot;
   for (const task of workspace.tasks.filter((item) => item.kind === "screenshot")) {
     const img = document.querySelector<HTMLImageElement>(`[data-thumb="${CSS.escape(task.id)}"]`);
@@ -1612,6 +1724,8 @@ element("page-list").addEventListener("click", (event) => {
     });
     return;
   }
+  const image = (event.target as HTMLElement).closest<HTMLElement>('[data-image]');
+  if (image) { void work(() => openImageTab(image.dataset.image!)); return; }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-page]");
   if (button) void work(() => openPage(button.dataset.page!));
 });
@@ -1680,7 +1794,10 @@ editor.addEventListener("editor-mode-change", () => {
 });
 element("save-page").addEventListener("click", () => { void work(saveDocument); });
 element("generate-page").addEventListener("click", () => { void work(generateCurrentPage); });
-element("reload-page").addEventListener("click", () => { if (documentState) void work(() => openPage(documentState!.page)); });
+element("reload-page").addEventListener("click", () => { if (documentState) void work(async () => {
+  if (!await confirmDiscard() || !documentState) return;
+  await openPage(documentState.page, false);
+}); });
 element("undo-edit").addEventListener("click", () => stepEditHistory(-1));
 element("redo-edit").addEventListener("click", () => stepEditHistory(1));
 element("detach-editor").addEventListener("click", () => { void work(async () => {
@@ -1880,7 +1997,7 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
   if (document.querySelector('dialog[open]') || target?.closest('#panel-terminal')) return;
   if (target?.matches('input,select,textarea') && target !== editor && !milkdown.host.contains(target)) return;
   const key = event.key.toLowerCase();
-  if (key === 's' && !event.shiftKey) { event.preventDefault(); if (documentState) void work(saveDocument); return; }
+  if (key === 's' && !event.shiftKey) { event.preventDefault(); if (documentState && !activeImageTab) void work(saveDocument); return; }
   if (!event.shiftKey || !['p', 'r', 'g'].includes(key)) return;
   event.preventDefault();
   if (!documentState || busy) return;
@@ -1907,7 +2024,7 @@ element('open-workspace-settings').title = '原稿・画像の保存先とHTML�
 document.querySelectorAll<HTMLButtonElement>('.editor-view-controls button[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
 let closingApproved = false;
 let closingPrompt = false;
-window.addEventListener("beforeunload", (event) => { if (dirty && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
+window.addEventListener("beforeunload", (event) => { if ((dirty || [...documentTabs.entries()].some(([page,tab]) => page !== documentState?.page && tab.content !== tab.document.content)) && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
 window.addEventListener("pagehide", () => terminalController?.disconnectOnUnload());
 if (native) void getCurrentWindow().onCloseRequested(event => {
   if (closingApproved) return;
@@ -1917,7 +2034,7 @@ if (native) void getCurrentWindow().onCloseRequested(event => {
   closingPrompt = true;
   void (async () => {
     try {
-      if (!await confirmDiscard()) return;
+      if (!await confirmAllDocumentTabs()) return;
       await terminalController?.kill();
       closingApproved = true;
       await getCurrentWindow().destroy();
@@ -2135,7 +2252,7 @@ function renderLaunchCommands(): void {
     const row = document.createElement("div"); row.className = "launch-command-row";
     const nameLabel = document.createElement("label"); nameLabel.textContent = "表示名（省略可）";
     const name = document.createElement("input"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name);
-    const programLabel = document.createElement("label"); programLabel.textContent = "起動コマンド / アプリ";
+    const programLabel = document.createElement("label"); programLabel.className = "launch-program-field"; programLabel.textContent = "起動パス";
     const programWrap = document.createElement("div"); programWrap.className = "app-picker-row";
     const program = document.createElement("input"); program.value = command.program; program.placeholder = "例: firefox または /usr/bin/firefox"; program.dataset.launchProgram = String(index);
     const browse = document.createElement("button"); browse.type = "button"; browse.textContent = "選択"; browse.dataset.launchBrowse = String(index);
@@ -2145,7 +2262,8 @@ function renderLaunchCommands(): void {
     const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "削除"; remove.dataset.launchRemove = String(index);
     const test = document.createElement("button"); test.type = "button"; test.textContent = "起動確認";
     test.addEventListener("click", () => { void work(async () => { if (!native) throw new Error("起動確認はデスクトップ版で利用できます。"); await invoke("test_launch_application", { program: program.value, args: args.value.split("\n").filter(value => value.length > 0) }); status("対象アプリを起動しました。"); }); });
-    row.append(nameLabel, programLabel, argsLabel, test, remove); list.append(row);
+    const actions = document.createElement("div"); actions.className = "actions launch-row-actions"; actions.append(test, remove);
+    row.append(programLabel, nameLabel, argsLabel, actions); list.append(row);
   });
   list.querySelectorAll<HTMLButtonElement>("[data-launch-browse]").forEach((button) => button.addEventListener("click", () => { void work(async () => {
     if (!native) throw new Error("アプリ選択はデスクトップアプリで利用できます。");
@@ -2426,25 +2544,75 @@ element<HTMLFormElement>("screenshot-task-form").addEventListener("invalid", (ev
   const message = control.validationMessage || "入力内容を確認してください。";
   showScreenshotFeedback(`指示を追加できません: ${message}`);
 }, true);
-element("new-page").addEventListener("click", () => {
+element<HTMLImageElement>('image-tab-preview').addEventListener('load',()=>{ const image=element<HTMLImageElement>('image-tab-preview');element('image-tab-size').textContent=`${image.naturalWidth} × ${image.naturalHeight}`; });
+element('image-tab-zoom').addEventListener('click',()=>{const canvas=element('image-tab-preview').parentElement!;const actual=canvas.dataset.actual!=='true';canvas.dataset.actual=String(actual);element('image-tab-zoom').textContent=actual?'画面に合わせる':'実寸表示';});
+let contextCreateParent: string | null = null;
+element("new-page").addEventListener("click", (event) => {
+  if (event.isTrusted) contextCreateParent = null;
   if (!projectRoot) { status("先にプロジェクトを開いてください。", true); return; }
+  if (contextCreateParent !== null) { input('new-page-path').value = contextCreateParent ? contextCreateParent + '/' : ''; input('new-page-title').value = ''; }
   element<HTMLDialogElement>("new-page-dialog").showModal(); input("new-page-path").focus();
 });
+const treeContextMenu = document.createElement('div'); treeContextMenu.id = 'tree-context-menu'; treeContextMenu.className = 'tree-context-menu'; treeContextMenu.role = 'menu'; treeContextMenu.hidden = true;
+for (const [label, id] of [['Markdownを作成','new-page'],['フォルダーを作成','new-folder']]) {
+  const button = document.createElement('button'); button.type = 'button'; button.role = 'menuitem'; button.textContent = label; button.onclick = () => { treeContextMenu.hidden = true; element<HTMLButtonElement>(id).click(); }; treeContextMenu.append(button);
+}
+document.body.append(treeContextMenu);
+element('page-list').addEventListener('contextmenu', event => {
+  if (!workspace || busy) return; event.preventDefault();
+  const target = event.target as HTMLElement;
+  const file = target.closest<HTMLElement>('[data-page],[data-image],[data-file]');
+  contextCreateParent = file ? (file.dataset.page || file.dataset.image || file.dataset.file || '').split('/').slice(0,-1).join('/') : target.closest<HTMLElement>('[data-folder]')?.dataset.folder || workspace.config.docs;
+  treeContextMenu.hidden = false;
+  const box = treeContextMenu.getBoundingClientRect(); treeContextMenu.style.left = `${Math.max(0,Math.min(event.clientX,innerWidth-box.width))}px`; treeContextMenu.style.top = `${Math.max(0,Math.min(event.clientY,innerHeight-box.height))}px`;
+  treeContextMenu.querySelector<HTMLButtonElement>('button')!.focus();
+});
+document.addEventListener('pointerdown',event=>{ if (!treeContextMenu.contains(event.target as Node)) treeContextMenu.hidden = true; });
+document.addEventListener('keydown',event=>{if(event.key==='Escape')treeContextMenu.hidden=true;});
+element('page-list').addEventListener('dragstart', event => {
+  const image = (event.target as HTMLElement).closest<HTMLElement>('[data-image]');
+  if (!image || !event.dataTransfer) return;
+  event.dataTransfer.setData('application/x-munin-image', JSON.stringify({root:projectRoot,path:image.dataset.image})); event.dataTransfer.effectAllowed = 'copy';
+});
+function relativeProjectAsset(asset: string, page: string): string {
+  const docs = workspace?.config.docs.replace(/\\/g,'/').replace(/\/$/,'') || 'docs';
+  const projectPage = workspace?.project_entries.some(entry=>entry.path===page) ? page : `${docs}/${page}`;
+  const from = projectPage.split('/').slice(0,-1), to = asset.split('/');
+  while (from.length && to.length && from[0]===to[0]) { from.shift(); to.shift(); }
+  return '../'.repeat(from.length)+to.join('/');
+}
+for (const target of [editor,milkdown.host] as HTMLElement[]) {
+  target.addEventListener('dragover',event=>{if(event.dataTransfer?.types.includes('application/x-munin-image')){event.preventDefault();event.dataTransfer.dropEffect='copy';}});
+  target.addEventListener('drop',event=>{
+    const data = event.dataTransfer?.getData('application/x-munin-image'); if (!data) return;
+    event.preventDefault();event.stopImmediatePropagation();
+    if (!documentState || activeImageTab || busy) { status('画像を挿入する原稿を開いてください。',true);return; }
+    const asset = JSON.parse(data) as {root:string;path:string}; if (asset.root !== projectRoot) {status('同じプロジェクトの画像を選択してください。',true);return;}
+    const path = relativeProjectAsset(asset.path,documentState.page);
+    const markdown = `![${(asset.path.split('/').at(-1)||'画像').replace(/[\[\]\\]/g,'\\$&')}](<${path}>)`;
+    if (target === milkdown.host) milkdown.insertMarkdownAt(markdown,event.clientX,event.clientY);
+    else { rememberCurrentSelection(); editor.setRangeText(markdown,editor.selectionStart,editor.selectionEnd,'end');editor.dispatchEvent(new Event('input',{bubbles:true})); }
+    status('画像の参照を挿入しました。');
+  },true);
+}
 element("cancel-new-page").addEventListener("click", () => element<HTMLDialogElement>("new-page-dialog").close());
 element("new-page-form").addEventListener("submit", (event) => {
   event.preventDefault();
   void work(async () => {
-    if (!await confirmDiscard()) return;
-    const page = input("new-page-path").value.trim();
+    let page = input("new-page-path").value.trim().replace(/\\/g, "/");
+    const docsRoot = `${workspace?.config.docs || "docs"}/`;
+    if (page.startsWith(docsRoot)) page = page.slice(docsRoot.length);
     await rpc("editor-save", { page, json: { content: `# ${input("new-page-title").value.trim()}\n\n`, revision: null } });
     element<HTMLDialogElement>("new-page-dialog").close();
-    dirty = false; await refreshWorkspace(); await openPage(page, false); status(`${page}を作成しました。`);
+    await refreshWorkspace(); await openPage(page, false); status(`${page}を作成しました。`);
   });
 });
-element("new-folder").addEventListener("click", () => {
+element("new-folder").addEventListener("click", (event) => {
+  if (event.isTrusted) contextCreateParent = null;
   if (!projectRoot || !workspace) { status("先にプロジェクトを開いてください。", true); return; }
   element("new-folder-parent").textContent = `作成先: ${workspace.config.docs}`;
-  input("new-folder-path").value = "";
+  input("new-folder-path").value = contextCreateParent ? contextCreateParent + '/' : '';
+  if (contextCreateParent !== null) element('new-folder-parent').textContent = `作成先: ${contextCreateParent || 'プロジェクト直下'}`;
   element<HTMLDialogElement>("new-folder-dialog").showModal();
   input("new-folder-path").focus();
 });
@@ -2454,7 +2622,7 @@ element("new-folder-form").addEventListener("submit", (event) => {
   void work(async () => {
     if (!projectRoot || !workspace) throw new Error("先にプロジェクトを開いてください。");
     const relative = input("new-folder-path").value.trim().replace(/\\/g, "/");
-    const created = await rpc("create-folder", { path: relative });
+    const created = await rpc("create-folder", { path: relative, json: { project_relative: contextCreateParent !== null } });
     for (const [index] of created.split("/").entries()) expandedFolders.add(created.split("/").slice(0, index + 1).join("/"));
     element<HTMLDialogElement>("new-folder-dialog").close();
     await refreshWorkspace();

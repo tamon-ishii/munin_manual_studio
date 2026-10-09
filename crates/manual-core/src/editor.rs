@@ -59,7 +59,8 @@ pub fn document_path(root: &Path, page: &str) -> Result<PathBuf, String> {
     project_path(&docs, page)
 }
 
-pub fn create_folder(root: &Path, folder: &str) -> Result<String, String> {
+pub fn create_folder(root: &Path, folder: &str) -> Result<String, String> { create_folder_at(root,folder,false) }
+pub fn create_folder_at(root: &Path, folder: &str, project_relative: bool) -> Result<String, String> {
     let clean = folder.trim().replace('\\', "/");
     let relative = Path::new(&clean);
     if clean.is_empty()
@@ -77,7 +78,7 @@ pub fn create_folder(root: &Path, folder: &str) -> Result<String, String> {
         .trim_start_matches("./")
         .trim_end_matches('/')
         .to_string();
-    let project_relative = format!("{docs}/{clean}");
+    let project_relative = if project_relative { clean } else { format!("{docs}/{clean}") };
     let path = project_path(root, &project_relative)?;
     if path.exists() {
         return Err("同じ名前のファイルまたはフォルダーが既にあります。".into());
