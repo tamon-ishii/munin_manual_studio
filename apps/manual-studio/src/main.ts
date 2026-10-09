@@ -2163,8 +2163,6 @@ function finishOperationRecording(): Promise<void> {
   updateCaptureBusyState();
   recordingFinishing = (async () => {
     try {
-      await hideManualStudioForCapture();
-      await new Promise((resolve) => setTimeout(resolve, 350));
       const result = await invoke<RecordingResult>("finish_operation_recording");
       if (!isCurrentCaptureSession(generation)) return;
       await acceptRecordingResult(result, generation);

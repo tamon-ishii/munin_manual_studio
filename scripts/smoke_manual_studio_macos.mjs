@@ -47,8 +47,8 @@ try{
  const {stdout:source}=await run(cli,['--request',JSON.stringify({root,action:'screenshots-image',options:{id:initial.id,json:{original:true}}})]);
  const original=JSON.parse(source).data,hash=createHash('sha256').update(original).digest('hex');
  await scenario(main(),press('MarkItsで編集'));const reopened=await poll(ownedMarkits);await scenario(reopened,press('編集終了'));
- await poll(async()=>{const s=await shot();return s&&s.edits.length>initial.edits.length?s:null;});
  await poll(async()=>await foreground()===studio.pid);
+ const reedited=await poll(shot);assert.deepEqual(reedited.edits.at(-1).scene,initial.edits.at(-1).scene,'Re-edit restores the saved annotation scene');
  const {stdout:after}=await run(cli,['--request',JSON.stringify({root,action:'screenshots-image',options:{id:initial.id,json:{original:true}}})]);
  assert.equal(createHash('sha256').update(JSON.parse(after).data).digest('hex'),hash);
  await scenario(main(),[...press('文書に挿入'),...press('ここに挿入')]);

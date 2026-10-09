@@ -172,7 +172,8 @@ try {
       if (!targetWindow) await new Promise(resolve=>setTimeout(resolve,100));
     }
     assert.deepEqual(JSON.parse(await readFile(argsFile,'utf8')),argumentsSnapshot,'real application receives exact argument boundaries');
-    const recorder = spawnTracked(markits,['--manual-studio-record-input',eventsFile],{stdio:'ignore'});
+    const recorder = spawnTracked(markits,['--manual-studio-record-input',eventsFile],{env:{...process.env,MUNIN_RECORDING_WINDOW:JSON.stringify({role:'window',name:targetWindow.title,window_id:process.platform==='linux'?String(BigInt(targetWindow.id)):targetWindow.id,pid:target.pid,x:targetWindow.x,y:targetWindow.y,width:targetWindow.width,height:targetWindow.height})}});
+    recorder.stderr.on('data',chunk=>process.stderr.write(chunk));recorder.stdout.resume();
     while (true) { try { await readFile(eventsFile); break; } catch {} requireRunning(recorder, 'Input recorder'); remaining();await new Promise(resolve=>setTimeout(resolve,100)); }
     const recordingScenario = path.join(tempRoot,'record-input.json');
     await writeFile(recordingScenario,JSON.stringify({version:1,platform:'desktop',window:"Munin Recording Fixture",steps:[{wait_ms:600},{click:{x:80,y:80}},{wait_ms:500}]}));
