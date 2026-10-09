@@ -22,6 +22,7 @@ async function scenario(window,steps){
 }
 const press=name=>[{expect_visible:`button[name="${name}"]`},{press:`button[name="${name}"]`}];
 const fill=(role,name,value)=>[{expect_visible:`${role}[name*="${name}"]`},{key:{selector:`${role}[name*="${name}"]`,keys:"Cmd+A"}},{text:value},{wait_ms:300}];
+const finishEditor=[{expect_visible:'button[name*="編集終了"]'},{press:'button[name*="編集終了"]'}];
 const main=()=>`pid:${studio.pid}:Munin Manual Studio`;
 async function manifests(){try{return await readdir(path.join(root,'.munin/screenshots'));}catch{return [];}}
 async function shot(){for(const id of await manifests()){try{const s=JSON.parse(await readFile(path.join(root,'.munin/screenshots',id,'manifest.json'),'utf8'));if(s.adopted)return s;}catch{}}}
@@ -47,12 +48,12 @@ try{
  await poll(async()=>{const events=(await readFile(recorderFile,'utf8')).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));return events.some(event=>event.kind==='click');});
  pass('Actual Studio recorder is ready and records the target click');
  await scenario(`pid:${studio.pid}:Munin Manual Studio — 撮影`,press('スクリーンショットを実行'));
- const editor=await poll(async()=>{const found=await ownedMarkits();if(found)return found;try{const {stdout}=await run(cli,['inspect-window','--root',root,'--window',main()],{timeout:3000});if(stdout.includes('撮影に失敗')||stdout.includes('起動できません'))throw new Error(stdout);}catch(error){if(String(error).includes('撮影に失敗')||String(error).includes('起動できません'))throw error;}return null;});await scenario(editor,press('編集終了'));
+ const editor=await poll(async()=>{const found=await ownedMarkits();if(found)return found;try{const {stdout}=await run(cli,['inspect-window','--root',root,'--window',main()],{timeout:3000});if(stdout.includes('撮影に失敗')||stdout.includes('起動できません'))throw new Error(stdout);}catch(error){if(String(error).includes('撮影に失敗')||String(error).includes('起動できません'))throw error;}return null;});await scenario(editor,finishEditor);
  const initial=await poll(shot);assert.ok(initial.recipe.steps.some(step=>step.click),'Native recorder captured the fixture click');
  await poll(async()=>await foreground()===studio.pid);pass('macOS Studio registration, native recording/capture, MarkIts completion and Studio foreground return');
  const {stdout:source}=await run(cli,['--request',JSON.stringify({root,action:'screenshots-image',options:{id:initial.id,json:{original:true}}})]);
  const original=JSON.parse(source).data,hash=createHash('sha256').update(original).digest('hex');
- await scenario(main(),press('MarkItsで編集'));const reopened=await poll(ownedMarkits);await scenario(reopened,press('編集終了'));
+ await scenario(main(),press('MarkItsで編集'));const reopened=await poll(ownedMarkits);await scenario(reopened,finishEditor);
  await poll(async()=>await foreground()===studio.pid);
  const reedited=await poll(shot);assert.deepEqual(reedited.edits.at(-1).scene,initial.edits.at(-1).scene,'Re-edit restores the saved annotation scene');
  const {stdout:after}=await run(cli,['--request',JSON.stringify({root,action:'screenshots-image',options:{id:initial.id,json:{original:true}}})]);
