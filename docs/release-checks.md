@@ -160,3 +160,17 @@ MkDocsがPATHにあり、LinuxではシステムPythonのGI・GTK3・AT-SPIとX1
 修正版 `3c48033` の[再実行](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37988716081)では、[ARM64](investigations/macos-native-20261010/arm64-pid-resolution.log)・[x64](investigations/macos-native-20261010/x64-pid-resolution.log)ともネイティブチェックが成功した。両ログで実引数保持・クリック録画、MarkIts保存・再編集・クロップ拡張、不変原本、Markdown挿入、AI未設定のHTML公開を確認した。x64の初回失敗はこの再実行では解消したが、再発しないことまでは保証しない。macOS実Studioの設定画面からの一連の操作・前面復帰、およびWindowsの150%・200%は引き続き未確認。
 
 この再実行は全4構成で最終成功した。Windowsの実録画・MarkItsとWebView2も成功し、全6条件の実測DPIは96、ページエラーは0件。LinuxのUI・生成・撮影・統合チェックと全構成の配布ビルドも成功した。修正版のZIP全4件を取得し、CRC、実行ファイルの同梱とUnix実行権限、macOSのバージョン情報・署名ファイルを確認した。[修正版の配布ファイル一覧・SHA-256](investigations/release-artifacts-20261010/package-verification-pid-resolution.json)を保存した。
+
+## 2026-10-10 ネイティブ撮影の復帰処理
+
+- `52dbadb`: 隠れたWebKit画面のタイマー／IPC継続に依存しないよう、撮影前の350ms待機・撮影完了通知・撮影コントロールの終了・失敗時のStudio再表示をネイティブホストへ移した。
+- Studio Rust 25件、撮影関連ブラウザチェック4段階が成功。
+- Linux実Studioで、登録・引数付き起動・操作記録・撮影・MarkIts編集／再編集・再撮影・前面復帰・原稿挿入・自動保存・HTML出版を通過（`scripts/smoke_manual_studio_native_library.py`、一時プロジェクト、AI接続なし）。
+- Windows実行 `37992754188` で実際の設定画面を1920×1080・150%へ変更し、WebView2実測144 DPIの表示チェック6条件が成功。100%は実測96 DPIで成功。200%は設定ウィンドウ再取得の修正後に再検証する。
+
+## 2026-10-10 公開前の最終結果
+
+- Windows `37994475502` / `caedd65`: 150%・200%の実WebView2チェックがそれぞれ実測144／192 DPIで6条件成功、画面エラーなし。100%（96 DPI）も成功。倍率はWindows設定UIで変更し、DPIエミュレーションは使用していない。
+- macOS `37995913061` / `baf79f1`: 実Studioからのプロジェクト選択、アプリ登録、厳密な引数保持、ネイティブクリック録画・撮影、MarkIts保存・再編集、不変原本、Studio前面復帰、原稿挿入・自動保存・HTML出力がすべて成功。実OS環境はGitHub ActionsのmacOSホスト。ARM64／x64という以前のCI名は配布ビルドのターゲットを指し、debugネイティブ検証はホスト上の実行ファイルを使う。
+- 最終 `npm run manual:check`: 全30段階成功（終了コード0）。Studio Rust 25件、core 158件成功・1件ignored。Linux実Studioの全フローと対象ウィンドウ付き録画ヘルパー検証も成功。
+- 3能力の変更仕様が本体仕様へ反映済みであることを再照合。残る7.5・9.3・9.4を完了し、アーカイブ・0.6.0公開へ進む。

@@ -1,0 +1,10 @@
+{
+  "results": [
+    "Studio project open, application registration and recording start controls",
+    "Actual Studio recorder is ready and records the target click",
+    "macOS Studio registration, native recording/capture, MarkIts completion and Studio foreground return",
+    "macOS Studio re-edit, immutable original, document insertion/autosave and HTML publication without AI"
+  ],
+  "platform": "darwin",
+  "scope": "Actual native Studio UI, accessibility/input, MarkIts handoff and foreground; no browser mocks"
+}

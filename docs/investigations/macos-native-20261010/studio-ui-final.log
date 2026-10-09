@@ -1,0 +1,4 @@
+PASS: Studio project open, application registration and recording start controls
+PASS: Actual Studio recorder is ready and records the target click
+PASS: macOS Studio registration, native recording/capture, MarkIts completion and Studio foreground return
+PASS: macOS Studio re-edit, immutable original, document insertion/autosave and HTML publication without AI
