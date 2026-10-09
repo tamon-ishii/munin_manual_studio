@@ -14,14 +14,14 @@ const cli=path.join(bin,'manualctl');const run=promisify(execFile);
 const root=await mkdtemp(path.join(tmpdir(),'munin-macos-studio-'));
 const output=path.resolve('native-smoke-results/macos-studio');await mkdir(output,{recursive:true});
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const deadline=Date.now()+180000;let studio,targetPid;const results=[];
+const deadline=Date.now()+240000;let studio,targetPid;let stderr="";const results=[];
 const poll=async(read)=>{while(Date.now()<deadline){const value=await read();if(value)return value;await pause(200);}throw new Error('macOS Studio UI deadline exceeded');};
 async function scenario(window,steps){
  const file=path.join(root,'scenario.json');await writeFile(file,JSON.stringify({version:1,platform:'desktop',window,steps}));
  await run(cli,['scenario-run','--root',root,'--input',file],{timeout:Math.min(40000,Math.max(1,deadline-Date.now()))});
 }
 const press=name=>[{expect_visible:`button[name="${name}"]`},{press:`button[name="${name}"]`}];
-const fill=(role,name,value)=>[{expect_visible:`${role}[name*="${name}"]`},{fill:{selector:`${role}[name*="${name}"]`,value}}];
+const fill=(role,name,value)=>[{expect_visible:`${role}[name*="${name}"]`},{key:{selector:`${role}[name*="${name}"]`,keys:"Cmd+A"}},{text:{selector:`${role}[name*="${name}"]`,value}},{wait_ms:300}];
 const main=()=>`pid:${studio.pid}:Munin Manual Studio`;
 async function manifests(){try{return await readdir(path.join(root,'.munin/screenshots'));}catch{return [];}}
 async function shot(){for(const id of await manifests()){try{const s=JSON.parse(await readFile(path.join(root,'.munin/screenshots',id,'manifest.json'),'utf8'));if(s.adopted)return s;}catch{}}}
@@ -34,9 +34,10 @@ try{
  const fixture=path.join(root,'target.py'),report=path.join(root,'arguments.json');
  await writeFile(fixture,'import tkinter as tk,json,sys,os\nfrom pathlib import Path\nPath(sys.argv[1]).write_text(json.dumps({"args":sys.argv[2:],"pid":os.getpid()}))\nroot=tk.Tk();root.title("Munin macOS Recording Target");root.geometry("640x400")\ntk.Button(root,text="Record target",command=lambda:root.title("Munin macOS Recording Target clicked")).place(x=30,y=40,width=120,height=80)\nroot.mainloop()\n');
  const {stdout:python}=await run(process.env.MANUAL_NATIVE_PYTHON||'python3',['-c','import sys; print(sys.executable)']);
- studio=spawn(path.join(bin,'manual-studio'),[],{cwd:root,stdio:['ignore','ignore','pipe']});let stderr='';studio.stderr.on('data',s=>stderr=(stderr+s).slice(-4000));
+ studio=spawn(path.join(bin,'manual-studio'),[],{cwd:root,stdio:['ignore','ignore','pipe']});studio.stderr.on('data',s=>stderr=(stderr+s).slice(-4000));
  await scenario(main(),[...press('開く'),...fill('text_field','プロジェクトのフォルダー',root),...press('開く'),...press('アプリ登録'),...press('アプリを追加')]);
  await scenario(main(),[...fill('text_field','起動パス',python.trim()),...fill('text_area','起動引数（1行に1つ）',[fixture,report,' value with spaces ','$(literal)'].join('\n')),...press('アプリ登録を保存'),...press('閉じる'),...press('スクリーンショット一覧'),...press('操作を記録して撮影'),...press('記録を開始')]);
+ pass('Studio project open, application registration and recording start controls');
  const args=await poll(async()=>{try{return JSON.parse(await readFile(report,'utf8'));}catch{return null;}});targetPid=args.pid;assert.deepEqual(args.args,[' value with spaces ','$(literal)']);
  await scenario(`pid:${targetPid}:Munin macOS Recording Target`,[{wait_ms:600},{click:{x:80,y:80}},{expect_window:`pid:${targetPid}:Munin macOS Recording Target clicked`}]);
  await scenario(`pid:${studio.pid}:Munin Manual Studio — 撮影`,press('スクリーンショットを実行'));
@@ -58,6 +59,8 @@ try{
 }catch(error){
  for(const action of ['list-windows','list-accessible-windows']){try{const {stdout}=await run(cli,[action,'--root',root],{timeout:10000});await writeFile(path.join(output,action+'.json'),stdout);}catch{}}
  if(studio){try{const {stdout}=await run(cli,['inspect-window','--root',root,'--window',main()],{timeout:10000});await writeFile(path.join(output,'studio-tree.txt'),stdout);}catch{}}
+ await writeFile(path.join(output,'studio-stderr.txt'),stderr);
+ for(const file of ['manual_setting.json','arguments.json']){try{await writeFile(path.join(output,file),await readFile(path.join(root,file)));}catch{}}
  await writeFile(path.join(output,'failure.txt'),String(error));throw error;
 }finally{
  if(targetPid){try{process.kill(targetPid,'SIGTERM');}catch{}}

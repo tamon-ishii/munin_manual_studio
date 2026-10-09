@@ -25,7 +25,8 @@ $combo=$combos[0]
 $expand=$combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
 $expand.Expand()
 Start-Sleep -Milliseconds 500
-$choices=$settings.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+$choices=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+$choices | ForEach-Object {@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;enabled=$_.Current.IsEnabled}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 "native-smoke-results/display-options-$Scale.json"
 $items=@($choices | Where-Object {$_.Current.Name -match "^$Scale%($|\s)" -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem})
 if($items.Count -ne 1){throw "Expected one $Scale percent option; found $($items.Count)"}
 $items[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()

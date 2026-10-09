@@ -140,6 +140,7 @@ jobs:
             native-smoke-results/
           if-no-files-found: warn
       - name: Prepare macOS native checks
+        id: macos_native_build
         if: runner.os == 'macOS' && inputs.macos_native_smoke
         run: |
           python -m pip install mkdocs-material
@@ -153,6 +154,13 @@ jobs:
         run: |
           set -o pipefail
           npm run manual:smoke-native 2>&1 | tee macos-native-smoke.log
+      - name: Check real macOS Studio UI workflow
+        if: always() && runner.os == 'macOS' && inputs.macos_native_smoke && steps.macos_native_build.outcome == 'success'
+        env:
+          MANUAL_NATIVE_PYTHON: python
+        shell: bash
+        run: |
+          set -o pipefail
           node scripts/smoke_manual_studio_macos.mjs 2>&1 | tee macos-studio-smoke.log
       - name: Save macOS native check log
         if: always() && runner.os == 'macOS' && inputs.macos_native_smoke
@@ -196,6 +204,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release
@@ -207,6 +216,11 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --title "Munin Manual Studio $RELEASE_TAG" --generate-notes
+            release_notes_path="docs/release-notes-${RELEASE_TAG#v}.md"
+            if [ -f "$release_notes_path" ]; then
+              gh release create "$RELEASE_TAG" --verify-tag --title "Munin Manual Studio $RELEASE_TAG" --notes-file "$release_notes_path"
+            else
+              gh release create "$RELEASE_TAG" --verify-tag --title "Munin Manual Studio $RELEASE_TAG" --generate-notes
+            fi
           fi
           gh release upload "$RELEASE_TAG" release/*.zip --clobber
