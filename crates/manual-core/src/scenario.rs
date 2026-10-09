@@ -2,7 +2,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tempfile::tempdir_in;
 
 use super::author;
@@ -62,6 +61,23 @@ fn run_mode(
     let docs = project_path(root, &read_config(root).docs)?;
     validate_scenario_with_tasks(&scenario, &docs, selected)?;
 
+    if record {
+        for step in &scenario.steps {
+            if let Some(id) = step
+                .get("screenshot")
+                .and_then(|v| v.get("task"))
+                .and_then(serde_json::Value::as_str)
+            {
+                let task = selected
+                    .iter()
+                    .find(|task| task.id == id)
+                    .cloned()
+                    .map(Ok)
+                    .unwrap_or_else(|| super::task::find_task(&docs, id))?;
+                super::task::ensure_unlocked(&task)?;
+            }
+        }
+    }
     let temporary = tempdir_in(root).map_err(|error| error.to_string())?;
     let captured_dir = temporary.path().join("captured");
     let completed = if scenario.platform.as_deref() == Some("desktop") {
@@ -70,13 +86,15 @@ fn run_mode(
         let script = temporary.path().join("scenario_runner.mjs");
         fs::write(&script, include_str!("scenario_runner.mjs"))
             .map_err(|error| error.to_string())?;
-        let result = Command::new("node")
-            .arg(&script)
-            .arg(&input_path)
-            .arg(&captured_dir)
-            .current_dir(root)
-            .output()
-            .map_err(|error| format!("Failed to start Node.js scenario runner: {error}"))?;
+        let result = super::agent::run_process(
+            root,
+            "node",
+            &[
+                script.to_string_lossy().into_owned(),
+                input_path.to_string_lossy().into_owned(),
+                captured_dir.to_string_lossy().into_owned(),
+            ],
+        )?;
         if !result.status.success() {
             return Err(format!(
                 "Scenario failed: {}",
@@ -100,6 +118,70 @@ fn run_mode(
         }
     }
     serde_json::to_string(&completed).map_err(|error| error.to_string())
+}
+
+/// Replay a stored screenshot recipe without reading or updating AI tags.
+pub fn capture_asset(root: &Path, recipe: &serde_json::Value, id: &str) -> Result<Vec<u8>, String> {
+    let mut recipe = recipe.clone();
+    let steps = recipe["steps"]
+        .as_array_mut()
+        .ok_or("撮影手順がありません。")?;
+    let mut captures = 0;
+    for step in steps {
+        if let Some(shot) = step.get_mut("screenshot") {
+            shot["task"] = serde_json::json!(id);
+            captures += 1;
+        }
+    }
+    if captures != 1 {
+        return Err("画像ごとの撮影手順には撮影を1回だけ指定してください。".into());
+    }
+    let scenario: Scenario = serde_json::from_value(recipe.clone()).map_err(|e| e.to_string())?;
+    let selected = [super::task::Task {
+        id: id.into(),
+        name: String::new(),
+        kind: "screenshot".into(),
+        page: String::new(),
+        prompt: String::new(),
+        source_sha256: String::new(),
+        status: "pending".into(),
+    }];
+    validate_scenario_with_tasks(
+        &scenario,
+        &project_path(root, &read_config(root).docs)?,
+        &selected,
+    )?;
+    let temporary = tempdir_in(root).map_err(|e| e.to_string())?;
+    let captured = temporary.path().join("captured");
+    let completed = if scenario.platform.as_deref() == Some("desktop") {
+        desktop_scenario::run(root, &scenario.window, &scenario.steps, &captured)?
+    } else {
+        let input = temporary.path().join("scenario.json");
+        fs::write(
+            &input,
+            serde_json::to_vec(&recipe).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let script = temporary.path().join("scenario_runner.mjs");
+        fs::write(&script, include_str!("scenario_runner.mjs")).map_err(|e| e.to_string())?;
+        let result = super::agent::run_process(
+            root,
+            "node",
+            &[
+                script.to_string_lossy().into_owned(),
+                input.to_string_lossy().into_owned(),
+                captured.to_string_lossy().into_owned(),
+            ],
+        )?;
+        if !result.status.success() {
+            return Err(String::from_utf8_lossy(&result.stderr).into_owned());
+        }
+        serde_json::from_slice::<RunResult>(&result.stdout).map_err(|e| e.to_string())?
+    };
+    if completed.steps != scenario.steps.len() || completed.captured != [id] {
+        return Err("撮影手順が完了していません。".into());
+    }
+    fs::read(captured.join(format!("{id}.png"))).map_err(|e| e.to_string())
 }
 
 fn validate_scenario(scenario: &Scenario, docs: &Path) -> Result<(), String> {
@@ -391,7 +473,8 @@ mod tests {
         assert_eq!(
             saved,
             root.join("manual/scenarios/settings.json")
-                .canonicalize().unwrap()
+                .canonicalize()
+                .unwrap()
                 .display()
                 .to_string()
         );

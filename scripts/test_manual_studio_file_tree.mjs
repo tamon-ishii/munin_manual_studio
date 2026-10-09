@@ -1,12 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import ts from 'typescript';
-
-const source = await readFile(new URL('../apps/manual-studio/src/fileTree.ts', import.meta.url), 'utf8');
-const javascript = ts.transpileModule(source, {
-  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-}).outputText;
-const { renderFileTree } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
+import { tsImport } from 'tsx/esm/api';
+const { renderFileTree } = await tsImport('../apps/manual-studio/src/fileTree.ts', import.meta.url);
 
 const escapedFile = 'docs/a&"<b>.md';
 const entries = [
@@ -36,3 +30,9 @@ assert.doesNotMatch(html, /data-page="docs\/a&"<b>/, 'unescaped file markup is n
 
 assert.equal(renderFileTree([], [], undefined, 'docs', new Set()), '<p class="muted">フォルダーにファイルがありません。</p>');
 console.log('Manual Studio file tree checks passed.');
+
+const filtered = renderFileTree(entries, [], undefined, 'docs', new Set(), { query: 'GUIDE', markdownOnly: true });
+assert.match(filtered, /data-page="docs\/guide.md"/);
+assert.match(filtered, /data-folder="docs" open/);
+assert.doesNotMatch(filtered, /data-folder="app"/);
+assert.match(renderFileTree(entries, [], undefined, 'docs', new Set(), { query: 'no-matching-file' }), /条件に一致/);

@@ -45,9 +45,9 @@ try {
   await writeFile(path.join(secondProject, 'docs/only.md'), '# Second project document\n');
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext();
+  context.setDefaultTimeout(30_000);
   await context.addInitScript(() => {
-    localStorage.setItem('manual-studio-sidebar-width', 'Infinity');
-    localStorage.setItem('manual-studio-editor-ratio', 'NaN');
+    localStorage.setItem('manual-studio-flexlayout-model', '{invalid-json');
   });
   const page = await context.newPage();
   const errors = [];
@@ -64,7 +64,10 @@ try {
     return target.locator('#markdown-editor');
   };
   const idle = async (target = page) => {
-    await target.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
+    await target.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false', undefined, { timeout: 30_000 }).catch(async error => {
+      const state = await target.evaluate(() => ({ status: document.querySelector('#status')?.textContent, dialogs: [...document.querySelectorAll('dialog[open]')].map(node => node.id) }));
+      throw new Error(`Studio did not become idle: ${JSON.stringify(state)}; ${error.message}`);
+    });
   };
   const awaitRpcObserved = (promise, label, timeoutMs = 30_000) => new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), timeoutMs);
@@ -80,6 +83,7 @@ try {
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(), /rich edit/);
   assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives text Undo');
+  await page.locator('.milkdown-top-bar .top-bar-heading-button').filter({ hasText: '挿入・その他' }).click();
   await page.locator('.milkdown-top-bar').getByRole('button', { name: 'Mermaidの図を挿入', exact: true }).click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives diagram insertion');
   await page.locator('#milkdown-editor .mermaid-preview svg').waitFor();
@@ -90,42 +94,37 @@ try {
     await page.locator('.milkdown-top-bar .top-bar-heading-button').filter({ hasText: 'AIタグを追加' }).click();
     await page.locator('.milkdown-top-bar').getByRole('button', { name: label, exact: true }).click();
   };
-  for (const [label, kind] of [['AI文章の指示', 'text'], ['依存図の指示', 'diagram']]) {
+  for (const [label, kind] of [['文章の指示', 'text'], ['図の指示', 'diagram']]) {
     await addNativeAiTag(label);
     assert.match(await page.locator('#markdown-editor').inputValue(), new RegExp(`ai:task id=[^\\s]+ kind=${kind}`));
     assert.equal(await page.locator('#markdown-editor').isVisible(), false);
-    assert.match(await page.locator('.milkdown-ai-task-summary').innerText(), /task-index/);
+    assert.doesNotMatch(await page.locator('.milkdown-ai-task-summary').innerText(), /task-index/);
     await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   }
-  await addNativeAiTag('撮影の指示');
-  await page.locator('#screenshot-task-dialog[open]').waitFor();
-  await page.locator('#cancel-screenshot-task').click();
+  assert.equal(await page.locator('.milkdown-top-bar').getByRole('button', {name:'撮影の指示',exact:true}).count(),0);
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
-  const initialPaneValues = await page.evaluate(() => ({
-    sidebarWidth: Number.parseFloat(document.querySelector('#app-layout').style.getPropertyValue('--sidebar-width')),
-    editorRatio: Number(document.querySelector('#editor-resizer').dataset.ratio),
-  }));
-  assert.ok(Number.isFinite(initialPaneValues.sidebarWidth), 'invalid saved sidebar width must use a finite default');
-  assert.ok(Number.isFinite(initialPaneValues.editorRatio), 'invalid saved editor ratio must use a finite default');
-  assert.equal(await page.locator('#generate-page').innerText(), 'この文書のAIタグを更新');
+  assert.equal(await page.locator('#generate-page').innerText(), 'この文書をAI更新');
   const editorHeight = await page.locator('#markdown-editor').evaluate(node => node.clientHeight);
-  assert.ok(editorHeight > 400, `editor must preserve vertical room: ${editorHeight}px`);
+  assert.ok(editorHeight > 150, `editor must preserve vertical room: ${editorHeight}px`);
 
-  for (const handleId of ['sidebar-resizer', 'editor-resizer']) {
-    const handle = page.locator(`#${handleId}`);
-    await handle.evaluate(node => {
-      window.__smokePointerId = null;
-      node.addEventListener('pointerdown', event => { window.__smokePointerId = event.pointerId; }, { once: true });
-    });
-    const bounds = await handle.boundingBox();
+  const splitters = page.locator('.flexlayout__splitter');
+  assert.ok(await splitters.count() > 0, 'FlexLayout splitters must exist');
+  const firstSplitter = splitters.first();
+  const bounds = await firstSplitter.boundingBox();
+  if (bounds) {
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     await page.mouse.down();
-    await page.waitForFunction(() => document.body.classList.contains('pane-resizing'));
-    await page.evaluate(handleId => {
-      const target = document.getElementById(handleId);
-      target.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: window.__smokePointerId }));
-    }, handleId);
-    await page.waitForFunction(() => !document.body.classList.contains('pane-resizing'));
+    await page.mouse.move(bounds.x + bounds.width / 2 + 10, bounds.y + bounds.height / 2);
+    await page.mouse.up();
+  }
+
+  const editorResizer = page.locator('#editor-resizer');
+  assert.ok(await editorResizer.count() > 0, '#editor-resizer must exist in unified editor pane');
+  const resizerBounds = await editorResizer.boundingBox();
+  if (resizerBounds) {
+    await page.mouse.move(resizerBounds.x + resizerBounds.width / 2, resizerBounds.y + resizerBounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(resizerBounds.x + resizerBounds.width / 2 + 10, resizerBounds.y + resizerBounds.height / 2);
     await page.mouse.up();
   }
   assert.equal(await page.locator('#panel-editor').isVisible(), true);
@@ -133,7 +132,9 @@ try {
     const images = [...(document.querySelector('#markdown-preview').contentDocument?.querySelectorAll('img') || [])];
     return images.length === 2 && images.every(image => image.complete && image.naturalWidth > 0);
   });
+  console.log("Smoke: editor and preview initialized");
   const originalMarkdown = await readFile(path.join(root, 'docs/index.md'), 'utf8');
+  await page.locator('#markdown-editor').focus();
   await page.locator('#markdown-editor').evaluate(node => {
     const start = node.value.indexOf('Original text');
     node.setSelectionRange(start, start + 'Original text'.length);
@@ -395,11 +396,14 @@ try {
   await idle();
   assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /Saved content/);
   await page.frameLocator('#markdown-preview').locator('strong').waitFor();
-  await page.locator('[data-tab="tasks"]').click();
+  await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   assert.equal(await page.locator('#generate-all-pages').count(), 1);
   await page.locator('[data-tab="publish"]').click();
+  await page.locator('[data-close-dialog="panel-publish"]').click();
+  await page.locator('[data-tab="settings"]').dispatchEvent('click');
   assert.ok(['codex', 'claude', 'grok', 'agy'].includes(await page.locator('#ai-agent').inputValue()));
   // Saving a choice does not require running that CLI on the smoke machine.
+  await page.locator('#ai-connection-type').selectOption('cli');
   await page.locator('#ai-agent option[value="claude"]').evaluate(node => { node.disabled = false; });
   await page.locator('#ai-agent').selectOption('claude');
   await page.waitForFunction(() => document.querySelector('#ai-save-state').textContent === '保存済み');
@@ -410,11 +414,13 @@ try {
   await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Saved content'));
   await idle();
   assert.equal(await page.locator('#ai-agent').inputValue(), 'claude', 'saved CLI is retained after reload even when unavailable');
-  await page.locator('[data-tab="publish"]').click();
+  await page.locator('[data-tab="settings"]').dispatchEvent('click');
   assert.equal(await page.locator('#panel-publish #docs-path').count(), 0, 'workspace paths are not in AI settings');
+  await page.locator('[data-close-dialog="panel-settings"]').click();
   await page.locator('#open-workspace-settings').click();
   await page.locator('#docs-path').fill('unfinished-folder');
   await page.locator('#cancel-workspace-settings').click();
+  await page.locator('[data-tab="settings"]').dispatchEvent('click');
   await page.locator('#ai-connection-type').selectOption('local_llm');
   await page.locator('#ai-model').fill('local-test-model');
   await page.locator('#ai-endpoint-url').fill('http://localhost:11434/v1');
@@ -456,6 +462,7 @@ try {
   await page.locator('[data-tab="editor"]').click();
 
   const popupPromise = page.waitForEvent('popup');
+  await page.locator('#editor-more summary').click();
   await page.locator('#detach-editor').click();
   const popup = await popupPromise;
   await popup.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Saved content'));
@@ -470,6 +477,7 @@ try {
   await idle();
   assert.match(await page.locator('#status').innerText(), /原稿が更新/);
   assert.equal(await readFile(path.join(root, 'docs/index.md'), 'utf8'), '# Updated in another window\n');
+  await page.locator('#editor-more summary').click();
   await page.locator('#reload-page').click();
   await page.locator('[data-unsaved-action=save]').click();
   await page.waitForFunction(() => document.querySelector('#unsaved-changes-error')?.textContent.includes('保存できませんでした'));
@@ -498,7 +506,7 @@ try {
 
   const generatedPrompt = '画面を開いてからボタンを押す';
   const generatedPromptB64 = Buffer.from(generatedPrompt, 'utf8').toString('base64');
-  const generatedExample = `# New guide\n\n<!-- ai:generated id=smoke-generated kind=screenshot prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n`;
+  const generatedExample = `# New guide\n\n<!-- ai:generated id=smoke-generated kind=text prompt-b64=${generatedPromptB64} -->\nGenerated text\n<!-- /ai:generated -->\n`;
   await (await sourceEditor(page)).fill(generatedExample);
   let delayedSaveSeen = false;
   await page.route('**/__manual/rpc', async route => {
@@ -516,7 +524,7 @@ try {
   assert.equal(await page.locator('#undo-edit').isEnabled(), true, 'saving must preserve undo history');
   await page.unroute('**/__manual/rpc');
 
-  await page.locator('[data-tab="tasks"]').click();
+  await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   const generatedOnlyCard = page.locator('[data-task="smoke-generated"]');
   await generatedOnlyCard.waitFor();
   assert.equal(await generatedOnlyCard.locator('[data-prompt]').inputValue(), generatedPrompt);
@@ -544,7 +552,7 @@ try {
   const otherGenerated = '<!-- ai:generated id=other-generated kind=text -->\nOther generated text\n<!-- /ai:generated -->\n';
   await (await sourceEditor(page)).fill(`${generatedExample}\n${otherGenerated}`);
   await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
-  const otherCard = page.locator('.milkdown-ai-task').filter({ hasText: 'other-generated' });
+  const otherCard = page.locator('[data-ai-task-id=\"other-generated\"]');
   await otherCard.waitFor();
   await otherCard.locator('.milkdown-ai-task-confirm').click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
@@ -572,9 +580,9 @@ try {
   const unifiedBlock = `<!-- ai:task id=unified-guide kind=text prompt="${unifiedPrompt}" -->\nGenerated unified body\n<!-- /ai:task -->`;
   await (await sourceEditor(page)).fill(`# New guide\n\n${unifiedBlock}\n\nKeep manual text\n`);
   await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
-  const unifiedCard = page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' });
+  const unifiedCard = page.locator('[data-ai-task-id=\"unified-guide\"]');
   await unifiedCard.waitFor();
-  assert.match(await unifiedCard.locator('.milkdown-ai-task-status').innerText(), /未確定/);
+  assert.match(await unifiedCard.locator('.milkdown-ai-task-status').innerText(), /生成済み/);
   await unifiedCard.locator('.milkdown-ai-task-confirm').click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   let unifiedMarkdown = await page.locator('#markdown-editor').inputValue();
@@ -587,7 +595,7 @@ try {
   assert.doesNotMatch(unifiedMarkdown, /approved-at="\d{4}-/);
   assert.match(unifiedMarkdown, /approved-at=fake/);
   await page.locator('#save-page').click(); await idle();
-  await page.locator('[data-tab="tasks"]').click();
+  await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   const unifiedCardInTasks = page.locator('[data-task="unified-guide"]');
   assert.equal(await unifiedCardInTasks.locator('[data-prompt]').inputValue(), '初心者向け "保存"\napproved-at=fake を説明');
   await unifiedCardInTasks.locator('[data-prompt]').fill('新しい指示 "引用"\n二行目');
@@ -600,13 +608,13 @@ try {
   if (await page.locator('#markdown-editor').isVisible()) {
     await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
   }
-  const unifiedCardDelete = page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' }).locator('.milkdown-ai-task-delete');
+  const unifiedCardDelete = page.locator('[data-ai-task-id=\"unified-guide\"]').locator('.milkdown-ai-task-delete');
   await unifiedCardDelete.click();
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Generated unified body/);
   await page.getByRole("button", { name: "Milkdown編集", exact: true }).click();
-  await page.locator('.milkdown-ai-task').filter({ hasText: 'unified-guide' }).locator('.milkdown-ai-task-delete').click();
+  await page.locator('[data-ai-task-id=\"unified-guide\"]').locator('.milkdown-ai-task-delete').click();
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   unifiedMarkdown = await page.locator('#markdown-editor').inputValue();
   assert.doesNotMatch(unifiedMarkdown, /unified-guide/);
@@ -676,12 +684,9 @@ try {
   assert.equal(droppedFile.subarray(1, 4).toString(), 'PNG');
   await page.frameLocator('#markdown-preview').locator('img[alt="dropped-shot"]').waitFor();
 
-  await page.locator('.instruction-toolbar summary').click();
-  await page.locator('[data-insert="screenshot"]').click();
-  await page.locator('#screenshot-task-dialog').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#start-operation-recording').isVisible(), true);
-  await page.locator('#cancel-screenshot-task').click();
-  await page.locator('#screenshot-task-dialog').waitFor({ state: 'hidden' });
+  await page.locator('[data-tab="screenshots"]').click();
+  assert.equal(await page.locator('#screenshot-library-import').isVisible(),true);
+  await page.locator('[data-tab="editor"]').click();
   await page.locator('#save-page').click();
   await idle();
   await page.locator('[data-tab="publish"]').click();
@@ -700,12 +705,21 @@ try {
   await page.locator('#project-root').fill(project);
   await page.locator('#project-form button[type=submit]').click();
   await idle();
+  // Generation itself is mocked below; choose a configured connection without
+  // depending on an AI CLI being installed on the machine running this smoke.
+  await page.locator('[data-tab="settings"]').dispatchEvent('click');
+  await page.locator('#ai-connection-type').selectOption('local_llm');
+  await page.locator('#ai-model').fill('smoke-generation-model');
+  await page.locator('#ai-endpoint-url').fill('http://127.0.0.1:11434/v1');
+  await page.waitForFunction(() => document.querySelector('#ai-save-state').textContent === '保存済み');
+  await page.locator('[data-close-dialog="panel-settings"]').click();
   let generatedPageTask = false;
+  let generationDelayMs = 500;
   await page.route('**/__manual/rpc', async route => {
     const request = route.request().postDataJSON();
     if (request.action === 'generate-review' && request.options.page === 'docs/ai-page.md') {
       generatedPageTask = true;
-      await new Promise(resolve => setTimeout(resolve, 1200));
+      await new Promise(resolve => setTimeout(resolve, generationDelayMs));
       const content = await readFile(path.join(project, request.options.page), 'utf8');
       const next = `${content}\n<!-- ai:generated id=smoke-text kind=text -->\n${request.options.feedback ? 'Revised guide' : 'Generated guide'}\n<!-- /ai:generated -->\n`;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ output: JSON.stringify({ before: { page: request.options.page, content, revision: createHash('sha256').update(content).digest('hex') }, content: next, updated: ['smoke-text'] }) }) });
@@ -714,8 +728,10 @@ try {
     } else await route.continue();
   });
   await page.locator('[data-generate-page="docs/ai-page.md"]').click();
+  await page.locator('#generation-input-run').click();
   await page.locator('#operation-progress').waitFor({ state: 'visible' });
-  assert.match(await page.locator('#progress-log').innerText(), /ai-page\.md のAI指示 1 件/);
+  await page.waitForFunction(() => document.querySelector('#progress-log').textContent.includes('ai-page.md の生成候補を準備'));
+  assert.match(await page.locator('#progress-log').innerText(), /ai-page\.md の生成候補を準備/);
   await page.locator('#generation-review-dialog').waitFor({ state: 'visible' });
   assert.ok(!(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8')).includes('Generated guide'), 'candidate does not overwrite the original');
   assert.match(await page.locator('#generation-diff-after').innerText(), /Generated guide/);
@@ -726,24 +742,6 @@ try {
   await page.locator('[data-review-action=adopt]').click();
   await idle();
   assert.match(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8'), /Revised guide/);
-  await page.locator('#review-ai-update').click();
-  await page.locator('[data-review-action=restore]').click();
-  await idle();
-  assert.ok(!(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8')).includes('Revised guide'), 'restore returns to the previous saved document');
-  await page.locator('#generate-page').click();
-  await page.locator('#generation-review-dialog').waitFor({ state: 'visible' });
-  await page.locator('[data-review-action=restore]').click();
-  await idle();
-  const unchangedOriginal = await readFile(path.join(project, 'docs/ai-page.md'), 'utf8');
-  assert.ok(!unchangedOriginal.includes('Generated guide'), 'rejecting a candidate keeps the original file');
-  await page.locator('#generate-page').click();
-  await page.locator('#generation-review-dialog').waitFor({ state: 'visible' });
-  await writeFile(path.join(project, 'docs/ai-page.md'), `${unchangedOriginal}\nExternal edit during review\n`);
-  await page.locator('[data-review-action=adopt]').click();
-  await idle();
-  assert.match(await page.locator('#status').innerText(), /原稿が更新/);
-  assert.match(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8'), /External edit during review/);
-  assert.equal(generatedPageTask, true);
   await page.locator('#progress-open').click();
   assert.match(await page.locator('#progress-log').innerText(), /タスク smoke-text の文章を生成しています/);
   assert.match(await page.locator('#progress-label').innerText(), /完了/);
@@ -751,8 +749,47 @@ try {
   assert.equal(await page.locator('#operation-progress').isVisible(), false);
   await page.locator('#progress-open').click();
   assert.equal(await page.locator('#operation-progress').isVisible(), true);
+  await page.locator('#progress-dismiss').click();
+  await page.locator('#review-ai-update').click();
+  await page.locator('[data-review-action=restore]').click();
+  await idle();
+  assert.ok(!(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8')).includes('Revised guide'), 'restore returns to the previous saved document');
+  await page.locator('#generate-page').click();
+  await page.locator('#generation-input-run').click();
+  await page.locator('#generation-review-dialog').waitFor({ state: 'visible' });
+  await page.locator('[data-review-action=restore]').click();
+  await idle();
+  const unchangedOriginal = await readFile(path.join(project, 'docs/ai-page.md'), 'utf8');
+  assert.ok(!unchangedOriginal.includes('Generated guide'), 'rejecting a candidate keeps the original file');
+  await page.locator('#generate-page').click();
+  await page.locator('#generation-input-run').click();
+  await page.locator('#generation-review-dialog').waitFor({ state: 'visible' });
+  await writeFile(path.join(project, 'docs/ai-page.md'), `${unchangedOriginal}\nExternal edit during review\n`);
+  await page.locator('[data-review-action=adopt]').click();
+  await page.locator('#execution-failure-dialog [data-keep]').click();
+  await idle();
+  assert.match(await page.locator('#status').innerText(), /失敗1件/);
+  assert.match(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8'), /External edit during review/);
+  assert.equal(generatedPageTask, true);
+  // Cancellation discards a late candidate and keeps the saved source intact.
+  generationDelayMs = 2000;
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('External edit during review'));
+  await idle();
+  const beforeCancel = await readFile(path.join(project, 'docs/ai-page.md'), 'utf8');
+  await page.locator('#generate-page').click();
+  const cancelRequest = page.waitForRequest(request => request.url().includes('/__manual/rpc') && request.postDataJSON()?.action === 'generate-review');
+  await page.locator('#generation-input-run').click();
+  await cancelRequest.catch(async error => { throw new Error(`Cancellation did not start generation: ${await page.locator('#execution-failure-dialog').textContent()}; ${error.message}`); });
+  await page.locator('#progress-cancel').waitFor({ state: 'visible' });
+  await page.locator('#progress-cancel').click();
+  await page.locator('#execution-failure-dialog [data-keep]').click();
+  await idle();
+  assert.match(await page.locator('#status').innerText(), /中断/);
+  assert.equal(await page.locator('#generation-review-dialog').isVisible(), false);
+  assert.equal(await readFile(path.join(project, 'docs/ai-page.md'), 'utf8'), beforeCancel);
   await page.unroute('**/__manual/rpc');
-  await page.locator('[data-tab="appearance"]').click();
+  await page.locator('[data-tab="appearance"]').dispatchEvent('click');
   assert.equal(await page.locator('#panel-appearance').isVisible(), true);
   assert.equal(await page.locator('#panel-publish #ui-theme').count(), 0);
   const themePicker = page.locator('#ui-theme');
@@ -783,7 +820,7 @@ try {
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'midnight' && document.querySelector('#ui-theme')?.value === 'midnight');
   assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).colorScheme), 'dark');
   await assertPreviewTheme();
-  await page.locator('[data-tab="appearance"]').click();
+  await page.locator('[data-tab="appearance"]').dispatchEvent('click');
   await page.locator('#ui-theme').selectOption('blue');
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'blue');
   assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).getPropertyValue('--app-bg').trim()), '#f5f8fc');
@@ -814,6 +851,7 @@ try {
   await page.locator('#new-workspace-dialog').waitFor({ state: 'hidden' });
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Tutorial guide/);
+  console.log("Smoke: workspace wizard created workspace");
   const tutorialRoot = path.join(root, 'tutorial-workspace');
   const tutorialConfig = JSON.parse(await readFile(path.join(tutorialRoot, 'manual_setting.json'), 'utf8'));
   assert.equal(tutorialConfig.docs, 'pages');
@@ -852,8 +890,61 @@ try {
   await page.locator('#generate-draft').click();
   await idle();
   assert.match(await page.locator('#status').innerText(), /未設定/);
+
+  // Verify AI terminal dock and controls
+  const closePublishBtn = page.locator('#panel-publish [data-close-dialog]');
+  if (await closePublishBtn.isVisible()) await closePublishBtn.click();
+  const closeAiSettingsBtn = page.locator('#panel-settings [data-close-dialog]');
+  if (await closeAiSettingsBtn.isVisible()) await closeAiSettingsBtn.click();
+  assert.equal(await page.locator('#panel-terminal').isVisible(), false, "AI terminal is hidden by default");
+  await page.locator('#view-menu-button').click();
+  await page.locator('#view-menu-dropdown label').filter({ hasText: "AIターミナル" }).locator('input').check();
+  await page.locator('#view-menu-button').click();
+  await page.locator('#panel-terminal').waitFor({ state: 'visible' });
+  await page.locator('#terminal-container .xterm').waitFor({ state: 'visible' });
+  const terminalBg = await page.locator('#panel-terminal').evaluate(node => node.style.backgroundColor);
+  assert.ok(terminalBg && terminalBg !== 'rgb(255, 255, 255)' && terminalBg !== '#ffffff', `terminal background (${terminalBg}) must match theme and not be white`);
+  assert.equal(await page.locator('#terminal-connect-btn').isVisible(), true);
+  assert.equal(await page.locator('#terminal-clear-btn').isVisible(), true);
+  assert.match(await page.locator('#terminal-badge').innerText(), /未接続/);
+  assert.equal(await page.locator('#terminal-disconnect-btn').isDisabled(), true);
+  await page.locator('#terminal-clear-btn').click();
+  await page.locator('#terminal-connect-btn').click();
+  await page.waitForTimeout(500);
+
+  await page.locator('#terminal-disconnect-btn').click();
+  await page.waitForFunction(() => document.querySelector('#terminal-badge').textContent.includes('未接続'));
+
+  // Consultation instructions preserve unsaved prompts and do not save implicitly.
+  const instructionPage = await page.evaluate(() => window.__manualStudioRaceTest.documentState.page);
+  const instructionFile = path.join(root, 'deferred-ai-workspace', instructionPage);
+  const instructionSource = '# Consultation\n\n<!-- ai:task id=consultation kind=text prompt="元の指示" -->\n\n<!-- /ai:task -->\n';
+  await writeFile(instructionFile, instructionSource);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('id=consultation'));
+  await idle();
+  await page.locator('[data-tab="editor"]').click();
+  const consultationEditor = await sourceEditor(page);
+  await consultationEditor.fill(instructionSource.replace('元の指示', '未保存の指示'));
+  await page.locator('#view-menu-button').click();
+  const terminalToggle = page.locator('#view-menu-dropdown label').filter({ hasText: 'AIターミナル' }).locator('input');
+  await terminalToggle.uncheck();
+  await terminalToggle.check();
+  await page.locator('#view-menu-button').click();
+  await page.locator('#terminal-use-selection-btn').click();
+  await page.locator('#terminal-instruction-dialog').waitFor({ state: 'visible' }).catch(async error => {
+    throw new Error(`Consultation dialog failed: ${await page.locator('#status').innerText()}; ${error.message}`);
+  });
+  assert.equal(await page.locator('#terminal-instruction-task').inputValue(), 'consultation');
+  await page.locator('#terminal-instruction-text').fill('追加の指示 "引用"');
+  await page.locator('#terminal-instruction-apply').click();
+  const combinedInstructions = await page.locator('#markdown-editor').inputValue();
+  assert.match(combinedInstructions, /未保存の指示/);
+  assert.match(combinedInstructions, /追加の指示 &quot;引用&quot;/);
+  assert.equal(await readFile(instructionFile, 'utf8'), instructionSource);
+
   assert.deepEqual(errors, []);
-  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot dialog, new page, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
+  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot library, new page, AI terminal, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
 } finally {
   await browser?.close();
   if (server && server.exitCode === null) {

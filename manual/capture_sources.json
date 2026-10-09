@@ -2,5 +2,9 @@
   "task-readme-screenshot-1": {
     "kind": "scenario",
     "input": "manual/scenarios/recorded-task-readme-screenshot-1.json"
+  },
+  "task-readme-screenshot-2": {
+    "kind": "scenario",
+    "input": "manual/scenarios/recorded-task-readme-screenshot-2.json"
   }
 }

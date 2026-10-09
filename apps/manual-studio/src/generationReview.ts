@@ -23,7 +23,7 @@ export function diffLines(before: string, after: string): DiffLine[] {
   return result;
 }
 export type ReviewDecision = { action: 'adopt' | 'restore' | 'retry'; feedback: string };
-export function showGenerationReview(page: string, before: string, after: string, applied = false): Promise<ReviewDecision> {
+export function showGenerationReview(page: string, before: string, after: string, applied = false, readOnly = false): Promise<ReviewDecision> {
   const dialog = document.createElement('dialog'); dialog.id = 'generation-review-dialog';
   dialog.setAttribute('aria-labelledby', 'generation-review-title');
   dialog.innerHTML = `<h2 id="generation-review-title">AI更新の差分</h2><p id="generation-review-page"></p><p>${applied ? '採用した結果を確認できます。前の結果に戻すときは、原稿の変更がないことを確認して保存します。' : '生成候補を確認してください。採用すると原稿へ保存します。元に戻すを選ぶと現在の原稿を保持します。'}</p><p id="generation-review-count" role="status"></p><div class="generation-diff" role="region" aria-label="更新前と生成結果の差分" tabindex="0"><div class="generation-diff-heading">更新前</div><div class="generation-diff-heading">${applied ? '採用した結果' : '生成候補'}</div><div id="generation-diff-before"></div><div id="generation-diff-after"></div></div><label>やり直しの指示（省略可）<textarea id="generation-review-feedback" rows="2" placeholder="例: 初めて使う人向けに、操作手順を短くしてください"></textarea></label><div class="actions"><button type="button" data-review-action="restore">${applied ? '前の結果に戻す' : '元に戻す'}</button><button type="button" data-review-action="retry">やり直す</button><button type="button" class="primary" data-review-action="adopt">${applied ? 'この結果を維持' : '採用して保存'}</button></div>`;
@@ -43,10 +43,30 @@ export function showGenerationReview(page: string, before: string, after: string
       row.append(number, text); columns[column].append(row);
     }
   }
+  if (readOnly) {
+    dialog.querySelector('label')!.remove();
+    dialog.querySelector('[data-review-action="restore"]')!.remove();
+    dialog.querySelector('[data-review-action="retry"]')!.remove();
+    dialog.querySelector('[data-review-action="adopt"]')!.textContent = '閉じる';
+    dialog.querySelector('#generation-review-title')!.textContent = '生成履歴の比較';
+    dialog.querySelectorAll('p')[1].textContent = '生成履歴の内容を比較します。原稿は変更しません。';
+  }
   document.body.append(dialog); dialog.showModal();
+  if (!applied && !readOnly) {
+    const adopt = dialog.querySelector<HTMLButtonElement>('[data-review-action="adopt"]')!;
+    adopt.disabled = true;
+    void (async () => {
+      try {
+        for (const diagram of after.matchAll(/```mermaid\s*\n([\s\S]*?)\n```/g)) await (await import('mermaid')).default.parse(diagram[1]);
+        adopt.disabled = false;
+      } catch (error) {
+        const message = document.createElement('p'); message.setAttribute('role', 'alert'); message.textContent = `Mermaidの構文を確認してください: ${String(error)}`; dialog.querySelector('.actions')!.before(message);
+      }
+    })();
+  }
   return new Promise(resolve => {
     const finish = (action: ReviewDecision['action']) => {
-      const feedback = dialog.querySelector<HTMLTextAreaElement>('#generation-review-feedback')!.value.trim();
+      const feedback = dialog.querySelector<HTMLTextAreaElement>('#generation-review-feedback')?.value.trim() || '';
       dialog.close(); dialog.remove(); resolve({ action, feedback });
     };
     dialog.querySelectorAll<HTMLButtonElement>('[data-review-action]').forEach(button => button.addEventListener('click', () => finish(button.dataset.reviewAction as ReviewDecision['action'])));

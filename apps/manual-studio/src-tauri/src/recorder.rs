@@ -1,7 +1,7 @@
 use rdev::{listen, Button, Event, EventType, Key};
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     fs::{self, File},
@@ -20,6 +20,10 @@ pub enum RecordedEvent {
         elapsed_ms: u64,
         x: f64,
         y: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<manual_core::semantic_target::Target>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visual: Option<manual_core::visual_target::Target>,
     },
     Text {
         elapsed_ms: u64,
@@ -41,6 +45,7 @@ pub enum RecordedEvent {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordingResult {
+    pub screenshot_id: String,
     pub scenario_file: String,
     pub operation_text: String,
     pub source_file: String,
@@ -117,8 +122,11 @@ const MARKITS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MARKITS_STDERR_TAIL_BYTES: u64 = 4096;
 
 fn launch_markits(mut command: Command, log_path: &Path) -> Result<(), String> {
-    let completion_file = command.get_args().collect::<Vec<_>>()
-        .windows(2).find(|args| args[0] == "--manual-studio-completion")
+    let completion_file = command
+        .get_args()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find(|args| args[0] == "--manual-studio-completion")
         .map(|args| PathBuf::from(args[1]));
     let log = File::create(log_path).map_err(|error| {
         format!(
@@ -226,6 +234,46 @@ impl Drop for StartReservation {
 pub fn run_helper(path: &Path) -> Result<(), String> {
     let file = File::create(path).map_err(|error| error.to_string())?;
     let output = Arc::new(Mutex::new(BufWriter::new(file)));
+    #[cfg(target_os = "linux")]
+    let point_context = std::env::var("MUNIN_RECORDING_WINDOW").ok()
+        .and_then(|context| serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context).ok());
+    let visual_window = std::env::var("MUNIN_RECORDING_WINDOW").ok()
+        .and_then(|context| serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context).ok())
+        .and_then(|context| context.window_id)
+        .and_then(|id| {
+            #[cfg(target_os = "linux")]
+            { id.parse::<u64>().ok().map(|id| format!("0x{id:x}")) }
+            #[cfg(not(target_os = "linux"))]
+            { Some(id) }
+        });
+    // Keep a pre-click image. Capturing after ButtonPress can record a changed
+    // label or a newly opened menu instead of the control that was clicked.
+    let visual_snapshot = Arc::new(Mutex::new(None));
+    let semantic_window = visual_window.clone();
+    if let Some(id) = visual_window {
+        let cache = Arc::clone(&visual_snapshot);
+        thread::spawn(move || loop {
+            let observed_at = Instant::now();
+            if let Ok(windows) = manual_core::window_capture::list_windows() {
+                if let Some(window) = windows.into_iter().find(|window| window.id == id) {
+                    if let Ok(picture) = manual_core::window_capture::read_window_pixels(&id, None) {
+                        if let Ok(mut cache) = cache.lock() { *cache = Some((observed_at, window, picture)); }
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(200));
+        });
+    }
+    let snapshot = Arc::new(Mutex::new((Instant::now(), Vec::new())));
+    if let Some(id) = semantic_window {
+        let snapshot = Arc::clone(&snapshot);
+        thread::spawn(move || loop {
+            let observed_at = Instant::now();
+            let elements = manual_core::semantic_target::observe_window(&id).unwrap_or_default();
+            if let Ok(mut cache) = snapshot.lock() { *cache = (observed_at, elements); }
+            thread::sleep(Duration::from_millis(200));
+        });
+    }
     let started = Instant::now();
     let mut ctrl = false;
     let mut shift = false;
@@ -309,6 +357,23 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
                 elapsed_ms,
                 x: pointer.0,
                 y: pointer.1,
+                visual: visual_snapshot.lock().ok().and_then(|cache| {
+                    let (observed_at, window, picture) = cache.as_ref()?;
+                    if observed_at.elapsed() > Duration::from_millis(800) { return None; }
+                    manual_core::visual_target::record_snapshot(window, picture, pointer.0, pointer.1).ok()
+                }),
+                target: {
+                    let cached = snapshot.lock().ok().and_then(|cache| {
+                        (cache.0.elapsed() < Duration::from_millis(2200))
+                            .then(|| manual_core::semantic_target::at_point(&cache.1, pointer.0, pointer.1)).flatten()
+                    });
+                    #[cfg(target_os = "linux")]
+                    let cached = cached.or_else(|| point_context.as_ref().and_then(|context| {
+                        let element = markits::ui_elements::desktop_target_at_point(context, pointer.0 as i32, pointer.1 as i32)?;
+                        Some(manual_core::semantic_target::Target { role: element.role, name: element.name?, reveals: None })
+                    }));
+                    cached
+                },
             }),
             EventType::Wheel { delta_x, delta_y } => Some(RecordedEvent::Scroll {
                 elapsed_ms,
@@ -441,8 +506,21 @@ pub fn start(
             };
             let windows: Vec<Value> = serde_json::from_str(&raw)
                 .map_err(|error| format!("ウィンドウ一覧を読み取れません: {error}"))?;
-            if let Some(found) = select_launched_window(&windows, &existing_ids, &window_title) {
-                reused_window = found["id"].as_str().is_some_and(|id| existing_ids.contains(id));
+            let app_ids = if window_title.trim().is_empty() {
+                launched_app_window_ids(
+                    &crate::native_worker::window_processes()?,
+                    &executable,
+                    app.id(),
+                )
+            } else {
+                HashSet::new()
+            };
+            if let Some(found) =
+                select_launched_window(&windows, &existing_ids, &window_title, &app_ids)
+            {
+                reused_window = found["id"]
+                    .as_str()
+                    .is_some_and(|id| existing_ids.contains(id));
                 return Ok((
                     WindowBounds {
                         id: found["id"].as_str().unwrap_or_default().to_string(),
@@ -467,7 +545,11 @@ pub fn start(
             {
                 if status.success() {
                     let processes = crate::native_worker::window_processes()?;
-                    if let Some(found) = select_existing_app_window(&windows, &processes, &executable.to_string_lossy()) {
+                    if let Some(found) = select_existing_app_window(
+                        &windows,
+                        &processes,
+                        &executable.to_string_lossy(),
+                    ) {
                         reused_window = true;
                         return Ok((
                             WindowBounds {
@@ -486,7 +568,6 @@ pub fn start(
                 }
                 // Single-instance launchers can exit before their existing window
                 // is ready. Keep polling until the original deadline.
-
             }
             thread::sleep(Duration::from_millis(500));
         }
@@ -519,6 +600,16 @@ pub fn start(
     let child = match Command::new(recorder)
         .arg("--manual-studio-record-input")
         .arg(&event_file)
+        .env("MUNIN_RECORDING_WINDOW", serde_json::to_string(&markits::ui_elements::DetectedUiElement {
+            role: "window".into(), name: Some(window_title.clone()), window_id: Some({
+                #[cfg(target_os = "linux")]
+                { u64::from_str_radix(window.id.trim_start_matches("0x"), 16).map_err(|error| error.to_string())?.to_string() }
+                #[cfg(not(target_os = "linux"))]
+                { window.id.clone() }
+            }),
+            pid: None, x: window.x as f64, y: window.y as f64,
+            width: window.width as f64, height: window.height as f64,
+        }).map_err(|error| error.to_string())?)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -530,26 +621,14 @@ pub fn start(
             return Err(format!("入力記録プロセスを起動できません: {error}"));
         }
     };
-    let configured_markits = if markits_program.trim().is_empty() {
-        "markits-desktop"
-    } else {
-        markits_program.trim()
-    };
-    let markits_program = if configured_markits == "markits-desktop" {
-        let binary_name = if cfg!(target_os = "windows") {
-            "markits-desktop.exe"
-        } else {
-            "markits-desktop"
-        };
-        std::env::current_exe()
-            .ok()
-            .and_then(|executable| executable.parent().map(|parent| parent.join(binary_name)))
-            .filter(|candidate| candidate.is_file())
-            .map(|candidate| candidate.to_string_lossy().into_owned())
-            .unwrap_or_else(|| configured_markits.to_string())
-    } else {
-        configured_markits.to_string()
-    };
+    // The annotation editor is linked into this executable. Keep the RPC
+    // argument for compatibility with existing frontends, but never launch an
+    // independently installed executable.
+    let _ = markits_program;
+    let markits_program = std::env::current_exe()
+        .map_err(|error| format!("注釈エディタの実行ファイルを確認できません: {error}"))?
+        .to_string_lossy()
+        .into_owned();
     let mut lock = match state.0.lock() {
         Ok(lock) => lock,
         Err(error) => {
@@ -592,6 +671,7 @@ fn select_launched_window<'a>(
     windows: &'a [Value],
     existing_ids: &HashSet<String>,
     requested_title: &str,
+    app_window_ids: &HashSet<String>,
 ) -> Option<&'a Value> {
     if !requested_title.trim().is_empty() {
         return windows
@@ -616,7 +696,7 @@ fn select_launched_window<'a>(
         .filter(|window| {
             window["id"]
                 .as_str()
-                .is_some_and(|id| !existing_ids.contains(id))
+                .is_some_and(|id| !existing_ids.contains(id) && app_window_ids.contains(id))
                 && window["width"].as_u64().unwrap_or(0) >= 120
                 && window["height"].as_u64().unwrap_or(0) >= 80
         })
@@ -625,26 +705,96 @@ fn select_launched_window<'a>(
         })
 }
 
+fn process_descends_from(mut pid: u32, launched_pid: u32) -> bool {
+    for _ in 0..64 {
+        if pid == launched_pid {
+            return true;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let Some(parent) = fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|stat| stat.rsplit_once(')').map(|(_, fields)| fields.to_string()))
+                .and_then(|fields| fields.split_whitespace().nth(1)?.parse::<u32>().ok())
+            else {
+                return false;
+            };
+            if parent == 0 || parent == pid {
+                return false;
+            }
+            pid = parent;
+        }
+        #[cfg(not(target_os = "linux"))]
+        return false;
+    }
+    false
+}
+
+fn launched_app_window_ids(
+    processes: &[markits::ui_elements::DetectedUiElement],
+    executable: &Path,
+    launched_pid: u32,
+) -> HashSet<String> {
+    let executable = executable.canonicalize().ok();
+    processes
+        .iter()
+        .filter_map(|window| {
+            let pid = window.pid?;
+            let same_executable = executable.as_ref().is_some_and(|expected| {
+                manual_core::platform::process_executable(pid)
+                    .and_then(|path| path.canonicalize().ok())
+                    .as_ref()
+                    == Some(expected)
+            });
+            if !process_descends_from(pid, launched_pid) && !same_executable {
+                return None;
+            }
+            let raw_id = window.window_id.as_deref()?;
+            let id = if let Some(hex) = raw_id.strip_prefix("0x") {
+                u64::from_str_radix(hex, 16).ok()?
+            } else {
+                raw_id.parse::<u64>().ok()?
+            };
+            Some(format!("0x{id:x}"))
+        })
+        .collect()
+}
+
 fn select_existing_app_window<'a>(
     windows: &'a [Value],
     processes: &[markits::ui_elements::DetectedUiElement],
     program: &str,
 ) -> Option<&'a Value> {
-    let executable = manual_core::platform::application_executable(program).ok()?.canonicalize().ok()?;
-    let matching_ids: HashSet<String> = processes.iter().filter_map(|window| {
-        let pid = window.pid?;
-        let process_executable = manual_core::platform::process_executable(pid)?.canonicalize().ok()?;
-        if process_executable != executable { return None; }
-        let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
-        Some(format!("0x{id:x}"))
-    }).collect();
-    windows.iter().filter(|window| {
-        window["id"].as_str().is_some_and(|id| matching_ids.contains(id))
-            && window["width"].as_u64().unwrap_or(0) >= 120
-            && window["height"].as_u64().unwrap_or(0) >= 80
-    }).max_by_key(|window| {
-        window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
-    })
+    let executable = manual_core::platform::application_executable(program)
+        .ok()?
+        .canonicalize()
+        .ok()?;
+    let matching_ids: HashSet<String> = processes
+        .iter()
+        .filter_map(|window| {
+            let pid = window.pid?;
+            let process_executable = manual_core::platform::process_executable(pid)?
+                .canonicalize()
+                .ok()?;
+            if process_executable != executable {
+                return None;
+            }
+            let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
+            Some(format!("0x{id:x}"))
+        })
+        .collect();
+    windows
+        .iter()
+        .filter(|window| {
+            window["id"]
+                .as_str()
+                .is_some_and(|id| matching_ids.contains(id))
+                && window["width"].as_u64().unwrap_or(0) >= 120
+                && window["height"].as_u64().unwrap_or(0) >= 80
+        })
+        .max_by_key(|window| {
+            window["width"].as_u64().unwrap_or(0) * window["height"].as_u64().unwrap_or(0)
+        })
 }
 
 pub fn is_running(state: &RecorderState) -> Result<bool, String> {
@@ -666,7 +816,10 @@ pub fn finish(state: &RecorderState) -> Result<RecordingResult, String> {
     finish_excluding_control(state, None)
 }
 
-pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f64, f64, f64, f64)>) -> Result<RecordingResult, String> {
+pub fn finish_excluding_control(
+    state: &RecorderState,
+    control_bounds: Option<(f64, f64, f64, f64)>,
+) -> Result<RecordingResult, String> {
     let mut session = state
         .0
         .lock()
@@ -682,10 +835,24 @@ pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f
         return Err("記録された操作がありません。".into());
     }
     if let Some((left, top, width, height)) = control_bounds {
-        events.retain(|event| !matches!(event, RecordedEvent::Click { x, y, .. }
-            if *x >= left && *x < left + width && *y >= top && *y < top + height));
+        events.retain(|event| {
+            !matches!(event, RecordedEvent::Click { x, y, .. }
+            if *x >= left && *x < left + width && *y >= top && *y < top + height)
+        });
     }
-    let scenario = build_scenario(&session, &events);
+    let mut scenario = build_scenario(&session, &events);
+    let observed = super::native_worker::observe_window(&session.window.id).unwrap_or_default();
+    let headings: Vec<_> = observed.iter().filter(|element| element.role == "heading")
+        .filter_map(|element| {
+            let target = manual_core::semantic_target::Target {
+                role: element.role.clone(), name: element.name.clone()?, reveals: None,
+            };
+            (!target.name.trim().is_empty() && target.resolve(&observed).ok().flatten().is_some()).then_some(target)
+        }).take(10).collect();
+    if !headings.is_empty() {
+        let steps = scenario["steps"].as_array_mut().unwrap();
+        steps.insert(steps.len() - 1, json!({"expect_targets": headings}));
+    }
     let operation_text = events_to_text(&events, &session.window);
     let scenario_dir = session.root.join("manual/scenarios");
     fs::create_dir_all(&scenario_dir).map_err(|e| e.to_string())?;
@@ -711,12 +878,27 @@ pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f
         &screenshot_path,
         session.app_child.is_some(),
     )?;
+    use base64::Engine;
+    let original_bytes = fs::read(&screenshot_path).map_err(|e| e.to_string())?;
+    let registered = manual_core::screenshots::register(
+        &session.root,
+        &json!({
+            "id": if session.task_id.starts_with("shot-") { Some(session.task_id.clone()) } else { None },
+            "source": base64::engine::general_purpose::STANDARD.encode(&original_bytes),
+            "recipe": scenario, "adopt": false
+        }),
+    )?;
+    let screenshot_id = registered["screenshot"]["id"]
+        .as_str()
+        .ok_or("画像の保存に失敗しました。")?
+        .to_owned();
     if let Some(child) = session.app_child.take() {
         stop_child(child);
     }
     let log_path = handoff_dir.join(format!("{}-{nonce}-markits.log", session.task_id));
     let mut command = Command::new(&session.markits_program);
     command
+        .arg("--manual-studio-annotate")
         .arg("--manual-studio-input")
         .arg(&screenshot_path)
         .arg("--manual-studio-output")
@@ -725,10 +907,11 @@ pub fn finish_excluding_control(state: &RecorderState, control_bounds: Option<(f
         .arg(&completion_path);
     let markits_result = launch_markits(command, &log_path);
     let (markits_started, message) = match markits_result {
-        Ok(()) => (true, "操作シナリオを保存し、撮影画像をMarkIts Desktopで開きました。注釈を保存するとAIタグへ自動で取り込みます。".into()),
+        Ok(()) => (true, "操作シナリオを保存し、撮影画像をMarkIts Desktopで開きました。注釈を保存するとスクリーンショット一覧へ取り込みます。".into()),
         Err(error) => (false, format!("操作シナリオと撮影画像は保存しましたが、MarkIts Desktop を起動できませんでした。{error}")),
     };
     Ok(RecordingResult {
+        screenshot_id,
         scenario_file: format!("manual/scenarios/{file_name}"),
         operation_text,
         source_file: screenshot_path.to_string_lossy().into_owned(),
@@ -745,6 +928,9 @@ fn events_to_text(events: &[RecordedEvent], window: &WindowBounds) -> String {
         .iter()
         .enumerate()
         .map(|(index, event)| match event {
+            RecordedEvent::Click { target: Some(target), .. } =>
+                format!("{}. 「{}」（{}）をクリック", index + 1, target.name, target.role),
+            RecordedEvent::Click { visual: Some(_), .. } => format!("{}. 画像照合でクリック", index + 1),
             RecordedEvent::Click { x, y, .. } => format!(
                 "{}. クリック: ({}, {})",
                 index + 1,
@@ -794,12 +980,18 @@ fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
                 flush_text(&mut steps, &mut text_buffer);
                 steps.push(json!({"key":value}));
             }
-            RecordedEvent::Click { x, y, .. } => {
+            RecordedEvent::Click { x, y, target, visual, .. } => {
                 flush_text(&mut steps, &mut text_buffer);
                 let x = (*x as i32 - session.window.x).max(0) as u32;
                 let y = (*y as i32 - session.window.y).max(0) as u32;
                 if x < session.window.width && y < session.window.height {
-                    steps.push(json!({"click":{"x":x,"y":y}}));
+                    let mut click = match target {
+                        Some(target) => json!({"target":target}),
+                        None if visual.is_some() => json!({}),
+                        None => json!({"x":x,"y":y}),
+                    };
+                    if let Some(visual) = visual { click["visual"] = json!(visual); }
+                    steps.push(json!({"click":click}));
                 }
             }
             RecordedEvent::Scroll { x, y, dx, dy, .. } => {
@@ -813,6 +1005,37 @@ fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
         }
     }
     flush_text(&mut steps, &mut text_buffer);
+    let mut focused_input: Option<Value> = None;
+    let mut input_visual: Option<Value> = None;
+    let mut index = 0;
+    while index < steps.len() {
+        if let Some(target) = steps[index]["click"].get("target") {
+            focused_input = (target["role"].as_str() == Some("input")).then(|| target.clone());
+            input_visual = steps[index]["click"].get("visual").cloned();
+        } else if steps[index].get("click").is_some() || steps[index].get("scroll").is_some() {
+            focused_input = None;
+        }
+        let selects_all = steps[index]["key"].as_str().is_some_and(|key| key.eq_ignore_ascii_case("Control+a") || key.eq_ignore_ascii_case("Meta+a"));
+        if selects_all && index + 1 < steps.len() {
+            if let (Some(target), Some(value)) = (focused_input.clone(), steps[index + 1]["text"].as_str()) {
+                steps[index] = json!({"fill_target":{"target":target,"value":value}});
+                if let Some(visual) = &input_visual { steps[index]["fill_target"]["visual"] = visual.clone(); }
+                steps.remove(index + 1);
+            }
+        }
+        if steps[index]["key"].as_str().is_some_and(|key| matches!(key, "Tab" | "Enter" | "Escape")) {
+            focused_input = None;
+        }
+        index += 1;
+    }
+    for index in 0..steps.len().saturating_sub(1) {
+        let is_folder = steps[index]["click"]["target"]["name"].as_str()
+            .is_some_and(|name| name.ends_with(" フォルダー"));
+        let next = steps[index + 1]["click"]["target"].clone();
+        if is_folder && next.is_object() {
+            steps[index]["click"]["target"]["reveals"] = next;
+        }
+    }
     steps.push(json!({"screenshot":{"task":session.task_id}}));
     json!({"version":1,"platform":"desktop","window":session.window_title,"steps":steps})
 }
@@ -905,7 +1128,10 @@ pub fn annotation_if_complete(
     if !marker.is_file() {
         let exit_marker = marker.with_extension("exit");
         if exit_marker.is_file() {
-            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| "MarkIts Desktop が編集完了前に終了しました。撮影画像と入力は保持しています。".into()));
+            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| {
+                "MarkIts Desktop が編集完了前に終了しました。撮影画像と入力は保持しています。"
+                    .into()
+            }));
         }
         return Ok(None);
     }
@@ -914,9 +1140,9 @@ pub fn annotation_if_complete(
     // drew no marks. Keep that distinct from importing an annotation spec,
     // where an empty spec is almost certainly an accidental selection.
     let normalized = normalize_annotation_spec_for_capture(&annotation)?;
-    let _ = fs::remove_file(marker);
-    let _ = fs::remove_file(marker.with_extension("exit"));
-    let _ = fs::remove_file(source_file);
+    // Keep completion markers until adoption so a failed import can retry.
+    // Original staging file remains available for completion retries.
+    let _ = source_file;
     Ok(Some(normalized))
 }
 
@@ -947,7 +1173,15 @@ pub fn preserve_annotated_capture(
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("MarkIts出力がPNG画像ではありません。".into());
     }
-    let asset_dir = page_path.parent().unwrap_or(root).join("assets");
+    let (initial_asset, _) = manual_core::config::asset_destination(
+        root,
+        &page_path,
+        &format!("markits-{task_id}.png"),
+    )?;
+    let asset_dir = initial_asset
+        .parent()
+        .ok_or("Invalid asset destination")?
+        .to_path_buf();
     fs::create_dir_all(&asset_dir).map_err(|e| e.to_string())?;
     let base_filename = format!("markits-{task_id}.png");
     let digest = format!("{:x}", Sha256::digest(&bytes));
@@ -965,7 +1199,10 @@ pub fn preserve_annotated_capture(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_nanos();
-    let temporary = asset_dir.join(format!(".{base_filename}.tmp-{}-{nonce}", std::process::id()));
+    let temporary = asset_dir.join(format!(
+        ".{base_filename}.tmp-{}-{nonce}",
+        std::process::id()
+    ));
     let mut staged = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -979,7 +1216,9 @@ pub fn preserve_annotated_capture(
     drop(staged);
     loop {
         let asset_path = asset_dir.join(&filename);
-        match publish_image(&temporary, &asset_path, &bytes, |source, destination| fs::hard_link(source, destination)) {
+        match publish_image(&temporary, &asset_path, &bytes, |source, destination| {
+            fs::hard_link(source, destination)
+        }) {
             Ok(()) => break,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let existing = match fs::read(&asset_path) {
@@ -996,7 +1235,10 @@ pub fn preserve_annotated_capture(
                     filename = format!("markits-{task_id}-{digest}.png");
                 } else {
                     let _ = fs::remove_file(&temporary);
-                    return Err(format!("撮影画像のハッシュ名が既存画像と衝突しました: {}", asset_path.display()));
+                    return Err(format!(
+                        "撮影画像のハッシュ名が既存画像と衝突しました: {}",
+                        asset_path.display()
+                    ));
                 }
             }
             Err(error) => {
@@ -1006,7 +1248,7 @@ pub fn preserve_annotated_capture(
         }
     }
     fs::remove_file(&temporary).map_err(|e| format!("一時画像を削除できません: {e}"))?;
-    let relative_image = format!("assets/{filename}");
+    let (_, relative_image) = manual_core::config::asset_destination(root, &page_path, &filename)?;
     let prompt_attr = manual_core::task::escape_prompt(prompt);
     let block = format!("<!-- ai:task id={task_id} kind=screenshot prompt=\"{prompt_attr}\" -->\n![撮影画面]({relative_image})\n<!-- /ai:task -->");
     Ok(block)
@@ -1025,10 +1267,15 @@ fn publish_image(
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err(error),
         Err(_) => {}
     }
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(destination)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
     let result = file.write_all(bytes).and_then(|_| file.sync_all());
     drop(file);
-    if result.is_err() { let _ = fs::remove_file(destination); }
+    if result.is_err() {
+        let _ = fs::remove_file(destination);
+    }
     result
 }
 
@@ -1101,7 +1348,8 @@ mod tests {
         let source = dir.join("source.png");
         let destination = dir.join("capture.png");
         fs::write(&source, b"new image").unwrap();
-        let unsupported = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+        let unsupported =
+            |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
         publish_image(&source, &destination, b"new image", unsupported).unwrap();
         assert_eq!(fs::read(&destination).unwrap(), b"new image");
         let error = publish_image(&source, &destination, b"replacement", unsupported).unwrap_err();
@@ -1137,8 +1385,15 @@ mod tests {
         launch_markits(command, &dir.join("markits.log")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            match annotation_if_complete(source.to_str().unwrap(), dir.join("annotated.png").to_str().unwrap(), completion.to_str().unwrap()) {
-                Err(error) => { assert!(error.contains("編集完了前")); break; }
+            match annotation_if_complete(
+                source.to_str().unwrap(),
+                dir.join("annotated.png").to_str().unwrap(),
+                completion.to_str().unwrap(),
+            ) {
+                Err(error) => {
+                    assert!(error.contains("編集完了前"));
+                    break;
+                }
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
                 other => panic!("missing exit notification: {other:?}"),
             }
@@ -1217,7 +1472,7 @@ mod tests {
             "docs/guide.md",
             "screen-one",
             different.to_str().unwrap(),
-            "annotated"
+            "annotated",
         )
         .unwrap();
         let different_retry = preserve_annotated_capture(
@@ -1251,6 +1506,36 @@ mod tests {
     }
 
     #[test]
+    fn markits_capture_uses_configured_assets_for_nested_pages() {
+        let root = test_dir("capture-configured-assets");
+        fs::create_dir_all(root.join("docs/sub")).unwrap();
+        fs::write(root.join("docs/sub/guide.md"), "# Guide\n").unwrap();
+        fs::write(
+            root.join("manual_setting.json"),
+            r#"{"docs":"docs","assets":"media/shots"}"#,
+        )
+        .unwrap();
+        let source = root.join("capture.png");
+        let bytes = b"\x89PNG\r\n\x1a\nimage";
+        fs::write(&source, bytes).unwrap();
+        let block = preserve_annotated_capture(
+            root.to_str().unwrap(),
+            "docs/sub/guide.md",
+            "nested-shot",
+            source.to_str().unwrap(),
+            "capture",
+        )
+        .unwrap();
+        assert!(block.contains("../../media/shots/markits-nested-shot.png"));
+        assert_eq!(
+            fs::read(root.join("media/shots/markits-nested-shot.png")).unwrap(),
+            bytes
+        );
+        assert!(!root.join("docs/sub/assets").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn markits_capture_resolves_docs_relative_page_from_editor() {
         let root = test_dir("capture-docs-relative");
         let docs = root.join("docs");
@@ -1269,7 +1554,10 @@ mod tests {
         )
         .unwrap();
         assert!(block.contains("assets/markits-index-shot.png"));
-        assert_eq!(fs::read(docs.join("assets/markits-index-shot.png")).unwrap(), bytes);
+        assert_eq!(
+            fs::read(docs.join("assets/markits-index-shot.png")).unwrap(),
+            bytes
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1341,8 +1629,17 @@ mod tests {
         let value: Value = serde_json::from_str(&normalized).unwrap();
         assert_eq!(value["annotations"], json!([]));
         assert_eq!(value["canvas"]["width"], 800);
-        assert!(!marker.exists());
-        assert!(!source.exists());
+        assert!(marker.exists());
+        assert!(source.exists());
+        assert_eq!(
+            annotation_if_complete(
+                source.to_str().unwrap(),
+                annotation.to_str().unwrap(),
+                marker.to_str().unwrap()
+            )
+            .unwrap(),
+            Some(normalized.clone())
+        );
 
         let block = preserve_annotated_capture(
             root.to_str().unwrap(),
@@ -1483,6 +1780,8 @@ mod tests {
                     elapsed_ms: 500,
                     x: 120.0,
                     y: 80.0,
+                    target: None,
+                    visual: None,
                 },
                 RecordedEvent::Text {
                     elapsed_ms: 900,
@@ -1494,6 +1793,38 @@ mod tests {
                 },
             ],
         );
+        let named = build_scenario(&session, &[RecordedEvent::Click {
+            elapsed_ms: 500, x: 120.0, y: 80.0,
+            target: Some(manual_core::semantic_target::Target { role: "button".into(), name: "Open".into(), reveals: None }), visual: None,
+        }]);
+        let patch = image::RgbImage::from_fn(32, 24, |x, y|
+            image::Rgb([((x*73+y*19)%251) as u8, ((x*17+y*61)%253) as u8, ((x*29+y*31)%247) as u8]));
+        let visual = manual_core::visual_target::Target::from_image(&patch, 12.0, 10.0).unwrap();
+        let visual_only = build_scenario(&session, &[RecordedEvent::Click {
+            elapsed_ms: 500, x: 120.0, y: 80.0, target: None, visual: Some(visual),
+        }]);
+        assert!(visual_only["steps"][2]["click"].get("visual").is_some());
+        assert!(visual_only["steps"][2]["click"].get("x").is_none());
+        assert_eq!(named["steps"][2]["click"]["target"]["name"], "Open");
+        assert!(named["steps"][2]["click"].get("x").is_none());
+        let readable = events_to_text(&[RecordedEvent::Click {
+            elapsed_ms: 500, x: 120.0, y: 80.0,
+            target: Some(manual_core::semantic_target::Target { role: "button".into(), name: "Open".into(), reveals: None }), visual: None,
+        }], &session.window);
+        assert!(readable.contains("「Open」"));
+        assert!(!readable.contains("(20, 30)"));
+        let legacy: RecordedEvent = serde_json::from_str(r#"{"kind":"click","elapsed_ms":1,"x":120,"y":80}"#).unwrap();
+        assert!(matches!(legacy, RecordedEvent::Click { target: None, visual: None, .. }));
+        let input = manual_core::semantic_target::Target { role: "input".into(), name: "Project root".into(), reveals: None };
+        let input_scenario = build_scenario(&session, &[
+            RecordedEvent::Click { elapsed_ms: 1, x: 120.0, y: 80.0, target: Some(input), visual: None },
+            RecordedEvent::Key { elapsed_ms: 2, value: "Control+a".into() },
+            RecordedEvent::Text { elapsed_ms: 3, value: "path with spaces".into() },
+        ]);
+        assert_eq!(input_scenario["steps"][3]["fill_target"]["target"]["name"], "Project root");
+        assert_eq!(input_scenario["steps"][3]["fill_target"]["value"], "path with spaces");
+        assert!(!input_scenario["steps"].as_array().unwrap().iter().any(|step| step.get("key").is_some()));
+
         assert_eq!(scenario["steps"][0]["launch"]["program"], "demo");
         assert_eq!(scenario["steps"][1]["window"], "Demo");
         assert_eq!(scenario["steps"][2]["click"]["x"], 20);
@@ -1522,19 +1853,28 @@ mod tests {
     }
 
     #[test]
-    fn automatic_window_selection_chooses_the_new_largest_app_window() {
+    fn automatic_window_selection_only_chooses_the_launched_app() {
         let existing = HashSet::from(["manual-studio-window".to_string()]);
         let windows = vec![
             json!({"id":"manual-studio-window","title":"Manual Studio","width":1400,"height":900}),
+            json!({"id":"unrelated-new","title":"Other app","width":2000,"height":1400}),
             json!({"id":"new-splash","title":"Loading","width":320,"height":120}),
             json!({"id":"new-app","title":"Settings","width":1000,"height":700}),
         ];
         assert_eq!(
-            select_launched_window(&windows, &existing, "").unwrap()["id"],
+            select_launched_window(
+                &windows,
+                &existing,
+                "",
+                &HashSet::from(["new-splash".into(), "new-app".into()])
+            )
+            .unwrap()["id"],
             "new-app"
         );
+        assert!(select_launched_window(&windows, &existing, "", &HashSet::new()).is_none());
         assert_eq!(
-            select_launched_window(&windows, &existing, "Manual Studio").unwrap()["id"],
+            select_launched_window(&windows, &existing, "Manual Studio", &HashSet::new()).unwrap()
+                ["id"],
             "manual-studio-window"
         );
     }
@@ -1557,10 +1897,15 @@ mod tests {
             height: 600.0,
         }];
         assert_eq!(
-            select_existing_app_window(&windows, &detected, executable.to_str().unwrap())
-                .unwrap()["id"],
+            select_existing_app_window(&windows, &detected, executable.to_str().unwrap()).unwrap()
+                ["id"],
             "0x10"
         );
-        assert!(select_existing_app_window(&windows, &detected, "manual-studio-missing-test-executable").is_none());
+        assert!(select_existing_app_window(
+            &windows,
+            &detected,
+            "manual-studio-missing-test-executable"
+        )
+        .is_none());
     }
 }

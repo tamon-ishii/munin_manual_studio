@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the three sibling executables required by Munin Manual Studio."""
+"""Package the host and CLI executables required by Munin Manual Studio."""
 import argparse
 import json
 import os
@@ -68,7 +68,7 @@ def main():
         raise SystemExit(f'Release tag {tag!r} does not match application version {version!r}')
     extension = '.exe' if 'windows' in args.target else ''
     binaries = [repo / 'target' / args.target / 'release' / (name + extension)
-                for name in ('manual-studio', 'manualctl', 'markits-desktop')]
+                for name in ('manual-studio', 'manualctl')]
     for binary in binaries:
         if not binary.is_file():
             raise SystemExit(f'Missing release executable: {binary}')

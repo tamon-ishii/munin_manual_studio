@@ -17,6 +17,9 @@ if (process.env.MODULELOOM_CHROME_PATH) {
 }
 const browser = await chromium.launch(browserOptions);
 const captured = [];
+let expectations = {};
+try { expectations = JSON.parse(await readFile(path.join(process.cwd(), '.munin/capture-expectations.json'), 'utf8')); }
+catch (error) { if (error.code !== 'ENOENT') throw error; }
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(10000);
@@ -44,6 +47,9 @@ try {
         if (typeof task !== 'string' || !/^[a-z][a-z0-9_-]*$/.test(task)) {
           throw new Error('screenshot needs a valid task ID');
         }
+        const expected = expectations[task] || {};
+        if (expected.window_title && await page.title() !== expected.window_title) throw new Error('Unexpected page title');
+        if (expected.screen_text && !(await page.locator('body').innerText()).includes(expected.screen_text)) throw new Error('Expected screen text is missing');
         const destination = path.join(capturedPath, `${task}.png`);
         await mkdir(path.dirname(destination), { recursive: true });
         if (selector === undefined) {

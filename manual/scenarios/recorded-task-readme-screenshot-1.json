@@ -4,17 +4,11 @@
     {
       "launch": {
         "args": [],
-        "program": "/usr/bin/gnome-calendar"
+        "program": "/home/ishii/PycharmProjects/pymodulemgr/target/release/manual-studio"
       }
     },
     {
-      "window": "カレンダー"
-    },
-    {
-      "click": {
-        "x": 99,
-        "y": 222
-      }
+      "window": "Manual Studio"
     },
     {
       "screenshot": {
@@ -23,5 +17,5 @@
     }
   ],
   "version": 1,
-  "window": "カレンダー"
+  "window": "Manual Studio"
 }

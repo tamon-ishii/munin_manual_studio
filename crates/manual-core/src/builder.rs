@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 
 use super::agent::which_binary;
 use super::config::read_config;
-use super::task::{collect_markdown_files, parse_page_tags, read_answer, tasks, utc_now, PageTag};
+use super::task::{collect_markdown_files, parse_page_tags, read_answer, utc_now, PageTag};
 
 const SITE_MANIFEST: &str = ".moduleloom-site-files.json";
 
@@ -162,6 +162,233 @@ fn publish_site_inner(
     Ok(())
 }
 
+struct BuildPage {
+    source: std::path::PathBuf,
+    original: std::path::PathBuf,
+    destination: std::path::PathBuf,
+    name: String,
+}
+
+fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, String> {
+    if let Some(root) = root {
+        // Windows canonical paths use the extended-length prefix. Use the same
+        // root for collected pages and guarded assets before comparing paths.
+        let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+        let config = read_config(&canonical_root);
+        let docs = super::config::project_path(&canonical_root, &config.docs)?;
+        if templates.canonicalize().map_err(|e| e.to_string())? == docs {
+            return super::task::collect_target_markdown_files(&canonical_root, &config)
+                .into_iter()
+                .map(|(name, source)| {
+                    let destination = if let Ok(relative) = source.strip_prefix(&docs) {
+                        relative.to_path_buf()
+                    } else {
+                        Path::new("_external").join(
+                            source
+                                .strip_prefix(&canonical_root)
+                                .map_err(|e| e.to_string())?,
+                        )
+                    };
+                    Ok(BuildPage {
+                        original: source.clone(),
+                        source,
+                        destination,
+                        name,
+                    })
+                })
+                .collect();
+        }
+        // Audience-filtered templates retain links relative to the original docs.
+        return Ok(collect_markdown_files(templates)
+            .into_iter()
+            .map(|source| {
+                let destination = source.strip_prefix(templates).unwrap().to_path_buf();
+                BuildPage {
+                    original: docs.join(&destination),
+                    name: destination.to_string_lossy().replace('\\', "/"),
+                    source,
+                    destination,
+                }
+            })
+            .collect());
+    }
+    Ok(collect_markdown_files(templates)
+        .into_iter()
+        .map(|source| {
+            let destination = source.strip_prefix(templates).unwrap().to_path_buf();
+            BuildPage {
+                original: source.clone(),
+                name: destination.to_string_lossy().replace('\\', "/"),
+                source,
+                destination,
+            }
+        })
+        .collect())
+}
+
+fn relative_link(page: &Path, destination: &Path) -> String {
+    let from: Vec<_> = page
+        .parent()
+        .unwrap_or(Path::new(""))
+        .components()
+        .collect();
+    let to: Vec<_> = destination.components().collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    format!(
+        "{}{}",
+        "../".repeat(from.len() - common),
+        to[common..]
+            .iter()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    )
+}
+
+fn stage_page_links(
+    root: &Path,
+    page: &BuildPage,
+    pages: &[BuildPage],
+    body: &str,
+    docs: &Path,
+) -> Result<String, String> {
+    use pulldown_cmark::{Event, Options, Parser, Tag};
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let resolve = |url: &str| -> Result<Option<String>, String> {
+        if url.is_empty()
+            || url.starts_with(['#', '/'])
+            || regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
+                .unwrap()
+                .is_match(url)
+        {
+            return Ok(None);
+        }
+        let split = url.find(['#', '?']).unwrap_or(url.len());
+        let decoded = percent_encoding::percent_decode_str(&url[..split])
+            .decode_utf8()
+            .map_err(|e| e.to_string())?;
+        let parent = page.original.parent().ok_or("Invalid page path")?;
+        let mut parts: Vec<_> = parent
+            .strip_prefix(&canonical_root)
+            .map_err(|e| e.to_string())?
+            .components()
+            .map(|part| part.as_os_str().to_os_string())
+            .collect();
+        for part in Path::new(decoded.as_ref()).components() {
+            match part {
+                Component::Normal(name) => parts.push(name.to_os_string()),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if parts.pop().is_none() {
+                        return Err("Linked asset escapes the project".into());
+                    }
+                }
+                _ => return Ok(None),
+            }
+        }
+        let relative: std::path::PathBuf = parts.iter().collect();
+        let source = super::config::project_path(root, &relative.to_string_lossy())?;
+        if !source.is_file() {
+            return Ok(None);
+        }
+        let destination =
+            if let Some(target) = pages.iter().find(|target| target.original == source) {
+                target.destination.clone()
+            } else if source.extension().is_some_and(|ext| ext == "md") {
+                return Ok(None);
+            } else {
+                let destination = Path::new("_assets").join(&relative);
+                let output = docs.join(&destination);
+                fs::create_dir_all(output.parent().ok_or("Invalid asset path")?)
+                    .map_err(|e| e.to_string())?;
+                fs::copy(source, output).map_err(|e| e.to_string())?;
+                destination
+            };
+        let link = relative_link(&page.destination, &destination);
+        // URL paths may contain Japanese characters, spaces, parentheses or fragments.
+        let encoded: String = link
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
+                    (byte as char).to_string()
+                } else {
+                    format!("%{byte:02X}")
+                }
+            })
+            .collect();
+        Ok(Some(format!("{encoded}{}", &url[split..])))
+    };
+    let parser = Parser::new_ext(body, Options::all());
+    let definitions: Vec<_> = parser
+        .reference_definitions()
+        .iter()
+        .map(|(_, definition)| (definition.dest.to_string(), definition.span.clone()))
+        .collect();
+    let destination_pattern =
+        regex::Regex::new(r"(?:\]\(|\]:)\s*(?:<(?P<angle>[^>]+)>|(?P<plain>(?:\\.|[^\s)])+))")
+            .unwrap();
+    let html_pattern =
+        regex::Regex::new(r#"(?i)\b(?:src|href)\s*=\s*["'](?P<url>[^"']+)["']"#).unwrap();
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    for (event, range) in parser.into_offset_iter() {
+        match event {
+            Event::Start(Tag::Image { dest_url, .. } | Tag::Link { dest_url, .. }) => {
+                if let Some(captures) = destination_pattern
+                    .captures_iter(&body[range.clone()])
+                    .last()
+                {
+                    if let Some(new_url) = resolve(&dest_url)? {
+                        let found = captures
+                            .name("angle")
+                            .or_else(|| captures.name("plain"))
+                            .unwrap();
+                        edits.push((
+                            range.start + found.start()..range.start + found.end(),
+                            new_url,
+                        ));
+                    }
+                }
+            }
+            Event::Html(_) | Event::InlineHtml(_) => {
+                if body[range.clone()].trim_start().starts_with("<!--") {
+                    continue;
+                }
+                for captures in html_pattern.captures_iter(&body[range.clone()]) {
+                    let found = captures.name("url").unwrap();
+                    if let Some(new_url) = resolve(found.as_str())? {
+                        edits.push((
+                            range.start + found.start()..range.start + found.end(),
+                            new_url,
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for (url, range) in definitions {
+        if let Some(new_url) = resolve(&url)? {
+            if let Some(captures) = destination_pattern.captures(&body[range.clone()]) {
+                let found = captures
+                    .name("angle")
+                    .or_else(|| captures.name("plain"))
+                    .unwrap();
+                edits.push((
+                    range.start + found.start()..range.start + found.end(),
+                    new_url,
+                ));
+            }
+        }
+    }
+    edits.sort_by_key(|(range, _)| range.start);
+    edits.dedup_by(|a, b| a.0 == b.0);
+    let mut result = body.to_string();
+    for (range, replacement) in edits.into_iter().rev() {
+        result.replace_range(range, &replacement);
+    }
+    Ok(result)
+}
+
 pub fn build(
     templates: &Path,
     generated: &Path,
@@ -189,7 +416,33 @@ fn build_inner(
     root: Option<&Path>,
     no_mkdocs: bool,
 ) -> Result<String, String> {
-    let task_list = tasks(templates)?;
+    if !draft {
+        if let Some(root) = root {
+            crate::quality::require_ready(root)?;
+        }
+    }
+    let pages = build_pages(templates, root)?;
+    let mut paths = std::collections::HashSet::new();
+    for page in &pages {
+        if !paths.insert(page.destination.clone()) {
+            return Err(format!(
+                "原稿の出力パスが重複しています: {}",
+                page.destination.display()
+            ));
+        }
+    }
+    let mut task_list = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+    for page in &pages {
+        for tag in parse_page_tags(
+            &page.name,
+            &fs::read_to_string(&page.source).map_err(|e| e.to_string())?,
+            &mut seen_ids,
+        )? {
+            let (PageTag::Task { task, .. } | PageTag::Generated { task, .. }) = tag;
+            task_list.push(task);
+        }
+    }
     let mut answers = HashMap::new();
 
     for task in &task_list {
@@ -227,13 +480,9 @@ fn build_inner(
 
     let built_at = utc_now();
 
-    for page in collect_markdown_files(templates) {
-        let content = fs::read_to_string(&page).map_err(|e| e.to_string())?;
-        let page_rel = page
-            .strip_prefix(templates)
-            .unwrap_or(&page)
-            .to_string_lossy()
-            .replace('\\', "/");
+    for page in &pages {
+        let content = fs::read_to_string(&page.source).map_err(|e| e.to_string())?;
+        let page_rel = &page.name;
         let mut ids = std::collections::HashSet::new();
         let tags = parse_page_tags(&page_rel, &content, &mut ids)?;
 
@@ -261,9 +510,12 @@ fn build_inner(
         }
         rendered.push_str(&content[last_idx..]);
         let final_page = rendered.replace("{{BUILD_TIMESTAMP}}", &built_at);
-
-        let rel = page.strip_prefix(templates).unwrap_or(&page);
-        let dest = temp_docs.join(rel);
+        let final_page = if let Some(root) = root {
+            stage_page_links(root, page, &pages, &final_page, &temp_docs)?
+        } else {
+            final_page
+        };
+        let dest = temp_docs.join(&page.destination);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -271,7 +523,11 @@ fn build_inner(
     }
 
     // markdown 以外の静的ファイルをコピー
-    for entry in WalkDir::new(templates).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(templates)
+        .into_iter()
+        .filter_entry(|entry| entry.file_name() != ".munin")
+        .filter_map(|e| e.ok())
+    {
         if entry.file_type().is_file() {
             if entry.path().extension().map_or(true, |ext| ext != "md") {
                 let rel = entry.path().strip_prefix(templates).unwrap_or(entry.path());
@@ -326,10 +582,13 @@ fn build_inner(
     };
 
     let mut nav_lines = String::new();
-    for page in collect_markdown_files(templates) {
-        let rel = page.strip_prefix(templates).unwrap_or(&page);
-        let rel_posix = rel.to_string_lossy().replace('\\', "/");
-        let stem = page.file_stem().unwrap_or_default().to_string_lossy();
+    for page in &pages {
+        let rel_posix = page.destination.to_string_lossy().replace('\\', "/");
+        let stem = page
+            .source
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
         nav_lines.push_str(&format!(
             "  - {}: {}\n",
             serde_json::to_string(&stem).unwrap(),
@@ -439,6 +698,41 @@ fn build_inner(
 #[cfg(test)]
 mod site_tests {
     use super::*;
+
+    #[test]
+    fn canonical_pages_publish_links_from_noncanonical_project_root() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join(".");
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(
+            root.join("manual_setting.json"),
+            r#"{"docs":"docs","targets":["docs","README.md"]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "# Readme").unwrap();
+        fs::write(
+            root.join("docs/index.md"),
+            "![Shot](image.png)\n[Readme](../README.md)",
+        )
+        .unwrap();
+        fs::write(root.join("docs/image.png"), b"fixture").unwrap();
+        let pages = build_pages(&root.join("docs"), Some(&root)).unwrap();
+        let page = pages
+            .iter()
+            .find(|page| page.destination == Path::new("index.md"))
+            .unwrap();
+        assert!(page.original.starts_with(root.canonicalize().unwrap()));
+        let staged = tmp.path().join("staged");
+        fs::create_dir(&staged).unwrap();
+        let body = fs::read_to_string(&page.source).unwrap();
+        let rendered = stage_page_links(&root, page, &pages, &body, &staged).unwrap();
+        assert!(rendered.contains("_assets/docs/image.png"));
+        assert!(rendered.contains("_external/README.md"));
+        assert_eq!(
+            fs::read(staged.join("_assets/docs/image.png")).unwrap(),
+            b"fixture"
+        );
+    }
 
     #[test]
     fn publish_removes_only_previously_generated_files() {
@@ -568,9 +862,13 @@ mod site_tests {
 }
 
 fn project_mkdocs(root: &Path, windows: bool) -> Option<Vec<String>> {
-    let directory = root.join(".venv").join(if windows { "Scripts" } else { "bin" });
+    let directory = root
+        .join(".venv")
+        .join(if windows { "Scripts" } else { "bin" });
     let executable = directory.join(if windows { "mkdocs.exe" } else { "mkdocs" });
-    executable.is_file().then(|| vec![executable.to_string_lossy().into_owned()])
+    executable
+        .is_file()
+        .then(|| vec![executable.to_string_lossy().into_owned()])
 }
 
 #[cfg(test)]
@@ -578,13 +876,18 @@ mod portability_tests {
     use super::*;
     #[test]
     fn mkdocs_is_found_in_each_platform_virtual_environment() {
-        for (windows, directory, filename) in [(true, "Scripts", "mkdocs.exe"), (false, "bin", "mkdocs")] {
+        for (windows, directory, filename) in
+            [(true, "Scripts", "mkdocs.exe"), (false, "bin", "mkdocs")]
+        {
             let root = tempfile::tempdir().unwrap();
             let bin = root.path().join(".venv").join(directory);
             std::fs::create_dir_all(&bin).unwrap();
             let executable = bin.join(filename);
             std::fs::write(&executable, "test").unwrap();
-            assert_eq!(project_mkdocs(root.path(), windows).unwrap()[0], executable.to_string_lossy());
+            assert_eq!(
+                project_mkdocs(root.path(), windows).unwrap()[0],
+                executable.to_string_lossy()
+            );
             assert!(project_mkdocs(root.path(), !windows).is_none());
         }
     }

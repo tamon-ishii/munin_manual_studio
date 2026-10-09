@@ -1,15 +1,18 @@
 {
   "name": "munin-manual-studio",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.4.3",
   "type": "module",
   "scripts": {
     "manual:dev": "vite --config apps/manual-studio/vite.config.ts",
-    "manual:build": "tsc -p apps/manual-studio/tsconfig.json && vite build --config apps/manual-studio/vite.config.ts",
+    "manual:build": "npm run manual:build-markits && tsc -p apps/manual-studio/tsconfig.json && vite build --config apps/manual-studio/vite.config.ts",
     "manual:build-markits": "npm --prefix crates/markits/apps/desktop run build",
     "manual:test-workflow": "node scripts/test_manual_studio_workflow.mjs",
     "manual:check": "node scripts/check_manual_studio.mjs",
-    "manual:app": "cd apps/manual-studio && tauri dev",
+    "manual:check-ui": "node scripts/check_manual_studio.mjs --group ui",
+    "manual:check-generation": "node scripts/check_manual_studio.mjs --group generation",
+    "manual:check-capture": "node scripts/check_manual_studio.mjs --group capture",
+    "manual:app": "npm run manual:build-markits && cd apps/manual-studio && tauri dev",
     "manual:bundle": "cd apps/manual-studio && tauri build",
     "manual:smoke": "node scripts/smoke_manual_studio.mjs --start-server",
     "manual:smoke-native": "node scripts/smoke_manual_markits_native.mjs"
@@ -17,14 +20,24 @@
   "dependencies": {
     "@codemirror/language": "^6.12.4",
     "@codemirror/language-data": "^6.5.2",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@milkdown/crepe": "^7.22.2",
     "@milkdown/kit": "^7.22.2",
     "@tauri-apps/api": "^2.2.0",
-    "mermaid": "^11.17.2"
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "flexlayout-react": "^0.11.1",
+    "mermaid": "^11.17.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "playwright-core": "^1.63.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.3",
     "vite": "^6.1.0"
   }

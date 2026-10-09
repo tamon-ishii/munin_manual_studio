@@ -13,6 +13,9 @@ pub const FLAG: &str = "--manual-studio-native-worker";
 enum Operation {
     Request(serde_json::Value),
     WindowProcesses,
+    ObserveWindow(String),
+    #[cfg(target_os = "linux")]
+    ActivateWindow(String),
     Capture {
         window: String,
         destination: PathBuf,
@@ -52,9 +55,16 @@ fn execute(operation: Operation) -> Result<String, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log);
+    let timeout = match &operation {
+        Operation::Request(request) => request["options"]["json"]["limits"]["timeout_seconds"]
+            .as_u64()
+            .unwrap_or(300)
+            .clamp(5, 1800),
+        _ => 60,
+    };
     run_child(
         &mut command,
-        Duration::from_secs(60),
+        Duration::from_secs(timeout + 5),
         &dir.0.join("stderr.log"),
     )?;
     let response = fs::read(dir.0.join("response.json"))
@@ -95,11 +105,20 @@ pub fn request(value: serde_json::Value) -> Result<String, String> {
     execute(Operation::Request(value))
 }
 
+#[cfg(target_os = "linux")]
+pub fn activate_window(id: &str) -> Result<(), String> {
+    execute(Operation::ActivateWindow(id.into())).map(|_| ())
+}
+
 pub fn window_processes() -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
     serde_json::from_str(&execute(Operation::WindowProcesses)?).map_err(|e| e.to_string())
 }
 
-pub fn capture_window(window: &str, destination: &Path, close_after_capture: bool) -> Result<(), String> {
+pub fn capture_window(
+    window: &str,
+    destination: &Path,
+    close_after_capture: bool,
+) -> Result<(), String> {
     execute(Operation::Capture {
         window: window.into(),
         destination: destination.into(),
@@ -117,6 +136,7 @@ pub fn requires_worker(action: &str) -> bool {
             | "activate-window"
             | "capture-window"
             | "recapture"
+            | "screenshots-recapture"
             | "capture-source-auto"
             | "markits-capture"
             | "ui-map-from-desktop"
@@ -130,24 +150,41 @@ pub fn requires_hiding(action: &str) -> bool {
     )
 }
 
+pub fn observe_window(id: &str) -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
+    let value = execute(Operation::ObserveWindow(id.to_string()))?;
+    serde_json::from_str(&value).map_err(|error| error.to_string())
+}
+
 pub fn run(dir: &Path) -> Result<(), String> {
     let operation: Operation =
         serde_json::from_slice(&fs::read(dir.join("request.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
     let response = match operation {
         Operation::Request(value) => manual_core::request(value),
+        #[cfg(target_os = "linux")]
+        Operation::ActivateWindow(id) => manual_core::window_capture::activate_window(&id)
+            .and_then(|window| serde_json::to_string(&window).map_err(|error| error.to_string())),
+        Operation::ObserveWindow(id) => manual_core::semantic_target::observe_window(&id)
+            .and_then(|elements| serde_json::to_string(&elements).map_err(|error| error.to_string())),
         Operation::WindowProcesses => {
             #[cfg(target_os = "linux")]
             let windows = markits::ui_elements::capture_desktop_windows(0, 0);
             #[cfg(any(target_os = "macos", target_os = "windows"))]
-            let windows = manual_core::window_capture::window_process_ids()?.into_iter().map(|(id, pid)| {
-                markits::ui_elements::DetectedUiElement {
-                    role: "window".into(), name: None, window_id: Some(id), pid: Some(pid),
-                    x: 0.0, y: 0.0, width: 0.0, height: 0.0,
-                }
-            }).collect::<Vec<_>>();
+            let windows = manual_core::window_capture::window_process_ids()?
+                .into_iter()
+                .map(|(id, pid)| markits::ui_elements::DetectedUiElement {
+                    role: "window".into(),
+                    name: None,
+                    window_id: Some(id),
+                    pid: Some(pid),
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.0,
+                    height: 0.0,
+                })
+                .collect::<Vec<_>>();
             serde_json::to_string(&windows).map_err(|e| e.to_string())
-        },
+        }
         Operation::Capture {
             window,
             destination,

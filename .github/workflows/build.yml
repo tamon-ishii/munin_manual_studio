@@ -6,6 +6,11 @@ on:
     tags: ['[0-9]*.[0-9]*.[0-9]*', 'v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      windows_native_smoke:
+        description: Run real Windows recording and MarkIts window checks
+        type: boolean
+        default: false
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -63,16 +68,45 @@ jobs:
       - name: Build frontends and check workflow logic
         run: |
           npm run manual:build
-          npm run manual:build-markits
           npm run manual:test-workflow
       - name: Test native Rust code and release layouts
         run: |
           cargo test --locked -p manual-core -p manual-studio
           python -m unittest discover -s scripts -p "test_package_release.py"
+      - name: Check real Windows recording and MarkIts windows
+        if: runner.os == 'Windows' && inputs.windows_native_smoke
+        shell: pwsh
+        run: |
+          python -m pip install mkdocs-material
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import platform, tkinter; print(platform.platform()); print('Tk', tkinter.TkVersion)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --locked -p manual-studio -p manual-core
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run manual:smoke-native 2>&1 | Tee-Object -FilePath windows-native-smoke.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Save Windows native check log
+        if: always() && runner.os == 'Windows' && inputs.windows_native_smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-smoke-log
+          path: windows-native-smoke.log
+          if-no-files-found: warn
+      - name: Install browser and manual builder for UI checks
+        if: runner.os == 'Linux'
+        run: |
+          npx playwright-core install --with-deps chrome
+          python -m pip install mkdocs-material
+      - name: Check UI, generation, capture, and integrated workflows
+        if: runner.os == 'Linux'
+        run: |
+          npm run manual:check -- --group unit
+          npm run manual:check-ui
+          npm run manual:check-generation
+          npm run manual:check-capture
+          npm run manual:check -- --group smoke
       - name: Build Manual Studio and CLI
         run: cargo build --locked --release --target ${{ matrix.target }} -p manual-studio -p manual-core
-      - name: Build MarkIts Desktop
-        run: cargo build --locked --release --manifest-path crates/markits/Cargo.toml --target-dir target --target ${{ matrix.target }} -p markits-desktop --features tauri/custom-protocol
       - name: Package applications
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}

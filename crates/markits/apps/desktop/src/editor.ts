@@ -339,7 +339,7 @@ export class AnnotationEditor {
   } {
     return {
       isAutoCropped: this.isAutoCropped,
-      autoCropOffset: { ...this.autoCropOffset },
+      autoCropOffset: this.isAutoCropped ? { ...this.autoCropOffset } : this.cropHistoryStack.reduce((offset, item) => ({ x: offset.x + item.offset.x, y: offset.y + item.offset.y }), { x: 0, y: 0 }),
       baseImageState: this.baseImageState
         ? {
             dataUrl: this.baseImageState.dataUrl,
@@ -367,6 +367,10 @@ export class AnnotationEditor {
     if (cropInfo) {
       this.isAutoCropped = cropInfo.is_auto_cropped;
       this.autoCropOffset = { x: cropInfo.offset_x, y: cropInfo.offset_y };
+      if (baseImageState && !cropInfo.is_auto_cropped) this.cropHistoryStack = [{
+        dataUrl: baseImageState.dataUrl, width: baseImageState.width, height: baseImageState.height,
+        uiElements: baseImageState.uiElements.map(el => ({ ...el })), offset: { x: cropInfo.offset_x, y: cropInfo.offset_y }, annotations: [],
+      }];
       const btnAutoCrop = document.getElementById('btn-autocrop');
       if (btnAutoCrop) {
         btnAutoCrop.classList.toggle('active', this.isAutoCropped);
@@ -2302,6 +2306,10 @@ export class AnnotationEditor {
       }
     }
 
+    if (this.isAutoCropped && this.baseImageState) {
+      this.cropHistoryStack = [{ dataUrl: this.baseImageState.dataUrl, width: this.baseImageState.width, height: this.baseImageState.height, uiElements: this.baseImageState.uiElements.map(el => ({ ...el })), offset: { ...this.autoCropOffset }, annotations: [] }];
+      this.isAutoCropped = false;
+    }
     this.cropHistoryStack.push({
       dataUrl: this.bgImgEl.src,
       width: this.scene.canvas.width,
@@ -2338,7 +2346,7 @@ export class AnnotationEditor {
         } else if (clone.type === 'bezier-arrow') {
           clone.start[0] += this.autoCropOffset.x; clone.start[1] += this.autoCropOffset.y;
           clone.control[0] += this.autoCropOffset.x; clone.control[1] += this.autoCropOffset.y;
-          clone.end[0] += this.autoCropOffset.x; clone.end[0] += this.autoCropOffset.y;
+          clone.end[0] += this.autoCropOffset.x; clone.end[1] += this.autoCropOffset.y;
         } else if ('target' in clone && Array.isArray(clone.target)) {
           clone.target[0] += this.autoCropOffset.x;
           clone.target[1] += this.autoCropOffset.y;
@@ -2418,7 +2426,8 @@ export class AnnotationEditor {
       }
 
       this.isAutoCropped = true;
-      this.autoCropOffset = { x: rx, y: ry };
+      const manualOffset = this.cropHistoryStack.reduce((offset,item) => ({ x:offset.x+item.offset.x,y:offset.y+item.offset.y }), {x:0,y:0});
+      this.autoCropOffset = { x: rx + manualOffset.x, y: ry + manualOffset.y };
       const btnAutoCrop = document.getElementById('btn-autocrop');
       if (btnAutoCrop) btnAutoCrop.classList.add('active');
 

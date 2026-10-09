@@ -116,7 +116,7 @@ fn auto_assign_scoped(root: &Path, page: Option<&str>) -> Result<String, String>
     if tasks.is_empty() {
         let warnings: Vec<_> = invalid_sources.iter().map(|id| json!({
             "id": id,
-            "reason": "保存済み撮影元はManual Studio自身です。明示的な撮影ではManual Studioを隠して撮影できないため、対象アプリの撮影元を選び直してください。設定は保持しました。"
+            "reason": "Manual Studioを撮影する設定は保持しました。自動選択では変更せず、保存した撮影元で撮影します。"
         })).collect();
         return Ok(json!({ "assigned": [], "skipped": invalid_sources, "warnings": warnings, "already_set": sources.len() }).to_string());
     }
@@ -224,7 +224,7 @@ fn auto_assign_scoped(root: &Path, page: Option<&str>) -> Result<String, String>
     if let Some(warnings) = output["warnings"].as_array_mut() {
         warnings.extend(invalid_sources.iter().map(|id| json!({
             "id": id,
-            "reason": "保存済み撮影元はManual Studio自身です。明示的な撮影ではManual Studioを隠して撮影できないため、対象アプリの撮影元を選び直してください。設定は保持しました。"
+            "reason": "Manual Studioを撮影する設定は保持しました。自動選択では変更せず、保存した撮影元で撮影します。"
         })));
     }
     Ok(output.to_string())
@@ -280,7 +280,7 @@ fn apply_auto_assignments(
         .map(|task| task.id.as_str())
         .collect();
     for task_id in &manual_studio_sources {
-        warnings.push(json!({ "id": task_id, "reason": "保存済み撮影元はManual Studio自身です。明示的な撮影ではManual Studioを隠して撮影できないため、対象アプリの撮影元を選び直してください。設定は保持しました。" }));
+        warnings.push(json!({ "id": task_id, "reason": "Manual Studioを撮影する設定は保持しました。自動選択では変更せず、保存した撮影元で撮影します。" }));
     }
     for assignment in assignments {
         let task_id = assignment
@@ -409,6 +409,7 @@ fn capture_task(
     window_id: &str,
     inset: u32,
 ) -> Result<String, String> {
+    task::ensure_unlocked(selected)?;
     let id = selected.id.as_str();
     if selected.kind != "screenshot" {
         return Err(format!("Task is not a screenshot: {id}"));
@@ -422,6 +423,7 @@ fn capture_task(
     let temporary = tempfile::tempdir_in(root).map_err(|error| error.to_string())?;
     let image = super::config::project_path(temporary.path(), &format!("{id}.png"))?;
     let window = window_capture::capture_window(window_id, inset, &image, true, None)?;
+    super::capture_validation::check_target(root, id, window_id, &window.title)?;
     author::record_screenshot_task(root, selected, &image)?;
     save(
         root,
@@ -431,7 +433,14 @@ fn capture_task(
             inset,
         },
     )?;
-    serde_json::to_string(&serde_json::json!({"window": window, "image": docs.join("assets").join(format!("{id}.png"))}))
+    let page_path = if docs.join(&selected.page).is_file() {
+        docs.join(&selected.page)
+    } else {
+        super::editor::document_path(root, &selected.page)?
+    };
+    let (saved_image, _) =
+        super::config::asset_destination(root, &page_path, &format!("{id}.png"))?;
+    serde_json::to_string(&serde_json::json!({"window": window, "image": saved_image}))
         .map_err(|error| error.to_string())
 }
 
@@ -466,6 +475,7 @@ pub fn recapture(root: &Path, id: &str) -> Result<String, String> {
 }
 
 pub(crate) fn recapture_task(root: &Path, selected: &task::Task) -> Result<String, String> {
+    task::ensure_unlocked(selected)?;
     let id = selected.id.as_str();
     if selected.kind != "screenshot" {
         return Err(format!("Task is not a screenshot: {id}"));

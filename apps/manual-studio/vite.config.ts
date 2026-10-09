@@ -30,7 +30,7 @@ export default defineConfig({
         request.on("data", (chunk) => { body += chunk; if (body.length > 5_000_000) request.destroy(); });
         request.on("end", () => {
           try { JSON.parse(body); } catch { response.statusCode = 400; response.end(); return; }
-          execFile(cli, ["--request", body], { maxBuffer: 15_000_000, timeout: 300_000 }, (error, stdout, stderr) => {
+          execFile(cli, ["--request", body], { maxBuffer: 15_000_000, timeout: 360_000 }, (error, stdout, stderr) => {
             response.setHeader("Content-Type", "application/json");
             response.statusCode = error ? 400 : 200;
             response.end(JSON.stringify(error ? { error: stderr.trim() || error.message } : { output: stdout.trimEnd() }));

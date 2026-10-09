@@ -12,44 +12,75 @@ mod recorder;
 static WORKSPACE_HISTORY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn workspace_history_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_config_dir().map_err(|error| error.to_string())?.join("workspace_history.json"))
+    Ok(app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?
+        .join("workspace_history.json"))
 }
 
 fn read_workspace_history(path: &std::path::Path) -> Result<Vec<String>, String> {
-    if !path.exists() { return Ok(Vec::new()); }
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
     serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
         .map_err(|error| format!("ワークスペース履歴を読み込めません: {error}"))
 }
 
 #[tauri::command]
 fn load_workspace_history(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    let _guard = WORKSPACE_HISTORY_LOCK.lock().map_err(|error| error.to_string())?;
+    let _guard = WORKSPACE_HISTORY_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
     read_workspace_history(&workspace_history_path(&app)?)
 }
 
 #[tauri::command]
 fn record_workspace_history(app: tauri::AppHandle, root: String) -> Result<Vec<String>, String> {
-    let _guard = WORKSPACE_HISTORY_LOCK.lock().map_err(|error| error.to_string())?;
+    let _guard = WORKSPACE_HISTORY_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
-    if !root.is_dir() { return Err("ワークスペースのフォルダーがありません。".into()); }
+    if !root.is_dir() {
+        return Err("ワークスペースのフォルダーがありません。".into());
+    }
     let root = root.to_string_lossy().into_owned();
     let path = workspace_history_path(&app)?;
     let mut history = read_workspace_history(&path)?;
     history.retain(|entry| entry != &root);
     history.insert(0, root);
     history.truncate(20);
-    fs::create_dir_all(path.parent().ok_or("設定フォルダーを取得できません。")?).map_err(|error| error.to_string())?;
-    fs::write(&path, serde_json::to_vec_pretty(&history).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+    fs::create_dir_all(path.parent().ok_or("設定フォルダーを取得できません。")?)
+        .map_err(|error| error.to_string())?;
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&history).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
     Ok(history)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchCommand {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
     name: String,
     program: String,
     #[serde(default)]
     args: Vec<String>,
+}
+
+fn normalize_launch_commands(commands: &mut [LaunchCommand]) -> bool {
+    let mut changed = false;
+    for command in commands {
+        if command.id.is_empty() {
+            command.id = manual_core::screenshots::new_id("app");
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn launch_commands_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -66,9 +97,14 @@ fn load_launch_commands(app: tauri::AppHandle) -> Result<Vec<LaunchCommand>, Str
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| format!("共通起動コマンドを読み込めません: {error}"))
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    let mut commands: Vec<LaunchCommand> = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("対象アプリを読み込めません: {error}"))?;
+    let needs_migration = normalize_launch_commands(&mut commands);
+    if needs_migration {
+        save_launch_commands(app, commands.clone())?;
+    }
+    Ok(commands)
 }
 
 #[tauri::command]
@@ -76,23 +112,38 @@ fn save_launch_commands(app: tauri::AppHandle, commands: Vec<LaunchCommand>) -> 
     if commands.len() > 100 {
         return Err("共通起動コマンドは100件以内にしてください。".into());
     }
-    let mut names = std::collections::HashSet::new();
+    let mut ids = std::collections::HashSet::new();
     for command in &commands {
-        if command.name.trim().is_empty() || command.program.trim().is_empty() {
-            return Err("コマンド名とアプリのパスは必須です。".into());
+        if command.program.trim().is_empty() {
+            return Err("アプリのパスは必須です。".into());
         }
-        if !names.insert(command.name.trim().to_lowercase()) {
-            return Err(format!(
-                "コマンド名「{}」が重複しています。",
-                command.name.trim()
-            ));
+        if command.id.is_empty() || !ids.insert(command.id.clone()) {
+            return Err("アプリの識別情報が不正です。".into());
         }
     }
     let path = launch_commands_path(&app)?;
     let parent = path.parent().ok_or("設定フォルダーを取得できません。")?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let bytes = serde_json::to_vec_pretty(&commands).map_err(|error| error.to_string())?;
-    fs::write(path, bytes).map_err(|error| format!("共通起動コマンドを保存できません: {error}"))
+    use std::io::Write;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    temporary.write_all(&bytes).map_err(|e| e.to_string())?;
+    temporary.as_file().sync_all().map_err(|e| e.to_string())?;
+    temporary.persist(path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn test_launch_application(program: String, args: Vec<String>) -> Result<(), String> {
+    if program.trim().is_empty() {
+        return Err("アプリのパスを指定してください。".into());
+    }
+    let executable = manual_core::platform::application_executable(&program)?;
+    std::process::Command::new(executable)
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("アプリを起動できません: {e}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -184,12 +235,37 @@ fn restore_manual_studio(
     while let Some(label) = hidden.last().cloned() {
         if let Some(window) = app.get_webview_window(&label) {
             window.show().map_err(|error| error.to_string())?;
+            window.unminimize().map_err(|error| error.to_string())?;
         }
         hidden.pop();
     }
     if let Some(main) = app.get_webview_window("main") {
         main.show().map_err(|error| error.to_string())?;
-        main.set_focus().map_err(|error| error.to_string())?;
+        main.unminimize().map_err(|error| error.to_string())?;
+        // Raising explicitly also brings Studio back above the app launched
+        // for capture. Keep its usual stacking policy after taking focus.
+        let was_on_top = main.is_always_on_top().map_err(|error| error.to_string())?;
+        main.set_always_on_top(true)
+            .map_err(|error| error.to_string())?;
+        let focused = main.set_focus();
+        let reset = main.set_always_on_top(was_on_top);
+        focused.map_err(|error| error.to_string())?;
+        reset.map_err(|error| error.to_string())?;
+        #[cfg(target_os = "linux")]
+        {
+            // GTK focus requests can be denied after the replay raised another
+            // application. Activate our own X11 window through the isolated worker.
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            let handle = main.window_handle().map_err(|error| error.to_string())?;
+            let id = match handle.as_raw() {
+                RawWindowHandle::Xlib(handle) => Some(handle.window as u64),
+                RawWindowHandle::Xcb(handle) => Some(handle.window.get() as u64),
+                _ => None,
+            };
+            if let Some(id) = id {
+                native_worker::activate_window(&format!("0x{id:x}"))?;
+            }
+        }
     }
     Ok(())
 }
@@ -214,6 +290,7 @@ async fn manual_request(
     request: serde_json::Value,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let recapture = request["action"].as_str() == Some("screenshots-recapture");
         let capture_app = app.clone();
         let attempted_capture = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let attempted = attempted_capture.clone();
@@ -247,7 +324,7 @@ async fn manual_request(
         .unwrap_or_else(|_| {
             Err("処理中に予期しないエラーが発生しました。Munin Manual Studioへ戻ります。".into())
         });
-        if attempted_capture.load(std::sync::atomic::Ordering::Relaxed) {
+        if recapture || attempted_capture.load(std::sync::atomic::Ordering::Relaxed) {
             let restored = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
             match (result, restored) {
                 (Err(error), Err(restore_error)) => Err(format!(
@@ -377,7 +454,9 @@ async fn paste_clipboard_image(
         if let Ok(text) = clipboard.get_text() {
             for raw_line in text.lines() {
                 let line = raw_line.trim();
-                let Some(src_path) = clipboard_paths::image_path(line) else { continue; };
+                let Some(src_path) = clipboard_paths::image_path(line) else {
+                    continue;
+                };
                 if src_path.is_file() {
                     let ext = src_path
                         .extension()
@@ -452,7 +531,9 @@ async fn read_clipboard_image() -> Result<Option<String>, String> {
         if let Ok(text) = clipboard.get_text() {
             for raw_line in text.lines() {
                 let line = raw_line.trim();
-                let Some(path) = clipboard_paths::image_path(line) else { continue; };
+                let Some(path) = clipboard_paths::image_path(line) else {
+                    continue;
+                };
                 if path.is_file() {
                     let ext = path
                         .extension()
@@ -571,19 +652,28 @@ async fn finish_operation_recording(
     app: tauri::AppHandle,
     state: State<'_, recorder::RecorderState>,
 ) -> Result<recorder::RecordingResult, String> {
-    let control_bounds = app.get_webview_window("recording-control").and_then(|window| {
-        let position = window.outer_position().ok()?;
-        let size = window.outer_size().ok()?;
-        #[cfg(target_os = "macos")]
-        let scale = window.scale_factor().ok()?;
-        #[cfg(not(target_os = "macos"))]
-        let scale = 1.0;
-        Some((position.x as f64 / scale, position.y as f64 / scale, size.width as f64 / scale, size.height as f64 / scale))
-    });
+    let control_bounds = app
+        .get_webview_window("recording-control")
+        .and_then(|window| {
+            let position = window.outer_position().ok()?;
+            let size = window.outer_size().ok()?;
+            #[cfg(target_os = "macos")]
+            let scale = window.scale_factor().ok()?;
+            #[cfg(not(target_os = "macos"))]
+            let scale = 1.0;
+            Some((
+                position.x as f64 / scale,
+                position.y as f64 / scale,
+                size.width as f64 / scale,
+                size.height as f64 / scale,
+            ))
+        });
     let state = state.inner().clone();
-    let result = tauri::async_runtime::spawn_blocking(move || recorder::finish_excluding_control(&state, control_bounds))
-        .await
-        .map_err(|error| error.to_string())??;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        recorder::finish_excluding_control(&state, control_bounds)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     if result.markits_started {
         let completion = PathBuf::from(&result.completion_file);
         let source = PathBuf::from(&result.source_file);
@@ -595,7 +685,9 @@ async fn finish_operation_recording(
                     let _ = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
                     break;
                 }
-                if !source.is_file() || app.get_webview_window("main").is_none() { break; }
+                if !source.is_file() || app.get_webview_window("main").is_none() {
+                    break;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
         });
@@ -652,6 +744,183 @@ async fn preserve_markits_capture(
 }
 
 #[tauri::command]
+async fn import_library_capture(
+    root: String,
+    id: String,
+    revision: Option<String>,
+    image_file: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine;
+        let root = PathBuf::from(root);
+        let source = manual_core::screenshots::image(&root,&id,revision.as_deref(),true)?;
+        let bytes = fs::read(image_file).map_err(|e|e.to_string())?;
+        let loaded = markits_desktop_lib::metadata::load_image_with_metadata(&bytes).map_err(|e|e.to_string())?;
+        let mut ui = loaded.ui_elements.clone();
+        if let Some(crop) = &loaded.crop_info { if let Some(elements) = &mut ui { for element in elements { element.x += crop.offset_x; element.y += crop.offset_y; } } }
+        let scene = loaded.annotations_json.as_deref().map(serde_json::from_str::<serde_json::Value>).transpose().map_err(|e|e.to_string())?;
+        let result = manual_core::screenshots::register(&root,&serde_json::json!({"id":id,"source":source["data"],"render":base64::engine::general_purpose::STANDARD.encode(&bytes),"scene":scene,"crop":loaded.crop_info,"ui":ui,"adopt":source["screenshot"]["adopted"].is_null()}))?;
+        Ok(result.to_string())
+    }).await.map_err(|e|e.to_string())?
+}
+
+fn prepare_library_screenshot(
+    root: String,
+    id: String,
+    revision: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    let root = PathBuf::from(root);
+    let source = manual_core::screenshots::image(&root, &id, revision.as_deref(), true)?;
+    if source["screenshot"]["protected"] == true {
+        return Err("保護を解除してから編集してください。".into());
+    }
+    let data = source["data"].as_str().ok_or("原本を読めません。")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.strip_prefix("data:image/png;base64,").unwrap_or(data))
+        .map_err(|e| e.to_string())?;
+    let edit = &source["edit"];
+    let scene = if edit["scene"].is_null() {
+        serde_json::json!({"canvas":{"width":edit["width"],"height":edit["height"]},"annotations":[]})
+    } else {
+        edit["scene"].clone()
+    };
+    let crop: Option<markits_desktop_lib::metadata::CropInfo> = if edit["crop"].is_null() {
+        None
+    } else {
+        Some(serde_json::from_value(edit["crop"].clone()).map_err(|e| e.to_string())?)
+    };
+    let mut background = bytes.clone();
+    if let Some(crop) = &crop {
+        let render = manual_core::screenshots::image(&root, &id, revision.as_deref(), false)?;
+        let render_data = render["data"].as_str().ok_or("画像を読めません。")?;
+        let render_bytes = base64::engine::general_purpose::STANDARD
+            .decode(
+                render_data
+                    .strip_prefix("data:image/png;base64,")
+                    .unwrap_or(render_data),
+            )
+            .map_err(|e| e.to_string())?;
+        let dimensions = image::load_from_memory(&render_bytes).map_err(|e| e.to_string())?;
+        let original = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+        if crop.offset_x < 0.0
+            || crop.offset_y < 0.0
+            || crop.offset_x as u32
+                + scene["canvas"]["width"]
+                    .as_u64()
+                    .unwrap_or(dimensions.width() as u64) as u32
+                > original.width()
+            || crop.offset_y as u32
+                + scene["canvas"]["height"]
+                    .as_u64()
+                    .unwrap_or(dimensions.height() as u64) as u32
+                > original.height()
+        {
+            return Err("クロップが原本の範囲外です。".into());
+        }
+        let cropped = original.crop_imm(
+            crop.offset_x as u32,
+            crop.offset_y as u32,
+            scene["canvas"]["width"]
+                .as_u64()
+                .unwrap_or(dimensions.width() as u64) as u32,
+            scene["canvas"]["height"]
+                .as_u64()
+                .unwrap_or(dimensions.height() as u64) as u32,
+        );
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        cropped
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        background = cursor.into_inner();
+    }
+    let ui: Option<Vec<markits_desktop_lib::ui_elements::DetectedUiElement>> =
+        if edit["ui"].is_null() {
+            None
+        } else {
+            Some(serde_json::from_value(edit["ui"].clone()).map_err(|e| e.to_string())?)
+        };
+    let ui = if let Some(crop) = &crop {
+        ui.map(|elements| {
+            markits_desktop_lib::ui_elements::filter_elements_for_crop(
+                &elements,
+                crop.offset_x,
+                crop.offset_y,
+                scene["canvas"]["width"].as_f64().unwrap_or(0.0),
+                scene["canvas"]["height"].as_f64().unwrap_or(0.0),
+            )
+        })
+    } else {
+        ui
+    };
+    let annotated = markits_desktop_lib::metadata::embed_metadata(
+        &background,
+        Some(&scene.to_string()),
+        ui.as_deref(),
+        crop.as_ref(),
+    )
+    .map_err(|e| e.to_string())?;
+    let annotated = markits_desktop_lib::metadata::embed_text_chunk(
+        &annotated,
+        "markits:source_image",
+        &format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&background)
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    let annotated =
+        markits_desktop_lib::metadata::embed_text_chunk(&annotated, "markits:base_image", data)
+            .map_err(|e| e.to_string())?;
+    let home = manual_core::config::project_path(
+        &root,
+        &format!(
+            ".munin/screenshots/{id}/sessions/{}",
+            manual_core::screenshots::new_id("session")
+        ),
+    )?;
+    fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    let input = home.join("input.png");
+    let output = home.join("output.png");
+    let completion = home.join("complete.done");
+    fs::write(&input, annotated).map_err(|e| e.to_string())?;
+    fs::write(home.join("session.json"),serde_json::json!({"version":1,"id":id,"revision":edit["id"],"original":edit["original"],"completion":completion}).to_string()).map_err(|e|e.to_string())?;
+    Ok(
+        serde_json::json!({"sourceFile":input,"annotationFile":output,"completionFile":completion,"revision":edit["id"]}),
+    )
+}
+
+#[tauri::command]
+async fn edit_library_screenshot(
+    root: String,
+    id: String,
+    revision: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let handoff = prepare_library_screenshot(root, id, revision)?;
+        let mut command =
+            std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+        command
+            .arg("--manual-studio-annotate")
+            .arg("--manual-studio-input")
+            .arg(handoff["sourceFile"].as_str().ok_or("Invalid input")?)
+            .arg("--manual-studio-output")
+            .arg(handoff["annotationFile"].as_str().ok_or("Invalid output")?)
+            .arg("--manual-studio-completion")
+            .arg(
+                handoff["completionFile"]
+                    .as_str()
+                    .ok_or("Invalid session")?,
+            )
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(handoff)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn cleanup_markits_capture(image_file: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || recorder::cleanup_completed_capture(&image_file))
         .await
@@ -662,6 +931,10 @@ fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
     let mode = args.next();
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--manual-studio-annotate")) {
+        markits_desktop_lib::run();
+        return;
+    }
     if mode.as_deref() == Some(std::ffi::OsStr::new(native_worker::FLAG)) {
         let result = args
             .next()
@@ -694,6 +967,7 @@ fn main() {
             load_workspace_history,
             record_workspace_history,
             save_launch_commands,
+            test_launch_application,
             show_recording_control,
             close_recording_control,
             hide_recording_control,
@@ -712,6 +986,8 @@ fn main() {
             import_markits_annotation,
             markits_annotation_ready,
             preserve_markits_capture,
+            import_library_capture,
+            edit_library_screenshot,
             cleanup_markits_capture,
             clone_operation_scenario_for_task,
             open_editor,
@@ -719,4 +995,110 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start Munin Manual Studio");
+}
+
+#[cfg(test)]
+mod application_profile_tests {
+    use super::*;
+    #[test]
+    fn library_completion_is_retryable_and_keeps_adopted_and_original_pixels() {
+        use base64::Engine;
+        let root = tempfile::tempdir().unwrap();
+        let original = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(20,16,image::Rgba([10,20,30,255])));
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        original.write_to(&mut buffer,image::ImageFormat::Png).unwrap();
+        let source = base64::engine::general_purpose::STANDARD.encode(buffer.into_inner());
+        let saved = manual_core::screenshots::register(root.path(),&serde_json::json!({"source":source})).unwrap();
+        let id = saved["screenshot"]["id"].as_str().unwrap().to_string();
+        let owner = root.path().to_string_lossy().into_owned();
+        let before = manual_core::screenshots::image(root.path(),&id,None,false).unwrap();
+        let handoff = prepare_library_screenshot(owner.clone(),id.clone(),None).unwrap();
+        // A missing/failed MarkIts output leaves the persistent source and adoption untouched.
+        assert!(tauri::async_runtime::block_on(import_library_capture(owner.clone(),id.clone(),None,"missing-output.png".into())).is_err());
+        for _ in 0..2 {
+            tauri::async_runtime::block_on(import_library_capture(owner.clone(),id.clone(),None,handoff["sourceFile"].as_str().unwrap().into())).unwrap();
+        }
+        let after = manual_core::screenshots::image(root.path(),&id,None,false).unwrap();
+        assert_eq!(after["data"],before["data"]);
+        assert_eq!(after["screenshot"]["adopted"],before["screenshot"]["adopted"]);
+        assert_eq!(after["screenshot"]["edits"].as_array().unwrap().len(),2,"repeated empty-annotation completion saves one candidate");
+        assert_eq!(manual_core::screenshots::image(root.path(),&id,None,true).unwrap()["data"],format!("data:image/png;base64,{source}"));
+    }
+    #[test]
+    fn handoff_reconstructs_raw_crop_scene_and_full_original_after_reload() {
+        use base64::Engine;
+        let root = tempfile::tempdir().unwrap();
+        let original = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            80,
+            60,
+            image::Rgba([10, 20, 30, 255]),
+        ));
+        let cropped = original.crop_imm(20, 10, 30, 25);
+        let encode = |image: &image::DynamicImage| {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+            base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())
+        };
+        let scene = serde_json::json!({"canvas":{"width":30,"height":25},"annotations":[{"type":"rect","target":[3,4,10,5],"style":"primary"}]});
+        let saved=manual_core::screenshots::register(root.path(),&serde_json::json!({"source":encode(&original),"render":encode(&cropped.resize_exact(15,12,image::imageops::FilterType::Nearest)),"scene":scene,"crop":{"is_auto_cropped":false,"offset_x":20.0,"offset_y":10.0,"base_width":80,"base_height":60}})).unwrap();
+        let id = saved["screenshot"]["id"].as_str().unwrap();
+        let handoff =
+            prepare_library_screenshot(root.path().to_string_lossy().into_owned(), id.into(), None)
+                .unwrap();
+        let loaded = markits_desktop_lib::metadata::load_image_with_metadata(
+            &fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!((loaded.width, loaded.height), (30, 25));
+        assert_eq!(
+            (loaded.base_width, loaded.base_height),
+            (Some(80), Some(60))
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(loaded.annotations_json.as_deref().unwrap())
+                .unwrap(),
+            scene
+        );
+        assert_eq!(loaded.crop_info.unwrap().offset_x, 20.0);
+        assert_eq!(
+            loaded.image_data_url,
+            format!("data:image/png;base64,{}", encode(&cropped))
+        );
+        assert_eq!(
+            manual_core::screenshots::image(root.path(), id, None, true).unwrap()["data"],
+            format!("data:image/png;base64,{}", encode(&original))
+        );
+        let session = std::path::Path::new(handoff["sourceFile"].as_str().unwrap())
+            .parent()
+            .unwrap()
+            .join("session.json");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&fs::read(session).unwrap()).unwrap()
+                ["revision"],
+            saved["revision"]
+        );
+    }
+    #[test]
+    fn legacy_profiles_keep_argument_boundaries_and_optional_names() {
+        let mut profiles:Vec<LaunchCommand>=serde_json::from_value(serde_json::json!([
+            {"name":"","program":"/path with spaces/app","args":[" value with spaces ","$(literal)","--flag"]},
+            {"name":"","program":"other","args":[]}
+        ])).unwrap();
+        assert!(normalize_launch_commands(&mut profiles));
+        let snapshot = profiles[0].clone();
+        let id = snapshot.id.clone();
+        assert_ne!(id, profiles[1].id);
+        assert!(!normalize_launch_commands(&mut profiles));
+        profiles[0].name = "renamed".into();
+        profiles[0].args.clear();
+        assert_eq!(profiles[0].id, id);
+        profiles.clear();
+        assert_eq!(
+            snapshot.args,
+            [" value with spaces ", "$(literal)", "--flag"]
+        );
+        let restored: LaunchCommand =
+            serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        assert_eq!(restored.id, id);
+    }
 }

@@ -28,6 +28,7 @@ BUILD_INPUTS = (
     "crates/markits/src",
     "crates/markits/Cargo.toml",
     "crates/markits/Cargo.lock",
+    "crates/markits/apps/desktop/index.html",
     "crates/markits/apps/desktop/src",
     "crates/markits/apps/desktop/src-tauri",
     "crates/markits/apps/desktop/package.json",
@@ -72,14 +73,13 @@ def target_directory() -> Path:
 
 def cached_binary(target: Path) -> Path | None:
     binary_name = "manual-studio.exe" if sys.platform == "win32" else "manual-studio"
-    markits_binary_name = "markits-desktop.exe" if sys.platform == "win32" else "markits-desktop"
     candidates = [target / profile / binary_name for profile in ("debug", "release")]
     candidates = [candidate for candidate in candidates if candidate.is_file() and os.access(candidate, os.X_OK)]
     if not candidates:
         return None
     latest = max(candidates, key=lambda candidate: candidate.stat().st_mtime)
     manualctl_name = "manualctl.exe" if sys.platform == "win32" else "manualctl"
-    if source_is_newer(latest) or not (latest.parent / markits_binary_name).is_file() or not (latest.parent / manualctl_name).is_file():
+    if source_is_newer(latest) or not (latest.parent / manualctl_name).is_file():
         return None
     return latest
 
@@ -90,14 +90,8 @@ def build_application(target: Path) -> Path:
     cargo = required_tool("cargo")
     markits_frontend = PROJECT_ROOT / "crates/markits/apps/desktop"
     prepare_frontend(npm)
-    subprocess.run([npm, "run", "manual:build"], cwd=PROJECT_ROOT, check=True)
     prepare_frontend(npm, markits_frontend)
-    subprocess.run([npm, "run", "build"], cwd=markits_frontend, check=True)
-    subprocess.run(
-        [cargo, "build", "--locked", "--manifest-path", "crates/markits/apps/desktop/src-tauri/Cargo.toml", "--target-dir", str(target)],
-        cwd=PROJECT_ROOT,
-        check=True,
-    )
+    subprocess.run([npm, "run", "manual:build"], cwd=PROJECT_ROOT, check=True)
     subprocess.run([cargo, "build", "--locked", "-p", "manual-core", "--bin", "manualctl", "--target-dir", str(target)], cwd=PROJECT_ROOT, check=True)
     subprocess.run([cargo, "build", "--locked", "-p", "manual-studio", "--target-dir", str(target)], cwd=PROJECT_ROOT, check=True)
     binary_name = "manual-studio.exe" if sys.platform == "win32" else "manual-studio"
@@ -117,9 +111,7 @@ def run_development_mode() -> int:
     markits_frontend = PROJECT_ROOT / "crates/markits/apps/desktop"
     prepare_frontend(npm, markits_frontend)
     subprocess.run([npm, "run", "manual:build"], cwd=PROJECT_ROOT, check=True)
-    subprocess.run([npm, "run", "build"], cwd=markits_frontend, check=True)
     target = target_directory()
-    subprocess.run([cargo, "build", "--locked", "--manifest-path", "crates/markits/apps/desktop/src-tauri/Cargo.toml", "--target-dir", str(target)], cwd=PROJECT_ROOT, check=True)
     subprocess.run([cargo, "build", "--locked", "-p", "manual-core", "--bin", "manualctl", "--target-dir", str(target)], cwd=PROJECT_ROOT, check=True)
     environment = os.environ.copy()
     environment["PATH"] = str(target / "debug") + os.pathsep + environment.get("PATH", "")

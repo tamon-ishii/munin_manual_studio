@@ -16,6 +16,27 @@ fn nonempty(value: &Value) -> Option<&str> {
     value.as_str().filter(|text| !text.trim().is_empty())
 }
 
+fn retry_unavailable_ui_element<T>(
+    timeout: Duration,
+    mut read: impl FnMut(Duration) -> Result<T, String>,
+) -> Result<T, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let result = read(deadline.saturating_duration_since(Instant::now()));
+        match result {
+            // UIA_E_ELEMENTNOTAVAILABLE: a WebView2 node was replaced while
+            // resolving the locator. Re-resolve only this read-only operation.
+            Err(error) if error.contains("Platform error (-2147220991):")
+                && Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(100).min(
+                        deadline.saturating_duration_since(Instant::now()),
+                    ));
+                }
+            result => return result,
+        }
+    }
+}
+
 fn key_for(name: &str) -> Option<Key> {
     match name.to_ascii_lowercase().as_str() {
         "enter" | "return" => Some(Key::Enter),
@@ -104,6 +125,15 @@ pub(crate) fn validate_with_tasks(
                     nonempty(value).ok_or_else(|| format!("Step {number} needs a selector"))?;
                 Selector::parse(selector).map_err(|error| format!("Step {number}: {error}"))?;
             }
+            "fill_target" => {
+                serde_json::from_value::<super::semantic_target::Target>(value["target"].clone())
+                    .map_err(|error| error.to_string())?.validate()?;
+                if value["value"].as_str().is_none() { return Err("入力欄の値は文字列で指定してください。".into()); }
+                if let Some(visual) = value.get("visual") {
+                    serde_json::from_value::<super::visual_target::Target>(visual.clone())
+                        .map_err(|error| error.to_string())?.decode()?;
+                }
+            }
             "fill" | "expect_value" => {
                 if value.get("value").and_then(Value::as_str).is_none() {
                     return Err(format!("{action} step {number} needs selector and value"));
@@ -156,6 +186,20 @@ pub(crate) fn validate_with_tasks(
                 }
             }
             "click" => {
+                if value.get("target").is_some() || value.get("visual").is_some() {
+                    if value.get("x").is_some() || value.get("y").is_some() {
+                        return Err(format!("Click step {number} cannot combine a target and coordinates"));
+                    }
+                    if let Some(target) = value.get("target") {
+                        serde_json::from_value::<super::semantic_target::Target>(target.clone())
+                            .map_err(|error| error.to_string())?.validate()?;
+                    }
+                    if let Some(visual) = value.get("visual") {
+                        serde_json::from_value::<super::visual_target::Target>(visual.clone())
+                            .map_err(|error| error.to_string())?.decode()?;
+                    }
+                    continue;
+                }
                 if value
                     .get("x")
                     .and_then(Value::as_u64)
@@ -168,6 +212,14 @@ pub(crate) fn validate_with_tasks(
                     return Err(format!(
                         "Click step {number} needs nonnegative x and y coordinates"
                     ));
+                }
+            }
+            "expect_targets" => {
+                let targets = value.as_array().filter(|targets| !targets.is_empty() && targets.len() <= 10)
+                    .ok_or("到達確認の対象は1〜10件必要です。")?;
+                for target in targets {
+                    serde_json::from_value::<super::semantic_target::Target>(target.clone())
+                        .map_err(|error| error.to_string())?.validate()?;
                 }
             }
             "wait_ms" => {
@@ -248,6 +300,46 @@ fn find_window(query: &str) -> Result<WindowInfo, String> {
     }
 }
 
+fn process_belongs_to(mut pid: u32, launched: u32) -> bool {
+    for _ in 0..64 {
+        if pid == launched { return true; }
+        #[cfg(target_os = "linux")]
+        {
+            let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else { return false; };
+            let Some(fields) = stat.rsplit_once(") ").map(|(_, rest)| rest) else { return false; };
+            let Some(parent) = fields.split_whitespace().nth(1).and_then(|value| value.parse::<u32>().ok()) else { return false; };
+            if parent == 0 || parent == pid { return false; }
+            pid = parent;
+        }
+        #[cfg(not(target_os = "linux"))]
+        { return false; }
+    }
+    false
+}
+
+fn select_launched_window(query: &str, windows: &[WindowInfo], owners: &[(String, u32)], launched: u32) -> Result<WindowInfo, String> {
+    let eligible: Vec<_> = windows.iter().filter(|window| owners.iter().any(|(id, pid)| id == &window.id && process_belongs_to(*pid, launched))).collect();
+    let exact: Vec<_> = eligible.iter().copied().filter(|window| window.id == query || window.title.eq_ignore_ascii_case(query)).collect();
+    let matches = if exact.is_empty() { eligible.into_iter().filter(|window| window.title.to_lowercase().contains(&query.to_lowercase())).collect() } else { exact };
+    match matches.as_slice() {
+        [window] => Ok((*window).clone()),
+        [] => Err(format!("Window not found: {query} (launched process {launched})")),
+        _ => Err(format!("Window name is ambiguous in launched process: {query}")),
+    }
+}
+
+fn wait_launched_window(query: &str, pid: u32) -> Result<WindowInfo, String> {
+    let until = Instant::now() + Duration::from_secs(15);
+    loop {
+        let result = select_launched_window(query, &window_capture::list_windows()?, &window_capture::window_process_ids()?, pid);
+        match result {
+            Ok(window) => return Ok(window),
+            Err(error) if Instant::now() >= until || !error.starts_with("Window not found:") => return Err(error),
+            Err(_) => thread::sleep(Duration::from_millis(200)),
+        }
+    }
+}
+
 fn wait_window(query: &str) -> Result<WindowInfo, String> {
     let until = Instant::now() + Duration::from_secs(10);
     loop {
@@ -297,6 +389,7 @@ fn a11y_window(query: &str) -> Result<Element, String> {
     let mut exact = Vec::new();
     let mut partial = Vec::new();
     for app in App::list().map_err(|error| error.to_string())? {
+        if scoped.is_some_and(|(pid, _)| app.pid.is_some_and(|actual| actual != pid)) { continue; }
         // An unrelated app may close while the desktop is being enumerated.
         let Ok(windows) = app.windows() else { continue };
         for window in windows {
@@ -465,6 +558,58 @@ fn locator(window: &Element, selector: &str) -> Locator {
     )
 }
 
+fn wait_click_target(
+    selected: &SelectedWindow, target: Option<&super::semantic_target::Target>,
+    visual: Option<&super::visual_target::Target>, root: &Path, checkpoint: &str,
+    started: Instant, timeout: Duration,
+) -> Result<(markits::ui_elements::DetectedUiElement, Vec<markits::ui_elements::DetectedUiElement>), String> {
+    let name = target.map(|target| target.name.as_str()).unwrap_or("画像の対象");
+    super::agent::log_progress(root, &format!("「{name}」の表示を待機（最大10秒）"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let check = || {
+        super::agent::check_cancelled(root, checkpoint)?;
+        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".to_string()); }
+        if Instant::now() >= deadline { return Err(format!("クリック対象が見つかりません：{name}")); }
+        Ok(())
+    };
+    loop {
+        check()?;
+        let window = selected.native()?;
+        let elements = match super::semantic_target::observe_window(&window.id) {
+            Ok(elements) => elements,
+            Err(_) if visual.is_some() => Vec::new(),
+            Err(error) => return Err(error),
+        };
+        check()?;
+        if let Some(target) = target {
+            // An ambiguous semantic identity is an error, never a reason to guess visually.
+            if let Some(element) = target.resolve(&elements)? { return Ok((element.clone(), elements)); }
+        }
+        if let Some(visual) = visual {
+            super::agent::log_progress(root, &format!("画像照合で「{name}」の位置を確認"));
+            let picture = window_capture::read_window_pixels(&window.id, None)?;
+            if let Some((x,y)) = super::visual_target::locate(visual, &picture, check)? {
+                check()?;
+                return Ok((markits::ui_elements::DetectedUiElement {
+                    role: "visual".into(), name: Some(name.into()), window_id: Some(window.id), pid: None,
+                    x: window.x as f64 + x * window.width as f64 / picture.width() as f64 - 0.5,
+                    y: window.y as f64 + y * window.height as f64 / picture.height() as f64 - 0.5,
+                    width: 1.0, height: 1.0,
+                }, elements));
+            }
+        }
+        check()?;
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn click_observed(selected: &SelectedWindow, element: &markits::ui_elements::DetectedUiElement) -> Result<(), String> {
+    if !window_capture::is_wayland_session() { activate_for_input(selected)?; }
+    let point = Point::new((element.x + element.width / 2.0) as i32, (element.y + element.height / 2.0) as i32);
+    xa11y::input_sim().map_err(|error| error.to_string())?.mouse().click(point)
+        .map_err(|error| error.to_string())
+}
+
 fn activate(selected: &SelectedWindow) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if !window_capture::is_wayland_session() {
@@ -483,10 +628,12 @@ fn activate(selected: &SelectedWindow) -> Result<(), String> {
 
 fn activate_for_input(selected: &SelectedWindow) -> Result<(), String> {
     #[cfg(target_os = "linux")]
-    if !window_capture::is_wayland_session() && selected.native().is_ok() {
-        return activate(selected);
+    if !window_capture::is_wayland_session() {
+        if let Ok(window) = selected.native() {
+            if window_capture::is_window_active(&window.id)? { return Ok(()); }
+            return activate(selected);
+        }
     }
-
     if a11y_window(&selected.query).is_ok_and(|window| window.states.active) {
         return Ok(());
     }
@@ -586,11 +733,35 @@ pub fn run(
     captured_dir: &Path,
 ) -> Result<RunResult, String> {
     fs::create_dir_all(captured_dir).map_err(|error| error.to_string())?;
+    let started = std::time::Instant::now();
+    let checkpoint = super::agent::cancellation_checkpoint(root);
+    let timeout = super::agent::operation_timeout(300);
     let mut selected = SelectedWindow::new(initial_window);
-    let mut launched_window = false;
+    let mut launched_window = None;
     let mut captured = Vec::new();
     for (index, step) in steps.iter().enumerate() {
         let (action, value) = step.as_object().unwrap().iter().next().unwrap();
+        super::agent::check_cancelled(root, &checkpoint)?;
+        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+        let label = match action.as_str() {
+            "launch" => "アプリを起動", "window" => "対象ウィンドウを探して前面へ移動",
+            "wait_ms" => "記録された待機", "screenshot" => "画面を撮影",
+            "click" => "クリック", "text" | "fill" | "fill_target" => "文字を入力", "key" => "キーを入力",
+            "expect_window" => "対象ウィンドウの表示を待機",
+            "expect_targets" => "撮影前に目的の画面への到達を確認",
+            "expect_hidden" => "対象要素が隠れるまで待機（最大10秒）",
+            "expect_enabled" => "対象要素が有効になるまで待機（最大10秒）",
+            "expect_disabled" => "対象要素が無効になるまで待機（最大10秒）",
+            "expect_focused" => "対象要素のフォーカスを待機（最大10秒）",
+            "expect_value" => "対象要素の値を待機（最大10秒）",
+            "scroll" | "scroll_into_view" => "スクロール",
+            "press" => "ボタンを押す", "focus" => "対象要素へフォーカス",
+            "toggle" => "切り替え", "select" => "選択",
+            "expect_visible" => "対象要素の表示を待機（最大10秒）",
+            _ => action.as_str(),
+        };
+        let detail = if action == "wait_ms" { format!("（{}秒）", value.as_u64().unwrap_or(0) as f64 / 1000.0) } else { String::new() };
+        super::agent::log_progress(root, &format!("操作 {}/{}：{label}{detail}", index + 1, steps.len()));
         let result: Result<(), String> = (|| {
             match action.as_str() {
                 "launch" => {
@@ -601,14 +772,16 @@ pub fn run(
                         .map(|items| items.iter().filter_map(Value::as_str).collect())
                         .unwrap_or_default();
                     let executable = super::platform::application_executable_in(root, program)?;
-                    Command::new(executable)
+                    let mut child = Command::new(executable)
                         .args(args)
                         .current_dir(root)
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
+                        .stderr(Stdio::null())
                         .spawn()
                         .map_err(|error| format!("Could not launch {program}: {error}"))?;
-                    launched_window = true;
+                    launched_window = Some(child.id());
+                    thread::spawn(move || { let _ = child.wait(); });
                 }
                 "window" => {
                     let query = value.as_str().unwrap();
@@ -617,12 +790,12 @@ pub fn run(
                     } else {
                         // A freshly launched native window may not exist yet. Poll
                         // for it instead of scanning every app's accessibility tree.
-                        let located = if launched_window
+                        let located = if launched_window.is_some()
                             && !window_capture::is_wayland_session()
                             && !query.starts_with("pid:")
                             && !query.starts_with("app:")
                         {
-                            LocatedWindow::Native(wait_window(query)?)
+                            LocatedWindow::Native(wait_launched_window(query, launched_window.unwrap())?)
                         } else {
                             wait_any_window(query)?
                         };
@@ -630,7 +803,12 @@ pub fn run(
                             LocatedWindow::Native(window) => {
                                 selected = SelectedWindow {
                                     accessible: None,
-                                    query: window.title,
+                                    query: if launched_window.is_some() {
+                                        window_capture::window_process_ids()?.into_iter()
+                                            .find(|(id, _)| id == &window.id)
+                                            .map(|(_, pid)| format!("pid:{pid}:{}", window.title))
+                                            .ok_or("Selected application window has no process ID")?
+                                    } else { window.title },
                                     native_id: Some(window.id),
                                 };
                                 activate(&selected)?;
@@ -653,12 +831,21 @@ pub fn run(
                             }
                         }
                     }
-                    launched_window = false;
+                    launched_window = None;
                 }
                 "expect_window" => {
                     wait_any_window(value.as_str().unwrap())?;
                 }
-                "press" | "focus" | "toggle" | "select" | "scroll_into_view" | "expect_visible"
+                "expect_visible" => {
+                    retry_unavailable_ui_element(Duration::from_secs(10), |remaining| {
+                        let window = selected.accessible()?;
+                        locator(&window, value.as_str().unwrap())
+                            .wait_visible(remaining)
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    })?;
+                }
+                "press" | "focus" | "toggle" | "select" | "scroll_into_view"
                 | "expect_hidden" | "expect_enabled" | "expect_disabled" | "expect_focused" => {
                     let window = selected.accessible()?;
                     let target = locator(&window, value.as_str().unwrap());
@@ -670,11 +857,6 @@ pub fn run(
                         "scroll_into_view" => target
                             .scroll_into_view()
                             .map_err(|error| error.to_string())?,
-                        "expect_visible" => {
-                            target
-                                .wait_visible(Duration::from_secs(10))
-                                .map_err(|error| error.to_string())?;
-                        }
                         "expect_hidden" => target
                             .wait_hidden(Duration::from_secs(10))
                             .map_err(|error| error.to_string())?,
@@ -753,6 +935,21 @@ pub fn run(
                         .map_err(|error| error.to_string())?;
                 }
                 "click" => {
+                    if value.get("target").is_some() || value.get("visual").is_some() {
+                        let target: Option<super::semantic_target::Target> = value.get("target").cloned()
+                            .map(serde_json::from_value).transpose().map_err(|error| error.to_string())?;
+                        let visual: Option<super::visual_target::Target> = value.get("visual").cloned()
+                            .map(serde_json::from_value).transpose().map_err(|error| error.to_string())?;
+                        let (element, elements) = wait_click_target(&selected, target.as_ref(), visual.as_ref(), root, &checkpoint, started, timeout)?;
+                        let name = target.as_ref().map(|target| target.name.as_str()).unwrap_or("画像の対象");
+                        if target.as_ref().map(|target| target.needs_click(&elements)).transpose()?.unwrap_or(true) {
+                            super::agent::log_progress(root, &format!("「{name}」をクリック"));
+                            click_observed(&selected, &element)?;
+                        } else {
+                            super::agent::log_progress(root, &format!("「{name}」は展開済みです"));
+                        }
+                        return Ok(());
+                    }
                     let bounds = selected.bounds_for_input()?;
                     let x = value["x"].as_u64().unwrap() as u32;
                     let y = value["y"].as_u64().unwrap() as u32;
@@ -775,6 +972,41 @@ pub fn run(
                         .mouse()
                         .click(Point::new(screen_x, screen_y))
                         .map_err(|error| error.to_string())?;
+                }
+                "fill_target" => {
+                    let target: super::semantic_target::Target = serde_json::from_value(value["target"].clone())
+                        .map_err(|error| error.to_string())?;
+                    let visual: Option<super::visual_target::Target> = value.get("visual").cloned()
+                        .map(serde_json::from_value).transpose().map_err(|error| error.to_string())?;
+                    let (element, _) = wait_click_target(&selected, Some(&target), visual.as_ref(), root, &checkpoint, started, timeout)?;
+                    super::agent::log_progress(root, &format!("入力欄「{}」の値を設定", target.name));
+                    click_observed(&selected, &element)?;
+                    let input = xa11y::input_sim().map_err(|error| error.to_string())?;
+                    input.keyboard().chord(Key::Char('a'), &[if cfg!(target_os = "macos") { Key::Meta } else { Key::Ctrl }]).map_err(|error| error.to_string())?;
+                    super::agent::check_cancelled(root, &checkpoint)?;
+                    let text = value["value"].as_str().unwrap();
+                    if text.is_empty() { input.keyboard().chord(Key::Backspace, &[]).map_err(|error| error.to_string())?; }
+                    else { input.keyboard().type_text(text).map_err(|error| error.to_string())?; }
+                    if element.role == "input" {
+                        super::agent::log_progress(root, &format!("入力欄「{}」への反映を確認", target.name));
+                        let deadline = Instant::now() + Duration::from_secs(10);
+                        let mut reflected_since = None;
+                        loop {
+                            super::agent::check_cancelled(root, &checkpoint)?;
+                            if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                            let actual = super::semantic_target::input_value(&selected.native()?.id, &target)?;
+                            super::agent::check_cancelled(root, &checkpoint)?;
+                            if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                            if actual.as_deref() == Some(text) {
+                                let since = reflected_since.get_or_insert_with(Instant::now);
+                                if since.elapsed() >= Duration::from_millis(300) { break; }
+                            } else { reflected_since = None; }
+                            if Instant::now() >= deadline {
+                                return Err(format!("入力欄「{}」へ値が反映されていません。", target.name));
+                            }
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                    }
                 }
                 "text" | "key" => {
                     if action == "text" && value.is_object() {
@@ -814,10 +1046,43 @@ pub fn run(
                             .map_err(|error| error.to_string())?;
                     }
                 }
-                "wait_ms" => thread::sleep(Duration::from_millis(value.as_u64().unwrap())),
+                "expect_targets" => {
+                    let targets: Vec<super::semantic_target::Target> = serde_json::from_value(value.clone())
+                        .map_err(|error| error.to_string())?;
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    loop {
+                        super::agent::check_cancelled(root, &checkpoint)?;
+                        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                        let elements = super::semantic_target::observe_window(&selected.native()?.id)?;
+                        super::agent::check_cancelled(root, &checkpoint)?;
+                        if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                        let missing: Vec<_> = targets.iter().filter_map(|target| match target.resolve(&elements) {
+                            Ok(Some(_)) => None,
+                            Ok(None) => Some(Ok(target.name.clone())),
+                            Err(error) => Some(Err(error)),
+                        }).collect::<Result<_, _>>()?;
+                        if missing.is_empty() { break; }
+                        super::agent::log_progress(root, &format!("撮影する画面の表示を待機：{}", missing.join("、")));
+                        if Instant::now() >= deadline { return Err(format!("目的の画面に到達していません：{}", missing.join("、"))); }
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                }
+                "wait_ms" => {
+                    let end=std::time::Instant::now()+Duration::from_millis(value.as_u64().unwrap());
+                    while std::time::Instant::now()<end {
+                        super::agent::check_cancelled(root,&checkpoint)?;
+                        if started.elapsed()>=timeout {return Err("撮影手順が制限時間を超えました。".into());}
+                        thread::sleep(Duration::from_millis(50).min(end.saturating_duration_since(std::time::Instant::now())));
+                    }
+                },
                 "screenshot" => {
                     let task_id = value["task"].as_str().unwrap();
                     let inset = value.get("inset").and_then(Value::as_u64).unwrap_or(0) as u32;
+                    let expectations = super::capture_validation::read(root, task_id)?;
+                    if !expectations.window_title.is_empty() || !expectations.screen_text.is_empty() {
+                        let window = selected.native()?;
+                        super::capture_validation::check_target(root, task_id, &window.id, &window.title)?;
+                    }
                     capture(
                         &selected,
                         value.get("selector").and_then(Value::as_str),
@@ -847,6 +1112,51 @@ pub fn run(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn named_click_validation_keeps_legacy_and_rejects_mixed_targets() {
+        let dir = tempdir().unwrap();
+        assert!(validate(&[serde_json::json!({"click":{"target":{"role":"button","name":"Open"}}})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"click":{"target":{"role":"button","name":""}}})], dir.path()).is_err());
+        assert!(validate(&[serde_json::json!({"click":{"target":{"role":"button","name":"Open"},"x":10,"y":20}})], dir.path()).is_err());
+        assert!(validate(&[serde_json::json!({"click":{"x":10,"y":20}})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"expect_targets":[{"role":"heading","name":"Nested page"}]})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"expect_targets":[]})], dir.path()).is_err());
+        assert!(validate(&[serde_json::json!({"fill_target":{"target":{"role":"input","name":"Project root"},"value":"path"}})], dir.path()).is_ok());
+        assert!(validate(&[serde_json::json!({"fill_target":{"target":{"role":"input","name":"Project root"},"value":1}})], dir.path()).is_err());
+    }
+
+    #[test]
+    fn visible_wait_retries_replaced_uia_node_and_preserves_other_errors() {
+        let unavailable = "Platform error (-2147220991): reading UIA control type failed";
+        let mut reads = 0;
+        let result = retry_unavailable_ui_element(Duration::from_secs(1), |_| {
+            reads += 1;
+            if reads == 1 { Err(unavailable.into()) } else { Ok("visible") }
+        });
+        assert_eq!(result.unwrap(), "visible");
+        assert_eq!(reads, 2);
+
+        let mut reads = 0;
+        let result: Result<(), String> = retry_unavailable_ui_element(Duration::from_secs(1), |_| {
+            reads += 1;
+            Err("permission denied".into())
+        });
+        assert_eq!(result.unwrap_err(), "permission denied");
+        assert_eq!(reads, 1);
+
+        let result: Result<(), String> = retry_unavailable_ui_element(Duration::ZERO, |_| Err(unavailable.into()));
+        assert_eq!(result.unwrap_err(), unavailable);
+    }
+
+    #[test]
+    fn launched_window_selection_excludes_ide_with_matching_title() {
+        let window = |id: &str, title: &str| WindowInfo { id: id.into(), title: title.into(), x: 0, y: 0, width: 1440, height: 940 };
+        let windows = vec![window("ide", "Manual Studio"), window("app", "Munin Manual Studio")];
+        let owners = vec![("ide".into(), u32::MAX), ("app".into(), std::process::id())];
+        assert_eq!(select_launched_window("Manual Studio", &windows, &owners, std::process::id()).unwrap().id, "app");
+        assert!(select_launched_window("Manual Studio", &windows[..1], &owners, std::process::id()).is_err());
+    }
 
     #[test]
     fn validates_desktop_scenario_before_input() {

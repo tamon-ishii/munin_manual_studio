@@ -161,6 +161,60 @@ pub fn read_config(root: &Path) -> ManualConfig {
     config
 }
 
+/// Use the configured source asset directory, and link to it from the actual page.
+pub fn asset_destination(
+    root: &Path,
+    page: &Path,
+    filename: &str,
+) -> Result<(PathBuf, String), String> {
+    if Path::new(filename).components().count() != 1
+        || !matches!(
+            Path::new(filename).components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+    {
+        return Err("画像のファイル名が不正です。".into());
+    }
+    let config = read_config(root);
+    let folder = if config.assets.trim().is_empty() {
+        format!("{}/assets", config.docs)
+    } else {
+        config.assets
+    };
+    let destination = project_path(
+        root,
+        &format!("{}/{filename}", folder.trim_end_matches('/')),
+    )?;
+    let page = project_page_path(root, page)?;
+    let page = page.parent().ok_or("原稿の保存先が不正です。")?;
+    let from: Vec<_> = page.components().collect();
+    let to: Vec<_> = destination.components().collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return Err("原稿と画像の保存先が一致しません。".into());
+    }
+    let link = format!(
+        "{}{}",
+        "../".repeat(from.len() - common),
+        to[common..]
+            .iter()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    );
+    Ok((destination, link))
+}
+
+/// Normalize the project root alias before comparing page and asset paths.
+pub(crate) fn project_page_path(root: &Path, page: &Path) -> Result<PathBuf, String> {
+    let canonical = root.canonicalize().map_err(|e| e.to_string())?;
+    let relative = page
+        .strip_prefix(root)
+        .or_else(|_| page.strip_prefix(&canonical))
+        .map_err(|_| "原稿がプロジェクトの外を指しています。")?;
+    project_path(root, &relative.to_string_lossy())
+}
+
 pub fn project_path(root: &Path, value: &str) -> Result<PathBuf, String> {
     let abs_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     if value.trim().is_empty()
@@ -338,4 +392,75 @@ pub fn save_settings(
     fs::write(&brief_path, format!("{}\n", final_brief.trim_end())).map_err(|e| e.to_string())?;
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn project_root_aliases_produce_local_links_without_allowing_escape() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        fs::create_dir_all(root.join("docs/sub")).unwrap();
+        let alias = temp.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let canonical = root.canonicalize().unwrap();
+        let page = alias.join("docs/sub/index.md");
+        let (destination, link) = asset_destination(&alias, &page, "shot.png").unwrap();
+        assert_eq!(destination, canonical.join("docs/assets/shot.png"));
+        assert_eq!(link, "../assets/shot.png");
+        assert_eq!(
+            crate::quality::local_path(&alias, &page, "../b.md").unwrap(),
+            canonical.join("docs/b.md")
+        );
+        assert!(crate::quality::local_path(&alias, &page, "../../../outside.md").is_err());
+        assert!(asset_destination(&alias, &temp.path().join("outside.md"), "shot.png").is_err());
+        std::os::unix::fs::symlink(temp.path(), root.join("escape")).unwrap();
+        assert!(crate::quality::local_path(&alias, &page, "../../escape/outside.md").is_err());
+    }
+
+    #[test]
+    fn asset_links_follow_configuration_and_page_location() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs/sub")).unwrap();
+        for (page, expected) in [
+            ("README.md", "docs/assets/shot.png"),
+            ("docs/sub/index.md", "../assets/shot.png"),
+        ] {
+            let (destination, link) =
+                asset_destination(root.path(), &root.path().join(page), "shot.png").unwrap();
+            assert_eq!(link, expected);
+            assert_eq!(
+                destination,
+                root.path()
+                    .canonicalize()
+                    .unwrap()
+                    .join("docs/assets/shot.png")
+            );
+        }
+        fs::write(
+            root.path().join("manual_setting.json"),
+            r#"{"docs":"docs","assets":"media/shots"}"#,
+        )
+        .unwrap();
+        let (destination, link) = asset_destination(
+            root.path(),
+            &root.path().join("docs/sub/index.md"),
+            "shot.png",
+        )
+        .unwrap();
+        assert_eq!(
+            destination,
+            root.path()
+                .canonicalize()
+                .unwrap()
+                .join("media/shots/shot.png")
+        );
+        assert_eq!(link, "../../media/shots/shot.png");
+        assert!(
+            asset_destination(root.path(), &root.path().join("README.md"), "../shot.png").is_err()
+        );
+    }
 }
