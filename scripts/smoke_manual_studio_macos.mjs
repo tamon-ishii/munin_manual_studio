@@ -39,7 +39,13 @@ try{
  await scenario(main(),[...fill('text_field','起動パス',python.trim()),...fill('text_area','起動引数（1行に1つ）',[fixture,report,' value with spaces ','$(literal)'].join('\n')),...press('アプリ登録を保存'),...press('閉じる'),...press('スクリーンショット一覧'),...press('操作を記録して撮影'),...press('記録を開始')]);
  pass('Studio project open, application registration and recording start controls');
  const args=await poll(async()=>{try{return JSON.parse(await readFile(report,'utf8'));}catch{return null;}});targetPid=args.pid;assert.deepEqual(args.args,[' value with spaces ','$(literal)']);
+ // The fixture writes arguments before Studio finishes detecting its window
+ // and starts the recorder. Wait for Studio's ready control and helper file.
+ await scenario(`pid:${studio.pid}:Munin Manual Studio — 撮影`,[{expect_visible:'button[name="スクリーンショットを実行"]'}]);
+ const recorderFile=await poll(async()=>{const files=await readdir(tmpdir());const name=files.find(name=>name.startsWith(`manual-studio-recorder-${studio.pid}-`)&&name.endsWith('.jsonl'));return name?path.join(tmpdir(),name):null;});
  await scenario(`pid:${targetPid}:Munin macOS Recording Target`,[{wait_ms:600},{click:{x:80,y:80}},{expect_window:`pid:${targetPid}:Munin macOS Recording Target clicked`}]);
+ await poll(async()=>{const events=(await readFile(recorderFile,'utf8')).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));return events.some(event=>event.kind==='click');});
+ pass('Actual Studio recorder is ready and records the target click');
  await scenario(`pid:${studio.pid}:Munin Manual Studio — 撮影`,press('スクリーンショットを実行'));
  const editor=await poll(async()=>{const found=await ownedMarkits();if(found)return found;try{const {stdout}=await run(cli,['inspect-window','--root',root,'--window',main()],{timeout:3000});if(stdout.includes('撮影に失敗')||stdout.includes('起動できません'))throw new Error(stdout);}catch(error){if(String(error).includes('撮影に失敗')||String(error).includes('起動できません'))throw error;}return null;});await scenario(editor,press('編集終了'));
  const initial=await poll(shot);assert.ok(initial.recipe.steps.some(step=>step.click),'Native recorder captured the fixture click');
