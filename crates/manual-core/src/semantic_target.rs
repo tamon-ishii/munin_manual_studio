@@ -152,7 +152,7 @@ mod tests {
 }
 
 /// Observe only the selected native window, using the same geometry as recording.
-pub fn observe_window(id: &str) -> Result<Vec<DetectedUiElement>, String> {
+fn window_context(id: &str) -> Result<DetectedUiElement, String> {
     let window = super::window_capture::list_windows()?
         .into_iter()
         .find(|window| window.id == id)
@@ -168,14 +168,25 @@ pub fn observe_window(id: &str) -> Result<Vec<DetectedUiElement>, String> {
             .ok_or("対象ウィンドウが閉じられました。")?
     };
     #[cfg(not(target_os = "linux"))]
+    let pid = super::window_capture::window_process_ids()?
+        .into_iter()
+        .find(|(candidate, _)| candidate == id)
+        .map(|(_, pid)| pid)
+        .ok_or("対象ウィンドウのアプリを確認できません。")?;
+    #[cfg(target_os = "windows")]
+    let accessible_id = {
+        let handle = u32::from_str_radix(id.trim_start_matches("0x"), 16)
+            .map_err(|error| error.to_string())?;
+        Some(format!("hwnd:{:#x}", (handle as i32 as isize) as usize))
+    };
+    #[cfg(target_os = "macos")]
+    let accessible_id = None;
+    #[cfg(not(target_os = "linux"))]
     let context = DetectedUiElement {
         role: "window".into(),
         name: Some(window.title),
-        window_id: Some(window.id),
-        pid: super::window_capture::window_process_ids()?
-            .into_iter()
-            .find(|(candidate, _)| candidate == id)
-            .map(|(_, pid)| pid),
+        window_id: accessible_id,
+        pid: Some(pid),
         x: window.x as f64,
         y: window.y as f64,
         width: window.width as f64,
@@ -183,5 +194,15 @@ pub fn observe_window(id: &str) -> Result<Vec<DetectedUiElement>, String> {
     };
     #[cfg(target_os = "linux")]
     let _ = window;
-    Ok(markits::ui_elements::observe_desktop_targets(&context))
+    Ok(context)
+}
+
+pub fn observe_window(id: &str) -> Result<Vec<DetectedUiElement>, String> {
+    Ok(markits::ui_elements::observe_desktop_targets(
+        &window_context(id)?,
+    ))
+}
+
+pub fn input_value(id: &str, target: &Target) -> Result<Option<String>, String> {
+    markits::ui_elements::desktop_input_value(&window_context(id)?, &target.name)
 }

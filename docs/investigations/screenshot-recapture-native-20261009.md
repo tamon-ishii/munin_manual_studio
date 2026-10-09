@@ -42,3 +42,13 @@ Linux X11のキー入力では、対象がすでにアクティブならウィ�
 - Linux: AT-SPIのGetAccessibleAtPointを要素取得に利用する。統一されたOS標準OCRを前提にせず、必要時にローカルOCRを追加する。画像テンプレート照合はOS共通の実装を検討する。
 
 参考: [Windows UI Automation](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation-elementfrompoint)、[Windows OCR](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr.ocrengine)、[macOS Accessibility](https://developer.apple.com/documentation/applicationservices/1462077-axuielementcopyelementatposition)、[Apple Vision](https://developer.apple.com/documentation/vision/vnrecognizetextrequest)、[AT-SPI](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Component.get_accessible_at_point.html)。
+
+## 2026-10-09 意味による録画・画像代替検索の検証
+
+実際のManual Studioで、ワークスペース、入力欄、開く、Chapter、Section、detail.mdの6クリックを名前・種類・小画像で保存し、各クリックのレシピに絶対座標がないことを確認した。録画原本のハッシュとMarkIts再編集後のシーンが保持された。検証用の一時資産だけで最初のボタン名を存在しない名前へ変更し、画像照合に必ず進む条件で再撮影を実行した。
+
+Studio経由では入力後すぐに「開く」を押すと初期プロジェクトが残り、次の階層を解決できず失敗するケースがあった。固定待機の追加で切り分けた後、`fill_target` に入力値の読み取りと安定確認を追加した。進捗へ値そのものを出さず「入力欄への反映を確認」と表示し、最大10秒で失敗させる。LinuxはAT-SPI Text.GetTextの単独呼び出しを使用し、WebKitGTKに対する大量の属性照会を避ける。対象がすでに前面ならクリック前にも再フォーカスしない。
+
+追加の固定待機なしで、画像代替検索、同じ階層文書への到達、見出しの確認、撮影候補保存、成功件数の表示、Munin Manual Studioへの復帰、Markdown挿入、MkDocs公開が成功した。これは一時プロジェクト内の確認であり、利用者の録画や画像を変更していない。
+
+OS条件: Linuxの操作録画・画像照合はX11が必要。WindowsではUIAのウィンドウ識別子とネイティブHWNDを対応付ける。macOSでは画面収録・アクセシビリティ権限が必要で、名前・プロセス・ウィンドウ範囲で限定する。OCRは使用しない。倍率対応は画像テンプレートの離散的なサイズ変更であり、テーマ変更や任意の外観差への対応を保証しない。Windows WebView2の巨大表示・100/150/200%表示倍率、macOSの実GUI操作は未確認。

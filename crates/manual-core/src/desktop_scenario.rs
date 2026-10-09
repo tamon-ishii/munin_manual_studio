@@ -604,7 +604,7 @@ fn wait_click_target(
 }
 
 fn click_observed(selected: &SelectedWindow, element: &markits::ui_elements::DetectedUiElement) -> Result<(), String> {
-    if !window_capture::is_wayland_session() { activate(selected)?; }
+    if !window_capture::is_wayland_session() { activate_for_input(selected)?; }
     let point = Point::new((element.x + element.width / 2.0) as i32, (element.y + element.height / 2.0) as i32);
     xa11y::input_sim().map_err(|error| error.to_string())?.mouse().click(point)
         .map_err(|error| error.to_string())
@@ -987,6 +987,26 @@ pub fn run(
                     let text = value["value"].as_str().unwrap();
                     if text.is_empty() { input.keyboard().chord(Key::Backspace, &[]).map_err(|error| error.to_string())?; }
                     else { input.keyboard().type_text(text).map_err(|error| error.to_string())?; }
+                    if element.role == "input" {
+                        super::agent::log_progress(root, &format!("入力欄「{}」への反映を確認", target.name));
+                        let deadline = Instant::now() + Duration::from_secs(10);
+                        let mut reflected_since = None;
+                        loop {
+                            super::agent::check_cancelled(root, &checkpoint)?;
+                            if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                            let actual = super::semantic_target::input_value(&selected.native()?.id, &target)?;
+                            super::agent::check_cancelled(root, &checkpoint)?;
+                            if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
+                            if actual.as_deref() == Some(text) {
+                                let since = reflected_since.get_or_insert_with(Instant::now);
+                                if since.elapsed() >= Duration::from_millis(300) { break; }
+                            } else { reflected_since = None; }
+                            if Instant::now() >= deadline {
+                                return Err(format!("入力欄「{}」へ値が反映されていません。", target.name));
+                            }
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                    }
                 }
                 "text" | "key" => {
                     if action == "text" && value.is_object() {

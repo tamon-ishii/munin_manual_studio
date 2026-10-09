@@ -249,6 +249,7 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
     // Keep a pre-click image. Capturing after ButtonPress can record a changed
     // label or a newly opened menu instead of the control that was clicked.
     let visual_snapshot = Arc::new(Mutex::new(None));
+    let semantic_window = visual_window.clone();
     if let Some(id) = visual_window {
         let cache = Arc::clone(&visual_snapshot);
         thread::spawn(move || loop {
@@ -264,19 +265,14 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
         });
     }
     let snapshot = Arc::new(Mutex::new((Instant::now(), Vec::new())));
-    if let Ok(context) = std::env::var("MUNIN_RECORDING_WINDOW") {
-        if let Ok(target) = serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context) {
-            let snapshot = Arc::clone(&snapshot);
-            thread::spawn(move || loop {
-                let observed_at = Instant::now();
-                let current = markits::ui_elements::capture_desktop_windows(0, 0).into_iter()
-                    .find(|window| window.window_id == target.window_id);
-                let elements = current.map(|window| markits::ui_elements::observe_desktop_targets(&window))
-                    .unwrap_or_default();
-                if let Ok(mut cache) = snapshot.lock() { *cache = (observed_at, elements); }
-                thread::sleep(Duration::from_millis(200));
-            });
-        }
+    if let Some(id) = semantic_window {
+        let snapshot = Arc::clone(&snapshot);
+        thread::spawn(move || loop {
+            let observed_at = Instant::now();
+            let elements = manual_core::semantic_target::observe_window(&id).unwrap_or_default();
+            if let Ok(mut cache) = snapshot.lock() { *cache = (observed_at, elements); }
+            thread::sleep(Duration::from_millis(200));
+        });
     }
     let started = Instant::now();
     let mut ctrl = false;

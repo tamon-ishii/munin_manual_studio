@@ -218,6 +218,31 @@ pub fn observe_desktop_targets(target: &DetectedUiElement) -> Vec<DetectedUiElem
     capture_desktop_detailed_elements_for_window(0, 0, target)
 }
 
+/// Read one uniquely named input without logging its contents.
+pub fn desktop_input_value(target: &DetectedUiElement, name: &str) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    { linux_atspi::input_value(target, name) }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let pid = target.pid.ok_or("入力先のアプリを確認できません。")?;
+        let app = App::by_pid(pid, std::time::Duration::ZERO).map_err(|error| error.to_string())?;
+        let windows = app.windows().map_err(|error| error.to_string())?;
+        let mut matching = windows.into_iter().filter(|window| {
+            target_accepts_window(target,window.stable_id.as_deref(),window.pid.or(app.pid))
+                && (target.window_id.is_some() || window.name.as_deref() == target.name.as_deref())
+                && window.bounds.is_some_and(|bounds| window_overlaps_target(bounds.x as f64,bounds.y as f64,bounds.width as f64,bounds.height as f64,target))
+        });
+        let Some(window) = matching.next() else { return Ok(None); };
+        if matching.next().is_some() { return Err("入力先のウィンドウが複数あります。".into()); }
+        let inputs = xa11y::Locator::new(window.provider().clone(),Some(window.data().clone()),"text_field, text_area")
+            .elements().map_err(|error| error.to_string())?;
+        let mut inputs = inputs.into_iter().filter(|input| input.name.as_deref().map(str::trim) == Some(name));
+        let Some(input) = inputs.next() else { return Ok(None); };
+        if inputs.next().is_some() { return Err("入力先が複数あります。操作を中止しました。".into()); }
+        Ok(input.value.clone())
+    }
+}
+
 /// Identify the process behind a captured X11 window when available.
 pub fn target_process_id(target: &DetectedUiElement) -> Option<u32> {
     #[cfg(target_os = "linux")]
@@ -270,6 +295,10 @@ fn collect_detailed_elements(
                     continue;
                 }
                 if let Some(target) = target {
+                    if target.window_id.is_none() && target.name.is_some()
+                        && window.name.as_deref().map(str::trim) != target.name.as_deref().map(str::trim) {
+                        continue;
+                    }
                     if !target_accepts_window(
                         target, window.stable_id.as_deref(), window.pid.or(app.pid),
                     ) {
@@ -537,6 +566,49 @@ mod linux_atspi {
             path = parent.1;
         }
         None
+    }
+
+    pub fn input_value(target: &super::DetectedUiElement, name: &str) -> Result<Option<String>, String> {
+        let started = std::time::Instant::now();
+        let pid = super::target_process_id(target).ok_or("入力先のアプリを確認できません。")?;
+        let app = App::by_pid(pid, Duration::ZERO).map_err(|error| error.to_string())?;
+        let root = app.as_element();
+        let bus = root.raw.get("bus_name").and_then(|value| value.as_str()).ok_or("AT-SPI接続先がありません。")?;
+        let path = root.raw.get("object_path").and_then(|value| value.as_str()).ok_or("AT-SPI対象がありません。")?;
+        let connection = connect(Some(Duration::from_millis(250))).ok_or("AT-SPIへ接続できません。")?;
+        let accessible = Proxy::new(&connection, bus, path, "org.a11y.atspi.Accessible").map_err(|error| error.to_string())?;
+        let windows: Vec<(String, OwnedObjectPath)> = accessible.call("GetChildren", &()).map_err(|error| error.to_string())?;
+        let mut roots = Vec::new();
+        for (bus, path) in windows {
+            let proxy = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Accessible").map_err(|error| error.to_string())?;
+            if proxy.get_property::<String>("Name").ok().as_deref() == target.name.as_deref() {
+                roots.push((bus.clone(), path.clone(), 0usize));
+            }
+        }
+        if roots.len() > 1 { return Err("入力先のウィンドウが複数あります。".into()); }
+        let mut queue = VecDeque::from(roots);
+        let mut found = None;
+        let mut visited = 0;
+        while let Some((bus, path, depth)) = queue.pop_front() {
+            if visited >= 2000 || started.elapsed() >= Duration::from_secs(2) {
+                return Err("入力先の値を時間内に確認できません。".into());
+            }
+            visited += 1;
+            let accessible = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Accessible").map_err(|error| error.to_string())?;
+            let matched = accessible.get_property::<String>("Name").map_err(|error| error.to_string())?.trim() == name;
+            if matched {
+                let role: u32 = accessible.call("GetRole", &()).map_err(|error| error.to_string())?;
+                if map_role(role) == Some("input") {
+                    if found.is_some() { return Err("入力先が複数あります。操作を中止しました。".into()); }
+                    let text = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Text").map_err(|error| error.to_string())?;
+                    found = Some(text.call::<_, _, String>("GetText", &(0i32, -1i32)).map_err(|error| error.to_string())?);
+                }
+            }
+            let children: Vec<(String, OwnedObjectPath)> = accessible.call("GetChildren", &()).map_err(|error| error.to_string())?;
+            if depth >= 32 && !children.is_empty() { return Err("入力先の階層を完全に確認できません。".into()); }
+            queue.extend(children.into_iter().map(|(bus,path)| (bus,path,depth+1)));
+        }
+        Ok(found)
     }
 
     fn map_role(role: u32) -> Option<&'static str> {

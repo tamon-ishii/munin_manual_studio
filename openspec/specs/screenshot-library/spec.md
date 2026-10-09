@@ -1,10 +1,10 @@
-# Spec Delta
+# screenshot-library Specification
 
 ## Purpose
 
 Manage screenshots as independent project assets with immutable full-size originals, editable MarkIts scenes, repeatable recording workflows, and document references, so users can capture and revise images without AI access or loss of the source pixels.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Provide an independent screenshot library
 Manual Studio SHALL provide a project screenshot list with thumbnails, optional names, capture or edit state, and document usage. The list SHALL support capture, recording, import, MarkIts editing, document insertion, individual recapture, whole-library recapture, and history without an AI connection or a selected document.
