@@ -42,3 +42,5 @@ API指定版 `7a5d105` の[CI](https://github.com/tamon-ishii/munin_manual_studi
 依存更新版 `52f458f` で `npm run manual:check` の全30段階が成功し、OpenSpec strict validationも成功した。フロントエンドのビルド後に最新のStudio／CLIをビルドして、Linux実アプリのAI指示開閉、アプリ登録、操作録画、MarkIts編集・再編集、再撮影の完了表示とStudio復帰、挿入先選択、原稿保存、AI未設定のMkDocs HTML出力を再度完了した。[Windowsの実画面チェックを含むCI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37976159776)では利用不可エラーは出なくなったが、MarkItsの「編集終了」を10秒待っても取得できなかった。探索候補はウィンドウ枠の最小化・最大化・閉じるだけで、HTML内のボタンがない。操作録画と引数保持は成功した。
 
 原因を切り分けるため、Windowsの準備・MarkIts確認・Studio WebView2確認を別ステップに分けた。MarkItsが失敗しても準備が成功していればWebView2確認を実行するが、元の失敗はジョブの失敗として残す。MarkItsの最初のシナリオ失敗時には、テストが起動したプロセスのウィンドウだけを画像と位置情報として保存する。画像取得が失敗してもシナリオの元のエラーを維持する。
+
+`52750f8` のWindowsチェックでは操作録画・起動引数保持・MarkItsの保存・クロップ・再編集・原本保持・Markdown挿入・AIなしのHTML公開が成功した。WebView2のCDP接続にも成功したが、プロジェクトを開くダイアログの入力欄が非表示のまま操作待ちで失敗した。CDPでページが見える時点とフロントエンドのイベント登録完了は一致しないため、初期化完了の `aria-busy=false` とダイアログの `open` を確認してから操作するようにした。修正版のWindows実画面ホバーはまだ未確認。
