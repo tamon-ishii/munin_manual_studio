@@ -54,7 +54,9 @@ try{
   const card=page.locator('[data-ai-task-id="hover-fixture"]');await card.waitFor();
   const before=await page.locator('#markdown-editor').inputValue();
   await card.getByRole('button',{name:'▶ 指示を展開',exact:true}).click();
-  assert.ok((await card.locator('textarea').boundingBox()).height<=216,'A long instruction must stay bounded in the actual WebView2');
+  const promptBounds = await card.locator('textarea').boundingBox();
+  const viewportHeight = await page.evaluate(()=>innerHeight);
+  assert.ok(promptBounds.height<=viewportHeight*0.3+2,`A long instruction must stay within 30vh in the actual WebView2 (${promptBounds.height}px / ${viewportHeight}px viewport)`);
   await card.getByRole('button',{name:'▼ 指示を折りたたむ',exact:true}).click();
   assert.equal(await page.locator('#markdown-editor').inputValue(),before,'Disclosure must preserve Markdown');
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
