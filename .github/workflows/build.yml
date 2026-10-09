@@ -85,12 +85,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run manual:smoke-native 2>&1 | Tee-Object -FilePath windows-native-smoke.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/test_manual_studio_webview2.mjs 2>&1 | Tee-Object -FilePath windows-webview2.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Save Windows native check log
         if: always() && runner.os == 'Windows' && inputs.windows_native_smoke
         uses: actions/upload-artifact@v4
         with:
           name: windows-native-smoke-log
-          path: windows-native-smoke.log
+          path: |
+            windows-native-smoke.log
+            windows-webview2.log
+            webview2-results/
           if-no-files-found: warn
       - name: Install browser and manual builder for UI checks
         if: runner.os == 'Linux'

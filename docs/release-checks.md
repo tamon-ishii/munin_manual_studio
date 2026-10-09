@@ -110,3 +110,11 @@ Linuxでは `scripts/smoke_manual_studio_native_library.py` によりStudio本�
 画像照合はローカルのPNGテンプレート比較を使い、OCRやAIは呼ばない。LinuxはX11、macOSは画面収録とアクセシビリティ権限が必要。画像が変化した場合や複数候補の場合は停止する。Windows WebView2のホバー表示倍率別確認とmacOS実GUIの一連の操作は未確認として残す。
 
 [最初の意味録画・画像照合版の4構成CI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37934009951) が成功し、Windowsの実録画・MarkItsチェックも成功した。入力反映確認を含む最終版はリリースCIで再検証する。
+
+### Windows WebView2の実画面チェック
+
+`node scripts/test_manual_studio_webview2.mjs` はWindowsでビルドした `target/debug/manual-studio.exe` を一時プロジェクトで起動する。WebView2の接続は[Microsoftが案内するリモートデバッグ設定](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/debug-visual-studio-code)を起動したプロセスだけに渡す。接続先はそのプロセスの専用ポートで、実際のTauri画面と専用原稿が開いたことを確認する。
+
+90行のAI指示を開閉し、高さ制限とMarkdownの保持を検証する。2種類のウィンドウ寸法と3つの編集表示で、パネルにtitleがなく、表示切替ボタンの説明が短いことを検証する。OSのポインターを動かしてホバーし、実際のウィンドウ画像と `GetDpiForWindow` のDPI、WebView2の表示寸法、診断記録を `webview2-results/` に保存する。ブラウザ倍率のエミュレーションは使わない。ウィンドウが画面外に切れている場合は成功にしない。
+
+このチェックは `windows_native_smoke=true` のCIに含む。確認済みのOS倍率は出力されたDPIから判断し、100／150／200%すべてを試したとは扱わない。追加時点ではスクリプトの構文確認のみ完了しており、Windowsでの実行結果と画像確認はまだ取得していない。
