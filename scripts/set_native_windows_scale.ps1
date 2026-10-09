@@ -32,7 +32,8 @@ if ($Scale -gt 125) {
   Start-Sleep -Milliseconds 500
   $modes=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
   $modes | ForEach-Object {@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName}} | ConvertTo-Json | Set-Content -Encoding UTF8 "native-smoke-results/display-modes-$Scale.json"
-  $large=@($modes | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem -and $_.Current.Name -match '^(1920|2560|3840) [×x] (1080|1440|2160)'})
+  $resolutionPattern=if($Scale -eq 200){'^1600 [×x] 1200'}else{'^1920 [×x] 1080'}
+  $large=@($modes | Where-Object {$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem -and $_.Current.Name -match $resolutionPattern})
   if (-not $large.Count) { throw 'Hosted display exposes no larger resolution for 150/200% scaling; see display-modes report' }
   $large[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
   Start-Sleep -Seconds 2
