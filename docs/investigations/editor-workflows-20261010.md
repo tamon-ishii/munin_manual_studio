@@ -30,3 +30,11 @@ Windows WebView2のホバー表示とOS表示倍率100／150／200%、macOSの�
 コミット `1e4ede9` では、実際のStudio/WebView2でプロジェクトを開き、AI指示の開閉、表示切替、OSポインターのホバー、ウィンドウ画像と実際のDPIの記録を行うチェックを追加した。[追加チェックを含むCI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37972828644)の結果と画像はまだ取得していない。表示倍率別の確認とmacOSの実GUI確認は引き続き未完了。
 
 その後Windowsジョブの終了を確認し、成果物の `windows-webview2.log` を取得した。実録画・MarkItsチェックは成功したが、WebView2チェックはデバッグ接続開始前に失敗し、画像は生成されなかった。管理者権限での環境変数指定が無視されるというMicrosoftの説明と整合するため、Debug／Windows専用の起動モードからWebView2の作成APIへポートと一時プロファイルを渡すよう修正した。表示不具合の検証成功とは扱わず、修正後の実行結果を待つ。
+
+### xa11yのライブ要素取得の修正
+
+API指定版 `7a5d105` の[CI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37974287093)はLinuxと両macOS構成で成功した。Windowsでは引数保持とクリック録画が成功した後、MarkItsの最初の `expect_visible` が `reading UIA control type failed: 0x80040201` で失敗した。成果物に `windows-webview2.log` はなく、WebView2チェックには到達していない。
+
+[xa11y 0.15.2](https://github.com/xa11y/xa11y/releases/tag/v0.15.2) はライブ照会中に消えたWindows候補とAT-SPIのサブツリーを除く修正を含む。配布ソースで、取得時の再試行後に正確な利用不可エラーだけを除き、ほかのエラーと保存したプロセスの同一性エラーを維持することを確認した。依存とlockfileのxa11y関連5パッケージを0.15.2へ更新した。
+
+更新後のLinuxではCore 158件成功・1件ignored、Studio 25件成功。Linux向けのlocked依存解決も成功した。Windowsでの解消、WebView2のホバー表示、倍率別確認とmacOS実GUIはまだ確認できていない。

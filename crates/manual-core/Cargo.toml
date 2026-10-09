@@ -16,7 +16,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 base64 = "0.22"
 markits = { path = "../markits" }
 image = { version = "0.25", default-features = false, features = ["png"] }
-xa11y = { version = "0.15.1", default-features = false }
+xa11y = { version = "0.15.2", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 tokio = { version = "1.51", features = ["rt", "time"] }
 percent-encoding = "2"
