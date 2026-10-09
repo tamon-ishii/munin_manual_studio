@@ -15,6 +15,10 @@ on:
         description: Run real macOS recording and MarkIts window checks
         type: boolean
         default: false
+      windows_scale_smoke:
+        description: Change real Windows display settings and verify 150/200 percent DPI
+        type: boolean
+        default: false
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -111,6 +115,30 @@ jobs:
             webview2-results/
             native-smoke-results/
           if-no-files-found: warn
+      - name: Check real Windows display scales
+        if: runner.os == 'Windows' && inputs.windows_scale_smoke && steps.windows_native_build.outcome == 'success'
+        shell: pwsh
+        run: |
+          try {
+            foreach ($scale in @(150, 200)) {
+              & scripts/set_native_windows_scale.ps1 -Scale $scale
+              $env:MANUAL_WEBVIEW2_EXPECTED_DPI = [string]($scale * 96 / 100)
+              $env:MANUAL_WEBVIEW2_RESULTS = "webview2-results/$scale"
+              node scripts/test_manual_studio_webview2.mjs
+              if ($LASTEXITCODE -ne 0) { throw "WebView2 check failed at $scale percent" }
+            }
+          } finally {
+            try { & scripts/set_native_windows_scale.ps1 -Scale 100 } catch { Write-Warning $_ }
+          }
+      - name: Save Windows scale check evidence
+        if: always() && runner.os == 'Windows' && inputs.windows_scale_smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-scale-smoke-results
+          path: |
+            webview2-results/
+            native-smoke-results/
+          if-no-files-found: warn
       - name: Prepare macOS native checks
         if: runner.os == 'macOS' && inputs.macos_native_smoke
         run: |
@@ -125,12 +153,16 @@ jobs:
         run: |
           set -o pipefail
           npm run manual:smoke-native 2>&1 | tee macos-native-smoke.log
+          node scripts/smoke_manual_studio_macos.mjs 2>&1 | tee macos-studio-smoke.log
       - name: Save macOS native check log
         if: always() && runner.os == 'macOS' && inputs.macos_native_smoke
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-native-smoke-log
-          path: macos-native-smoke.log
+          path: |
+            macos-native-smoke.log
+            macos-studio-smoke.log
+            native-smoke-results/
           if-no-files-found: warn
       - name: Install browser and manual builder for UI checks
         if: runner.os == 'Linux'
