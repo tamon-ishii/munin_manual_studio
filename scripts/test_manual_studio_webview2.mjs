@@ -41,6 +41,11 @@ try{
   let page;
   for(let i=0;i<100;i++){page=context.pages().find(candidate=>/tauri\.localhost|tauri:\/\//.test(candidate.url()));if(page)break;await pause(100);}
   assert.ok(page,'The native Tauri page must be present');
+  // A fresh WebView profile starts without a selected project. Use Studio's
+  // own project picker rather than assuming its working directory is opened.
+  await page.locator('#open-existing-workspace').click();
+  await page.locator('#project-root').fill(root);
+  await page.locator('#project-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('WebView2 hover fixture'),undefined,{timeout:30000});
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   const card=page.locator('[data-ai-task-id="hover-fixture"]');await card.waitFor();
