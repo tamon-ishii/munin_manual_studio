@@ -1,0 +1,48 @@
+[
+  {
+    "file": "manual-studio-0.5.0-linux-x64.zip",
+    "size": 44126434,
+    "sha256": "288a3af18c2cb8d419043af87beaaef789f7e9173723feb460e2ccda526cfe24",
+    "files": [
+      "manual-studio",
+      "README.txt",
+      "manualctl"
+    ]
+  },
+  {
+    "file": "manual-studio-0.5.0-macos-arm64.zip",
+    "size": 32638816,
+    "sha256": "3b4845b07ae5e00e8d1ce5351b65ea0d4a986b5a65972b95ea4ca8bcbe4d90da",
+    "files": [
+      "README.txt",
+      "Munin Manual Studio.app/Contents/Info.plist",
+      "Munin Manual Studio.app/Contents/_CodeSignature/CodeResources",
+      "Munin Manual Studio.app/Contents/MacOS/manual-studio",
+      "Munin Manual Studio.app/Contents/MacOS/manualctl",
+      "Munin Manual Studio.app/Contents/Resources/manual-studio.icns"
+    ]
+  },
+  {
+    "file": "manual-studio-0.5.0-macos-x64.zip",
+    "size": 35420430,
+    "sha256": "daea11d298a72db9e59a0cf8656bb4a454a84e7ee6f54d5ba2e880ed96859cae",
+    "files": [
+      "README.txt",
+      "Munin Manual Studio.app/Contents/Info.plist",
+      "Munin Manual Studio.app/Contents/_CodeSignature/CodeResources",
+      "Munin Manual Studio.app/Contents/MacOS/manual-studio",
+      "Munin Manual Studio.app/Contents/MacOS/manualctl",
+      "Munin Manual Studio.app/Contents/Resources/manual-studio.icns"
+    ]
+  },
+  {
+    "file": "manual-studio-0.5.0-windows-x64.zip",
+    "size": 32301701,
+    "sha256": "ed5bfc2c2f6b3536d1b581e00214e826f50ac99530f7b0cd3e504cc49fed5fcd",
+    "files": [
+      "manual-studio.exe",
+      "manualctl.exe",
+      "README.txt"
+    ]
+  }
+]

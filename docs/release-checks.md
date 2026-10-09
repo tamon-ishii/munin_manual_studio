@@ -120,3 +120,23 @@ Linuxでは `scripts/smoke_manual_studio_native_library.py` によりStudio本�
 このチェックは `windows_native_smoke=true` のCIに含む。確認済みのOS倍率は出力されたDPIから判断し、100／150／200%すべてを試したとは扱わない。追加時点ではスクリプトの構文確認のみ完了しており、Windowsでの実行結果と画像確認はまだ取得していない。
 
 最初のCI実行ではデバッグ接続が開始せず、画像は取得できなかった。[Microsoftの説明](https://github.com/MicrosoftEdge/WebView2Feedback/issues/5645)では、WebView2 150以降の管理者権限での起動時は環境変数の指定を無視し、作成APIによる指定を利用できる。失敗はこれと整合するため、環境変数だけに依存した起動からAPI指定へ変更した。CIのWindows実行結果が得られるまで表示確認済みとは扱わない。
+
+### 2026-10-10 Windows確認結果の更新
+
+`f24bdfb` の[CI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37985959902)でWindowsの実録画・MarkItsとWebView2のチェックが成功した。取得したログ、実測96 DPIの6条件のレポート、左右比較のホバー画像を確認した。詳細は[調査記録](investigations/windows-webview2-20261010.md#dpi検証追加後の再確認)に記載する。
+
+Windowsの150%・200%とmacOS実操作は未確認。利用者から現時点で実機環境がないと確認したため、これらを公開前の残タスクとして維持する。macOS両構成のCIビルド成功を実操作の確認に読み替えない。
+
+同コミットのローカル `npm run manual:check` は全30段階成功。StudioのRustテストは25件、manual-coreは158件成功・1件ignored。`openspec validate separate-screenshots-from-ai-authoring --strict` も成功した。残る実機確認が完了するまで7.5・9.3・9.4は未完了のまま維持し、アーカイブ・0.6.0公開へは進まない。
+
+上記CIは最終的にLinux、Windows、macOS ARM64、macOS x64の全4構成で成功し、配布ZIPの作成まで完了した。タグ実行ではないため公開処理はスキップされ、リリースは公開していない。
+
+### 2026-10-10 仕様整合と配布成果物の確認
+
+変更仕様の `manual-authoring` で、追加機能8項目が `REMOVED Requirements` の下に置かれていた見出しの不整合を修正した。3つの本体仕様について、追加・変更要件の全文一致と削除要件の不在を確認した。本体仕様の検証は3件成功し、変更仕様の厳密検証も成功した。
+
+CIの配布ZIP全4件をダウンロードし、全エントリーのCRC、Studioとmanualctlの同梱、README、macOSアプリ構成を確認した。[ファイル一覧・サイズ・SHA-256](investigations/release-artifacts-20261010/package-verification.json)を保存した。現行バージョンが0.5.0のため、これらは0.5.0表記の検証成果物であり、0.6.0の公開配布ファイルではない。
+
+Linuxの `manual:smoke-native` も再実行し、実アプリの引数保持・クリック録画、MarkItsのクロップ保存・再起動・拡張、不変原本、原稿挿入、AI未設定のHTML公開が成功した。最初の実行はMkDocsがPATHにないため公開段階で停止し、既存の `/tmp/munin-native-publication-venv/bin` をPATHに追加して全経路が成功した。
+
+Linux専用の実Studio操作も含めて終了コード0を確認した。AI指示の開閉、設定画面からの操作録画、撮影一覧、MarkIts編集・再編集、再撮影の完了表示、Studioの前面復帰、Markdown挿入、AI未設定のHTML公開がすべて成功した。

@@ -31,3 +31,9 @@ node scripts/test_manual_studio_webview2.mjs
 ```
 
 この設定はOSの倍率を変更しない。倍率の変更自体は[Windowsの表示設定](https://support.microsoft.com/en-gb/windows/hardware/display-graphics/change-your-screen-resolution-and-layout-in-windows)で行う。実行前に `npm run manual:build` と `cargo build --locked -p manual-core -p manual-studio` が必要。
+
+## DPI検証追加後の再確認
+
+コミット `f24bdfb` の[CI実行](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37985959902)からWindowsのログ・画像・レポートを取得した。Windowsの録画・MarkItsチェックと実WebView2チェックは成功。レポートの全6条件は96 DPIで、実ビューポートは1008×681または984×661、ページエラーは0件だった。984×661の左右比較の画像を確認し、パネルホバーに巨大表示がなく、ボタンホバーの説明が一行であることを再確認した。
+
+ネイティブログでは、空白・特殊文字を含む起動引数、クリック録画、MarkItsのクロップ保存・再起動・クロップ拡張、不変原本、Markdown挿入、AI未設定のHTML出力が成功した。期待DPIを指定しない通常CIの結果であり、150%・200%での成功を示すものではない。
