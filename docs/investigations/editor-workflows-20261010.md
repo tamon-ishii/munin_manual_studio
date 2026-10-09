@@ -38,3 +38,7 @@ API指定版 `7a5d105` の[CI](https://github.com/tamon-ishii/munin_manual_studi
 [xa11y 0.15.2](https://github.com/xa11y/xa11y/releases/tag/v0.15.2) はライブ照会中に消えたWindows候補とAT-SPIのサブツリーを除く修正を含む。配布ソースで、取得時の再試行後に正確な利用不可エラーだけを除き、ほかのエラーと保存したプロセスの同一性エラーを維持することを確認した。依存とlockfileのxa11y関連5パッケージを0.15.2へ更新した。
 
 更新後のLinuxではCore 158件成功・1件ignored、Studio 25件成功。Linux向けのlocked依存解決も成功した。Windowsでの解消、WebView2のホバー表示、倍率別確認とmacOS実GUIはまだ確認できていない。
+
+依存更新版 `52f458f` で `npm run manual:check` の全30段階が成功し、OpenSpec strict validationも成功した。フロントエンドのビルド後に最新のStudio／CLIをビルドして、Linux実アプリのAI指示開閉、アプリ登録、操作録画、MarkIts編集・再編集、再撮影の完了表示とStudio復帰、挿入先選択、原稿保存、AI未設定のMkDocs HTML出力を再度完了した。[Windowsの実画面チェックを含むCI](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37976159776)では利用不可エラーは出なくなったが、MarkItsの「編集終了」を10秒待っても取得できなかった。探索候補はウィンドウ枠の最小化・最大化・閉じるだけで、HTML内のボタンがない。操作録画と引数保持は成功した。
+
+原因を切り分けるため、Windowsの準備・MarkIts確認・Studio WebView2確認を別ステップに分けた。MarkItsが失敗しても準備が成功していればWebView2確認を実行するが、元の失敗はジョブの失敗として残す。MarkItsの最初のシナリオ失敗時には、テストが起動したプロセスのウィンドウだけを画像と位置情報として保存する。画像取得が失敗してもシナリオの元のエラーを維持する。

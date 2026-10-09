@@ -73,7 +73,8 @@ jobs:
         run: |
           cargo test --locked -p manual-core -p manual-studio
           python -m unittest discover -s scripts -p "test_package_release.py"
-      - name: Check real Windows recording and MarkIts windows
+      - name: Prepare Windows native checks
+        id: windows_native_build
         if: runner.os == 'Windows' && inputs.windows_native_smoke
         shell: pwsh
         run: |
@@ -83,8 +84,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo build --locked -p manual-studio -p manual-core
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check real Windows recording and MarkIts windows
+        if: runner.os == 'Windows' && inputs.windows_native_smoke
+        shell: pwsh
+        run: |
           npm run manual:smoke-native 2>&1 | Tee-Object -FilePath windows-native-smoke.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check Studio in real Windows WebView2
+        if: always() && runner.os == 'Windows' && inputs.windows_native_smoke && steps.windows_native_build.outcome == 'success'
+        shell: pwsh
+        run: |
           node scripts/test_manual_studio_webview2.mjs 2>&1 | Tee-Object -FilePath windows-webview2.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Save Windows native check log
@@ -96,6 +105,7 @@ jobs:
             windows-native-smoke.log
             windows-webview2.log
             webview2-results/
+            native-smoke-results/
           if-no-files-found: warn
       - name: Install browser and manual builder for UI checks
         if: runner.os == 'Linux'

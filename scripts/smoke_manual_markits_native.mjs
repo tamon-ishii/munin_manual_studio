@@ -189,7 +189,27 @@ try {
   scenario.window = `pid:${app.pid}:${window.title}`;
   await writeFile(scenarioPath, JSON.stringify(scenario, null, 2));
   console.log(`MarkIts pid=${app.pid}, window=${window.id} (${window.title})`);
-  await run(manualctl, ['scenario-run', '--root', tempRoot, '--input', scenarioPath]);
+  try {
+    await run(manualctl, ['scenario-run', '--root', tempRoot, '--input', scenarioPath]);
+  } catch (error) {
+    if (process.platform === 'win32') {
+      try {
+        const diagnostics = path.join(repo, 'native-smoke-results');
+        await mkdir(diagnostics, { recursive: true });
+        const captured = await run('powershell.exe', [
+          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          path.join(repo, 'scripts/native_webview2_window.ps1'),
+          '-OwnerPid', String(app.pid), '-Action', 'capture',
+          '-OutputPath', path.join(diagnostics, 'markits-failure.png'),
+        ], { windowsHide: true });
+        await writeFile(path.join(diagnostics, 'markits-window.json'), captured.stdout);
+        console.log('Saved the owned MarkIts failure window to native-smoke-results.');
+      } catch (diagnosticError) {
+        console.error(`Could not capture the owned MarkIts window: ${diagnosticError.message}`);
+      }
+    }
+    throw error;
+  }
   const completedAt = Date.now();
   while (remaining() > 0) {
     try { if ((await readFile(completion, 'utf8')) === 'saved') break; } catch {}
