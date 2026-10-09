@@ -140,3 +140,13 @@ CIの配布ZIP全4件をダウンロードし、全エントリーのCRC、Studi
 Linuxの `manual:smoke-native` も再実行し、実アプリの引数保持・クリック録画、MarkItsのクロップ保存・再起動・拡張、不変原本、原稿挿入、AI未設定のHTML公開が成功した。最初の実行はMkDocsがPATHにないため公開段階で停止し、既存の `/tmp/munin-native-publication-venv/bin` をPATHに追加して全経路が成功した。
 
 Linux専用の実Studio操作も含めて終了コード0を確認した。AI指示の開閉、設定画面からの操作録画、撮影一覧、MarkIts編集・再編集、再撮影の完了表示、Studioの前面復帰、Markdown挿入、AI未設定のHTML公開がすべて成功した。
+
+### 配布Linux版の実操作検証
+
+`MANUAL_NATIVE_BIN_DIR` に展開済みZIPのディレクトリを指定して、JavaScriptとLinux専用Pythonの両ネイティブチェックが同じ配布実行ファイルを使うようにした。`37985959902` のLinux ZIPから展開したStudio・manualctlで `manual:smoke-native` を通過し、終了コード0を確認した。起動引数、クリック録画、MarkItsクロップ保存・再起動・拡張、原本保持、実StudioのAI指示開閉・設定・撮影一覧・再編集・再撮影・前面復帰・原稿挿入・HTML公開まで成功した。
+
+```bash
+MANUAL_NATIVE_BIN_DIR=/path/to/extracted-linux-package npm run manual:smoke-native
+```
+
+MkDocsがPATHにあり、LinuxではシステムPythonのGI・GTK3・AT-SPIとX11が利用できる環境で実行する。環境変数を省略した場合は従来どおり `target/debug` を使う。

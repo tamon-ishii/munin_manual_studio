@@ -388,7 +388,24 @@ fn a11y_window(query: &str) -> Result<Element, String> {
         .and_then(|rest| rest.split_once("::"));
     let mut exact = Vec::new();
     let mut partial = Vec::new();
-    for app in App::list().map_err(|error| error.to_string())? {
+    // A freshly launched macOS process can be reachable by AX before it
+    // participates in global GUI application discovery. Keep PID queries
+    // attached to the requested process; the caller already polls readiness.
+    #[cfg(target_os = "macos")]
+    let apps = if let Some((pid, _)) = scoped {
+        match App::by_pid(pid, Duration::ZERO) {
+            Ok(app) => vec![app],
+            Err(xa11y::Error::SelectorNotMatched { .. } | xa11y::Error::Timeout { .. }) => {
+                return Err(format!("Accessibility window not found: {query}"));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    } else {
+        App::list().map_err(|error| error.to_string())?
+    };
+    #[cfg(not(target_os = "macos"))]
+    let apps = App::list().map_err(|error| error.to_string())?;
+    for app in apps {
         if scoped.is_some_and(|(pid, _)| app.pid.is_some_and(|actual| actual != pid)) { continue; }
         // An unrelated app may close while the desktop is being enumerated.
         let Ok(windows) = app.windows() else { continue };

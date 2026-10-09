@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const bin = path.join(repo, 'target/debug');
+const bin = path.resolve(process.env.MANUAL_NATIVE_BIN_DIR || path.join(repo, 'target/debug'));
 const markits = path.join(bin, process.platform === 'win32' ? 'manual-studio.exe' : 'manual-studio');
 const manualctl = path.join(bin, process.platform === 'win32' ? 'manualctl.exe' : 'manualctl');
 const fixturePython = process.env.MANUAL_NATIVE_PYTHON || (process.platform === 'linux' ? '/usr/bin/python3' : process.platform === 'win32' ? 'python' : 'python3');

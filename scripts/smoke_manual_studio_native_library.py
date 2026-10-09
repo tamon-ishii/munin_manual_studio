@@ -7,7 +7,7 @@ Only descendants of the spawned Studio are inspected or terminated.
 import os, subprocess, tempfile, time, json, shutil, ctypes, hashlib, sys
 from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
-BIN = REPO / 'target/debug'
+BIN = Path(os.environ.get('MANUAL_NATIVE_BIN_DIR', str(REPO / 'target/debug'))).resolve()
 if sys.platform != 'linux':
     raise SystemExit('This Studio GUI check requires Linux X11 and AT-SPI.')
 import gi
