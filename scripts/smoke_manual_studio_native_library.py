@@ -323,8 +323,11 @@ try:
             click('文書に挿入', 'push button')
             click('ここに挿入', 'push button')
             click('原稿を編集', 'push button')
-            click('保存 ⌘ / Ctrl S', 'push button')
-            time.sleep(1)
+            save_deadline = time.monotonic() + 10
+            while 'screenshot:ref' not in open(root + '/docs/index.md').read():
+                if time.monotonic() >= save_deadline:
+                    raise AssertionError('Inserted screenshot was not automatically saved')
+                time.sleep(0.1)
             assert 'screenshot:ref' in open(root + '/docs/index.md').read()
             result = subprocess.run([str(BIN / 'manualctl'), 'build-mkdocs', '--root', root], check=True, capture_output=True, text=True, timeout=30, env=os.environ.copy())
             assert 'Site:' in result.stdout

@@ -103,7 +103,7 @@ try {
   }
   assert.equal(await page.locator('.milkdown-top-bar').getByRole('button', {name:'撮影の指示',exact:true}).count(),0);
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
-  assert.equal(await page.locator('#generate-page').innerText(), 'この文書をAI更新');
+  assert.equal(await page.locator('#generate-page').innerText(), '更新');
   const editorHeight = await page.locator('#markdown-editor').evaluate(node => node.clientHeight);
   assert.ok(editorHeight > 150, `editor must preserve vertical room: ${editorHeight}px`);
 
@@ -133,7 +133,7 @@ try {
     return images.length === 2 && images.every(image => image.complete && image.naturalWidth > 0);
   });
   console.log("Smoke: editor and preview initialized");
-  const originalMarkdown = await readFile(path.join(root, 'docs/index.md'), 'utf8');
+  const originalMarkdown = await page.locator('#markdown-editor').inputValue();
   await page.locator('#markdown-editor').focus();
   await page.locator('#markdown-editor').evaluate(node => {
     const start = node.value.indexOf('Original text');
@@ -207,12 +207,14 @@ try {
   await page.locator('#page-list [data-page="notes/extra.md"]').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Unsaved dialog check/);
+  assert.match(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), /Unsaved dialog check/, 'switching tabs persists the previous draft');
+  await (await sourceEditor(page)).fill(originalNote + '\nUnsaved dialog check\nPending close edit\n');
   await page.getByRole('button', { name: 'notes/extra.mdを閉じる', exact: true }).click();
   assert.equal(await page.locator('#unsaved-changes-dialog button').count(), 3);
   await page.locator('[data-unsaved-action=cancel]').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Unsaved dialog check/);
-  assert.equal(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), originalNote);
+  assert.match(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), /Unsaved dialog check/);
   await page.getByRole('button', { name: 'notes/extra.mdを閉じる', exact: true }).click();
   await page.locator('[data-unsaved-action=save]').click();
   await idle();
@@ -316,7 +318,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Original text'));
   await idle();
 
-  // A late save response must not replace the editor state after navigation.
+  // Navigation waits for an in-flight save before changing the editor owner.
   const oldSavePage = await page.evaluate(() => window.__manualStudioRaceTest.documentState.page);
   const newerPage = await page.locator('#page-list [data-page]').evaluateAll(nodes => nodes.map(node => node.dataset.page).find(candidate => candidate?.endsWith('/intro.md')));
   assert.ok(newerPage, 'fixture project must expose its nested guide page');
@@ -339,14 +341,14 @@ try {
     window.__oldSaveResponse = window.__manualStudioRaceTest.saveDocument(false);
   });
   await awaitRpcObserved(oldSaveObserved, 'delayed old editor-save');
-  await page.evaluate(pagePath => window.__manualStudioRaceTest.openPage(pagePath, false), newerPage);
-  await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Nested guide'));
-  const nestedRevision = await page.evaluate(() => window.__manualStudioRaceTest.documentState.revision);
+  await page.evaluate(pagePath => { window.__navigationAfterSave = window.__manualStudioRaceTest.openPage(pagePath, false); }, newerPage);
+  assert.equal(await page.evaluate(() => window.__manualStudioRaceTest.documentState.page), oldSavePage, 'navigation retains the old editor until its save completes');
   releaseOldSave();
-  await page.evaluate(() => window.__oldSaveResponse);
+  await page.evaluate(() => Promise.all([window.__oldSaveResponse, window.__navigationAfterSave]));
+  await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Nested guide'));
   assert.match(await page.locator('#markdown-editor').inputValue(), /Nested guide/);
-  assert.equal(await page.locator('#editor-title').innerText(), newerPage.replace(/^docs\//, ''));
-  assert.equal(await page.evaluate(() => window.__manualStudioRaceTest.documentState.revision), nestedRevision);
+  assert.equal(await page.locator('#editor-title').textContent(), newerPage.replace(/^docs\//, ''));
+  assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /Save response from old document/);
   await page.unroute('**/__manual/rpc');
 
   // A refresh response cannot discard edits made while its document read waits.
@@ -373,7 +375,7 @@ try {
   releaseRefreshRead();
   await page.evaluate(() => window.__pendingWorkspaceRefresh);
   assert.equal(await page.locator('#markdown-editor').inputValue(), '# User edit during refresh\n');
-  assert.match(await page.locator('#save-state').innerText(), /未保存/);
+  assert.equal(await page.locator('#save-state').getAttribute('data-state'), 'dirty');
   await page.unroute('**/__manual/rpc');
 
   const longDraft = Array.from({ length: 120 }, (_, index) => `Paragraph ${index + 1}: scroll synchronization check.\n\n`).join('');
@@ -398,7 +400,7 @@ try {
     return ratio > 0.15 && ratio < 0.35;
   });
   await (await sourceEditor(page)).fill('# Edited guide\n\n**Saved content**\n');
-  await page.locator('#save-page').click();
+  await page.keyboard.press('Control+s');
   await idle();
   assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /Saved content/);
   await page.frameLocator('#markdown-preview').locator('strong').waitFor();
@@ -478,10 +480,10 @@ try {
   await popup.waitForSelector("#milkdown-editor .ProseMirror");
   await popup.getByRole("button", { name: "Markdownソース", exact: true }).click();
   await (await sourceEditor(popup)).fill('# Updated in another window\n');
-  await popup.locator('#save-page').click();
+  await popup.keyboard.press('Control+s');
   await idle(popup);
   await (await sourceEditor(page)).fill('# Stale edit\n');
-  await page.locator('#save-page').click();
+  await page.keyboard.press('Control+s');
   await idle();
   assert.match(await page.locator('#status').innerText(), /原稿が更新/);
   assert.equal(await readFile(path.join(root, 'docs/index.md'), 'utf8'), '# Updated in another window\n');
@@ -525,7 +527,7 @@ try {
     }
     await route.continue();
   });
-  await page.locator('#save-page').click();
+  await page.keyboard.press('Control+s');
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'true');
   await idle();
   assert.equal(delayedSaveSeen, true);
@@ -603,7 +605,7 @@ try {
   unifiedMarkdown = await page.locator('#markdown-editor').inputValue();
   assert.doesNotMatch(unifiedMarkdown, /approved-at="\d{4}-/);
   assert.match(unifiedMarkdown, /approved-at=fake/);
-  await page.locator('#save-page').click(); await idle();
+  await page.keyboard.press('Control+s'); await idle();
   await page.locator('[data-tab="tasks"]').dispatchEvent('click');
   const unifiedCardInTasks = page.locator('[data-task="unified-guide"]');
   assert.equal(await unifiedCardInTasks.locator('[data-prompt]').inputValue(), '初心者向け "保存"\napproved-at=fake を説明');
@@ -697,7 +699,7 @@ try {
   await page.locator('[data-tab="screenshots"]').click();
   assert.equal(await page.locator('#screenshot-library-import-button').isVisible(),true);
   await page.locator('[data-tab="editor"]').click();
-  await page.locator('#save-page').click();
+  await page.keyboard.press('Control+s');
   await idle();
   await page.locator('[data-tab="publish"]').click();
   await page.locator('#build-draft').click();

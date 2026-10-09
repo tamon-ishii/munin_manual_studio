@@ -64,7 +64,7 @@ try {
   await page.keyboard.press('Control+Shift+z');
   await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('screenshot:ref'));
 
-  await page.locator('[data-tab=editor]').click();await page.locator('#save-page').click();await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  await page.locator('[data-tab=editor]').click();await page.keyboard.press('Control+s');await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   const saved=await readFile(path.join(root,'docs/index.md'),'utf8');assert.match(saved,/screenshot:ref id=shot-/);assert.match(saved,/!\[icon\]\(assets\/screenshots\//);
   await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   await page.locator('#markdown-editor').evaluate(editor=>editor.setSelectionRange(editor.value.length,editor.value.length));
@@ -79,7 +79,7 @@ try {
   assert.equal(await page.locator('#markdown-editor').inputValue(),sourceBefore,'source insertion can be undone');
   await page.keyboard.press('Control+Shift+z');
   assert.equal((await page.locator('#markdown-editor').inputValue()).match(/<!-- screenshot:ref id=/g).length,2,'source insertion can be redone');
-  await page.locator('#save-page').click();await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  await page.keyboard.press('Control+s');await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   const listed=JSON.parse(await rpc('screenshots-list')).items[0];assert.equal(listed.usage.length,1);
   await assert.rejects(()=>rpc('screenshots-change',{id:first.id,json:{delete:true}}),/参照中/);
   await rpc('screenshots-register',{json:{id:first.id,source:original.data,render:original.data,scene:{canvas:{width:128,height:128},annotations:[]},adopt:false}});

@@ -254,3 +254,16 @@ Manual Studio SHALL support separately configured image generation, prompt and s
 - **WHEN** image generation succeeds
 - **THEN** a project asset and generation metadata are saved and the preview becomes available
 - **AND** the document changes only after explicit insertion.
+
+### Requirement: Automatically save document edits with compact status
+Manual Studio SHALL automatically save edited documents after an idle interval and before document operations or switching document tabs. Unsaved changes SHALL be marked with an asterisk after the tab filename. The editor SHALL omit the ordinary save button and duplicate filename header, retain save errors and conflicts visibly, and preserve edits on failed saves. Ctrl/Cmd+S SHALL allow an explicit retry. The current document AI update button SHALL be labeled 更新 and placed next to the shortcuts button.
+
+#### Scenario: Save an idle edit
+- **WHEN** a document is edited and the idle interval elapses
+- **THEN** the document is saved without a button action
+- **AND** its tab asterisk disappears after the save succeeds.
+
+#### Scenario: Preserve a failed save
+- **WHEN** automatic saving fails or detects an external revision conflict
+- **THEN** the editor retains the draft and shows the failure
+- **AND** the user can retry with Ctrl/Cmd+S.

@@ -91,6 +91,8 @@ let projectRoot = "";
 let workspace: State | null = null;
 let documentState: Document | null = null;
 let dirty = false;
+let documentAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
+let documentSavePending: Promise<void> | undefined;
 let documentSaveState: { owner: Document; state: 'saving' | 'error'; message?: string } | null = null;
 const lastExecutions = new Map<string, ExecutionRun>();
 const aiPhases = new Map<string, AiPhase>();
@@ -435,7 +437,7 @@ element("terminal-use-selection-btn").addEventListener("click", () => {
     const tasks = (JSON.parse(await rpc("page-tasks", { page }, root)) as Task[])
       .filter(task => task.kind !== "screenshot" && task.status !== "approved");
     if (root !== projectRoot || page !== documentState?.page) return;
-    if (!tasks.length) throw new Error("現在の原稿に生成済みの文章・図のAIタグがありません。AIタグを追加した場合は先に保存してください。");
+    if (!tasks.length) throw new Error("現在の原稿に生成済みの文章・図のAIタグがありません。AIタグを追加した場合は自動保存の完了を待ってください。");
     terminalInstructionContext = { root, page, tasks };
     const select = element<HTMLSelectElement>("terminal-instruction-task");
     select.replaceChildren(...tasks.map(task => new Option(task.id, task.id)));
@@ -524,8 +526,10 @@ function captureNeedsUiLock(): boolean {
   return captureSessions.active !== null
     && (operationRecording || recordingStarting || recordingFinishActive || externalFinishActive || annotationPollRunning || screenshotSubmitRunning || Boolean(pendingAnnotatedImageFile));
 }
-function savedBeforeOperation(): void {
-  if (dirty) throw new Error("原稿に未保存の変更があります。「保存」を押してから実行してください。");
+async function savedBeforeOperation(): Promise<void> {
+  while (documentSavePending) await documentSavePending;
+  if (dirty) await saveDocument(false);
+  if (dirty) throw new Error("原稿の保存が完了しませんでした。編集内容を確認して再試行してください。");
 }
 async function work(operation: () => Promise<void>): Promise<void> {
   if (busy) return;
@@ -617,7 +621,8 @@ function renderDocumentTabs(): void {
     const changed = active ? dirty : tab.content !== tab.document.content;
     const group = document.createElement('div'); group.className = 'document-tab';
     const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.setAttribute('aria-selected', String(active)); button.title = page;
-    button.textContent = `${changed ? '● ' : ''}${page.split('/').at(-1)}`; button.dataset.documentPage = page;
+    button.textContent = `${page.split('/').at(-1)}${changed ? ' *' : ''}`; button.dataset.documentPage = page;
+    button.setAttribute('aria-label', `${page}${changed ? '（未保存の変更）' : ''}`);
     button.onclick = () => { void work(() => openPage(page)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${page}を閉じる`);
     close.onclick = () => { void work(async () => {
@@ -639,6 +644,7 @@ function renderDocumentTabs(): void {
     group.append(button, close); strip.append(group);
   }
   strip.hidden = !documentTabs.size && !imageTabs.size;
+  element('editor-title').hidden = !strip.hidden;
 }
 async function confirmAllDocumentTabs(): Promise<boolean> {
   retainDocumentTab();
@@ -650,13 +656,24 @@ async function confirmAllDocumentTabs(): Promise<boolean> {
   return true;
 }
 function updateSaveState(): void {
-  renderDocumentTabs();
   const ownerState = documentSaveState?.owner === documentState ? documentSaveState : null;
+  clearTimeout(documentAutosaveTimer);
+  if (dirty && documentState && !ownerState) {
+    const owner = documentState;
+    const root = projectRoot;
+    documentAutosaveTimer = setTimeout(() => {
+      if (documentState !== owner || projectRoot !== root || !dirty) return;
+      if (busy || document.querySelector('dialog[open]')) { updateSaveState(); return; }
+      void saveDocument(false).catch(error => status(`自動保存できませんでした：${String(error)}`, true));
+    }, 800);
+  }
+  renderDocumentTabs();
   const badge = element("save-state");
+  badge.hidden = !!documentState && ownerState?.state !== 'saving' && ownerState?.state !== 'error';
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
   const conflicted = ownerState?.state === 'error' && /変更されています|conflict|revision/i.test(ownerState.message || '');
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
-  badge.title = ownerState?.message || (dirty ? '保存してからAI更新・出力を実行してください。' : '原稿の保存状態');
+  badge.title = ownerState?.message || (dirty ? '自動保存を待っています。' : '原稿の保存状態');
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
   renderLastExecution();
   updateWorkspaceGuide();
@@ -677,7 +694,7 @@ function renderLastExecution(): void {
   setAiPhase(element('ai-workflow-status'), aiPhases.get(key) || 'idle');
   renderExecutionResult(element('execution-result'), run, {
     resume: id => { void work(async () => {
-      savedBeforeOperation();
+      await savedBeforeOperation();
       const root = projectRoot;
       const plan = JSON.parse(await rpc('execution-resume', { id }, root)) as {page:string;ids:string[];limits:ExecutionLimits};
       if (root !== projectRoot) return;
@@ -728,6 +745,8 @@ async function openPage(page: string, check = true): Promise<void> {
   const docsPrefix = (workspace?.config.docs || 'docs').replace(/\/$/,'') + '/';
   if (page.startsWith(docsPrefix) && workspace?.pages.includes(page.slice(docsPrefix.length))) page = page.slice(docsPrefix.length);
   if (check && documentState?.page === page && !activeImageTab) { chooseTab('editor'); return; }
+  while (documentSavePending) await documentSavePending;
+  if (dirty && documentState && documentSaveState?.state !== 'error') await saveDocument(false);
   retainDocumentTab();
   showDocumentView();
   let cached = check ? documentTabs.get(page) : undefined;
@@ -801,7 +820,7 @@ function insertDocumentMarkdown(markdown:string): void {
       editor.dispatchEvent(new Event("input", { bubbles: true }));
       editor.focus();
     }
-    status("スクリーンショットを原稿に挿入しました。保存すると確定します。");
+    status("スクリーンショットを原稿に挿入しました。原稿は自動保存されます。");
   }
 const screenshotLibrary = setupScreenshotLibrary({
   root: () => projectRoot, request: rpc, work, applications: () => launchCommands,
@@ -1110,6 +1129,13 @@ async function openProject(root: string, check = true): Promise<void> {
 
 }
 async function saveDocument(refresh = true): Promise<void> {
+  while (documentSavePending) await documentSavePending;
+  const pending = persistDocument(refresh);
+  documentSavePending = pending;
+  try { await pending; }
+  finally { if (documentSavePending === pending) documentSavePending = undefined; }
+}
+async function persistDocument(refresh: boolean): Promise<void> {
   if (!documentState) throw new Error("保存する原稿を選択してください。");
   const current = documentState;
   const root = projectRoot;
@@ -1254,7 +1280,7 @@ function renderMap(): void {
   element("uimap-list").innerHTML = map?.views.length ? `<p><strong>${map.views.length}画面・${map.total_elements}要素</strong>を登録しています。画面名を開いて内容を確認してください。コード変更後は一覧を作り直します。</p>` + map.views.map((view) => `<details class="card"><summary>${escape(view.name)}（${view.elements.length}要素）</summary><p class="muted">確認元: ${escape(view.observed_from || "プロジェクトの画面定義")}</p><ul>${view.elements.map((item) => `<li>${escape(item.name)} <small>${escape(item.role)}</small> <code>${escape(item.selector)}</code></li>`).join("")}</ul></details>`).join("") : '<div class="card"><h2>画面一覧はまだありません</h2><p>「コードから画面一覧を作る」を押してください。検出された内容をここで確認できます。</p></div>';
 }
 async function generateCurrentPage(): Promise<void> {
-  savedBeforeOperation();
+  await savedBeforeOperation();
   if (!documentState || !workspace) throw new Error("先にMarkdown原稿を開いてください。");
   await generateDocument(documentState.page);
 }
@@ -1278,7 +1304,7 @@ async function confirmGenerationInput(page: string, id?: string, feedback = "", 
 }
 
 async function generateReviewed(page: string, id?: string, initialFeedback = "", confirmedInput?: GenerationInput): Promise<boolean> {
-  savedBeforeOperation();
+  await savedBeforeOperation();
   await ensureAiSettings();
   const root = projectRoot;
   const input = confirmedInput ?? await confirmGenerationInput(page, id, initialFeedback);
@@ -1355,7 +1381,7 @@ async function generateReviewed(page: string, id?: string, initialFeedback = "",
   }
 }
 element("execution-history-open").addEventListener("click",()=>{void work(async()=>{
-  savedBeforeOperation();
+  await savedBeforeOperation();
   const root=projectRoot;
   const history=JSON.parse(await rpc("execution-history",{},root)) as {runs:ExecutionRun[]};
   await showExecutionHistory(history.runs,{
@@ -1383,7 +1409,7 @@ element("generation-history-open").addEventListener("click", () => { void work(a
     load: async id => { assertContext(); return JSON.parse(await rpc("generation-history-entry", { id }, root)) as GenerationHistoryEntry; },
     compare: async (before, after) => { assertContext(); await showGenerationReview(page, before, after, false, true); },
     reuse: async entry => {
-      assertContext(); savedBeforeOperation();
+      assertContext(); await savedBeforeOperation();
       if (entry.input.page !== page) throw new Error("別の原稿の生成履歴です。");
       const before = JSON.parse(await rpc("editor-read", { page }, root)) as Document;
       const decision = await showGenerationReview(page, before.content, entry.candidate.content);
@@ -1399,7 +1425,7 @@ element("generation-history-open").addEventListener("click", () => { void work(a
   });
 }); });
 element("review-ai-update").addEventListener("click", () => { void work(async () => {
-  savedBeforeOperation();
+  await savedBeforeOperation();
   if (!documentState) return;
   const page = documentState.page;
   const key = aiReviewKey(page);
@@ -1503,7 +1529,7 @@ async function generateDocument(page: string, resumeIds?: string[], defaults?: E
   }
 }
 async function generateAllDocuments(): Promise<void> {
-  savedBeforeOperation();
+  await savedBeforeOperation();
   if (!workspace) throw new Error("先にプロジェクトのフォルダーを開いてください。");
   const docsFolder = workspace.config.docs.replace(/^[.\\/]+|[\\/]+$/g, "");
   const pages = workspace.project_entries.filter((entry) => !entry.directory && /\.md$/i.test(entry.path))
@@ -1525,7 +1551,7 @@ async function generateAllDocuments(): Promise<void> {
     const tasks = candidates.find(item => item.page === page)!.tasks.filter(task => task.status !== "approved");
     if (!tasks.length) continue;
     if (documentState?.page !== page) {
-      if (dirty) throw new Error("未保存の原稿があります。保存してから選択した文書をAI更新してください。");
+      await savedBeforeOperation();
       await openPage(page, false);
     }
     const failures = await generateDocument(page,undefined,selectedPages.limits);
@@ -1536,7 +1562,7 @@ async function generateAllDocuments(): Promise<void> {
   status(`すべての文書のAI更新が完了しました（${completed}文書）。${failedCaptures ? `撮影失敗 ${failedCaptures}件は実行ログを確認してください。` : ""}`, failedCaptures > 0);
 }
 async function runAction(action: string, options: Record<string, unknown> = {}, resultId?: string): Promise<void> {
-  savedBeforeOperation();
+  await savedBeforeOperation();
   const isAiAction = action === "draft" || action === "generate-task" || action === "capture-source-auto";
   if (isAiAction) await ensureAiSettings();
   if (isAiAction) {
@@ -1674,7 +1700,7 @@ element("workspace-settings-form").addEventListener("submit", event => {
   event.preventDefault();
   void work(async () => {
     if (!workspace) throw new Error("先にワークスペースを開いてください。");
-    savedBeforeOperation();
+    await savedBeforeOperation();
     await saveAiSettings();
     const root = projectRoot;
     element("workspace-save-state").textContent = "保存中…";
@@ -1792,7 +1818,6 @@ applyEditorView();
 editor.addEventListener("editor-mode-change", () => {
   if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
 });
-element("save-page").addEventListener("click", () => { void work(saveDocument); });
 element("generate-page").addEventListener("click", () => { void work(generateCurrentPage); });
 element("reload-page").addEventListener("click", () => { if (documentState) void work(async () => {
   if (!await confirmDiscard() || !documentState) return;
@@ -1801,7 +1826,7 @@ element("reload-page").addEventListener("click", () => { if (documentState) void
 element("undo-edit").addEventListener("click", () => stepEditHistory(-1));
 element("redo-edit").addEventListener("click", () => stepEditHistory(1));
 element("detach-editor").addEventListener("click", () => { void work(async () => {
-  savedBeforeOperation();
+  await savedBeforeOperation();
   if (!documentState) throw new Error("原稿を選択してください。");
   if (native) await invoke("open_editor", { root: projectRoot, page: documentState.page });
   else window.open(`/?editor=1&root=${encodeURIComponent(projectRoot)}&page=${encodeURIComponent(documentState.page)}`, "_blank");
@@ -2017,8 +2042,6 @@ element('workspace-guide').querySelector('[data-guide-dismiss]')!.addEventListen
 });
 element('generate-page').setAttribute('aria-keyshortcuts', 'Control+Shift+G Meta+Shift+G');
 element('generate-page').title += ' (Ctrl/Cmd+Shift+G)';
-element('save-page').setAttribute('aria-keyshortcuts', 'Control+S Meta+S');
-element('save-page').innerHTML = `${uiIcon('save')} 保存 <kbd>⌘ / Ctrl S</kbd>`;
 element('open-workspace-settings').innerHTML = `${uiIcon('settings')} ワークスペース設定`;
 element('open-workspace-settings').title = '原稿・画像の保存先とHTML出力先を設定';
 document.querySelectorAll<HTMLButtonElement>('.editor-view-controls button[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
@@ -2529,7 +2552,7 @@ element("screenshot-task-form").addEventListener("submit", async (event) => {
       pendingLaunchArgs = [];
       updateCaptureBusyState();
       clearScreenshotFeedback();
-      const message = "撮影指示を原稿へ追加しました。保存すると実行対象になります。";
+      const message = "撮影指示を原稿へ追加しました。自動保存後に実行できます。";
       element("operation-recording-status").textContent = message;
       status(message);
     } else {
@@ -3029,7 +3052,7 @@ if (editorColumn) {
     }
   });
 }
-element("refresh-tasks").addEventListener("click", () => { void work(async () => { savedBeforeOperation(); await refreshWorkspace(true); status("AIタグ一覧を更新しました。"); }); });
+element("refresh-tasks").addEventListener("click", () => { void work(async () => { await savedBeforeOperation(); await refreshWorkspace(true); status("AIタグ一覧を更新しました。"); }); });
 element("generate-all-pages").addEventListener("click", () => { void work(generateAllDocuments); });
 element("task-list").addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button");
@@ -3151,7 +3174,7 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
   renderLaunchCommands(); refreshLaunchCommandOptions(); status("このプロジェクトのアプリ登録を保存しました。");
 }); });
 element("generate-draft").addEventListener("click", () => { void work(async () => {
-  savedBeforeOperation();
+  await savedBeforeOperation();
   if (workspace?.pages.length && !window.confirm("現在の原稿をバックアップして、AIの下書きに置き換えますか？")) return;
   await runAction("draft", {}, "publish-result");
 }); });

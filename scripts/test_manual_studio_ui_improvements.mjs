@@ -82,7 +82,7 @@ try {
   const priorView=await page.locator('#panel-editor').getAttribute('data-editor-view');
   await page.keyboard.press('Control+Shift+P');assert.notEqual(await page.locator('#panel-editor').getAttribute('data-editor-view'),priorView);
   await page.locator('.editor-view-controls button[data-editor-view=split]').click();
-  saveDelay=600;saveFails=true;await page.locator('#save-page').click();
+  saveDelay=600;saveFails=true;await page.keyboard.press('Control+s');
   await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saving');await idle();
   assert.equal(await page.locator('#save-state').getAttribute('data-state'),'error');
   assert.match(await page.locator('#save-state').getAttribute('title'),/原稿が変更/);

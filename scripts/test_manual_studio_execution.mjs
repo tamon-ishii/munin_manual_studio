@@ -47,7 +47,10 @@ try{
  slowResponses=1;
  await page.locator('#generate-page').click();assert.equal(await page.locator('#generation-input-tasks input[value=shot]').count(),0);
  await page.locator('#execution-timeout').fill('5');await page.locator('#execution-retries').fill('1');
- await page.locator('#generation-input-run').click();await page.locator('[data-review-action=adopt]').click();await idle();
+ await page.locator('#generation-input-run').click();
+ try { await page.locator('[data-review-action=adopt]').click(); }
+ catch(error) { throw new Error(`${error.message}\nStudio status: ${await page.locator('#status').textContent()}\nAI requests: ${requests}\nPage errors: ${JSON.stringify(errors)}`, {cause:error}); }
+ await idle();
  const timed=(await rpc('execution-history')).runs[0];assert.equal(timed.entries[0].attempts,2);assert.equal(timed.limits.timeout_seconds,5);assert.equal(timed.status,'completed');
  assert.deepEqual(errors,[]);console.log(`Execution checks passed: AI/image independence, approval protection, durable history, conflict-safe restoration, retries and API deadlines (${captures} captures).`);
 }finally{await browser?.close();vite?.kill();await new Promise(resolve=>ai.close(resolve));await rm(root,{recursive:true,force:true});}

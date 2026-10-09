@@ -25,13 +25,35 @@ try {
   async function idle(){await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');}
   async function tree(file){await page.locator('#tree-search').fill(file.split('/').at(-1));await page.locator(`[data-page="${file}"],[data-image="${file}"]`).click();await idle();await page.locator('#tree-search').fill('');}
   await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
+  assert.equal(await page.locator('#save-page').count(),0,'the editor has no save button');
+  assert.equal(await page.locator('#shortcut-help + #generate-page').textContent(),'更新');
+  await page.locator('#markdown-editor').fill(initial+'Autosaved draft.\n');
+  await page.waitForFunction(()=>document.querySelector('#document-tabs [data-document-page="index.md"]').textContent==='index.md');
+  assert.match(await readFile(path.join(root,'docs/index.md'),'utf8'),/Autosaved draft/,'idle edits are persisted without a save action');
+  let delayedSaveRequests = 0;
+  const delayedSave = async route => {
+    if (route.request().postDataJSON().action === 'editor-save') {
+      delayedSaveRequests++;
+      await new Promise(resolve=>setTimeout(resolve,600));
+    }
+    await route.continue();
+  };
+  await page.route('**/__manual/rpc', delayedSave);
+  await page.locator('#markdown-editor').fill(initial+'Saving draft.\n');
+  await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saving');
+  await page.locator('#markdown-editor').fill(initial+'Autosaved draft.\n');
+  await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved' && document.querySelector('#document-tabs [data-document-page="index.md"]').textContent==='index.md');
+  assert.equal(delayedSaveRequests,2,'an edit during saving causes a second serialized save');
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),initial+'Autosaved draft.\n','edits made during saving are saved in a subsequent request');
+  await page.unroute('**/__manual/rpc', delayedSave);
   await page.locator('#markdown-editor').fill(initial+'Unsaved draft.\n');
+  assert.equal(await page.locator('#document-tabs [data-document-page="index.md"]').textContent(),'index.md *');
   await tree('docs/guide.md');
   assert.equal(await page.locator('#document-tabs [role=tab]').count(),2);
-  assert.equal(await page.locator('#document-tabs [data-document-page="index.md"]').textContent(),'● index.md');
+  assert.equal(await page.locator('#document-tabs [data-document-page="index.md"]').textContent(),'index.md');
   await page.locator('[data-document-page="index.md"]').click();await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(),/Unsaved draft/);
-  await page.locator('#markdown-editor').focus();await page.keyboard.press('Control+z');assert.equal(await page.locator('#markdown-editor').inputValue(),initial);
+  await page.locator('#markdown-editor').focus();await page.keyboard.press('Control+z');assert.equal(await page.locator('#markdown-editor').inputValue(),initial+'Autosaved draft.\n');
   await page.keyboard.press('Control+Shift+z');assert.match(await page.locator('#markdown-editor').inputValue(),/Unsaved draft/);
   await page.locator('#tree-search').fill('demo.png');await page.locator('[data-image]').first().click();await idle();await page.locator('#image-tab-view').waitFor();await page.locator('#image-tab-preview').waitFor();
   assert.ok((await page.locator('#image-tab-view').boundingBox()).height>150,'image tab has a usable visible area');
@@ -40,7 +62,7 @@ try {
   await page.locator('#markdown-editor').evaluate(editor=>editor.setSelectionRange(editor.value.length,editor.value.length));
   await page.locator('#markdown-editor').evaluate((editor,root)=>{const transfer=new DataTransfer();transfer.setData('application/x-munin-image',JSON.stringify({root,path:'docs/assets/demo.png'}));editor.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));},root);
   assert.match(await page.locator('#markdown-editor').inputValue(),/!\[demo.png\]\(<assets\/demo.png>\)/);
-  await page.locator('#save-page').click();await idle();
+  await page.keyboard.press('Control+s');await idle();
   const savedDraft=await readFile(path.join(root,'docs/index.md'),'utf8');
   await writeFile(path.join(root,'docs/index.md'),savedDraft+'\nExternal update.\n');
   await page.locator('[data-document-page="guide.md"]').click();await idle();
@@ -49,6 +71,7 @@ try {
   await writeFile(path.join(root,'docs/index.md'),savedDraft+'\nExplicit reload.\n');
   await page.locator('#editor-more>summary').click();await page.locator('#reload-page').click();await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(),/Explicit reload/,'reload reads the active file');
+  if (!await page.locator('#markdown-editor').isVisible()) await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   await page.locator('#markdown-editor').fill(savedDraft+'\nClose cancellation draft.\n');
   await page.getByRole('button',{name:'index.mdを閉じる',exact:true}).click();
   await page.locator('#unsaved-changes-dialog [data-unsaved-action=cancel]').click();await idle();
