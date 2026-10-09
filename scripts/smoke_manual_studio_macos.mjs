@@ -21,7 +21,7 @@ async function scenario(window,steps){
  await run(cli,['scenario-run','--root',root,'--input',file],{timeout:Math.min(40000,Math.max(1,deadline-Date.now()))});
 }
 const press=name=>[{expect_visible:`button[name="${name}"]`},{press:`button[name="${name}"]`}];
-const fill=(role,name,value)=>[{expect_visible:`${role}[name*="${name}"]`},{key:{selector:`${role}[name*="${name}"]`,keys:"Cmd+A"}},{text:{selector:`${role}[name*="${name}"]`,value}},{wait_ms:300}];
+const fill=(role,name,value)=>[{expect_visible:`${role}[name*="${name}"]`},{key:{selector:`${role}[name*="${name}"]`,keys:"Cmd+A"}},{text:value},{wait_ms:300}];
 const main=()=>`pid:${studio.pid}:Munin Manual Studio`;
 async function manifests(){try{return await readdir(path.join(root,'.munin/screenshots'));}catch{return [];}}
 async function shot(){for(const id of await manifests()){try{const s=JSON.parse(await readFile(path.join(root,'.munin/screenshots',id,'manifest.json'),'utf8'));if(s.adopted)return s;}catch{}}}
