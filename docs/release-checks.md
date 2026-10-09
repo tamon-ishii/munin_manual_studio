@@ -150,3 +150,13 @@ MANUAL_NATIVE_BIN_DIR=/path/to/extracted-linux-package npm run manual:smoke-nati
 ```
 
 MkDocsがPATHにあり、LinuxではシステムPythonのGI・GTK3・AT-SPIとX11が利用できる環境で実行する。環境変数を省略した場合は従来どおり `target/debug` を使う。
+
+### macOSネイティブCIの追加調査
+
+手動CIに `macos_native_smoke=true` を追加し、両macOS構成で実録画・MarkItsチェックを実行した。[初回実行](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37988139925)の[ARM64ログ](investigations/macos-native-20261010/arm64-initial.log)では、実引数保持・クリック録画、MarkIts保存・再起動・クロップ拡張、原本保持、Markdown挿入、AI未設定のHTML公開まで成功した。Linux専用の実Studio設定画面・復帰操作の確認はこのmacOSチェックには含まれない。
+
+[x64ログ](investigations/macos-native-20261010/x64-initial.log)では引数・録画・最初のMarkIts保存に成功し、再編集時のPID指定ウィンドウがアクセシビリティ側で見つからず失敗した。macOSのPID指定では全GUIアプリの列挙からの絞り込みをやめ、指定PIDへの直接接続を使用する修正を追加した。対象プロセスとウィンドウ名の照合、10秒の待機、曖昧な対象の拒否を保持して再検証する。
+
+修正版 `3c48033` の[再実行](https://github.com/tamon-ishii/munin_manual_studio/actions/runs/37988716081)では、[ARM64](investigations/macos-native-20261010/arm64-pid-resolution.log)・[x64](investigations/macos-native-20261010/x64-pid-resolution.log)ともネイティブチェックが成功した。両ログで実引数保持・クリック録画、MarkIts保存・再編集・クロップ拡張、不変原本、Markdown挿入、AI未設定のHTML公開を確認した。x64の初回失敗はこの再実行では解消したが、再発しないことまでは保証しない。macOS実Studioの設定画面からの一連の操作・前面復帰、およびWindowsの150%・200%は引き続き未確認。
+
+この再実行は全4構成で最終成功した。Windowsの実録画・MarkItsとWebView2も成功し、全6条件の実測DPIは96、ページエラーは0件。LinuxのUI・生成・撮影・統合チェックと全構成の配布ビルドも成功した。修正版のZIP全4件を取得し、CRC、実行ファイルの同梱とUnix実行権限、macOSのバージョン情報・署名ファイルを確認した。[修正版の配布ファイル一覧・SHA-256](investigations/release-artifacts-20261010/package-verification-pid-resolution.json)を保存した。

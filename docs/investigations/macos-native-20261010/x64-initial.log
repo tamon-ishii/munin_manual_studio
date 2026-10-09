@@ -1,0 +1,18 @@
+
+> munin-manual-studio@0.5.0 manual:smoke-native
+> node scripts/smoke_manual_markits_native.mjs
+
+PASS: real application launch preserves spaced/special arguments; Studio recorder captures a darwin click.
+MarkIts pid=4013, window=0x28 (MarkIts Editor)
+PASS: completion marker, annotation JSON, and UI metadata verified in 1490ms
+file:///Users/runner/work/munin_manual_studio/munin_manual_studio/scripts/smoke_manual_markits_native.mjs:107
+  if (result !== 0) throw new Error(`${path.basename(command)} exited ${result}: ${stderr.trim()}`);
+                          ^
+
+Error: manualctl exited 1: Desktop scenario step 1 (expect_visible) failed: Accessibility window not found: pid:4298:MarkIts Editor
+    at run (file:///Users/runner/work/munin_manual_studio/munin_manual_studio/scripts/smoke_manual_markits_native.mjs:107:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async editAgain (file:///Users/runner/work/munin_manual_studio/munin_manual_studio/scripts/smoke_manual_markits_native.mjs:243:5)
+    at async file:///Users/runner/work/munin_manual_studio/munin_manual_studio/scripts/smoke_manual_markits_native.mjs:256:20
+
+Node.js v22.23.2
