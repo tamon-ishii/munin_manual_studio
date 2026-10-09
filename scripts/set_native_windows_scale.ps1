@@ -7,6 +7,9 @@ Start-Process 'ms-settings:display'
 $deadline=[DateTime]::UtcNow.AddSeconds(20)
 $settings=$null
 while ([DateTime]::UtcNow -lt $deadline) {
+    $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'Settings')
+  $settings=[System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children,$condition)
+  if($settings){break}
   $process=Get-Process SystemSettings -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowHandle -ne 0} | Select-Object -First 1
   if ($process) { $settings=[System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle); if($settings){break} }
   Start-Sleep -Milliseconds 200

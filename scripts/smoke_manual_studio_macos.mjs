@@ -41,7 +41,7 @@ try{
  const args=await poll(async()=>{try{return JSON.parse(await readFile(report,'utf8'));}catch{return null;}});targetPid=args.pid;assert.deepEqual(args.args,[' value with spaces ','$(literal)']);
  await scenario(`pid:${targetPid}:Munin macOS Recording Target`,[{wait_ms:600},{click:{x:80,y:80}},{expect_window:`pid:${targetPid}:Munin macOS Recording Target clicked`}]);
  await scenario(`pid:${studio.pid}:Munin Manual Studio — 撮影`,press('スクリーンショットを実行'));
- const editor=await poll(ownedMarkits);await scenario(editor,press('編集終了'));
+ const editor=await poll(async()=>{const found=await ownedMarkits();if(found)return found;try{const {stdout}=await run(cli,['inspect-window','--root',root,'--window',main()],{timeout:3000});if(stdout.includes('撮影に失敗')||stdout.includes('起動できません'))throw new Error(stdout);}catch(error){if(String(error).includes('撮影に失敗')||String(error).includes('起動できません'))throw error;}return null;});await scenario(editor,press('編集終了'));
  const initial=await poll(shot);assert.ok(initial.recipe.steps.some(step=>step.click),'Native recorder captured the fixture click');
  await poll(async()=>await foreground()===studio.pid);pass('macOS Studio registration, native recording/capture, MarkIts completion and Studio foreground return');
  const {stdout:source}=await run(cli,['--request',JSON.stringify({root,action:'screenshots-image',options:{id:initial.id,json:{original:true}}})]);
@@ -59,7 +59,7 @@ try{
 }catch(error){
  console.error('Studio process state', {exitCode:studio?.exitCode,signalCode:studio?.signalCode});
  try{const {stdout}=await run('ps',['-axo','pid,ppid,stat,command']);await writeFile(path.join(output,'processes.txt'),stdout);}catch{}
- for(const directory of ['.munin','manual']){try{await cp(path.join(root,directory),path.join(output,directory),{recursive:true});}catch{}}
+ for(const directory of ['.munin','manual']){try{await cp(path.join(root,directory),path.join(output,directory==='.munin'?'munin-data':directory),{recursive:true});}catch{}}
  try{await cp(path.join(tmpdir(),'manual-studio-markits'),path.join(output,'handoff'),{recursive:true});}catch{}
  for(const action of ['list-windows','list-accessible-windows']){try{const {stdout}=await run(cli,[action,'--root',root],{timeout:10000});await writeFile(path.join(output,action+'.json'),stdout);}catch{}}
  if(studio){try{const {stdout}=await run(cli,['inspect-window','--root',root,'--window',main()],{timeout:10000});await writeFile(path.join(output,'studio-tree.txt'),stdout);}catch{}}

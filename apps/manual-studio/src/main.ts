@@ -3221,12 +3221,7 @@ if (recordingControlMode) {
     button.disabled = true; button.textContent = "撮影してMarkItsを起動中…";
     try {
       await emitTo("main", "manual-studio-screenshot-requested");
-      await invoke("hide_recording_control");
-      await invoke("hide_manual_studio");
-      await new Promise((resolve) => setTimeout(resolve, 350));
-      const result = await invoke<RecordingResult>("finish_operation_recording");
-      await emitTo("main", "manual-studio-screenshot-finished", result);
-      await getCurrentWindow().close();
+      await invoke<RecordingResult>("finish_operation_recording");
     } catch (error) {
       await invoke("show_recording_control_again").catch(() => {});
       const message = `撮影に失敗しました: ${String(error)}`;
