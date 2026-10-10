@@ -963,3 +963,16 @@ dialog.panel-dialog>.panel-header{position:sticky;top:-16px;z-index:2;background
 #panel-editor[data-image-open=true]>.editor-view-controls,
 #panel-editor[data-image-open=true]>.execution-result,
 #panel-editor[data-image-open=true]>.panel-header>.actions{display:none}
+
+.generated-images-stack{display:flex;gap:10px;overflow-x:auto;padding:8px 0;margin-top:14px;scrollbar-width:thin}
+.generated-images-stack:empty{display:none}
+.generated-stack-item{position:relative;flex:0 0 84px;height:84px;border:2px solid var(--border-color,#dce3d9);border-radius:8px;overflow:hidden;cursor:pointer;background:var(--surface-bg,#fff);transition:border-color .15s,transform .15s}
+.generated-stack-item:hover{border-color:var(--accent,#285d46);transform:translateY(-2px)}
+.generated-stack-item.selected{border-color:var(--accent,#285d46);box-shadow:0 0 0 2px var(--accent,#285d46)}
+.generated-stack-item img{width:100%;height:100%;object-fit:cover;display:block}
+.generated-stack-badge{position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:10px;padding:1px 4px;border-radius:4px;line-height:1.2}
+
+.milkdown-image-action-overlay{position:absolute;display:flex;gap:6px;z-index:100;pointer-events:auto;transition:opacity .15s ease}
+.milkdown-image-edit-btn{display:inline-flex;align-items:center;gap:5px;background:var(--accent,#285d46);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:5px 10px;font-size:12px;font-weight:600;box-shadow:0 3px 10px rgba(0,0,0,0.25);cursor:pointer;transition:background-color .15s,transform .1s}
+.milkdown-image-edit-btn:hover{background:var(--accent-hover,#1f4c38);transform:scale(1.03)}
+

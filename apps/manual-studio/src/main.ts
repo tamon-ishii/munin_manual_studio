@@ -49,7 +49,7 @@ const editor = element<HTMLTextAreaElement>("markdown-editor");
 const milkdown = setupMilkdownEditor(editor, message => status(message, true), source => {
   if (!documentState || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(source)) return Promise.resolve(source);
   return rpc("preview-asset", { page: documentState.page, asset: source });
-}, uploadMilkdownImage, requestAiTask);
+}, uploadMilkdownImage, requestAiTask, (source, img) => { void handleEditDocumentImage(source, img); });
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 const params = new URLSearchParams(location.search);
@@ -831,6 +831,70 @@ const screenshotLibrary = setupScreenshotLibrary({
 });
 setupToolbarCustomization();
 setupImageGeneration({root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
+
+let documentImageEditing = false;
+async function handleEditDocumentImage(imageSource: string, _img: HTMLImageElement): Promise<void> {
+  if (documentImageEditing) {
+    status("他の画像をMarkItsで編集中です。MarkItsの編集を完了してください。", true);
+    return;
+  }
+  if (!native) {
+    status("MarkItsによる画像編集はデスクトップ版（Tauri）でのみ利用できます。", true);
+    return;
+  }
+  if (!projectRoot) {
+    status("プロジェクトが開かれていません。", true);
+    return;
+  }
+  documentImageEditing = true;
+  try {
+    status("MarkItsを起動しています…");
+    const result = await invoke<{
+      sourceFile: string;
+      annotationFile: string;
+      completionFile: string;
+      targetFile: string;
+      relativePath: string;
+    }>("edit_document_image", {
+      root: projectRoot,
+      relativePath: imageSource,
+      page: documentState?.page || null,
+    });
+    status("MarkItsで画像を編集中です。編集が完了したらMarkItsで「編集終了」または「Manual Studioへ注釈を返す」を押してください。");
+    const checkReady = async () => {
+      try {
+        const ready = await invoke<boolean | null>("document_image_edit_ready", {
+          completionFile: result.completionFile,
+          annotationFile: result.annotationFile,
+        });
+        if (!ready) {
+          window.setTimeout(() => { void checkReady(); }, 600);
+          return;
+        }
+        await invoke("apply_document_image_edit", {
+          targetFile: result.targetFile,
+          annotationFile: result.annotationFile,
+        });
+        documentImageEditing = false;
+        status("画像の編集を原稿に反映しました。");
+        milkdown.refresh();
+        await milkdown.refreshImages();
+        void renderPreview();
+        await refreshWorkspace();
+        if (activeImageTab) {
+          void openImageTab(activeImageTab);
+        }
+      } catch (err) {
+        documentImageEditing = false;
+        status(`画像の編集保存に失敗しました: ${String(err)}`, true);
+      }
+    };
+    void checkReady();
+  } catch (err) {
+    documentImageEditing = false;
+    status(`MarkItsの起動に失敗しました: ${String(err)}`, true);
+  }
+}
 async function refreshWorkspace(reloadPage = false): Promise<void> {
   const root = projectRoot;
   const current = documentState;

@@ -35,9 +35,17 @@ export async function renderMermaid(target: HTMLElement, code: string): Promise<
   }
 }
 
-export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (message: string) => void, resolveImage: (source: string) => Promise<string> = async source => source, uploadImage?: (file: File) => Promise<string>, requestAiTask?: (kind: AiTaskKind) => void) {
+export function setupMilkdownEditor(
+  source: HTMLTextAreaElement,
+  report: (message: string) => void,
+  resolveImage: (source: string) => Promise<string> = async source => source,
+  uploadImage?: (file: File) => Promise<string>,
+  requestAiTask?: (kind: AiTaskKind) => void,
+  onEditImage?: (source: string, img: HTMLImageElement) => void
+) {
   const host = document.createElement('div');
   host.id = 'milkdown-editor';
+  host.style.position = 'relative';
   source.before(host);
   const toggle = document.createElement('button');
   toggle.type = 'button'; toggle.textContent = 'Markdownソース';
@@ -55,7 +63,133 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
   let readonly = source.disabled || source.readOnly;
   const valueProperty = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!;
   const sourceValue = () => valueProperty.get!.call(source) as string;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'milkdown-image-action-overlay';
+  overlay.style.display = 'none';
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'milkdown-image-edit-btn';
+  editBtn.textContent = '🎨 画像の編集';
+  editBtn.title = 'MarkItsで画像に注釈やトリミングを加えて編集します';
+  overlay.appendChild(editBtn);
+  host.appendChild(overlay);
+
+  let activeImg: HTMLImageElement | null = null;
+  let activeSource = '';
+  let hideTimer: number | null = null;
+
+  function hideOverlay() {
+    overlay.style.display = 'none';
+    activeImg = null;
+    activeSource = '';
+  }
+
+  function cancelHide() {
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+  }
+
+  function scheduleHide() {
+    cancelHide();
+    hideTimer = window.setTimeout(() => {
+      hideOverlay();
+    }, 250);
+  }
+
+  function getOriginalSrc(img: HTMLImageElement): string | null {
+    if (img.dataset.originalSrc) {
+      return img.dataset.originalSrc;
+    }
+    let foundSrc: string | null = null;
+    if (instance) {
+      instance.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        view.state.doc.descendants((node, position) => {
+          if (foundSrc) return;
+          if (!['image', 'image-block'].includes(node.type.name) || !node.attrs.src) return;
+          const dom = view.nodeDOM(position);
+          if (dom === img || (dom instanceof HTMLElement && dom.contains(img))) {
+            foundSrc = String(node.attrs.src);
+          }
+        });
+      });
+    }
+    if (foundSrc) {
+      img.dataset.originalSrc = foundSrc;
+      return foundSrc;
+    }
+    const rawSrc = img.getAttribute('src');
+    if (rawSrc && !rawSrc.startsWith('data:')) {
+      img.dataset.originalSrc = rawSrc;
+      return rawSrc;
+    }
+    return null;
+  }
+
+  function updateOverlayPosition() {
+    if (!activeImg || !activeImg.isConnected) {
+      hideOverlay();
+      return;
+    }
+    const imgRect = activeImg.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    const top = imgRect.top - hostRect.top + host.scrollTop + 8;
+    const right = hostRect.right - imgRect.right - host.scrollLeft + 8;
+    overlay.style.top = `${Math.max(0, top)}px`;
+    overlay.style.right = `${Math.max(0, right)}px`;
+    overlay.style.left = 'auto';
+    overlay.style.display = 'flex';
+  }
+
+  function handleImageHover(img: HTMLImageElement) {
+    if (!onEditImage || readonly) return;
+    cancelHide();
+    activeImg = img;
+    activeSource = getOriginalSrc(img) || '';
+    if (!activeSource || activeSource.startsWith('data:')) return;
+    updateOverlayPosition();
+  }
+
+  overlay.addEventListener('mouseenter', cancelHide);
+  overlay.addEventListener('mouseleave', scheduleHide);
+  editBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (activeImg && activeSource && onEditImage) {
+      onEditImage(activeSource, activeImg);
+    }
+  });
+
+  host.addEventListener('mouseover', e => {
+    const target = e.target;
+    if (target instanceof HTMLImageElement) {
+      handleImageHover(target);
+    }
+  });
+
+  host.addEventListener('mouseout', e => {
+    const target = e.target;
+    if (target instanceof HTMLImageElement) {
+      const related = e.relatedTarget as Node | null;
+      if (related && (overlay.contains(related) || target.contains(related))) {
+        return;
+      }
+      scheduleHide();
+    }
+  });
+
+  host.addEventListener('scroll', () => {
+    if (activeImg) updateOverlayPosition();
+  }, { passive: true });
+  window.addEventListener('resize', () => {
+    if (activeImg) updateOverlayPosition();
+  }, { passive: true });
+
   function refresh() {
+    hideOverlay();
     ++imageRefreshVersion;
     if (!ready || !instance || syncing) return;
     syncing = true;
@@ -75,7 +209,10 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
         if (!['image', 'image-block'].includes(node.type.name) || !node.attrs.src) return;
         const dom = view.nodeDOM(position);
         const image = dom instanceof HTMLImageElement ? dom : dom instanceof HTMLElement ? dom.querySelector<HTMLImageElement>('img') : null;
-        if (image) images.push({ image, source: String(node.attrs.src) });
+        if (image) {
+          image.dataset.originalSrc = String(node.attrs.src);
+          images.push({ image, source: String(node.attrs.src) });
+        }
       });
       return images;
     });
@@ -83,11 +220,15 @@ export function setupMilkdownEditor(source: HTMLTextAreaElement, report: (messag
       try {
         const resolved = await resolveImage(imageSource);
         if (version !== imageRefreshVersion || !image.isConnected) return;
+        if (image.src === resolved) {
+          image.src = '';
+        }
         image.src = resolved;
       } catch (error) { if (version === imageRefreshVersion) report(`画像の更新に失敗しました: ${String(error)}`); }
     }));
   }
   function showSource() {
+    hideOverlay();
     sourceMode = true; host.hidden = true; source.hidden = false;
     if (sourceToolbar) sourceToolbar.hidden = false;
     if (sourceAiToolbar) sourceAiToolbar.hidden = false;

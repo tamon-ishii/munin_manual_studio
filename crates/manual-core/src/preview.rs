@@ -290,13 +290,14 @@ pub fn preview_html(root: &Path, page: &str) -> Result<String, String> {
     Ok(inline_html_assets(&output, &content))
 }
 
-pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, String> {
+pub fn resolve_asset_path(root: &Path, page: &str, asset: &str) -> Result<PathBuf, String> {
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
     let generated = root.join("manual").join("ai");
     let page_path = super::editor::document_path(root, page)?;
 
-    let asset_path = Path::new(asset);
+    let clean_asset = asset.trim_start_matches('<').trim_end_matches('>').trim();
+    let asset_path = Path::new(clean_asset);
     if asset_path.is_absolute() {
         return Err("Preview image must be project-relative".to_string());
     }
@@ -305,27 +306,30 @@ pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, Str
     let candidate_paths = [
         page_path
             .parent()
-            .map(|p| p.join(asset))
+            .map(|p| p.join(clean_asset))
             .unwrap_or_default(),
-        root.join(asset),
+        root.join(clean_asset),
         templates.join("assets").join(asset_name),
-        templates.join(asset),
+        templates.join(clean_asset),
+        templates.join("assets").join(clean_asset),
         generated.join("assets").join(asset_name),
     ];
 
     let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
-    let mut image = None;
     for cand in &candidate_paths {
         let Ok(canonical) = cand.canonicalize() else {
             continue;
         };
         if canonical.starts_with(&canonical_root) && canonical.is_file() {
-            image = Some(canonical);
-            break;
+            return Ok(canonical);
         }
     }
 
-    let img = image.ok_or_else(|| "Preview image is missing".to_string())?;
+    Err(format!("Preview image is missing: {asset}"))
+}
+
+pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, String> {
+    let img = resolve_asset_path(root, page, asset)?;
     let ext = img
         .extension()
         .and_then(|e| e.to_str())

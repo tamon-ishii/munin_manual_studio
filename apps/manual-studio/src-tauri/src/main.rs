@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use tauri::{Emitter, Manager, State};
 
 mod clipboard_paths;
@@ -960,6 +963,146 @@ async fn edit_library_screenshot(
 }
 
 #[tauri::command]
+async fn edit_document_image(
+    root: String,
+    relative_path: String,
+    page: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root_path = PathBuf::from(&root);
+        let canonical_root = root_path.canonicalize().unwrap_or_else(|_| root_path.clone());
+
+        let full_path = if let Some(ref p) = page {
+            manual_core::preview::resolve_asset_path(&root_path, p, &relative_path)
+                .or_else(|_| manual_core::config::project_path(&root_path, &relative_path))?
+        } else {
+            manual_core::config::project_path(&root_path, &relative_path)?
+        };
+
+        if !full_path.is_file() {
+            return Err(format!("画像ファイルが見つかりません: {relative_path}"));
+        }
+
+        let bytes = fs::read(&full_path).map_err(|e| e.to_string())?;
+        let session_id = manual_core::screenshots::new_id("session");
+        let home = manual_core::config::project_path(
+            &root_path,
+            &format!(".munin/sessions/{session_id}"),
+        )?;
+        fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+        let input = home.join("input.png");
+        let output = home.join("output.png");
+        let completion = home.join("complete.done");
+
+        // MarkIts expects an image input. If source is JPEG/etc, decode and re-encode to PNG so MarkIts loads cleanly.
+        if let Ok(dynamic_image) = image::load_from_memory(&bytes) {
+            dynamic_image
+                .save_with_format(&input, image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
+        } else {
+            fs::write(&input, &bytes).map_err(|e| e.to_string())?;
+        }
+
+        let mut command =
+            std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+        command
+            .arg("--manual-studio-annotate")
+            .arg("--manual-studio-input")
+            .arg(&input)
+            .arg("--manual-studio-output")
+            .arg(&output)
+            .arg("--manual-studio-completion")
+            .arg(&completion);
+        let mut child = command.spawn().map_err(|e| e.to_string())?;
+        let completion_marker = completion.clone();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            let exit_marker = completion_marker.with_extension("exit");
+            let _ = fs::write(exit_marker, "closed");
+        });
+
+        let rel = full_path
+            .strip_prefix(&canonical_root)
+            .unwrap_or(&full_path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        Ok(serde_json::json!({
+            "sourceFile": input.to_string_lossy(),
+            "annotationFile": output.to_string_lossy(),
+            "completionFile": completion.to_string_lossy(),
+            "targetFile": full_path.to_string_lossy(),
+            "relativePath": rel,
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn document_image_edit_ready(
+    completion_file: String,
+    annotation_file: String,
+) -> Result<Option<bool>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let completion = PathBuf::from(&completion_file);
+        let output = PathBuf::from(&annotation_file);
+        if completion.is_file() {
+            if fs::metadata(&output).map(|m| m.len() > 0).unwrap_or(false) {
+                return Ok(Some(true));
+            } else {
+                return Err("MarkItsで画像が保存されませんでした。".into());
+            }
+        }
+        let exit_marker = completion.with_extension("exit");
+        if exit_marker.is_file() {
+            if fs::metadata(&output).map(|m| m.len() > 0).unwrap_or(false) {
+                return Ok(Some(true));
+            } else {
+                return Err("MarkItsが保存前に終了しました。".into());
+            }
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn apply_document_image_edit(
+    target_file: String,
+    annotation_file: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target_path = PathBuf::from(&target_file);
+        let annotation_path = PathBuf::from(&annotation_file);
+        if !annotation_path.is_file() {
+            return Err("編集後の画像ファイルが見つかりません。".into());
+        }
+        let ext = target_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if ext == "jpg" || ext == "jpeg" {
+            let img = image::open(&annotation_path).map_err(|e| e.to_string())?;
+            img.save_with_format(&target_path, image::ImageFormat::Jpeg)
+                .map_err(|e| e.to_string())?;
+        } else if ext == "webp" {
+            let img = image::open(&annotation_path).map_err(|e| e.to_string())?;
+            img.save_with_format(&target_path, image::ImageFormat::WebP)
+                .map_err(|e| e.to_string())?;
+        } else {
+            let output_bytes = fs::read(&annotation_path).map_err(|e| e.to_string())?;
+            fs::write(&target_path, output_bytes).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn cleanup_markits_capture(image_file: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || recorder::cleanup_completed_capture(&image_file))
         .await
@@ -1051,7 +1194,10 @@ fn main() {
             cleanup_markits_capture,
             clone_operation_scenario_for_task,
             open_editor,
-            open_output
+            open_output,
+            edit_document_image,
+            document_image_edit_ready,
+            apply_document_image_edit
         ])
         .run(context)
         .expect("Failed to start Munin Manual Studio");
@@ -1193,5 +1339,45 @@ mod application_profile_tests {
         let restored: LaunchCommand =
             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
         assert_eq!(restored.id, id);
+    }
+
+    #[test]
+    fn document_image_edit_and_apply_flow() {
+        let root = tempfile::tempdir().unwrap();
+        let docs = root.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        let img_path = docs.join("sample.png");
+        let initial_img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(10, 10, image::Rgba([255, 0, 0, 255])));
+        initial_img.save_with_format(&img_path, image::ImageFormat::Png).unwrap();
+
+        let handoff = tauri::async_runtime::block_on(edit_document_image(
+            root.path().to_string_lossy().into_owned(),
+            "docs/sample.png".into(),
+            None,
+        )).unwrap();
+
+        let annotation_file = handoff["annotationFile"].as_str().unwrap();
+        let completion_file = handoff["completionFile"].as_str().unwrap();
+
+        // Simulate MarkIts saving standard edited PNG without MarkIts metadata
+        let edited_img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(20, 20, image::Rgba([0, 255, 0, 255])));
+        edited_img.save_with_format(annotation_file, image::ImageFormat::Png).unwrap();
+        fs::write(completion_file, "saved").unwrap();
+
+        let ready = tauri::async_runtime::block_on(document_image_edit_ready(
+            completion_file.into(),
+            annotation_file.into(),
+        )).unwrap();
+        assert_eq!(ready, Some(true));
+
+        // Apply edit and verify target_file was updated with new pixels
+        let target_file = handoff["targetFile"].as_str().unwrap();
+        tauri::async_runtime::block_on(apply_document_image_edit(
+            target_file.into(),
+            annotation_file.into(),
+        )).unwrap();
+
+        let updated_img = image::open(target_file).unwrap();
+        assert_eq!((updated_img.width(), updated_img.height()), (20, 20));
     }
 }
