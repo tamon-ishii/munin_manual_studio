@@ -158,7 +158,7 @@ pub fn cancel(root: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn stop_cli_tree(child: &mut std::process::Child) {
+pub(crate) fn stop_cli_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
         let _ = Command::new("kill")
@@ -178,7 +178,7 @@ fn stop_cli_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
-fn wait_for_cli(
+pub(crate) fn wait_for_cli(
     child: &mut std::process::Child,
     root: &Path,
     checkpoint: &str,
@@ -206,7 +206,7 @@ fn wait_for_cli(
     }
 }
 
-fn cli_command(binary: &str, args: &[String], root: &Path) -> Command {
+pub(crate) fn cli_command(binary: &str, args: &[String], root: &Path) -> Command {
     let mut command = Command::new(binary);
     command
         .args(args)

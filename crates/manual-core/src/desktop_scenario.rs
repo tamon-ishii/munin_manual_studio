@@ -80,7 +80,8 @@ fn parse_keys(value: &str) -> Result<Vec<Key>, String> {
     Ok(keys)
 }
 
-pub fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
+#[cfg(test)]
+fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
     validate_with_tasks(steps, docs, &[])
 }
 

@@ -1,3 +1,4 @@
+import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePresentation} from './imagePresentation';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { uiIcon } from './uiIcons';
@@ -14,7 +15,13 @@ import { type Editor, editorViewCtx, editorViewOptionsCtx, serializerCtx } from 
 import { imageSchema, clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
 import { undo, redo } from '@milkdown/kit/prose/history';
 import { Plugin } from '@milkdown/kit/prose/state';
-import { $prose, replaceAll, callCommand, insert } from '@milkdown/kit/utils';
+import { $prose, $remark, replaceAll, callCommand, insert } from '@milkdown/kit/utils';
+type ImageAstNode={type:string;value?:string;children?:ImageAstNode[];muninPresentation?:ImagePresentation};
+const imagePresentationPlugin=$remark('munin-image-presentation',()=>()=>function transform(node:ImageAstNode){
+  if(node.type==='html'){const figure=parseFigure(node.value||'');if(figure){Object.assign(node,{type:'image-block',url:figure.src,alt:figure.alt,title:figure.caption,muninPresentation:figure});return;}}
+  node.children?.forEach(transform);
+  if(node.type==='paragraph'&&node.children?.length===1&&node.children[0].muninPresentation){const image=node.children[0];delete node.children;Object.assign(node,image);}
+});
 let mermaidModule: Promise<typeof import('mermaid')['default']> | undefined;
 function loadMermaid() {
   return mermaidModule ??= import('mermaid').then(({ default: mermaid }) => {
@@ -41,7 +48,8 @@ export function setupMilkdownEditor(
   resolveImage: (source: string) => Promise<string> = async source => source,
   uploadImage?: (file: File) => Promise<string>,
   requestAiTask?: (kind: AiTaskKind) => void,
-  onEditImage?: (source: string, img: HTMLImageElement) => void
+  onEditImage?: (source: string, img: HTMLImageElement) => void,
+  onImageSettings?: (img: HTMLImageElement) => void
 ) {
   const host = document.createElement('div');
   host.id = 'milkdown-editor';
@@ -73,6 +81,7 @@ export function setupMilkdownEditor(
   editBtn.textContent = '🎨 画像の編集';
   editBtn.title = 'MarkItsで画像に注釈やトリミングを加えて編集します';
   overlay.appendChild(editBtn);
+  const settingsBtn=document.createElement('button');settingsBtn.type='button';settingsBtn.textContent='画像の表示設定';settingsBtn.onclick=()=>{if(activeImg)onImageSettings?.(activeImg);};if(onImageSettings)overlay.append(settingsBtn);
   host.appendChild(overlay);
 
   let activeImg: HTMLImageElement | null = null;
@@ -100,9 +109,6 @@ export function setupMilkdownEditor(
   }
 
   function getOriginalSrc(img: HTMLImageElement): string | null {
-    if (img.dataset.originalSrc) {
-      return img.dataset.originalSrc;
-    }
     let foundSrc: string | null = null;
     if (instance) {
       instance.action(ctx => {
@@ -121,6 +127,7 @@ export function setupMilkdownEditor(
       img.dataset.originalSrc = foundSrc;
       return foundSrc;
     }
+    if(img.dataset.originalSrc)return img.dataset.originalSrc;
     const rawSrc = img.getAttribute('src');
     if (rawSrc && !rawSrc.startsWith('data:')) {
       img.dataset.originalSrc = rawSrc;
@@ -145,7 +152,7 @@ export function setupMilkdownEditor(
   }
 
   function handleImageHover(img: HTMLImageElement) {
-    if (!onEditImage || readonly) return;
+    if ((!onEditImage&&!onImageSettings) || readonly) return;
     cancelHide();
     activeImg = img;
     activeSource = getOriginalSrc(img) || '';
@@ -211,6 +218,11 @@ export function setupMilkdownEditor(
         const image = dom instanceof HTMLImageElement ? dom : dom instanceof HTMLElement ? dom.querySelector<HTMLImageElement>('img') : null;
         if (image) {
           image.dataset.originalSrc = String(node.attrs.src);
+          if(dom instanceof HTMLElement&&node.type.name==='image-block'){
+            const configured=Boolean(node.attrs.presentation);dom.style.width=configured?`${node.attrs.displayWidth}%`:'';
+            dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';
+            if(configured){image.style.width='100%';image.style.height='auto';image.addEventListener('load',()=>{image.style.height='auto';},{once:true});}
+          }
           images.push({ image, source: String(node.attrs.src) });
         }
       });
@@ -282,6 +294,7 @@ export function setupMilkdownEditor(
         source.setSelectionRange(start, Math.max(start, end));
       }
       if (!changed) return;
+      requestAnimationFrame(applyImageStyles);
       syncing = true;
       try {
         source.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
@@ -293,7 +306,14 @@ export function setupMilkdownEditor(
   const mermaidSource = '```mermaid\ngraph TD\n    A[開始] --> B[完了]\n```';
   const topBarLabels: string[] = [];
   const labels: Record<string, string> = { bold: '太字', italic: '斜体', strikethrough: '取り消し線', code: 'インラインコード', link: 'リンク', image: '画像', table: '表', 'code-block': 'コードブロック', math: '数式', quote: '引用', hr: '区切り線', 'bullet-list': '箇条書き', 'ordered-list': '番号付きリスト', 'task-list': 'タスクリスト', undo: '元に戻す', redo: 'やり直す', mermaid: 'Mermaidの図を挿入' };
+  function applyImageStyles(){if(!ready||!instance)return;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.state.doc.descendants((node,pos)=>{
+    if(node.type.name!=='image-block')return;const dom=view.nodeDOM(pos);if(!(dom instanceof HTMLElement))return;
+    const image=dom.querySelector('img');if(image)image.alt=String(node.attrs.alt||'');
+    const configured=Boolean(node.attrs.presentation);dom.dataset.imagePresentation=String(configured);dom.style.width=configured?`${node.attrs.displayWidth}%`:'';
+    dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';dom.style.textAlign=configured?node.attrs.alignment:'';
+  });});}
   const toolbarObserver = new MutationObserver(() => {
+    applyImageStyles();
     host.querySelectorAll<HTMLButtonElement>('.milkdown-top-bar .top-bar-item').forEach((button, index) => {
       const label = topBarLabels[index];
       if (label) { button.setAttribute('aria-label', label); button.title = label; }
@@ -370,18 +390,20 @@ export function setupMilkdownEditor(
     ctx.update(editorViewOptionsCtx, previous => ({ ...previous, editable: () => !source.disabled && !source.readOnly, attributes: { role: 'textbox', 'aria-label': 'Markdown原稿', 'aria-multiline': 'true' } }));
     ctx.update(imageBlockSchema.key, previous => ctx => {
       const schema = previous(ctx);
-      return { ...schema, attrs: { ...schema.attrs, alt: { default: '', validate: 'string' } },
-        parseMarkdown: { ...schema.parseMarkdown, runner: (state, node, type) => {
-          state.addNode(type, { src: String(node.url ?? ''), caption: String(node.title ?? ''), alt: String(node.alt ?? ''), ratio: 1 });
+      return { ...schema, attrs: { ...schema.attrs, alt: { default: '', validate: 'string' }, displayWidth:{default:100},alignment:{default:'center'},presentation:{default:false} },
+        parseMarkdown: { ...schema.parseMarkdown, match:node=>schema.parseMarkdown.match(node), runner: (state, node, type) => {
+          const figure=(node.muninPresentation as ImagePresentation|undefined)||(node.type==='html'?parseFigure(String(node.value||'')):undefined);
+          state.addNode(type, figure?{src:figure.src,caption:figure.caption,alt:figure.alt,ratio:1,displayWidth:figure.width,alignment:figure.align,presentation:true}:{ src: String(node.url ?? ''), caption: String(node.title ?? ''), alt: String(node.alt ?? ''), ratio: 1 });
         } },
         toMarkdown: { ...schema.toMarkdown, runner: (state, node) => {
+          if(node.attrs.presentation){state.addNode('html',undefined,renderFigure({src:node.attrs.src,alt:node.attrs.alt,caption:node.attrs.caption,width:node.attrs.displayWidth,align:node.attrs.alignment,configured:true}));return;}
           state.openNode('paragraph');
           state.addNode('image', undefined, undefined, { url: node.attrs.src, alt: node.attrs.alt, title: node.attrs.caption });
           state.closeNode();
         } },
       };
     });
-  }).use(aiTaskBlockPlugins).use(bridge).use(aiTags.plugins);
+  }).use(aiTaskBlockPlugins).use(imagePresentationPlugin).use(bridge).use(aiTags.plugins);
   void crepe.create().then(editor => {
     instance = editor; ready = true; refresh(); updateReadonly();
     if (!sourceMode) source.hidden = true;
@@ -392,7 +414,14 @@ export function setupMilkdownEditor(
     instance.action(ctx => { const view = ctx.get(editorViewCtx); (direction < 0 ? undo : redo)(view.state, view.dispatch); view.focus(); });
     return true;
   }
-  return { showSource, refresh, refreshImages, host, stepHistory,
+  function imageSourceRange(image:HTMLImageElement):DocumentImage|undefined{
+    if(!ready||!instance)return;const src=getOriginalSrc(image);let ordinal=-1,index=0;
+    instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.state.doc.descendants((node,pos)=>{if(!['image','image-block'].includes(node.type.name)||node.attrs.src!==src)return;const dom=view.nodeDOM(pos);if(dom===image||dom instanceof HTMLElement&&dom.contains(image))ordinal=index;index++;});});
+    const images=documentImages(sourceValue()).filter(item=>item.src===src);return ordinal>=0?images[ordinal]:images.length===1?images[0]:undefined;
+  }
+  return { showSource, refresh, refreshImages, host, stepHistory,imageSourceRange,
+    selectedImageSourceRange:()=>{if(!ready||!instance||sourceMode)return;let image:HTMLImageElement|undefined;instance.action(ctx=>{const view=ctx.get(editorViewCtx);const dom=view.nodeDOM(view.state.selection.from);image=dom instanceof HTMLImageElement?dom:dom instanceof HTMLElement?dom.querySelector<HTMLImageElement>('img')||undefined:undefined;});return image?imageSourceRange(image):undefined;},
+    replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(replaceAll(markdown));return true;},
     focus: () => { if (sourceMode) source.focus(); else instance?.action(ctx=>ctx.get(editorViewCtx).focus()); },
     captureState: () => ready && instance ? instance.action(ctx => ctx.get(editorViewCtx).state) : null,
     restoreState: (state: EditorState) => { if (ready && instance && state) instance.action(ctx => ctx.get(editorViewCtx).updateState(state)); },

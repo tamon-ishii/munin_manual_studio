@@ -36,6 +36,9 @@ pub(crate) fn local_path(root: &Path, page: &Path, url: &str) -> Result<PathBuf,
         .map_err(|_| "リンクがプロジェクトの外を指しています。")?;
     project_path(root, &rel.to_string_lossy())
 }
+pub(crate) fn decode_html_attr(value:&str)->String {
+    value.replace("&quot;","\"").replace("&#39;","'").replace("&lt;","<").replace("&gt;",">").replace("&amp;","&")
+}
 fn anchors(content: &str) -> BTreeSet<String> {
     let mut heading = false;
     let mut text = String::new();
@@ -73,6 +76,16 @@ fn anchors(content: &str) -> BTreeSet<String> {
     }
     found
 }
+fn location(content: &str, start: usize, end: usize) -> Value {
+    json!({"line":content[..start].bytes().filter(|b| *b == b'\n').count()+1,
+        "start":content[..start].encode_utf16().count(), "end":content[..end].encode_utf16().count(),
+        "snippet":&content[start..end]})
+}
+fn issue(page: &str, kind: &str, message: &str, content: &str, range: std::ops::Range<usize>, tag: Option<&str>) -> Value {
+    let mut value=location(content,range.start,range.end);
+    value["page"]=json!(page); value["kind"]=json!(kind); value["message"]=json!(message);
+    if let Some(tag)=tag { value["tag"]=json!(tag); } value
+}
 pub fn check(root: &Path) -> Result<Value, String> {
     let config = read_config(root);
     let files = task::collect_target_markdown_files(root, &config);
@@ -81,26 +94,27 @@ pub fn check(root: &Path) -> Result<Value, String> {
     for (page, path) in files {
         let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         for tag in task::parse_page_tags(&page, &content, &mut Default::default())? {
-            let task = match tag {
-                task::PageTag::Task { task, .. } | task::PageTag::Generated { task, .. } => task,
+            let (task,range) = match tag {
+                task::PageTag::Task { task, range } | task::PageTag::Generated { task, range, .. } => (task,range),
             };
-            if task.status == "missing" {
-                issues.push(json!({"page":page,"tag":task.id,"kind":"ungenerated","message":"未生成のAIタグです。"}));
+            if task.status == "missing" || task.status == "stale" {
+                issues.push(issue(&page,if task.status=="missing" {"ungenerated"} else {"stale_answer"},
+                    if task.status=="missing" {"未生成のAIタグです。"} else {"指示変更後の古いAI回答です。"}, &content,range,Some(&task.id)));
             }
         }
         let html_links = regex::Regex::new(r#"(?i)(href|src)\s*=\s*["']([^"']+)["']"#).unwrap();
-        let links: Vec<(String, bool)> = Parser::new_ext(&content, Options::all())
-            .flat_map(|event| match event {
-                Event::Start(Tag::Image { dest_url, .. }) => vec![(dest_url.to_string(), true)],
-                Event::Start(Tag::Link { dest_url, .. }) => vec![(dest_url.to_string(), false)],
+        let links: Vec<(String, bool, std::ops::Range<usize>)> = Parser::new_ext(&content, Options::all()).into_offset_iter()
+            .flat_map(|(event, range)| match event {
+                Event::Start(Tag::Image { dest_url, .. }) => vec![(dest_url.to_string(), true, range)],
+                Event::Start(Tag::Link { dest_url, .. }) => vec![(dest_url.to_string(), false, range)],
                 Event::Html(html) | Event::InlineHtml(html) => html_links
                     .captures_iter(&html)
-                    .map(|cap| (cap[2].to_owned(), cap[1].eq_ignore_ascii_case("src")))
+                    .map(|cap| (decode_html_attr(&cap[2]), cap[1].eq_ignore_ascii_case("src"), range.clone()))
                     .collect(),
                 _ => vec![],
             })
             .collect();
-        for (url, image) in links {
+        for (url, image, range) in links {
             if url.contains(':') || url.starts_with("//") {
                 continue;
             }
@@ -147,7 +161,7 @@ pub fn check(root: &Path) -> Result<Value, String> {
                 }
             };
             if let Some(message) = invalid {
-                issues.push(json!({"page":page,"kind":if image{"missing_image"}else{"broken_link"},"message":message}));
+                issues.push(issue(&page,if image{"missing_image"}else{"broken_link"}, &message,&content,range,None));
             }
         }
     }
@@ -166,7 +180,17 @@ pub fn check(root: &Path) -> Result<Value, String> {
                     continue;
                 }
                 if entry["status"] == "failed" {
-                    issues.push(json!({"page":key.0,"tag":key.1,"kind":"execution_failure","message":entry["error"]}));
+                    let mut value=json!({"page":key.0,"tag":key.1,"kind":"execution_failure","message":entry["error"]});
+                    if let Ok(path)=crate::editor::document_path(root,key.0) {
+                        if let Ok(content)=fs::read_to_string(path) {
+                            if let Ok(tags)=task::parse_page_tags(key.0,&content,&mut Default::default()) {
+                                for tag in tags { let (task,range)=match tag {task::PageTag::Task{task,range}|task::PageTag::Generated{task,range,..}=>(task,range)};
+                                    if task.id==key.1 {value=issue(key.0,"execution_failure",entry["error"].as_str().unwrap_or("生成に失敗しました。"),&content,range,Some(key.1));break;}
+                                }
+                            }
+                        }
+                    }
+                    issues.push(value);
                 }
             }
         }
@@ -186,6 +210,15 @@ pub fn require_ready(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn issue_locations_handle_unicode_repeated_links_and_stale_answers() {
+        let root=tempfile::tempdir().unwrap();fs::create_dir_all(root.path().join("docs")).unwrap();
+        let content="# 😀日本語\n\n[First](missing.md)\n[Again](missing.md)\n\n```md\n![Example](missing.png)\n```\n\n<!-- ai:task id=stale kind=text prompt=\"New\" source-sha256=0000000000000000000000000000000000000000000000000000000000000000 -->\nOld answer\n<!-- /ai:task -->\n";
+        fs::write(root.path().join("docs/index.md"),content).unwrap();let report=check(root.path()).unwrap();let issues=report["issues"].as_array().unwrap();
+        let links:Vec<_>=issues.iter().filter(|v|v["kind"]=="broken_link").collect();assert_eq!(links.len(),2);assert_eq!(links[0]["line"],3);assert_eq!(links[1]["line"],4);
+        let start=content.find("[First]").unwrap();assert_eq!(links[0]["start"],content[..start].encode_utf16().count());assert_eq!(links[0]["snippet"],"[First](missing.md)");
+        assert!(issues.iter().any(|v|v["kind"]=="stale_answer"&&v["tag"]=="stale"));assert!(!issues.iter().any(|v|v["kind"]=="missing_image"));
+    }
     #[test]
     fn missing_images_links_and_ungenerated_tasks_block_final() {
         let root = tempfile::tempdir().unwrap();

@@ -174,3 +174,27 @@ MkDocsがPATHにあり、LinuxではシステムPythonのGI・GTK3・AT-SPIとX1
 - macOS `37995913061` / `baf79f1`: 実Studioからのプロジェクト選択、アプリ登録、厳密な引数保持、ネイティブクリック録画・撮影、MarkIts保存・再編集、不変原本、Studio前面復帰、原稿挿入・自動保存・HTML出力がすべて成功。実OS環境はGitHub ActionsのmacOSホスト。ARM64／x64という以前のCI名は配布ビルドのターゲットを指し、debugネイティブ検証はホスト上の実行ファイルを使う。
 - 最終 `npm run manual:check`: 全30段階成功（終了コード0）。Studio Rust 25件、core 158件成功・1件ignored。Linux実Studioの全フローと対象ウィンドウ付き録画ヘルパー検証も成功。
 - 3能力の変更仕様が本体仕様へ反映済みであることを再照合。残る7.5・9.3・9.4を完了し、アーカイブ・0.6.0公開へ進む。
+
+## フロントの分割とビルド警告
+
+Manual Studioは依存パッケージとMermaidの配布モジュールごとにチャンクを分割する。KaTeXはCrepe用とMermaid用でバージョンが異なるため別チャンクにする。Mermaidの配布済みパーサーは単一モジュールで約670KBあり、Rollupでは内部を分割できないため警告基準は700KBとする。圧縮前のサイズを基準にし、今後もこの上限を超える追加・増加は検出する。
+
+配布ビルドの編集画面とMermaidの遅延読み込みは次で確認できる。通常の開発サーバーとは別の5175番ポートを使う。
+
+```sh
+npm run manual:build
+MUNIN_TEST_PRODUCTION=1 node scripts/test_manual_studio_ui_improvements.mjs
+```
+
+Linux撮影依存の `screenshots` 0.8.10は、D-Bus呼び出しの戻り値を明示する互換性修正を適用したローカルコピーをルートワークスペースで使用する。変更内容とライセンスは [パッチ説明](../vendor/screenshots/PATCH.md) と [LICENSE](../vendor/screenshots/LICENSE) を参照する。Cargoレジストリ内のファイルには変更を加えない。
+
+## 2026-10-10 リソース一覧・AI作画の継続確認
+
+AI作画の履歴で画像が欠落した場合、指示とエラーを保持し、古いプレビューを消して挿入・参照修正を無効にする。プレビューの応答が遅れても最後に選んだ画像を上書きしないよう修正した。履歴由来のAgy指定と、失敗した参照修正の親IDも保持する。欠落と応答順序のブラウザ回帰テストを追加した。
+
+再撮影進捗テストにはリソース検索欄を追加し、ブラウザ統合テストは左側のリソース一覧からファイルツリーへ戻ってAI更新を操作するよう変更した。ファイルツリーのAI更新説明から旧撮影指示を除いた。
+
+- `npm run manual:check` はブラウザ統合直前までの28段階が成功。停止原因の画面配置を修正後、`--group smoke` と `--group native` が成功し、合計31段階を分割確認した。
+- Studio Rustは26件成功、manual-coreは171件成功・1件ignored。型チェック、ファイルツリー単体チェック、OpenSpec全5仕様のstrict validation、`git diff --check` も成功。
+- ブラウザ統合テストは編集・保存・競合・プロジェクト切替・リソース一覧・AIターミナルを確認。統合テストの一時プロジェクトではMkDocs未設定の案内経路を通過し、別のMkDocsビルドボタンテストではHTML出力を確認した。
+- 今回はLinux上の確認。画像APIはローカルの模擬応答を使用し、Agy／Codex／外部APIによる実画像生成とWindows／macOS実GUIの再確認は実施していない。

@@ -3,20 +3,21 @@ import { spawn } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
-const base = 'http://127.0.0.1:5174';
+const production = process.env.MUNIN_TEST_PRODUCTION === '1';
+const base = `http://127.0.0.1:${production ? 5175 : 5174}`;
 const tasks = [
   { id:'write', kind:'text', page:'docs/index.md', prompt:'Explain', status:'missing' },
   { id:'screen', kind:'screenshot', page:'docs/index.md', prompt:'Capture', status:'current' },
   { id:'diagram', kind:'diagram', page:'docs/index.md', prompt:'Draw', status:'stale' },
   { id:'protected', kind:'text', page:'docs/index.md', prompt:'Keep', status:'approved' },
 ];
-const content = '# Guide\n\n' + tasks.map(task => `<!-- ai:task id=${task.id} kind=${task.kind} prompt="${task.prompt}" ${task.status === 'approved' ? 'approved-at=2026-10-08T00:00:00Z' : ''} -->\n${task.status === 'missing' ? '' : 'Existing result'}\n<!-- /ai:task -->`).join('\n\n');
+const content = '# Guide\n\n' + (production ? '```mermaid\ngraph TD\n A[Start] --> B[End]\n```\n\n' : '') + tasks.map(task => `<!-- ai:task id=${task.id} kind=${task.kind} prompt="${task.prompt}" ${task.status === 'approved' ? 'approved-at=2026-10-08T00:00:00Z' : ''} -->\n${task.status === 'missing' ? '' : 'Existing result'}\n<!-- /ai:task -->`).join('\n\n');
 const state = { has_config:true, config:{docs:'docs', output:'manual', agent:'codex', model:'test', connection_type:'local_llm', endpoint_url:'http://localhost:11434/v1', mkdocs:{site_name:'Guide',theme:'material',language:'ja',use_directory_urls:true}}, brief:'', pages:['docs/index.md'], project_entries:[{path:'docs/index.md',directory:false}], tasks, capture_sources:{}, image_assets:{}, ui_map:null, agents:[] };
 const inputFor = ids => ({page:'docs/index.md',revision:'r1',existing_content:content,tasks:tasks.filter(task => task.kind !== 'screenshot' && task.status !== 'approved' && (!ids || ids.includes(task.id))),references:[],source_note:'Test',feedback:'',connection_type:'local_llm',agent:'codex',model:'test',requests:[]});
 let browser, server, saveFails=false, saveDelay=0, previewFails=false, previewDelay=0;
 const actions=[];
 try {
-  server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
+  server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'), ...(production ? ['preview', '--port', '5175', '--strictPort'] : []), '--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
   for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   browser=await chromium.launch({channel:'chrome',headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:960}});page.setDefaultTimeout(15000);
@@ -50,6 +51,7 @@ try {
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await idle();
   // The panel shares data-editor-view with the controls, but must never inherit
   // a native tooltip containing the entire editor UI and document.
+  if (production) await page.locator('.mermaid-preview svg').first().waitFor();
   const editorPanel=page.locator('#panel-editor');
   assert.equal(await editorPanel.getAttribute('title'),null);
   assert.equal(await editorPanel.getAttribute('aria-pressed'),null);

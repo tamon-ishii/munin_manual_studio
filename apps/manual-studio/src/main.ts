@@ -1,6 +1,8 @@
+import {imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
+import type {ResourceUsage} from './resourceBrowser';
 import { setupImageGeneration } from './imageGeneration';
 import { setupToolbarCustomization } from './toolbarCustomization';
-import { chooseDestination } from './screenshotWorkflow';
+import { chooseDestination,featureDialog } from './screenshotWorkflow';
 import { setupScreenshotLibrary } from "./screenshotLibrary";
 import { showPartialFailure, showExecutionHistory, showCaptureExpectations, type ExecutionRun, type ExecutionLimits } from './executionHistory';
 import { selectGenerationPages, taskStatusLabels, taskKindLabels } from './taskPresentation';
@@ -49,7 +51,7 @@ const editor = element<HTMLTextAreaElement>("markdown-editor");
 const milkdown = setupMilkdownEditor(editor, message => status(message, true), source => {
   if (!documentState || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(source)) return Promise.resolve(source);
   return rpc("preview-asset", { page: documentState.page, asset: source });
-}, uploadMilkdownImage, requestAiTask, (source, img) => { void handleEditDocumentImage(source, img); });
+}, uploadMilkdownImage, requestAiTask, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img));
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 const params = new URLSearchParams(location.search);
@@ -820,19 +822,71 @@ function insertDocumentMarkdown(markdown:string): void {
       editor.dispatchEvent(new Event("input", { bubbles: true }));
       editor.focus();
     }
-    status("スクリーンショットを原稿に挿入しました。原稿は自動保存されます。");
+    status("画像を原稿に挿入しました。原稿は自動保存されます。");
   }
+async function insertResourceAsset(path:string):Promise<boolean>{
+  if(!await chooseImageDestination()||!documentState)return false;
+  insertDocumentMarkdown(`![${path.split('/').at(-1)||'画像'}](<${relativeProjectAsset(path,documentState.page)}>)`);return true;
+}
+interface QualityIssue extends Partial<ResourceUsage> {page:string;tag?:string;kind?:string;message:string}
+function renderQualityReport(target:HTMLElement,report:{passed:boolean;issues:QualityIssue[]},root:string){
+  target.replaceChildren();
+  const summary=document.createElement('p');summary.textContent=report.passed?'公開前チェックに合格しました。':`公開前チェックで${report.issues.length}件の問題が見つかりました。`;target.append(summary);
+  for(const issue of report.issues){
+    const row=document.createElement('div');row.className='quality-issue';
+    const jump=document.createElement('button');jump.type='button';jump.textContent=`${issue.page}${issue.line?`:${issue.line}`:''} — 該当箇所を開く`;
+    jump.onclick=()=>{void work(async()=>{if(root!==projectRoot)return;await openResourceUsage({page:issue.page,line:issue.line||1,start:issue.start??-1,end:issue.end??-1,snippet:issue.snippet||''});});};
+    const message=document.createElement('span');message.textContent=issue.message;row.append(jump,message);target.append(row);
+  }
+}
+async function openResourceUsage(usage:ResourceUsage):Promise<void>{
+  const root=projectRoot;const docsPrefix=(workspace?.config.docs||'docs').replace(/\/$/,'')+'/';
+  const expectedPage=usage.page.startsWith(docsPrefix)&&workspace?.pages.includes(usage.page.slice(docsPrefix.length))?usage.page.slice(docsPrefix.length):usage.page;
+  await openPage(usage.page);
+  if(root!==projectRoot||documentState?.page!==expectedPage)return;
+  showDocumentView();chooseTab('editor');
+  if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
+  milkdown.showSource();
+  let start=usage.snippet&&editor.value.slice(usage.start,usage.start+usage.snippet.length)!==usage.snippet?editor.value.indexOf(usage.snippet,Math.max(0,usage.start-100)):usage.start;
+  if(start<0&&usage.snippet)start=editor.value.indexOf(usage.snippet);
+  if(start<0){start=editor.value.split('\n').slice(0,usage.line-1).join('\n').length;}
+  jumpToSource(editor,start,start+(usage.snippet?.length||0));updateCursor();
+}
 const screenshotLibrary = setupScreenshotLibrary({
   root: () => projectRoot, request: rpc, work, applications: () => launchCommands,
   page: () => documentState?.page,
   openPage: async page => { await openPage(page); },
   chooseDestination: chooseImageDestination,
   insert: insertDocumentMarkdown,
+  insertAsset:insertResourceAsset,openImage:openImageTab,
+  editImage:async path=>{await handleEditDocumentImage(path,element<HTMLImageElement>('image-tab-preview'));},
+  openUsage:openResourceUsage,generateImage:(entry,edit)=>imageGeneration.open(entry,edit),
 });
 setupToolbarCustomization();
-setupImageGeneration({root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
+const imageGeneration=setupImageGeneration({root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
 
 let documentImageEditing = false;
+function changeImageMarkdown(next:string,expected:string){
+  if(editor.value!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');
+  if(!milkdown.replaceMarkdownDocument(next,expected)){rememberCurrentSelection();editor.setRangeText(next,0,editor.value.length,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
+}
+function showImagePresentation(image?:HTMLImageElement){
+  if(!documentState||activeImageTab||busy)return;
+  const selected=image?milkdown.imageSourceRange(image):milkdown.selectedImageSourceRange()||imageAtSelection(editor.value,editor.selectionStart,editor.selectionEnd);
+  if(!selected){status('画像にカーソルを合わせるか、画像記法を選択してください。',true);return;}
+  const root=projectRoot,page=documentState.page,expected=editor.value;
+  const {dialog,body}=featureDialog('画像の表示設定');dialog.dataset.imagePresentation='true';
+  const widthLabel=document.createElement('label');widthLabel.textContent='表示幅（本文に対する％）';const width=document.createElement('input');width.type='number';width.min='1';width.max='100';width.value=String(selected.width);width.setAttribute('aria-label','表示幅（％）');widthLabel.append(width);
+  const alignLabel=document.createElement('label');alignLabel.textContent='配置';const align=document.createElement('select');for(const [value,label] of [['left','左寄せ'],['center','中央寄せ'],['right','右寄せ']])align.add(new Option(label,value));align.value=selected.align;align.setAttribute('aria-label','画像の配置');alignLabel.append(align);
+  const captionLabel=document.createElement('label');captionLabel.textContent='キャプション';const caption=document.createElement('input');caption.value=selected.caption;caption.setAttribute('aria-label','画像のキャプション');captionLabel.append(caption);
+  const help=document.createElement('p');help.textContent='画像の下に説明を表示します。表示幅と配置はプレビュー・公開にも反映されます。';
+  const feedback=document.createElement('p');feedback.role='status';const apply=document.createElement('button');apply.type='button';apply.className='primary';apply.textContent='表示設定を適用';
+  apply.onclick=()=>{try{if(root!==projectRoot||documentState?.page!==page)throw new Error('原稿が切り替わりました。');const value=Number(width.value);if(!Number.isInteger(value)||value<1||value>100)throw new Error('表示幅は1〜100の整数で指定してください。');
+    const raw=renderFigure({...selected,width:value,align:align.value as DocumentImage['align'],caption:caption.value,configured:true});const before=expected.slice(0,selected.start),after=expected.slice(selected.end);const gapBefore=before&&!before.endsWith('\n\n')?(before.endsWith('\n')?'\n':'\n\n'):'';const gapAfter=after&&!after.startsWith('\n\n')?(after.startsWith('\n')?'\n':'\n\n'):'';changeImageMarkdown(before+gapBefore+raw+gapAfter+after,expected);dialog.close();void milkdown.refreshImages();status('画像の表示設定を更新しました。');
+  }catch(error){feedback.textContent=String(error);}};
+  body.append(widthLabel,alignLabel,captionLabel,help,feedback,apply);
+}
+element('image-presentation').addEventListener('click',()=>showImagePresentation());
 async function handleEditDocumentImage(imageSource: string, _img: HTMLImageElement): Promise<void> {
   if (documentImageEditing) {
     status("他の画像をMarkItsで編集中です。MarkItsの編集を完了してください。", true);
@@ -1639,7 +1693,9 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
   let completionMessage = `${action === "build-mkdocs" ? "MkDocsでHTMLを作成しました" : action === "recapture" || action === "capture-window" ? "画像を更新し、撮影元を保存しました" : "処理が完了しました"}。`;
   let completionHasError = false;
   try {
-    const output = await rpc(action, options);
+    const actionRoot=projectRoot;
+    const output = await rpc(action, options,actionRoot);
+    if(actionRoot!==projectRoot)return;
     if (typeof options.id === "string") {
       const task = workspace?.tasks.find(task => task.id === options.id);
       if (task) recordTaskResult(task);
@@ -1674,6 +1730,7 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
         } else text = JSON.stringify(parsed, null, 2);
       } catch { /* Accessibility inspection returns text. */ }
       element(resultId).textContent = text;
+      if(action==='quality-check')renderQualityReport(element(resultId),JSON.parse(output),actionRoot);
     }
     if (action === "draft") {
       await refreshWorkspace();
@@ -2672,14 +2729,36 @@ for (const target of [editor,milkdown.host] as HTMLElement[]) {
     const data = event.dataTransfer?.getData('application/x-munin-image'); if (!data) return;
     event.preventDefault();event.stopImmediatePropagation();
     if (!documentState || activeImageTab || busy) { status('画像を挿入する原稿を開いてください。',true);return; }
-    const asset = JSON.parse(data) as {root:string;path:string}; if (asset.root !== projectRoot) {status('同じプロジェクトの画像を選択してください。',true);return;}
-    const path = relativeProjectAsset(asset.path,documentState.page);
-    const markdown = `![${(asset.path.split('/').at(-1)||'画像').replace(/[\[\]\\]/g,'\\$&')}](<${path}>)`;
-    if (target === milkdown.host) milkdown.insertMarkdownAt(markdown,event.clientX,event.clientY);
-    else { rememberCurrentSelection(); editor.setRangeText(markdown,editor.selectionStart,editor.selectionEnd,'end');editor.dispatchEvent(new Event('input',{bubbles:true})); }
-    status('画像の参照を挿入しました。');
+    let asset:{root:string;path:string;screenshot_id?:string};
+    try{asset=JSON.parse(data);if(typeof asset.path!=='string'||!asset.path)throw new Error();}catch{status('画像のドラッグ情報を読み込めません。',true);return;}
+    if (asset.root !== projectRoot) {status('同じプロジェクトの画像を選択してください。',true);return;}
+    const page=documentState.page,root=projectRoot,start=editor.selectionStart,end=editor.selectionEnd,left=event.clientX,top=event.clientY;
+    const expected=editor.value;const droppedImage=(event.target as Element).closest<HTMLImageElement>('img');
+    const existing=target===milkdown.host?(droppedImage?milkdown.imageSourceRange(droppedImage):undefined):imageAtSelection(expected,start,end);
+    if(existing){
+      const next=replaceDocumentImage(expected,existing,relativeProjectAsset(asset.path,page),asset.screenshot_id);
+      try{changeImageMarkdown(next,expected);void milkdown.refreshImages();status('画像の参照を置き換えました。説明と表示設定は保持しています。');}catch(error){status(String(error),true);}return;
+    }
+    const insert=(markdown:string)=>{
+      if(root!==projectRoot||documentState?.page!==page||activeImageTab)return;
+      if(target===milkdown.host)milkdown.insertMarkdownAt(markdown,left,top);
+      else {rememberCurrentSelection();editor.setRangeText(markdown,start,end,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
+      status('画像の参照を挿入しました。');
+    };
+    if(asset.screenshot_id){void work(async()=>{insert(await rpc('screenshots-reference',{id:asset.screenshot_id,page},root));});}
+    else {const path=relativeProjectAsset(asset.path,page);insert(`![${(asset.path.split('/').at(-1)||'画像').replace(/[\[\]\\]/g,'\\$&')}](<${path}>)`);}
+
   },true);
 }
+let resourceDragHover:ReturnType<typeof setTimeout>|undefined;
+const editorNavigation=document.querySelector<HTMLElement>('[data-tab="editor"]');
+editorNavigation?.addEventListener('dragover',event=>{
+  if(!event.dataTransfer?.types.includes('application/x-munin-image'))return;
+  event.preventDefault();event.dataTransfer.dropEffect='copy';
+  resourceDragHover??=setTimeout(()=>{resourceDragHover=undefined;if(documentState&&!busy)chooseTab('editor');},400);
+});
+function clearResourceDragHover(){if(resourceDragHover)clearTimeout(resourceDragHover);resourceDragHover=undefined;}
+editorNavigation?.addEventListener('dragleave',clearResourceDragHover);document.addEventListener('dragend',clearResourceDragHover);document.addEventListener('drop',clearResourceDragHover);
 element("cancel-new-page").addEventListener("click", () => element<HTMLDialogElement>("new-page-dialog").close());
 element("new-page-form").addEventListener("submit", (event) => {
   event.preventDefault();

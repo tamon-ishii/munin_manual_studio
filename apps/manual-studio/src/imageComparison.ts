@@ -36,15 +36,15 @@ export function readAnnotationInfo(src: string): AnnotationInfo {
   } catch { return {state:'invalid',count:0}; }
 }
 
-export function showImageComparison(images: ComparisonImage[], title = '撮影画像を確認'): Promise<void> {
+export function showImageComparison(images: ComparisonImage[], title = '撮影画像を確認', showAnnotations = true): Promise<void> {
   const dialog = document.createElement('dialog');
   dialog.className = 'image-comparison-dialog';
   dialog.setAttribute('aria-labelledby', 'image-comparison-title');
-  dialog.innerHTML = '<div class="panel-header"><h2 id="image-comparison-title"></h2><button type="button" data-close>閉じる</button></div><p class="muted">同じ倍率で撮影前後を比較できます。画像をクリックすると実寸表示へ切り替わります。</p><label class="image-zoom-control">表示倍率 <input type="range" min="25" max="200" step="25" value="100" aria-label="画像の表示倍率" /><output>幅に合わせる</output></label><div class="image-comparison-grid"></div>';
+  dialog.innerHTML = '<div class="panel-header"><h2 id="image-comparison-title"></h2><button type="button" data-close>閉じる</button></div><p class="muted">同じ倍率で画像を比較できます。画像をクリックすると実寸表示へ切り替わります。</p><label class="image-zoom-control">表示倍率 <input type="range" min="25" max="200" step="25" value="100" aria-label="画像の表示倍率" /><output>幅に合わせる</output></label><div class="image-comparison-grid"></div>';
   dialog.querySelector('h2')!.textContent = title;
   const grid = dialog.querySelector<HTMLElement>('.image-comparison-grid')!;
   const metadata = images.map(item => readAnnotationInfo(item.src));
-  if (images.length === 2) {
+  if (showAnnotations && images.length === 2) {
     const note = document.createElement('p'); note.className = 'image-annotation-summary'; note.setAttribute('role', 'status');
     note.textContent = metadata.every(info => info.state === 'present')
       ? metadata[0].value === metadata[1].value ? '撮影前後の注釈データは同一です。' : '撮影前後で注釈データが変わっています。位置と内容を確認してください。'

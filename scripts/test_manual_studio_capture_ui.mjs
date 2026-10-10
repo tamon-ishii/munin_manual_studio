@@ -125,7 +125,7 @@ try {
   assert.equal(await nativePage.locator('#settings-menu [data-tab=applications]').count(),0,'registration is outside global settings');
   await nativePage.goto(`${base}/?root=${encodeURIComponent('/tmp/library-native-fixture')}`);
   await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  assert.equal(await nativePage.locator('.workspace-tabs [data-tab=editor] + #open-applications').count(),1,'application registration is immediately after the editor button');
+  assert.equal(await nativePage.locator('.workspace-nav-tools #open-applications').count(),1,'application registration is grouped with screen tools');
   assert.equal(await nativePage.locator('#open-applications').isVisible(),true);
   await nativePage.getByRole('button',{name:'アプリ登録',exact:true}).click();await nativePage.locator('#add-launch-command').click();
   await nativePage.locator('[data-launch-program="0"]').fill('/missing/app');

@@ -1,10 +1,12 @@
+import {setupResourceBrowser, type Resource, type ResourceUsage} from './resourceBrowser';
+import type {ImageGenerationEntry} from './imageGeneration';
 import { featureDialog } from './screenshotWorkflow';
 import { showImageComparison } from './imageComparison';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { LaunchCommand } from './types';
 interface Revision { id: string; created_at: string; flattened: boolean; requires_review?: boolean }
-interface Screenshot { capture_id?: string; id: string; name: string; adopted: string | null; protected: boolean; edits: Revision[]; usage: string[]; thumbnail: string | null; recipe: unknown }
+interface Screenshot { output: string; capture_id?: string; id: string; name: string; adopted: string | null; protected: boolean; edits: Revision[]; usage: string[]; thumbnail: string | null; recipe: unknown }
 interface Options {
   root(): string;
   request(action: string, options: Record<string, unknown>, root: string): Promise<string>;
@@ -14,26 +16,37 @@ interface Options {
   chooseDestination(): Promise<boolean>;
   openPage(page:string): Promise<void>;
   applications(): LaunchCommand[];
+  insertAsset(path:string):Promise<boolean>;
+  openImage(path:string):Promise<void>;
+  editImage(path:string):Promise<void>;
+  openUsage(usage:ResourceUsage):Promise<void>;
+  generateImage(entry:ImageGenerationEntry,edit:boolean):Promise<void>;
 }
 export function setupScreenshotLibrary(options: Options) {
   const list = document.getElementById('screenshot-library-list')!;
   let generation = 0;
   let recording: {root: string; id: string} | null = null;
+  let currentShots:Screenshot[]=[];
+  const resources=setupResourceBrowser({...options,refresh},()=>render(options.root()));
   async function refresh() {
     const root = options.root(), version = ++generation;
     updateControls();
     if (recaptureOwnerRoot && recaptureOwnerRoot !== root) recaptureStatus.textContent = "";
     if (!root) { list.textContent = 'プロジェクトを開いてください。'; return; }
-    const result = JSON.parse(await options.request('screenshots-list', {}, root)) as { items: Screenshot[] };
+    const [shots,assets]=await Promise.all([options.request('screenshots-list',{},root),options.request('resources-list',{},root)]);
+    const result = JSON.parse(shots) as {items:Screenshot[]};
+    const resourceResult=JSON.parse(assets) as {items:Resource[]};
     if (root !== options.root() || version !== generation) return;
-    result.items ||= [];
-    list.replaceChildren();
-    if (!result.items.length) list.textContent = '画像を取り込むと、ここから原本と編集版を管理できます。';
+    currentShots=result.items||[];resources.setItems(resourceResult.items||[]);render(root);
+  }
+  function render(root:string){
+    const result={items:currentShots};list.replaceChildren();
     for (const shot of result.items) {
+      if(!resources.matchesShot(shot.output,{path:shot.output||'',name:shot.name,kind:shot.recipe?'screenshot':'imported',usages:shot.usage.map(page=>({page,line:1,start:0,end:0,snippet:''}))}))continue;
       const card = document.createElement('article'); card.className = 'card screenshot-library-card';
-      const title = document.createElement('h2'); title.textContent = shot.name || 'スクリーンショット'; card.append(title);
-      if (shot.thumbnail) { const image = document.createElement('img'); image.src = shot.thumbnail; image.alt = title.textContent; card.append(image); }
-      const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' ／ 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' ／ 再撮影候補あり' : ''}`; card.append(usage);
+      const title = document.createElement('h2'); title.textContent = shot.name || '画像'; card.append(title);resources.decorateShot(card,shot.output);
+      if (shot.thumbnail) { const image = document.createElement('img'); image.src = shot.thumbnail; image.alt = title.textContent; image.draggable=Boolean(shot.adopted);image.title='ドラッグして原稿に挿入';card.append(image); }
+      const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${card.querySelector('.resource-usages') ? '' : shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' 再撮影候補あり' : ''}`.trim(); if(usage.textContent)card.append(usage);
       const sharedCount = result.items.filter(item => (item.capture_id || item.id) === (shot.capture_id || shot.id)).length;
       if (sharedCount > 1) { const shared = document.createElement('p'); shared.className = 'muted'; shared.textContent = `原本を共有：${sharedCount}画像 ／ 撮影1回`; card.append(shared); }
       const actions = document.createElement('div'); actions.className = 'actions screenshot-primary-actions'; card.append(actions);
@@ -80,6 +93,8 @@ export function setupScreenshotLibrary(options: Options) {
       }, shot.protected);
       editButton.classList.add('primary');
       actions.replaceChildren(editButton, copyButton, insertButton, recaptureButton);
+      const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで修正';aiEdit.disabled=!shot.adopted||!shot.output;
+      aiEdit.onclick=()=>{if(root===options.root())void options.generateImage({id:shot.id,path:shot.output,prompt:'',created_at:''},true);};actions.append(aiEdit);
       button('選択版を表示', async () => {
         const loaded = JSON.parse(await options.request('screenshots-image', { id: shot.id, json: { revision: versions.value } }, root));
         if (root !== options.root()) return;
@@ -92,6 +107,7 @@ export function setupScreenshotLibrary(options: Options) {
       if (shot.edits.some(edit => edit.flattened)) { const warning = document.createElement("p"); warning.textContent = "平坦化画像からの取り込みです。失われた画素や注釈の編集状態は復元できません。"; card.append(warning); }
       list.append(card);
     }
+    resources.renderExtras(list,root);
   }
   const recaptureStatus = document.getElementById('screenshot-recapture-status')!;
   let activeRecaptureRoot: string | null = null;

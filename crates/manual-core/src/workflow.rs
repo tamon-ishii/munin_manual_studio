@@ -90,7 +90,7 @@ fn relative(root: &Path, path: &Path) -> Result<String, String> {
         .to_string_lossy()
         .replace('\\', "/"))
 }
-pub(crate) fn resource_lock(root: &Path, name: &str) -> Result<fs::File, String> {
+fn resource_lock_file(root: &Path, name: &str) -> Result<fs::File, String> {
     let directory = project_path(root, ".munin/resource-locks")?;
     fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let canonical = project_path(root, name)?;
@@ -104,8 +104,15 @@ pub(crate) fn resource_lock(root: &Path, name: &str) -> Result<fs::File, String>
             digest(canonical.to_string_lossy().as_bytes())
         )))
         .map_err(|e| e.to_string())?;
-    lock.lock().map_err(|e| e.to_string())?;
     Ok(lock)
+}
+pub(crate) fn resource_lock(root: &Path, name: &str) -> Result<fs::File, String> {
+    let lock=resource_lock_file(root,name)?;
+    lock.lock().map_err(|e|e.to_string())?; Ok(lock)
+}
+pub(crate) fn try_resource_lock(root: &Path, name: &str) -> Result<Option<fs::File>, String> {
+    let lock=resource_lock_file(root,name)?;
+    match lock.try_lock() { Ok(())=>Ok(Some(lock)), Err(std::fs::TryLockError::WouldBlock)=>Ok(None), Err(error)=>Err(error.to_string()) }
 }
 pub(crate) fn page_lock(root: &Path, page: &str) -> Result<fs::File, String> {
     resource_lock(root, &relative(root, &editor::document_path(root, page)?)?)

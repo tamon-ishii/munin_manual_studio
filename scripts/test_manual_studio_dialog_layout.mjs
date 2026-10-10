@@ -45,8 +45,9 @@ try {
   await page.locator('[data-tab=screenshots]').click();
   await page.locator('.screenshot-library-card').first().waitFor();
   await page.setViewportSize({width:1440,height:960});
-  assert.ok((await page.locator('#panel-screenshots').boundingBox()).width>720,'image library opens in the main work area');
-  assert.equal(await page.locator('.screenshot-primary-actions button').count(),12,'four primary actions per image');
+  const libraryBox=await page.locator('#panel-screenshots').boundingBox();const editorBox=await page.locator('#panel-editor').boundingBox();
+  assert.ok(libraryBox.width>150&&libraryBox.x+libraryBox.width<=editorBox.x+4,'resource library opens alongside the editor for drag/drop');
+  assert.equal(await page.locator('.screenshot-primary-actions button').count(),15,'five primary actions per image, including AI editing');
   assert.equal(await page.locator('.screenshot-management[open]').count(),0,'management begins collapsed');
   await page.locator('.screenshot-library-card').first().getByRole('button',{name:'文書に挿入',exact:true}).click();
   await page.locator('[data-screenshot-destination]').waitFor();

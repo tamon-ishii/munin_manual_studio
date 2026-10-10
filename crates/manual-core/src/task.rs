@@ -1473,10 +1473,9 @@ mod identity_tests {
             .collect();
         assert_ne!(ids[0], ids[1]);
         assert_eq!(saved, normalize_identifiers("index.md", &saved).unwrap());
-        if let PageTag::Task { task, .. } | PageTag::Generated { task, .. } = &tags[0] {
-            assert!(render_task_block(task, "生成した本文", &utc_now(), None)
-                .contains("name=\"同じ名前\""));
-        }
+        let (PageTag::Task { task, .. } | PageTag::Generated { task, .. }) = &tags[0];
+        assert!(render_task_block(task, "生成した本文", &utc_now(), None)
+            .contains("name=\"同じ名前\""));
         let renamed = saved
             .replace("同じ名前", "別名")
             .replace("説明", "新しい説明");

@@ -6,3 +6,7 @@ members = [
 ]
 exclude = ["crates/markits"]
 resolver = "2"
+
+# Pin the upstream never-type fallback fix for Linux screenshot calls.
+[patch.crates-io]
+screenshots = { path = "vendor/screenshots" }

@@ -24,6 +24,7 @@ pub mod quality;
 pub mod scenario;
 pub mod screenshots;
 mod image_generation;
+pub mod resources;
 pub mod task;
 pub mod template;
 pub mod ui_explore;
@@ -195,6 +196,16 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "screenshots-list",
         "image-generation-settings",
         "image-generate",
+        "image-generation-history",
+        "image-generation-cancel",
+        "image-generation-capabilities",
+        "resources-list",
+        "resources-image",
+        "resources-thumbnail",
+        "resources-detail",
+        "resources-copy",
+        "resources-replace",
+        "resources-restore",
         "screenshots-templates",
         "screenshots-diagnose",
         "screenshots-register",
@@ -442,6 +453,16 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                 .map_err(|e| e.to_string())?,
         )?
         .to_string()),
+        "resources-list" => Ok(resources::list(root)?.to_string()),
+        "resources-thumbnail" => resources::preview_thumbnail(root, asset_opt.ok_or("画像を選択してください。")?),
+        "resources-detail" => Ok(resources::detail(root, asset_opt.ok_or("画像を選択してください。")?)?.to_string()),
+        "resources-image" => resources::image_data(root, asset_opt.ok_or("画像を選択してください。")?),
+        "resources-copy" => Ok(resources::copy(root, asset_opt.ok_or("画像を選択してください。")?)?.to_string()),
+        "resources-restore" => Ok(resources::restore(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?)?.to_string()),
+        "resources-replace" => Ok(resources::replace(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?)?.to_string()),
+        "image-generation-history" => Ok(image_generation::history(root)?.to_string()),
+        "image-generation-cancel" => Ok(image_generation::cancel(root, id_opt.ok_or("作画の実行IDを指定してください。")?)?.to_string()),
+        "image-generation-capabilities" => Ok(image_generation::capabilities(&serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?).to_string()),
         "image-generation-settings" => Ok(image_generation::settings(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
         "image-generate" => Ok(image_generation::generate(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
         "screenshots-templates" => Ok(screenshots::templates(root)?.to_string()),

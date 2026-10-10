@@ -739,6 +739,7 @@ try {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ output: JSON.stringify({ total: 1, logs: [{ time: '12:00:00', message: 'タスク smoke-text の文章を生成しています' }] }) }) });
     } else await route.continue();
   });
+  await page.locator('.flexlayout__tab_button').filter({hasText:'ファイルツリー'}).click();
   await page.locator('[data-generate-page="docs/ai-page.md"]').click();
   await page.locator('#generation-input-run').click();
   await page.locator('#operation-progress').waitFor({ state: 'visible' });

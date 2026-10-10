@@ -203,9 +203,10 @@ fn usages(root: &Path, shot: &Screenshot) -> Result<Vec<String>, String> {
             {
                 crate::quality::local_path(root, &path, &dest_url).ok()
                     == project_path(root, &shot.output).ok()
-            } else {
-                false
-            }
+            } else if let pulldown_cmark::Event::Html(html)|pulldown_cmark::Event::InlineHtml(html)=event {
+                regex::Regex::new(r#"(?is)<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#).unwrap().captures_iter(&html).any(|cap|
+                    crate::quality::local_path(root,&path,&crate::quality::decode_html_attr(&cap[1])).ok()==project_path(root,&shot.output).ok())
+            } else {false}
         });
         if image_reference
             || pattern

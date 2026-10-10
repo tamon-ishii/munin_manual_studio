@@ -215,7 +215,7 @@ try:
                 fill('起動引数（1行に1つ）', '\n'.join([fixture, report, ' value with spaces ', '$(literal)']))
             click('アプリ登録を保存', 'push button')
             click('閉じる', 'push button')
-            click('スクリーンショット一覧', 'push button')
+            click('リソース一覧', 'push button')
             click('操作を記録して撮影', 'push button')
             click('記録を開始', 'push button')
             time.sleep(3)

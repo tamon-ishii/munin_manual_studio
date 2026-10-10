@@ -37,7 +37,7 @@ try{
  const {stdout:python}=await run(process.env.MANUAL_NATIVE_PYTHON||'python3',['-c','import sys; print(sys.executable)']);
  studio=spawn(path.join(bin,'manual-studio'),[],{cwd:root,stdio:['ignore','ignore','pipe']});studio.stderr.on('data',s=>stderr=(stderr+s).slice(-4000));
  await scenario(main(),[...press('開く'),...fill('text_field','プロジェクトのフォルダー',root),...press('開く'),...press('アプリ登録'),...press('アプリを追加')]);
- await scenario(main(),[...fill('text_field','起動パス',python.trim()),...fill('text_area','起動引数（1行に1つ）',[fixture,report,' value with spaces ','$(literal)'].join('\n')),...press('アプリ登録を保存'),...press('閉じる'),...press('スクリーンショット一覧'),...press('操作を記録して撮影'),...press('記録を開始')]);
+ await scenario(main(),[...fill('text_field','起動パス',python.trim()),...fill('text_area','起動引数（1行に1つ）',[fixture,report,' value with spaces ','$(literal)'].join('\n')),...press('アプリ登録を保存'),...press('閉じる'),...press('リソース一覧'),...press('操作を記録して撮影'),...press('記録を開始')]);
  pass('Studio project open, application registration and recording start controls');
  const args=await poll(async()=>{try{return JSON.parse(await readFile(report,'utf8'));}catch{return null;}});targetPid=args.pid;assert.deepEqual(args.args,[' value with spaces ','$(literal)']);
  // The fixture writes arguments before Studio finishes detecting its window

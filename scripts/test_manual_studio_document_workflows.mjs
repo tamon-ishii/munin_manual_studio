@@ -104,8 +104,8 @@ try {
   await page.locator('[data-tab=screenshots]').click();await page.locator('#screenshot-library-refresh').evaluate(button=>button.click());await idle();await page.locator('.screenshot-management').first().locator('summary').click();await page.getByRole('button',{name:'共有関係',exact:true}).first().click();await page.getByRole('heading',{name:'共有原本と使用原稿'}).waitFor();assert.match(await page.locator('dialog[open]').textContent(),/派生画像2枚/);await page.locator('dialog[open]').getByRole('button',{name:'閉じる',exact:true}).click();
   // Generate via a local HTTP fixture and insert only after reviewing the saved image.
   await rpc('image-generation-settings',{json:{save:true,model:'fixture-image-model',endpoint:`http://127.0.0.1:${api.address().port}/images/generations`}});
-  await page.locator('[data-tab=editor]').click();await page.locator('#editor-more>summary').click();await page.locator('#generate-ai-image').click();await idle();const drawing=page.locator('[data-ai-image]');await drawing.getByRole('textbox',{name:'画像の指示'}).fill('A diagram illustration');if(!await drawing.locator('input[type=password]').isVisible())await drawing.locator('details>summary').click();await drawing.locator('input[type=password]').fill('fixture-key');await drawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();await drawing.locator('img.generated-image-preview').waitFor();assert.equal(requests,1);assert.equal(await drawing.locator('.generated-stack-item').count(),1);
-  const settings=await readFile(path.join(root,'.munin/image-generation.json'),'utf8');assert.doesNotMatch(settings,/fixture-key/);assert.match(await drawing.locator('[role=status]').textContent(),/画像.*を保存/);
+  await page.locator('[data-tab=editor]').click();await page.locator('#editor-more>summary').click();await page.locator('#generate-ai-image').click();await idle();const drawing=page.locator('[data-ai-image]');assert.equal(await drawing.getByRole('combobox',{name:'生成方法',exact:true}).inputValue(),'agy');await drawing.getByRole('combobox',{name:'生成方法',exact:true}).selectOption('codex');assert.equal(await drawing.locator('input[type=password]').isVisible(),false);await drawing.getByRole('combobox',{name:'生成方法',exact:true}).selectOption('api');await drawing.getByRole('textbox',{name:'画像の指示'}).fill('A diagram illustration');if(!await drawing.locator('input[type=password]').isVisible())await drawing.locator('details>summary').click();await drawing.locator('input[type=password]').fill('fixture-key');await drawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();await drawing.locator('img.generated-image-preview').waitFor();assert.equal(requests,1);assert.equal(await drawing.locator('.generated-stack-item').count(),1);
+  const settings=await readFile(path.join(root,'.munin/image-generation.json'),'utf8');assert.doesNotMatch(settings,/fixture-key/);assert.equal(JSON.parse(settings).provider,'api');assert.match(await drawing.locator('.image-generation-status').textContent(),/画像.*を保存/);
   await drawing.getByRole('button',{name:'原稿に挿入',exact:true}).click();await page.getByRole('combobox',{name:'挿入先の原稿',exact:true}).selectOption('index.md');await page.getByRole('combobox',{name:'挿入先の位置',exact:true}).selectOption('end');await page.getByRole('button',{name:'ここに挿入',exact:true}).click();await idle();assert.match(await page.locator('#markdown-editor').inputValue(),/generated\/ai-image-/);
   // Verify raw generated image is saved without forced scaling.
   const secondResult = JSON.parse(await rpc('image-generate', {json: {prompt: 'diagram', api_key: 'fixture-key'}}));
@@ -114,5 +114,28 @@ try {
   assert.ok(secondBytes.length > 0);
   const beforeFailure=await page.locator('#markdown-editor').inputValue();fail=true;
   await assert.rejects(()=>rpc('image-generate',{json:{prompt:'failed',api_key:'fixture-key',size:'1024x1024'}}),/HTTP 401/);assert.equal(await page.locator('#markdown-editor').inputValue(),beforeFailure);
+  // Provider selection routes explicitly and persists independently of API keys.
+  const routedProviders=[];
+  await page.route('**/__manual/rpc',async route=>{
+    const payload=route.request().postDataJSON();
+    if(payload.action!=='image-generate'){await route.continue();return;}
+    routedProviders.push(payload.options.json.provider);
+    assert.equal(payload.options.json.api_key,'');
+    await route.fulfill({json:{output:JSON.stringify({path:secondResult.path})}});
+  });
+  await page.locator('#generate-ai-image').click();await idle();
+  const providerDrawing=page.locator('[data-ai-image]');
+  const providerSelect=providerDrawing.getByRole('combobox',{name:'生成方法',exact:true});
+  assert.equal(await providerSelect.inputValue(),'api','previous provider is restored');
+  await providerDrawing.getByRole('textbox',{name:'画像の指示'}).fill('Landscape');
+  for(const provider of ['codex','agy']){
+    await providerSelect.selectOption(provider);
+    assert.equal(await providerDrawing.locator('input[type=password]').isVisible(),false);
+    await providerDrawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();
+    assert.equal(JSON.parse(await readFile(path.join(root,'.munin/image-generation.json'),'utf8')).provider,provider);
+    assert.equal(await providerDrawing.getByRole('button',{name:'原稿に挿入',exact:true}).isEnabled(),true);
+  }
+  assert.deepEqual(routedProviders,['codex','agy']);
+  assert.equal(await page.locator('#markdown-editor').inputValue(),beforeFailure,'CLI previews do not insert into manuscript automatically');
   assert.deepEqual(errors,[]);console.log('Document tabs, draft/history retention, image tabs/drop, tree context creation, hidden AI metadata, toolbar customization, screenshot templates/relationships/diagnosis, and image API generation/insertion checks passed.');
 } finally {await browser?.close();server?.kill();await new Promise(resolve=>api?api.close(resolve):resolve());await rm(root,{recursive:true,force:true});}

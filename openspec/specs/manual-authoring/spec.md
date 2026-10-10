@@ -248,7 +248,9 @@ The rich text AI body SHALL hide generated-output metadata comments while preser
 - **THEN** the body remains editable and its comments remain serialized while the comments are hidden from the rich text body display.
 
 ### Requirement: Generate and review AI artwork
-Manual Studio SHALL support separately configured image generation, prompt and size input, ongoing status, saved image preview and explicit insertion into a selected document. API keys SHALL not be persisted in project settings or generated-image metadata. API errors SHALL preserve document content.
+Image generation SHALL follow the dedicated `ai-image-generation` specification; unified resource operations SHALL follow `resource-library`.
+
+Manual Studio SHALL support separately configured image generation, prompt input, ongoing status, saved image preview and explicit insertion into a selected document. API keys SHALL not be persisted in project settings or generated-image metadata. API errors SHALL preserve document content.
 
 #### Scenario: Review a generated image before insertion
 - **WHEN** image generation succeeds
@@ -256,7 +258,7 @@ Manual Studio SHALL support separately configured image generation, prompt and s
 - **AND** the document changes only after explicit insertion.
 
 ### Requirement: Automatically save document edits with compact status
-Manual Studio SHALL automatically save edited documents after an idle interval and before document operations or switching document tabs. Unsaved changes SHALL be marked with an asterisk after the tab filename. The editor SHALL omit the ordinary save button and duplicate filename header, retain save errors and conflicts visibly, and preserve edits on failed saves. Ctrl/Cmd+S SHALL allow an explicit retry. The current document AI update button SHALL be labeled 更新 and placed next to the shortcuts button.
+Manual Studio SHALL automatically save edited documents after an idle interval and before document operations or switching document tabs. Unsaved changes SHALL be marked with an asterisk after the tab filename. The editor SHALL omit the ordinary save button and duplicate filename header, retain save errors and conflicts visibly, and preserve edits on failed saves. Ctrl/Cmd+S SHALL allow an explicit retry. The current document AI update button SHALL be labeled 更新 and placed next to the icon-labeled AI作画 action.
 
 #### Scenario: Save an idle edit
 - **WHEN** a document is edited and the idle interval elapses
@@ -267,3 +269,26 @@ Manual Studio SHALL automatically save edited documents after an idle interval a
 - **WHEN** automatic saving fails or detects an external revision conflict
 - **THEN** the editor retains the draft and shows the failure
 - **AND** the user can retry with Ctrl/Cmd+S.
+
+### Requirement: Navigate publication check findings
+Publication checks SHALL provide issue locations where identifiable for missing images, broken links, ungenerated or stale AI answers, and latest generation failures. Each finding SHALL offer navigation to its source without modifying document content.
+
+#### Scenario: Navigate a repeated broken reference
+- **WHEN** the user selects a finding for a reference repeated in the same document
+- **THEN** the source editor selects the occurrence identified by the finding.
+
+### Requirement: Configure image presentation in manuscripts
+Manual Studio SHALL provide image width from 1 to 100 percent of the manuscript column, left/center/right alignment and optional plain-text captions. Settings SHALL persist in Markdown using an HTML figure and survive rich editing, preview, publication and reopening. Alternative text SHALL remain separate and caption text SHALL be escaped. Settings SHALL participate in undo and save.
+
+#### Scenario: Save an aligned image with a caption
+- **WHEN** the user configures an image to 80 percent width, right alignment and a caption
+- **THEN** editing and preview reflect the settings
+- **AND** saving and reopening preserve the width, alignment, caption and alternative text.
+
+### Requirement: Replace a manuscript image by resource drop
+Dropping a project resource on a manuscript image SHALL replace that reference while preserving its position, caption, alternative text and presentation. Source editing SHALL use the image syntax at the cursor or selection. File contents SHALL remain unchanged, screenshot associations SHALL follow the replacement resource, and undo SHALL restore the previous reference.
+
+#### Scenario: Replace a configured image
+- **WHEN** a resource is dropped on a configured image in the rich editor
+- **THEN** the reference changes without inserting a second image or overwriting either asset
+- **AND** its caption and presentation remain and undo restores the previous reference.
