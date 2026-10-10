@@ -9,5 +9,10 @@
 /crates/markits/manual/
 /release/
 /.idea/
+/.munin/
+# Generated image assets and recorded screenshot recipes
+/docs/assets/generated/
+/docs/assets/screenshots/
+/manual/scenarios/recorded-shot-*.json
 /sample_project/manual/ai/
 /sample_project/docs/assets/
