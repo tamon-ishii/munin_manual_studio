@@ -130,7 +130,9 @@ pub fn capture_window(
 pub fn requires_worker(action: &str) -> bool {
     matches!(
         action,
-        "list-windows"
+        "screenshot-ai-plan"
+            | "screenshot-ai-capture"
+            | "list-windows"
             | "list-accessible-windows"
             | "inspect-window"
             | "activate-window"
@@ -139,14 +141,13 @@ pub fn requires_worker(action: &str) -> bool {
             | "screenshots-recapture"
             | "capture-source-auto"
             | "markits-capture"
-            | "ui-map-from-desktop"
     )
 }
 
 pub fn requires_hiding(action: &str) -> bool {
     matches!(
         action,
-        "capture-window" | "recapture" | "capture-source-auto" | "markits-capture"
+        "screenshot-ai-capture" | "capture-window" | "recapture" | "capture-source-auto" | "markits-capture"
     )
 }
 

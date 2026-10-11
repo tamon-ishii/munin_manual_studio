@@ -19,10 +19,27 @@ fn atomic_json(path: &Path, value: &Value) -> Result<(), String> {
     Ok(())
 }
 fn validate_provider(provider: &str) -> Result<(), String> {
-    if matches!(provider, "auto" | "agy" | "codex" | "api") {
+    if matches!(provider, "auto" | "agy" | "codex" | "api" | "shared") {
         Ok(())
     } else {
         Err("画像の生成方法はAgy・Codex・画像APIから選択してください。".into())
+    }
+}
+fn shared_connection(root: &Path) -> Result<(String, String), String> {
+    let config = crate::config::read_config(root);
+    match config.connection_type.as_str() {
+        "cli" if matches!(config.agent.as_str(), "agy" | "codex") => Ok((config.agent, String::new())),
+        "cli" => Err("文章・図のAIは画像生成に対応していません。画像生成AIを個別に設定してください。".into()),
+        "api" | "local_llm" => {
+            let endpoint = if config.endpoint_url.trim().is_empty() && config.connection_type == "local_llm" { "http://localhost:11434/v1" } else { config.endpoint_url.trim() };
+            validate_endpoint(endpoint)?;
+            let mut url = reqwest::Url::parse(endpoint).map_err(|e| e.to_string())?;
+            let base = url.path().trim_end_matches('/').trim_end_matches("/chat/completions").trim_end_matches("/responses").trim_end_matches("/images/generations");
+            let path = format!("{base}/images/generations");
+            url.set_path(&path);
+            Ok(("api".into(), url.to_string()))
+        }
+        _ => Err("文章・図のAI接続が未設定です。AI設定で接続するか、画像生成AIを個別に設定してください。".into()),
     }
 }
 fn validate_endpoint(endpoint: &str) -> Result<(), String> {
@@ -62,9 +79,15 @@ pub fn settings(root: &Path, options: &Value) -> Result<Value, String> {
         // Never retain credentials, even from older settings files.
         let clean = json!({"model":value["model"],"endpoint":value["endpoint"],"provider":value["provider"]});
         atomic_json(&path, &clean)?;
-        return Ok(clean);
+        value = clean;
     }
-    Ok(value)
+    // Return only known settings, never credentials from an old file.
+    let mut clean = json!({"model":value["model"],"endpoint":value["endpoint"],"provider":value["provider"]});
+    match shared_connection(root) {
+        Ok((provider, endpoint)) => {clean["shared_provider"] = json!(provider); clean["shared_endpoint"] = json!(endpoint);}
+        Err(error) => clean["shared_error"] = json!(error),
+    }
+    Ok(clean)
 }
 fn job_path(root: &Path, id: &str, suffix: &str) -> Result<PathBuf, String> {
     if id.is_empty() || id.len() > 100 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
@@ -422,13 +445,19 @@ pub fn generate(root: &Path, options: &Value) -> Result<Value, String> {
         return Err("作画の指示を入力してください。".into());
     }
     let configured = settings(root, &Value::Null)?;
+    let mut options = options.clone();
+    if options["provider"].as_str().or(configured["provider"].as_str()) == Some("shared") {
+        let (provider, endpoint) = shared_connection(root)?;
+        options["provider"] = json!(provider);
+        options["endpoint"] = json!(endpoint);
+    }
     let mut provider = options["provider"]
         .as_str()
         .or(configured["provider"].as_str())
         .unwrap_or("auto");
     validate_provider(provider)?;
     if provider == "auto" {
-        provider = if api_key(options).is_some() {
+        provider = if api_key(&options).is_some() {
             "api"
         } else {
             "agy"
@@ -589,6 +618,32 @@ mod tests {
         }
         assert!(settings(root.path(), &json!({"save":true,"provider":"unknown"})).is_err());
         assert!(generate(root.path(), &json!({"prompt":"test","provider":"unknown"})).is_err());
+    }
+    #[test]
+    fn shared_image_connection_follows_manuscript_without_overwriting_independent_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let config_path = crate::config::config_path(root.path());
+        let mut config = crate::config::ManualConfig::default();
+        config.agent = "agy".into();
+        fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+        let saved = settings(root.path(), &json!({"save":true,"provider":"shared","model":"image-model","endpoint":"https://images.example/v1/images/generations","api_key":"secret"})).unwrap();
+        assert_eq!(saved["shared_provider"], "agy");
+        config.agent = "codex".into();
+        fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert_eq!(settings(root.path(), &Value::Null).unwrap()["shared_provider"], "codex");
+        config.connection_type = "api".into();config.model = "text-model".into();
+        for (endpoint, expected) in [("https://text.example/v1", "https://text.example/v1/images/generations"), ("https://text.example/v1/chat/completions", "https://text.example/v1/images/generations"), ("https://text.example/v1/responses", "https://text.example/v1/images/generations")] {
+            config.endpoint_url = endpoint.into();fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+            let resolved = settings(root.path(), &Value::Null).unwrap();
+            assert_eq!(resolved["shared_provider"], "api");assert_eq!(resolved["shared_endpoint"], expected);
+            assert_eq!(resolved["endpoint"], "https://images.example/v1/images/generations");assert_eq!(resolved["model"], "image-model");
+        }
+        config.connection_type = "none".into();fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(generate(root.path(), &json!({"prompt":"image"})).unwrap_err().contains("未設定"));
+        config.connection_type = "cli".into();config.agent = "claude".into();fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(settings(root.path(), &Value::Null).unwrap()["shared_error"].as_str().unwrap().contains("個別"));
+        assert!(generate(root.path(), &json!({"prompt":"image"})).unwrap_err().contains("対応していません"));
+        assert!(!fs::read_to_string(root.path().join(".munin/image-generation.json")).unwrap().contains("secret"));
     }
 
     #[test]

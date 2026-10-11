@@ -8,17 +8,17 @@ const steps = [
   { group: 'unit', name: 'preview navigation unit checks', command: npx, args: ['tsx', 'apps/manual-studio/src/previewNavigation.test.ts'], timeoutMs: 60_000 },
   { group: 'unit', name: 'editor history unit checks', command: process.execPath, args: ['scripts/test_manual_studio_editor_history.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'file tree rendering checks', command: process.execPath, args: ['scripts/test_manual_studio_file_tree.mjs'], timeoutMs: 60_000 },
-  { group: 'unit', name: 'Markdown AI tag checks', command: process.execPath, args: ['scripts/test_manual_studio_markdown_tags.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'MarkIts workflow checks', command: npm, args: ['run', 'manual:test-workflow'], timeoutMs: 60_000 },
   { group: 'unit', name: 'transport callback mock checks', command: process.execPath, args: ['scripts/test_manual_studio_transport.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'capture session checks', command: process.execPath, args: ['scripts/test_manual_studio_capture_session.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'terminal output parser checks', command: npx, args: ['tsx', 'scripts/test_terminal_output_parser.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'PNG annotation metadata checks', command: npx, args: ['tsx', 'scripts/test_image_comparison.ts'], timeoutMs: 60_000 },
 ];
+steps.push({ group: 'unit', name: 'selective Diff checks', command: npx, args: ['tsx','scripts/test_manual_studio_selectable_diff.ts'], timeoutMs: 60_000 });
 const unitStepCount = steps.length;
 
 steps.push(
-  { group: 'generation', name: 'durable execution browser checks', command: process.execPath, args: ['scripts/test_manual_studio_execution.mjs'], timeoutMs: 180_000 },
+  { group: 'generation', name: 'reader review and screenshot instruction integration', command: process.execPath, args: ['scripts/test_manual_studio_ai_assistance.mjs'], timeoutMs: 180_000 },
   { group: 'ui', name: 'UI improvements browser checks', command: process.execPath, args: ['scripts/test_manual_studio_ui_improvements.mjs'], timeoutMs: 120_000 },
   { group: 'build', name: 'Manual Studio frontend build', command: npm, args: ['run', 'manual:build'], timeoutMs: 240_000 },
   { group: 'ui', name: 'preview link browser checks', command: process.execPath, args: ['scripts/test_manual_studio_preview_navigation.mjs'], timeoutMs: 120_000 },
@@ -33,9 +33,6 @@ steps.push(
   { prerequisite: true, group: 'build', name: 'manualctl build for browser smoke', command: 'cargo', args: ['build', '-p', 'manual-core', '--bin', 'manualctl', '--offline'], timeoutMs: 300_000 },
   { group: 'ui', name: 'MkDocs build input checks', command: process.execPath, args: ['scripts/test_manual_studio_build.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'MkDocs build button checks', command: process.execPath, args: ['scripts/test_manual_studio_mkdocs_button.mjs'], timeoutMs: 120_000 },
-  { group: 'ui', name: 'Milkdown AI prompt save checks', command: process.execPath, args: ['scripts/test_manual_studio_ai_prompt.mjs'], timeoutMs: 120_000 },
-  { group: 'generation', name: 'generation review integration checks', command: process.execPath, args: ['scripts/test_manual_studio_generation_review.mjs'], timeoutMs: 120_000 },
-  { group: 'generation', name: 'generation tools browser checks', command: process.execPath, args: ['scripts/test_manual_studio_generation_tools.mjs'], timeoutMs: 120_000 },
   { group: 'smoke', name: 'browser smoke checks', command: process.execPath, args: ['scripts/smoke_manual_studio.mjs', '--start-server'], timeoutMs: 240_000 },
   { group: 'native', name: 'Manual Studio Rust checks', command: 'cargo', args: ['test', '--manifest-path', 'apps/manual-studio/src-tauri/Cargo.toml', '--offline'], timeoutMs: 360_000 },
   { group: 'native', name: 'manual-core Rust checks', command: 'cargo', args: ['test', '-p', 'manual-core', '--offline'], timeoutMs: 600_000 },

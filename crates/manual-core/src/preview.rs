@@ -11,7 +11,7 @@ use super::agent::get_agents;
 use super::builder::build;
 use super::config::{has_config, project_path, read_config, DEFAULT_BRIEF};
 use super::task::{
-    collect_target_markdown_files, parse_page_tags, read_answer, scan_entries, tasks, utc_now,
+    collect_target_markdown_files, parse_page_tags, utc_now,
     PageTag,
 };
 
@@ -36,47 +36,8 @@ pub fn render_page_markdown(
         return Err(format!("Preview page is missing: {}", page_rel.display()));
     }
     let content = fs::read_to_string(&page_path).map_err(|e| e.to_string())?;
-    let task_list = tasks(templates)?;
-    let mut answers = HashMap::new();
-    for task in &task_list {
-        let answer_path = generated.join("answers").join(format!("{}.md", task.id));
-        if answer_path.is_file() {
-            if let Ok(ans) = read_answer(&answer_path, task) {
-                answers.insert(task.id.clone(), ans);
-            }
-        }
-    }
-
-    let built_at = utc_now();
-    let page_rel_str = page_rel.to_string_lossy().replace('\\', "/");
-    let mut ids = std::collections::HashSet::new();
-    let tags = parse_page_tags(&page_rel_str, &content, &mut ids)?;
-
-    let mut result = String::new();
-    let mut last_idx = 0;
-
-    for tag in tags {
-        if let PageTag::Task { range, task } = tag {
-            result.push_str(&content[last_idx..range.start]);
-            let task_id = &task.id;
-            let kind = &task.kind;
-
-            if let Some((created, body, approved)) = answers.get(task_id) {
-                result.push_str(&super::task::render_task_block(
-                    &task,
-                    body,
-                    created,
-                    approved.as_deref(),
-                ));
-            } else {
-                result.push_str(&format!("> **作成待ち:** `{task_id}` ({kind})"));
-            }
-            last_idx = range.end;
-        }
-    }
-    result.push_str(&content[last_idx..]);
-
-    Ok(result.replace("{{BUILD_TIMESTAMP}}", &built_at))
+    Ok(crate::legacy_ai::plain_markdown(&content, Some(generated))
+        .replace("{{BUILD_TIMESTAMP}}", &utc_now()))
 }
 
 pub fn inline_html_assets(output: &Path, html_text: &str) -> String {
@@ -427,7 +388,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     };
 
     let has_cfg = has_config(root);
-    let tasks = scan_entries(&templates, &generated);
+
     let image_link = Regex::new(r"!\[[^\]]*\]\((?P<path>[^)]+)\)").unwrap();
     let mut image_assets = HashMap::new();
     for (page, path) in collect_target_markdown_files(root, &config) {
@@ -457,12 +418,11 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
         "config": config,
         "agents": get_agents(),
         "brief": brief,
-        "execution_results": crate::workflow::latest_results(root)?,
-        "update_reasons": crate::workflow::update_reasons(root, &tasks)?,
-        "tasks": tasks,
+
+
+
         "image_assets": image_assets,
         "capture_sources": super::capture_source::read(root)?,
-        "ui_map": fs::read_to_string(project_path(root, "manual/ui_map.json")?).ok().and_then(|raw| serde_json::from_str::<super::uimap::UIMap>(&raw).ok()),
         "pages": pages,
         "project_entries": project_entries,
         "preview": preview,

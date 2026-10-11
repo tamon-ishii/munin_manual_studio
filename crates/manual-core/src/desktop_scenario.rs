@@ -448,6 +448,7 @@ struct AccessibleWindowInfo {
     title: String,
     app: String,
     pid: Option<u32>,
+    program: Option<String>,
 }
 
 pub(super) fn list_accessible_windows() -> Result<String, String> {
@@ -463,15 +464,20 @@ pub(super) fn list_accessible_windows() -> Result<String, String> {
             let id = window.stable_id.as_deref().unwrap_or(title);
             found.push(AccessibleWindowInfo {
                 id: pid.map_or_else(|| id.to_string(), |pid| format!("pid:{pid}:{id}")),
-                query: format!("app:{}::{title}", app.name),
+                query: pid.map_or_else(|| format!("app:{}::{title}", app.name), |pid| format!("pid:{pid}:{title}")),
                 title: title.to_string(),
                 app: app.name.clone(),
+                program: pid.and_then(super::platform::process_executable).map(|path| path.to_string_lossy().into_owned()),
                 pid,
             });
         }
     }
     found.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     serde_json::to_string(&found).map_err(|error| error.to_string())
+}
+
+pub(super) fn window_title(query: &str) -> Result<String,String> {
+    a11y_window(query)?.name.clone().filter(|name| !name.trim().is_empty()).ok_or("撮影ウィンドウのタイトルを確認できません。".into())
 }
 
 pub(super) fn inspect_window(query: &str) -> Result<String, String> {
@@ -841,7 +847,11 @@ pub fn run(
                                     window
                                         .name
                                         .as_deref()
-                                        .and_then(|name| find_window(name).ok())
+                                        .and_then(|name| {
+                                            if let Some(pid) = window.pid {
+                                                select_launched_window(name, &window_capture::list_windows().ok()?, &window_capture::window_process_ids().ok()?, pid).ok()
+                                            } else { find_window(name).ok() }
+                                        })
                                         .map(|native| native.id)
                                 };
                                 selected = SelectedWindow {

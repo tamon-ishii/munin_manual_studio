@@ -1,15 +1,16 @@
+import {setupScreenshotAi} from './screenshotAi';
+import {askReader,showReaderReport,type ReaderReport} from './readerReview';
 import {imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
 import type {ResourceUsage} from './resourceBrowser';
+import { setupImageAiSettings } from './imageAiSettings';
 import { setupImageGeneration } from './imageGeneration';
 import { setupToolbarCustomization } from './toolbarCustomization';
-import { chooseDestination,featureDialog } from './screenshotWorkflow';
+import { chooseDestination,featureDialog,confirmAction } from './screenshotWorkflow';
 import { setupScreenshotLibrary } from "./screenshotLibrary";
-import { showPartialFailure, showExecutionHistory, showCaptureExpectations, type ExecutionRun, type ExecutionLimits } from './executionHistory';
-import { selectGenerationPages, taskStatusLabels, taskKindLabels } from './taskPresentation';
 import { uiIcon } from './uiIcons';
-import { showImageComparison } from './imageComparison';
+import { setupControlIcons } from './controlIcons';
 import { showShortcutHelp } from './shortcutHelp';
-import { setAiPhase, renderExecutionResult, type AiPhase } from './workflowPresentation';
+import { setAiPhase } from './workflowPresentation';
 import { readAiCredential, saveAiCredential, hasUnassignedAiCredential, assignLegacyAiCredential } from "./aiCredentials";
 import { applyEditorFontSize, isEditorFontSize, setupEditorFontSize } from "./editorFontSize";
 import { setupMilkdownEditor, renderMermaid } from "./milkdownEditor";
@@ -18,9 +19,6 @@ import { emitTo, listen } from "@tauri-apps/api/event";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { EditorHistory, type EditorSnapshot } from "./editorHistory";
-import { completeMarkitsCapture } from "./markitsWorkflow";
-import { CaptureSessionStore } from "./captureSession";
-import { collectAiTagIds } from "./markdownTags";
 import { setupPaneResizers } from "./paneResizers";
 import { setupWindowLayout, type WindowLayoutManager } from "./windowLayout";
 import { createPreviewNavigator } from "./previewNavigation";
@@ -28,22 +26,19 @@ import { sendManualRequest } from "./manualTransport";
 import { renderFileTree } from "./fileTree";
 import { setupPreviewTheme } from "./themePreview";
 import { setupMarkdownTableEditor } from "./markdownTable";
-import { setupDocumentTagsPane } from "./documentTagsPane";
 import { jumpToSource } from "./editorNavigation";
 import { setupWorkspaceWizard } from "./workspaceWizard";
-import { showGenerationReview } from "./generationReview";
+import {askSelectionInstruction,reviewSelection,type SelectionDraft} from "./selectionAi";
 import { showUnsavedChangesDialog } from "./unsavedChangesDialog";
 import { loadWorkspaceHistory, recordWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
 import { changeHeadingLevel, toggleStrikethrough, toggleTaskList, changeIndent, continueMarkdownList, type MarkdownEdit } from "./markdownAssists";
 import { applyTheme, currentTheme, initializeTheme, isThemeId, type ThemeId } from "./theme";
-import { showGenerationInput, type GenerationInput } from "./generationInput";
-import { showGenerationHistory, type GenerationHistorySummary, type GenerationHistoryEntry } from "./generationHistory";
 import { aiErrorAdvice } from "./aiErrors";
 import { setupTerminalPane, type TerminalController } from "./terminalPane";
 import { emit } from "@tauri-apps/api/event";
 import "./style.css";
 
-import type { Task, State, Document, NativeWindow, RecordingResult, LaunchCommand } from "./types";
+import type { State, Document, RecordingResult, LaunchCommand } from "./types";
 
 const element = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const input = (id: string): HTMLInputElement => element(id);
@@ -51,7 +46,7 @@ const editor = element<HTMLTextAreaElement>("markdown-editor");
 const milkdown = setupMilkdownEditor(editor, message => status(message, true), source => {
   if (!documentState || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(source)) return Promise.resolve(source);
   return rpc("preview-asset", { page: documentState.page, asset: source });
-}, uploadMilkdownImage, requestAiTask, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img));
+}, uploadMilkdownImage, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img));
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 const params = new URLSearchParams(location.search);
@@ -96,8 +91,6 @@ let dirty = false;
 let documentAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 let documentSavePending: Promise<void> | undefined;
 let documentSaveState: { owner: Document; state: 'saving' | 'error'; message?: string } | null = null;
-const lastExecutions = new Map<string, ExecutionRun>();
-const aiPhases = new Map<string, AiPhase>();
 let busy = false;
 let previewVersion = 0;
 let previewRequestPending = false;
@@ -113,34 +106,10 @@ let progressAgentTotal = 0;
 let manualStudioHiddenForCapture = false;
 let previewTimer: ReturnType<typeof setTimeout>;
 const expandedFolders = new Set<string>();
-interface AiReviewSnapshot { before: Document; after: Document; id?: string; updated: string[] }
-const aiReviews = new Map<string, AiReviewSnapshot>();
-const aiReviewKey = (page: string) => JSON.stringify([projectRoot, page]);
 let editHistory = new EditorHistory();
 let replayingHistory = false;
 let pendingEditorFocus = false;
-let operationRecording = false;
-let recordingStarting = false;
-let externalFinishActive = false;
-let recordingFinishing: Promise<void> | null = null;
-let recordingFinishActive = false;
-let activeRecordingResult: RecordingResult | null = null;
 let launchCommands: LaunchCommand[] = [];
-let recordingPoll: ReturnType<typeof setTimeout> | undefined;
-let recordingPollGeneration = 0;
-const captureSessions = new CaptureSessionStore();
-let acceptedRecordingResultGeneration = -1;
-const ignoredCaptureFiles = new Set<string>();
-let pendingScenarioFile: string | null = null;
-let pendingRecordedOperations = "";
-let pendingAnnotationSpec = "";
-let pendingAnnotatedImageFile = "";
-let pendingLaunchProgram = "";
-let pendingLaunchArgs: string[] = [];
-let annotationPoll: ReturnType<typeof setTimeout> | undefined;
-let annotationPollRunning = false;
-let screenshotSubmitRunning = false;
-let screenshotStageTimer: ReturnType<typeof setInterval> | undefined;
 let busyButtonStates: Map<HTMLButtonElement, boolean> | null = null;
 if (detached) document.body.classList.add("detached");
 
@@ -217,38 +186,6 @@ function status(message: string, error = false): void {
     element("operation-progress").hidden = false;
   }
 }
-function showScreenshotFeedback(message: string, error = true): void {
-  const dialog = element<HTMLDialogElement>("screenshot-task-dialog");
-  let feedback = dialog.querySelector<HTMLElement>("#screenshot-submit-feedback");
-  if (!feedback) {
-    feedback = document.createElement("p");
-    feedback.id = "screenshot-submit-feedback";
-    feedback.setAttribute("role", error ? "alert" : "status");
-    feedback.setAttribute("aria-live", error ? "assertive" : "polite");
-    dialog.querySelector("#screenshot-task-form > .actions")?.before(feedback);
-  }
-  feedback.setAttribute("role", error ? "alert" : "status");
-  feedback.setAttribute("aria-live", error ? "assertive" : "polite");
-  feedback.dataset.kind = error ? "error" : "wait";
-  feedback.textContent = message;
-  feedback.hidden = false;
-  if (error) {
-    element("operation-recording-status").textContent = message;
-    status(message, true);
-  }
-}
-function clearScreenshotFeedback(): void {
-  const feedback = element<HTMLDialogElement>("screenshot-task-dialog").querySelector<HTMLElement>("#screenshot-submit-feedback");
-  if (feedback) { feedback.textContent = ""; feedback.hidden = true; delete feedback.dataset.kind; }
-}
-function screenshotSubmitWaitReason(): string {
-  if (operationRecording) return "操作記録中です。画面の「スクリーンショットを実行」を押し、MarkItsで注釈後に「編集終了」を押してください。";
-  if (recordingStarting) return "アプリの起動と操作記録を開始しています。完了するまでお待ちください。";
-  if (recordingFinishActive || externalFinishActive) return "撮影結果を処理しています。完了するまでお待ちください。";
-  if (annotationPollRunning) return "MarkItsで「編集終了」を押してください。編集結果の返却を待っています。";
-  if (screenshotSubmitRunning) return "撮影画像を取り込んでいます。完了するまでお待ちください。";
-  return "別の処理が実行中です。完了してから指示を追加してください。";
-}
 function renderProgressLog(): void {
   const log = element<HTMLElement>("progress-log");
   const followTail = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
@@ -284,14 +221,6 @@ async function readAgentProgress(generation: number): Promise<void> {
     }
   } catch { /* The progress endpoint can be briefly unavailable while the request starts. */ }
 }
-async function hideManualStudioForCapture(taskId?: string): Promise<void> {
-  const source = taskId ? workspace?.capture_sources[taskId] : undefined;
-  // Scenario capture raises its own target; it may intentionally capture this app.
-  if (source?.kind === "scenario" || (source?.kind === "window" && /manual\s*studio/i.test(source.title))) return;
-  if (!native || manualStudioHiddenForCapture) return;
-  await invoke("hide_manual_studio");
-  manualStudioHiddenForCapture = true;
-}
 async function restoreManualStudioAfterCapture(force = false): Promise<void> {
   if (!native || (!manualStudioHiddenForCapture && !force)) return;
   await invoke("restore_manual_studio");
@@ -301,7 +230,7 @@ function startAiProgress(action: string): void {
   ++progressGeneration;
   const labels: Record<string, string> = { codex: "Codex", claude: "Claude Code", grok: "Grok Build", agy: "Agy" };
   const agent = workspace?.config.agent || element<HTMLSelectElement>("ai-agent").value || "AI";
-  const operation = action === "draft" ? "原稿の下書きを生成中" : action === "generate-page" ? "文書のAI更新と撮影を実行中" : "AI文章・図を生成中";
+  const operation = action === "draft" ? "原稿の下書きを生成中" : "AI文書の候補を作成中";
   element("progress-label").textContent = `${labels[agent] || agent}で${operation}`;
   progressRunning = true;
   element("ai-error-advice").hidden = true;
@@ -328,11 +257,10 @@ function startAiProgress(action: string): void {
   progressPollTimer = setInterval(() => { void pollAgentProgress(); }, 750);
 }
 let activeGenerationRoot: string | null = null;
-let generationCancelled = false;
 let generationCancelRequest: Promise<void> | undefined;
 element("progress-cancel").addEventListener("click", () => {
   if (!activeGenerationRoot) return;
-  generationCancelled = true;
+
   const root = activeGenerationRoot;
   element<HTMLButtonElement>("progress-cancel").disabled = true;
   logProgress("中断を要求しました。実行中の処理を停止します。");
@@ -373,7 +301,7 @@ element("progress-open").addEventListener("click", () => {
 });
 async function rpc(action: string, options: Record<string, unknown> = {}, root = projectRoot): Promise<string> {
   const mergedOptions = { ...options };
-  const aiActions = new Set(["generate-review", "generate-task", "generate-page", "generate", "draft", "generate-page-captures", "capture-source-auto", "fact-check", "scenario-save"]);
+  const aiActions = new Set(["selection-generate", "document-review", "screenshot-ai-application", "screenshot-ai-plan", "screenshot-ai-annotate", "draft", "fact-check", "scenario-save"]);
   if (aiActions.has(action) && mergedOptions.api_key === undefined) {
     mergedOptions.api_key = root === projectRoot ? readAiCredential(root, workspace?.config.endpoint_url || "") : "";
   }
@@ -429,54 +357,6 @@ function openManualTerminal(): void {
 }
 window.addEventListener("manual-studio-terminal-open", openManualTerminal);
 
-let terminalInstructionContext: { root: string; page: string; tasks: Task[] } | null = null;
-element("terminal-use-selection-btn").addEventListener("click", () => {
-  void work(async () => {
-    if (!documentState) throw new Error("先に原稿を開いてください。");
-    const root = projectRoot;
-    const page = documentState.page;
-    const selection = terminalController?.getSelection() || "";
-    const tasks = (JSON.parse(await rpc("page-tasks", { page }, root)) as Task[])
-      .filter(task => task.kind !== "screenshot" && task.status !== "approved");
-    if (root !== projectRoot || page !== documentState?.page) return;
-    if (!tasks.length) throw new Error("現在の原稿に生成済みの文章・図のAIタグがありません。AIタグを追加した場合は自動保存の完了を待ってください。");
-    terminalInstructionContext = { root, page, tasks };
-    const select = element<HTMLSelectElement>("terminal-instruction-task");
-    select.replaceChildren(...tasks.map(task => new Option(task.id, task.id)));
-    element<HTMLTextAreaElement>("terminal-instruction-text").value = selection;
-    element<HTMLDialogElement>("terminal-instruction-dialog").showModal();
-  });
-});
-element("terminal-instruction-cancel").addEventListener("click", () => {
-  element<HTMLDialogElement>("terminal-instruction-dialog").close();
-});
-element("terminal-instruction-apply").addEventListener("click", () => {
-  try {
-    const text = element<HTMLTextAreaElement>("terminal-instruction-text").value.trim();
-    if (!text) throw new Error("追加する指示を入力してください。");
-    const id = element<HTMLSelectElement>("terminal-instruction-task").value;
-    if (terminalInstructionContext?.root !== projectRoot || terminalInstructionContext?.page !== documentState?.page) {
-      throw new Error("原稿が切り替わりました。相談結果の追加をやり直してください。");
-    }
-    const task = terminalInstructionContext?.tasks.find(task => task.id === id);
-    if (!task) throw new Error("追加先のAIタグを確認してください。");
-    // Read the current editor prompt so an unsaved edit is preserved.
-    const block = [...editor.value.matchAll(taskBlockPattern)].find(match => tagAttribute(match.groups?.attrs || "", "id") === id);
-    const encoded = block ? tagAttribute(block.groups?.attrs || "", "prompt") : null;
-    const decoder = document.createElement("textarea");
-    // Escape markup before decoding character references in the attribute.
-    decoder.innerHTML = (encoded ?? "").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-    const legacy = [...editor.value.matchAll(/<!--\s*ai:task(?<attrs>[^\r\n>]*)\r?\n(?<prompt>.*?)\r?\n-->/gs)]
-      .find(match => tagAttribute(match.groups?.attrs || "", "id") === id);
-    const prompt = encoded !== null ? decoder.value : legacy?.groups?.prompt ?? task.prompt;
-    editor.value = updateTaskPrompt(editor.value, task, `${prompt}\n\n${text}`);
-    editor.dispatchEvent(new Event("input"));
-    element<HTMLDialogElement>("terminal-instruction-dialog").close();
-    chooseTab("editor");
-    status(`${id}の生成指示へ追加しました。内容を確認して原稿を保存してください。`);
-  } catch (error) { status(String(error), true); }
-});
-
 function setBusy(value: boolean): void {
   busy = value;
   document.body.setAttribute("aria-busy", String(value));
@@ -487,46 +367,21 @@ function setBusy(value: boolean): void {
   if (value) {
     for (const button of document.querySelectorAll<HTMLButtonElement>("button:not(.progress-control)")) {
       if (!busyButtonStates!.has(button)) busyButtonStates!.set(button, button.disabled);
-      const id = button.id;
-      const captureControl = id === "stop-operation-recording" && operationRecording
-        || id === "start-operation-recording" && captureSessions.active !== null && !operationRecording && !recordingStarting && !recordingFinishActive && !externalFinishActive && !annotationPollRunning && !pendingAnnotatedImageFile && !screenshotSubmitRunning
-        || id === "cancel-screenshot-task" && captureSessions.active !== null && !operationRecording && !recordingStarting && !recordingFinishActive && !externalFinishActive && !screenshotSubmitRunning
-        || button.matches('#screenshot-task-form button[type="submit"]') && captureSessions.active !== null && !operationRecording && !recordingStarting && !recordingFinishActive && !externalFinishActive && !annotationPollRunning && !screenshotSubmitRunning;
-      button.disabled = !captureControl;
+      button.disabled = true;
     }
-    const submit = element<HTMLButtonElement>("screenshot-task-form").querySelector<HTMLButtonElement>('button[type="submit"]');
-    if (submit?.disabled && captureSessions.active) showScreenshotFeedback(screenshotSubmitWaitReason(), false);
   } else if (busyButtonStates) {
     for (const [button, wasDisabled] of busyButtonStates) button.disabled = wasDisabled;
     busyButtonStates = null;
-    if (captureSessions.active && element<HTMLDialogElement>("screenshot-task-dialog").querySelector<HTMLElement>("#screenshot-submit-feedback")?.dataset.kind === "wait") clearScreenshotFeedback();
   }
   if (!value && pendingEditorFocus) { pendingEditorFocus = false; requestAnimationFrame(()=>milkdown.focus()); }
   editor.readOnly = value;
   editor.disabled = !documentState;
   updateHistoryButtons();
-  renderDocumentTags();
+
 }
 function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
   if (busyButtonStates?.has(button)) busyButtonStates.set(button, disabled);
   else button.disabled = disabled;
-}
-function assertNoActiveCaptureSession(): void {
-  captureSessions.assertInactive();
-}
-function isCurrentCaptureSession(generation: number): boolean {
-  const session = captureSessions.active;
-  return captureSessions.isCurrent(generation)
-    && session !== null
-    && captureSessions.matchesTarget(generation, projectRoot, documentState?.page || "");
-}
-function updateCaptureBusyState(): void {
-  updateCaptureSteps();
-  setBusy(captureNeedsUiLock());
-}
-function captureNeedsUiLock(): boolean {
-  return captureSessions.active !== null
-    && (operationRecording || recordingStarting || recordingFinishActive || externalFinishActive || annotationPollRunning || screenshotSubmitRunning || Boolean(pendingAnnotatedImageFile));
 }
 async function savedBeforeOperation(): Promise<void> {
   while (documentSavePending) await documentSavePending;
@@ -537,7 +392,7 @@ async function work(operation: () => Promise<void>): Promise<void> {
   if (busy) return;
   setBusy(true);
   try { await operation(); } catch (error) { status(String(error), true); }
-  finally { setBusy(captureNeedsUiLock()); previewNavigator.updateToolbarState(); }
+  finally { setBusy(false); previewNavigator.updateToolbarState(); }
 }
 async function confirmDiscard(): Promise<boolean> {
   return !dirty || showUnsavedChangesDialog(documentState?.page || "原稿", async () => {
@@ -567,7 +422,7 @@ function openPanelDialog(panelId: string): void {
 function tabToComponentId(name: string): string {
   switch (name) {
     case "editor": return "editor";
-    case "tasks": return "ai-tags";
+
     case "tree": return "file-tree";
     case "preview": return "editor";
     case "terminal": return "terminal";
@@ -577,7 +432,8 @@ function tabToComponentId(name: string): string {
 function chooseTab(name: string): void {
   if (name === "applications" && !workspace) return;
   element<HTMLDetailsElement>("project-menu").open = false;
-  if (name === "uimap" || name === "publish" || name === "appearance" || name === "settings" || name === "applications") {
+  if (name === "publish" || name === "appearance" || name === "settings" || name === "applications") {
+    if(name==='settings')void imageAiSettings.refresh();
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
     element<HTMLDetailsElement>("settings-menu").open = false;
     openPanelDialog(`panel-${name}`);
@@ -601,7 +457,7 @@ const imageTabs = new Set<string>();
 let activeImageTab: string | null = null;
 function showDocumentView(): void { activeImageTab = null; element('panel-editor').removeAttribute('data-image-open'); element('image-tab-view').hidden = true; }
 async function openImageTab(path: string): Promise<void> {
-  assertNoActiveCaptureSession(); retainDocumentTab();
+   retainDocumentTab();
   const root = projectRoot;
   const source = await rpc('preview-asset', { page: documentState?.page || `${workspace?.config.docs || 'docs'}/index.md`, asset: path }, root);
   if (root !== projectRoot) return;
@@ -628,13 +484,13 @@ function renderDocumentTabs(): void {
     button.onclick = () => { void work(() => openPage(page)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${page}を閉じる`);
     close.onclick = () => { void work(async () => {
-      assertNoActiveCaptureSession();
+
       if (documentState?.page !== page) await openPage(page);
       if (!await confirmDiscard()) return;
       documentTabs.delete(page); documentState = null; documentSaveState = null; dirty = false;
       const next = [...documentTabs.keys()].at(-1);
       if (next) await openPage(next);
-      else { editor.value = ''; resetEditHistory(); ++previewVersion; element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages(); renderDocumentTags(); }
+      else { editor.value = ''; resetEditHistory(); ++previewVersion; element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages();  }
     }); };
     group.append(button, close); strip.append(group);
   }
@@ -677,7 +533,7 @@ function updateSaveState(): void {
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
   badge.title = ownerState?.message || (dirty ? '自動保存を待っています。' : '原稿の保存状態');
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
-  renderLastExecution();
+
   updateWorkspaceGuide();
 }
 function updateWorkspaceGuide(): void {
@@ -685,25 +541,6 @@ function updateWorkspaceGuide(): void {
   let dismissed = false;
   try { dismissed = localStorage.getItem(`manual-studio-guide:${projectRoot}`) === 'hidden'; } catch { /* Optional preference. */ }
   guide.hidden = detached || !workspace || dismissed || workspace.config.connection_type !== 'none' && workspace.has_config;
-}
-function showAiPhase(phase: AiPhase, root = projectRoot, page = documentState?.page || ''): void {
-  aiPhases.set(JSON.stringify([root, page]), phase);
-  if (root === projectRoot && page === documentState?.page) setAiPhase(element('ai-workflow-status'), phase);
-}
-function renderLastExecution(): void {
-  const key = JSON.stringify([projectRoot, documentState?.page]);
-  const run = documentState ? lastExecutions.get(key) : undefined;
-  setAiPhase(element('ai-workflow-status'), aiPhases.get(key) || 'idle');
-  renderExecutionResult(element('execution-result'), run, {
-    resume: id => { void work(async () => {
-      await savedBeforeOperation();
-      const root = projectRoot;
-      const plan = JSON.parse(await rpc('execution-resume', { id }, root)) as {page:string;ids:string[];limits:ExecutionLimits};
-      if (root !== projectRoot) return;
-      await openPage(plan.page, false); await generateDocument(plan.page, plan.ids, plan.limits);
-    }); },
-    history: () => element<HTMLButtonElement>('execution-history-open').click(),
-  });
 }
 async function renderPreview(): Promise<void> {
   if (!documentState) return;
@@ -743,7 +580,7 @@ let projectRequestVersion = 0;
 let documentRequestVersion = 0;
 let workspaceRequestVersion = 0;
 async function openPage(page: string, check = true): Promise<void> {
-  assertNoActiveCaptureSession();
+
   const docsPrefix = (workspace?.config.docs || 'docs').replace(/\/$/,'') + '/';
   if (page.startsWith(docsPrefix) && workspace?.pages.includes(page.slice(docsPrefix.length))) page = page.slice(docsPrefix.length);
   if (check && documentState?.page === page && !activeImageTab) { chooseTab('editor'); return; }
@@ -774,23 +611,12 @@ async function openPage(page: string, check = true): Promise<void> {
   element("editor-title").textContent = page;
   editor.dataset.owner = JSON.stringify([projectRoot, page]);
   document.title = `${page} — Munin Manual Studio`;
-  updateSaveState(); updateCursor(); renderPages(); renderDocumentTags();
+  updateSaveState(); updateCursor(); renderPages();
   element("page-list").querySelector("[aria-current=page]")?.scrollIntoView({ block: "nearest" });
   await renderPreview();
   previewNavigator.pushPage(page);
   chooseTab("editor");
-  const previousExecution = lastExecutions.get(JSON.stringify([root,page]));
-  void rpc('execution-history', { page }, root).then(output => {
-    if (root !== projectRoot || version !== documentRequestVersion || documentState?.page !== page) return;
-    if (lastExecutions.get(JSON.stringify([root,page])) !== previousExecution) return;
-    const history = JSON.parse(output) as {runs?:ExecutionRun[]};
-    const latest = history.runs?.[0];
-    if (!latest || !Array.isArray(latest.entries)) return;
-    const key = JSON.stringify([root, page]);
-    lastExecutions.set(key, latest);
-    if (!['generating','review','capturing','restored'].includes(aiPhases.get(key) || '')) aiPhases.set(key, latest.status === 'rolled_back' ? 'restored' : latest.status === 'completed' ? 'completed' : 'partial');
-    renderLastExecution();
-  }).catch(() => { /* Opening a document remains available if history cannot be read. */ });
+
 }
 function renderPages(): void {
   const entries = workspace?.project_entries || [];
@@ -816,9 +642,11 @@ function insertDocumentMarkdown(markdown:string): void {
     showDocumentView(); chooseTab("editor");
     if (documentState) element("editor-title").textContent = documentState.page;
     if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
-    if (!milkdown.insertMarkdown(markdown)) {
+    const richInsertion = milkdown.captureSelectionEdit(true);
+    if (richInsertion) richInsertion.apply(markdown, true);
+    else {
       rememberCurrentSelection();
-      editor.setRangeText("\n\n" + markdown + "\n\n", editor.selectionStart, editor.selectionEnd, "end");
+      editor.setRangeText("\n\n" + markdown + "\n\n", editor.selectionStart, editor.selectionStart, "end");
       editor.dispatchEvent(new Event("input", { bubbles: true }));
       editor.focus();
     }
@@ -854,6 +682,7 @@ async function openResourceUsage(usage:ResourceUsage):Promise<void>{
 }
 const screenshotLibrary = setupScreenshotLibrary({
   root: () => projectRoot, request: rpc, work, applications: () => launchCommands,
+  annotateScreenshot:id=>screenshotAi.annotate(id),
   page: () => documentState?.page,
   openPage: async page => { await openPage(page); },
   chooseDestination: chooseImageDestination,
@@ -863,7 +692,8 @@ const screenshotLibrary = setupScreenshotLibrary({
   openUsage:openResourceUsage,generateImage:(entry,edit)=>imageGeneration.open(entry,edit),
 });
 setupToolbarCustomization();
-const imageGeneration=setupImageGeneration({root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
+const imageAiSettings=setupImageAiSettings({root:()=>projectRoot,request:rpc,prepare:saveAiSettings});
+const imageGeneration=setupImageGeneration({prepare:saveAiSettings,imageKey:(root,url)=>imageAiSettings.key(root,url),sharedKey:root=>root===projectRoot?readAiCredential(root,workspace?.config.endpoint_url||''):'',root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
 
 let documentImageEditing = false;
 function changeImageMarkdown(next:string,expected:string){
@@ -956,87 +786,16 @@ async function refreshWorkspace(reloadPage = false): Promise<void> {
   const documentVersion = documentRequestVersion;
   const version = ++workspaceRequestVersion;
   const loaded = JSON.parse(await rpc("state", {}, root)) as State;
-  loaded.tasks = loaded.tasks.filter(task => task.kind !== "screenshot");
   if (root !== projectRoot || version !== workspaceRequestVersion) return;
   workspace = loaded;
-  renderPages(); renderTasks(); renderMap(); updateWorkspaceGuide();
+  renderPages();  updateWorkspaceGuide();
   await screenshotLibrary.refresh();
-  element("task-count").textContent = String(workspace.tasks.length);
   if (reloadPage && current) {
     if (documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
     const opened = JSON.parse(await rpc("editor-read", { page: current.page }, root)) as Document;
     if (root !== projectRoot || documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
-    documentState = opened; editor.value = opened.content; resetEditHistory(); dirty = false; updateSaveState(); renderDocumentTags(); await Promise.all([renderPreview(), milkdown.refreshImages()]);
+    documentState = opened; editor.value = opened.content; resetEditHistory(); dirty = false; updateSaveState();  await Promise.all([renderPreview(), milkdown.refreshImages()]);
   }
-}
-function escapeTaskPrompt(prompt: string): string {
-  return prompt.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\r", "&#13;").replaceAll("\n", "&#10;");
-}
-const taskBlockPattern = /<!--\s*ai:task\b(?<attrs>(?:"[^"]*"|'[^']*'|[^>"'])*)-->[\s\S]*?<!--\s*\/ai:task\s*-->/g;
-const taskPromptAttribute = /\s+prompt=(?:"[^"]*"|'[^']*'|[^\s>]+)/;
-const headerAttributes = /(?:^|\s)[a-zA-Z][a-zA-Z0-9_-]*=(?:"[^"]*"|'[^']*'|[^\s>]+)/g;
-function tagAttribute(attrs: string, name: string): string | null {
-  for (const token of attrs.matchAll(headerAttributes)) {
-    const match = /(?:^|\s)([a-zA-Z][a-zA-Z0-9_-]*)=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/.exec(token[0]);
-    if (match?.[1] === name) return match[2] ?? match[3] ?? match[4];
-  }
-  return null;
-}
-function removeTagAttributes(header: string, names: string[]): string {
-  return header.replace(headerAttributes, token => names.some(name => token.trimStart().startsWith(`${name}=`)) ? "" : token);
-}
-function renderDocumentTags(): void {
-  const pageTasks = workspace && documentState ? tasksForPage(documentState.page) : [];
-  const allApproved = !dirty && pageTasks.length > 0 && pageTasks.every(task => task.status === "approved");
-  const generatePage = document.getElementById("generate-page") as HTMLButtonElement | null;
-  if (generatePage) {
-    setButtonDisabled(generatePage, !documentState || allApproved);
-    generatePage.title = allApproved ? "すべて確定済みです。更新するタグの確定を解除してください。" : "この文書のAI指示を実行し、文章・図・撮影結果を更新";
-  }
-  const reviewAiUpdate = document.getElementById("review-ai-update") as HTMLButtonElement | null;
-  if (reviewAiUpdate) {
-    reviewAiUpdate.hidden = !documentState || !aiReviews.has(aiReviewKey(documentState.page));
-  }
-  const list = document.getElementById("document-tag-list");
-  if (!list) return;
-  if (!documentState) { list.innerHTML = '<span class="muted">原稿を開くとタグが表示されます。</span>'; return; }
-  const content = editor.value;
-  const masked = content.split("");
-  const codeRanges = [...content.matchAll(/^\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\s*\1[^\n]*$/gm)];
-  for (const range of codeRanges) for (let i = range.index!; i < range.index! + range[0].length; i++) if (masked[i] !== "\n") masked[i] = " ";
-  const source = masked.join("");
-  const tags = new Map<string, { id: string; kind: string; status: string; start: number; end: number; generatedStart?: number; generatedEnd?: number; generatedHeaderEnd?: number; approved?: boolean }>();
-  const collect = (pattern: RegExp, generated: boolean) => {
-    for (const match of source.matchAll(pattern)) {
-      const attrs = match.groups?.attrs || "";
-      const id = tagAttribute(attrs, "id");
-      if (!id) continue;
-      const raw = content.slice(match.index!, match.index! + match[0].length);
-      const actualAttrs = attrs;
-      const existing = tags.get(id);
-      const unified = /^<!--\s*ai:task\b/.test(raw) && /<!--\s*\/ai:task\s*-->$/.test(raw);
-      const hasBody = !unified || raw.slice(raw.indexOf("-->") + 3, raw.lastIndexOf("<!--")).trim().length > 0;
-      const isGenerated = generated && hasBody;
-      const headerEnd = isGenerated ? match.index! + raw.indexOf("-->") + 3 : undefined;
-      const approved = isGenerated && Boolean(tagAttribute(actualAttrs, "approved-at"));
-      tags.set(id, {
-        id,
-        kind: tagAttribute(actualAttrs, "kind") || existing?.kind || "text",
-        status: isGenerated ? (approved ? "確定済み" : "生成済み") : existing?.status || "未生成",
-        start: existing?.start ?? match.index!,
-        end: existing?.end ?? match.index! + match[0].length,
-        generatedStart: isGenerated ? match.index! : existing?.generatedStart,
-        generatedEnd: isGenerated ? match.index! + match[0].length : existing?.generatedEnd,
-        generatedHeaderEnd: headerEnd ?? existing?.generatedHeaderEnd,
-        approved: isGenerated ? approved : existing?.approved,
-      });
-    }
-  };
-  collect(/<!--\s*ai:task\b(?<attrs>[^\r\n>]*)\r?\n[\s\S]*?\r?\n-->/g, false);
-  collect(/<!--\s*ai:generated\b(?<attrs>[^>]*)-->[\s\S]*?<!--\s*\/ai:generated\s*-->/g, true);
-  collect(taskBlockPattern, true);
-  const kinds: Record<string, string> = { screenshot: "画像", text: "文章", diagram: "図" };
-  list.innerHTML = tags.size ? [...tags.values()].map((tag) => `<div class="document-tag-row${tag.approved ? " is-approved" : ""}" data-tag-start="${tag.start}" data-tag-end="${tag.end}"${tag.generatedStart === undefined ? "" : ` data-generated-start="${tag.generatedStart}" data-generated-end="${tag.generatedEnd}" data-generated-header-end="${tag.generatedHeaderEnd}" data-approved="${tag.approved}"`}><button type="button" class="document-tag-jump" data-tag-jump><code>${escape(tag.id)}</code><span>${kinds[tag.kind] || escape(tag.kind)}</span><span class="document-tag-status${tag.approved ? " is-approved" : ""}">${tag.status}</span></button>${tag.generatedStart === undefined ? "" : `<span class="document-tag-actions"><button type="button" data-tag-confirm${tag.approved ? ' class="button-approved is-approved"' : ""}${busy || !documentState ? " disabled" : ""}>${tag.approved ? "確定解除" : "確定"}</button><button type="button" data-tag-delete${busy || !documentState ? " disabled" : ""}>生成結果を削除</button></span>`}</div>`).join("") : '<span class="muted">この文書にAIタグはありません。</span>';
 }
 function updateAiSettingsVisibility(): void {
   const connectionType = element<HTMLSelectElement>("ai-connection-type").value;
@@ -1068,6 +827,7 @@ function updateAiSettingsVisibility(): void {
 }
 function renderSettings(): void {
   if (!workspace) return;
+  void imageAiSettings.refresh();
   input("docs-path").value = workspace.config.docs;
   input("output-path").value = workspace.config.output;
   input("site-name").value = workspace.config.mkdocs.site_name;
@@ -1128,6 +888,7 @@ function saveAiSettings(): Promise<void> {
       if (projectRoot === root) {
         workspace!.config = saved.config;
         workspace!.has_config = saved.has_config;
+        void imageAiSettings.updateShared();
         if (aiEditVersion === version) setAiSaveState("保存済み");
       }
     } catch (error) {
@@ -1196,13 +957,12 @@ async function ensureAiSettings(): Promise<void> {
   }
 }
 async function openProject(root: string, check = true): Promise<void> {
-  assertNoActiveCaptureSession();
+
   if (check && !await confirmAllDocumentTabs()) return;
   await saveAiSettings();
   status("プロジェクトを開いています…");
   const version = ++projectRequestVersion;
   const loaded = JSON.parse(await rpc("state", {}, root)) as State;
-  loaded.tasks = loaded.tasks.filter(task => task.kind !== "screenshot");
   if (version !== projectRequestVersion) return;
   ++documentRequestVersion; ++workspaceRequestVersion;
   if (projectRoot !== root) expandedFolders.clear();
@@ -1221,7 +981,7 @@ async function openProject(root: string, check = true): Promise<void> {
   element<HTMLIFrameElement>("markdown-preview").srcdoc = "";
   element("editor-title").textContent = "Markdownを編集する";
   document.title = "Munin Manual Studio";
-  updateSaveState(); updateCursor(); renderDocumentTags();
+  updateSaveState(); updateCursor();
   input("project-root").value = root;
   localStorage.setItem("manual-studio-project", root);
   try { await recordWorkspaceHistory(native, root); }
@@ -1277,411 +1037,9 @@ async function persistDocument(refresh: boolean): Promise<void> {
   if (refresh) await refreshWorkspace();
   status(`${page}を保存しました。`);
 }
-const taskFailures = new Map<string, string>();
-function taskFailureKey(task: Pick<Task, "page" | "id">, root = projectRoot): string {
-  const docs = workspace?.config.docs.replace(/^[.\\/]+|[\\/]+$/g, "") || "docs";
-  const page = task.page.startsWith(`${docs}/`) ? task.page.slice(docs.length + 1) : task.page;
-  return JSON.stringify([root, page, task.id]);
-}
-function taskDisplayStatus(task: Task): string {
-  return task.status !== "approved" && (taskFailures.has(taskFailureKey(task)) || workspace?.execution_results?.[task.id]?.status === "failed") ? "failed" : task.status;
-}
-function recordTaskResult(task: Pick<Task, "page" | "id">, error?: string, root = projectRoot): void {
-  const key = taskFailureKey(task, root);
-  if (error) taskFailures.set(key, error); else taskFailures.delete(key);
-}
-function renderTasks(): void {
-  if (!workspace) return;
-  const kindLabel = taskKindLabels;
-  const statusLabel = taskStatusLabels;
-  const statusFilter = element<HTMLSelectElement>("task-status-filter").value;
-  const kindFilter = element<HTMLSelectElement>("task-kind-filter").value;
-  const visibleTasks = workspace.tasks.filter(task => (statusFilter === "all" || taskDisplayStatus(task) === statusFilter)
-    && (kindFilter === "all" || task.kind === kindFilter));
-  element("task-filter-summary").textContent = `${visibleTasks.length}件 / 全${workspace.tasks.length}件`;
-
-  element("task-list").innerHTML = visibleTasks.length ? visibleTasks.map((task) => {
-    const source = workspace!.capture_sources[task.id];
-    const description = source?.kind === "window" ? `${escape(source.title)} · 外枠 ${source.inset}px` : source?.kind === "scenario" ? "撮影元と撮影前の操作を設定済み" : "撮影元はまだ設定されていません。文書のAI更新で自動設定できます。";
-    return `<article class="card${task.status === "approved" ? " card-approved is-approved" : ""}" data-task="${escape(task.id)}"><div class="task-header"><h2>${escape(task.name || task.prompt.replace(/\s+/g, " ").slice(0, 48))} <small>${escape(task.page)}</small></h2><span data-task-status="${taskDisplayStatus(task)}" class="badge${task.status === "approved" ? " badge-approved is-approved" : ""}">${kindLabel[task.kind]} · ${statusLabel[taskDisplayStatus(task)] || escape(task.status)}</span></div>${workspace!.update_reasons?.[task.id]?.length ? `<p class="update-reasons">更新候補の理由: ${workspace!.update_reasons[task.id].map(escape).join("・")}${task.status === "approved" ? "（確定済みのため自動更新しません）" : ""}</p>` : ""}${taskDisplayStatus(task) === "failed" ? `<p class="task-failure" role="status">${escape(taskFailures.get(taskFailureKey(task)) || workspace?.execution_results?.[task.id]?.error || "前回の更新に失敗しました。実行記録から再開できます。")}</p>` : ""}<details class="task-instructions" data-task-disclosure="${escape(task.id)}"><summary>▶ 指示を展開</summary><label class="task-prompt-label">AIへの指示<textarea data-prompt="${escape(task.id)}" rows="3">${escape(task.prompt)}</textarea></label><button data-save-prompt="${escape(task.id)}">指示を保存</button></details><div class="actions"><button data-toggle-approved="${escape(task.id)}"${task.status === "approved" ? ' class="button-approved is-approved"' : ""}${task.status === "missing" ? " disabled title=\"生成結果がある場合に確定できます\"" : ""}>${task.status === "approved" ? "確定解除" : "確定"}</button>${task.kind !== "screenshot" ? `<button data-generate="${escape(task.id)}" class="primary">${task.kind === "diagram" ? "図をAI更新" : "文章をAI更新"}</button>` : ""}</div>${task.kind === "screenshot" ? `
-      <p class="muted">${description}</p><img class="task-image" data-thumb="${escape(task.id)}" alt="${escape(task.id)}の登録画像" hidden />
-      <div class="actions">${source ? `<button class="primary" data-recapture="${escape(task.id)}">${source.kind === "scenario" ? "設定した手順で更新" : "同じ撮影元で更新"}</button>` : ""}<button data-source-config="${escape(task.id)}">${source ? "撮影元を変更" : "撮影元を選ぶ"}</button><button data-capture-expectations="${escape(task.id)}">撮影成功の条件</button><button data-register-image="${escape(task.id)}">既存のPNGを登録</button></div>
-      <details class="capture-settings"><summary>撮影元の設定</summary><p class="muted">アプリの対象画面を開いて一覧を更新してください。タイトルで記憶するので、アプリを再起動しても使えます。同じタイトルが複数ある場合は自動で選びません。Waylandでは毎回OSの撮影ダイアログで対象を選びます。</p><div class="actions"><select data-window-select="${escape(task.id)}"><option value="">一覧を更新してください</option></select><button data-window-list="${escape(task.id)}">一覧を更新</button></div><div class="actions"><label>外枠を除く（px）<input type="number" min="0" max="64" data-inset="${escape(task.id)}" value="${source?.kind === "window" ? source.inset : 0}" /></label><button data-capture="${escape(task.id)}" class="primary">撮影元を保存して撮影</button></div></details>` : ""}<button class="edit-task" data-edit-page="${escape(task.page)}">原稿を開く</button></article>`;
-  }).join("") : workspace.tasks.length ? '<p class="muted">条件に一致するAIタグがありません。</p>' : '<div class="card"><h2>更新する画像・文章・図を追加する</h2><p>原稿の編集画面で「撮影の指示」「文章の指示」「図の指示」を追加して保存してください。この一覧に表示されます。</p></div>';
-  element("task-list").querySelectorAll<HTMLDetailsElement>("[data-task-disclosure]").forEach(details => {
-    const key = `manual-task-list-disclosure:${projectRoot}:${details.dataset.taskDisclosure}`;
-    const summary = details.querySelector<HTMLElement>("summary")!;
-    const update = () => { summary.textContent = details.open ? "▼ 指示を折りたたむ" : "▶ 指示を展開"; summary.setAttribute("aria-expanded", String(details.open)); try { localStorage.setItem(key, String(details.open)); } catch { /* UI preference is optional. */ } };
-    try { details.open = localStorage.getItem(key) === "true"; } catch { details.open = false; }
-    summary.setAttribute("role", "button"); summary.tabIndex = 0;
-    summary.addEventListener("click", event => { event.preventDefault(); details.open = !details.open; update(); });
-    summary.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); details.open = !details.open; update(); } });
-    details.addEventListener("toggle", update); update();
-  });
-  const generationRoot = projectRoot;
-  for (const task of workspace.tasks.filter((item) => item.kind === "screenshot")) {
-    const img = document.querySelector<HTMLImageElement>(`[data-thumb="${CSS.escape(task.id)}"]`);
-    void rpc("preview-asset", { page: task.page, asset: workspace.image_assets[task.id] || `assets/${task.id}.png` }).then((src) => {
-      if (generationRoot !== projectRoot || !img?.isConnected) return;
-      if (img) { img.src = src; img.hidden = false; }
-      if (img) {
-        img.tabIndex = 0; img.setAttribute('role', 'button'); img.setAttribute('aria-label', `${task.id}の撮影画像を拡大`);
-        const inspect = () => { void showImageComparison([{ label: task.id, src: img.src }]); };
-        img.addEventListener('click', inspect);
-        img.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); inspect(); } });
-      }
-    }).catch(() => { /* An unregistered screenshot has no image yet. */ });
-  }
-}
-async function editTaskPage(task: Task, edit: (content: string) => string): Promise<void> {
-  if (!await confirmDiscard()) return;
-  const root = projectRoot;
-  const page = JSON.parse(await rpc("editor-read", { page: task.page }, root)) as Document;
-  if (projectRoot !== root) return;
-  const content = edit(page.content);
-  if (content === page.content) return;
-  await rpc("editor-save", { page: task.page, json: { content, revision: page.revision } }, root);
-  if (projectRoot !== root) return;
-  await refreshWorkspace(documentState?.page === task.page);
-  status(`${task.id}を保存しました。`);
-}
-function updateTaskPrompt(content: string, task: Task, prompt: string): string {
-  const hasId = (attrs: string) => tagAttribute(attrs, "id") === task.id;
-  const blocks = [...content.matchAll(taskBlockPattern)].filter(match => hasId(match.groups?.attrs || ""));
-  if (blocks.length > 1) throw new Error(`${task.id}の指示タグが複数あります。`);
-  if (blocks.length === 1) {
-    const match = blocks[0];
-    const headerEnd = match[0].indexOf("-->") + 3;
-    const originalHeader = match[0].slice(0, headerEnd);
-    const header = taskPromptAttribute.test(originalHeader)
-      ? originalHeader.replace(taskPromptAttribute, () => ` prompt="${escapeTaskPrompt(prompt.trim())}"`)
-      : originalHeader.replace(/\s*-->$/, () => ` prompt="${escapeTaskPrompt(prompt.trim())}" -->`);
-    return content.slice(0, match.index) + header + match[0].slice(headerEnd) + content.slice(match.index! + match[0].length);
-  }
-  if (prompt.includes("-->")) throw new Error("旧形式のAI指示にコメント終端「-->」は入力できません。新形式のprompt属性を使ってください。");
-  const taskTag = /<!--\s*ai:task(?<attrs>[^\r\n>]*)\r?\n(?<prompt>.*?)\r?\n-->/gs;
-  const taskMatches = [...content.matchAll(taskTag)].filter((match) => hasId(match.groups?.attrs || ""));
-  if (taskMatches.length === 1) {
-    const match = taskMatches[0];
-    const replacement = `<!-- ai:task${match.groups!.attrs}\n${prompt.trim()}\n-->`;
-    return content.slice(0, match.index) + replacement + content.slice(match.index! + match[0].length);
-  }
-  if (taskMatches.length > 1) throw new Error(`${task.id}の指示タグが複数あります。`);
-
-  const generatedTag = /<!--\s*ai:generated\b(?<attrs>[^>]*)-->[\s\S]*?<!--\s*\/ai:generated\s*-->/g;
-  const generatedMatches = [...content.matchAll(generatedTag)].filter((match) => hasId(match.groups?.attrs || ""));
-  if (generatedMatches.length !== 1) throw new Error(`${task.id}の指示タグを原稿から特定できません。`);
-  const match = generatedMatches[0];
-  const attrs = match.groups!.attrs;
-  const bytes = new TextEncoder().encode(prompt.trim());
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  const encodedPrompt = btoa(binary);
-  const nextAttrs = /\bprompt-b64=[A-Za-z0-9+/=]+/.test(attrs)
-    ? attrs.replace(/\bprompt-b64=[A-Za-z0-9+/=]+/, `prompt-b64=${encodedPrompt}`)
-    : `${attrs} prompt-b64=${encodedPrompt}`;
-  return content.slice(0, match.index) + match[0].replace(attrs, nextAttrs) + content.slice(match.index! + match[0].length);
-}
-function toggleTaskApproval(content: string, task: Task): string {
-  const tag = new RegExp(`<!--\\s*ai:generated\\b(?<attrs>[^>]*)-->[\\s\\S]*?<!--\\s*\\/ai:generated\\s*-->`, "g");
-  const matches = [...content.matchAll(tag), ...content.matchAll(taskBlockPattern)].filter(match => tagAttribute(match.groups?.attrs || "", "id") === task.id);
-  if (matches.length !== 1) throw new Error(`${task.id}の生成結果が原稿にありません。`);
-  const match = matches[0];
-  const attrs = match.groups!.attrs;
-  const nextAttrs = Boolean(tagAttribute(attrs, "approved-at"))
-    ? removeTagAttributes(attrs, ["approved-at"])
-    : `${attrs} approved-at=${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}`;
-  return content.slice(0, match.index) + match[0].replace(attrs, nextAttrs) + content.slice(match.index! + match[0].length);
-}
-function renderMap(): void {
-  const map = workspace?.ui_map;
-  element("uimap-list").innerHTML = map?.views.length ? `<p><strong>${map.views.length}画面・${map.total_elements}要素</strong>を登録しています。画面名を開いて内容を確認してください。コード変更後は一覧を作り直します。</p>` + map.views.map((view) => `<details class="card"><summary>${escape(view.name)}（${view.elements.length}要素）</summary><p class="muted">確認元: ${escape(view.observed_from || "プロジェクトの画面定義")}</p><ul>${view.elements.map((item) => `<li>${escape(item.name)} <small>${escape(item.role)}</small> <code>${escape(item.selector)}</code></li>`).join("")}</ul></details>`).join("") : '<div class="card"><h2>画面一覧はまだありません</h2><p>「コードから画面一覧を作る」を押してください。検出された内容をここで確認できます。</p></div>';
-}
-async function generateCurrentPage(): Promise<void> {
-  await savedBeforeOperation();
-  if (!documentState || !workspace) throw new Error("先にMarkdown原稿を開いてください。");
-  await generateDocument(documentState.page);
-}
-async function confirmGenerationInput(page: string, id?: string, feedback = "", selectedIds?: string[], defaults?: ExecutionLimits): Promise<GenerationInput | null> {
-  const root = projectRoot;
-  const load = async (ids?: string[], revision?: string) => JSON.parse(await rpc("generation-input", {
-    page, id, feedback, json: { ...(ids ? { ids } : {}), ...(revision ? { revision } : {}) },
-  }, root)) as GenerationInput;
-  let initial = await load(selectedIds);
-  const anonymous = [...initial.existing_content.matchAll(/<!--\s*ai:task\b((?:"[^"]*"|'[^']*'|[^>"'])*)-->/g)].some(match => !tagAttribute(match[1], 'id'));
-  if (anonymous) {
-    if (root !== projectRoot) throw new Error("プロジェクトが切り替わりました。");
-    if (documentState?.page === page) await saveDocument(false);
-    else await rpc('editor-save', {page,json:{content:initial.existing_content,revision:initial.revision}},root);
-    await refreshWorkspace(); initial = await load(selectedIds);
-  }
-  initial.limits = defaults;
-  const input = await showGenerationInput(initial, (ids, revision) => load(ids, revision), tasksForPage(page).filter(task => task.status === "approved").length);
-  if (root !== projectRoot) throw new Error("ワークスペースが切り替わりました。生成入力を確認し直してください。");
-  return input;
-}
-
-async function generateReviewed(page: string, id?: string, initialFeedback = "", confirmedInput?: GenerationInput): Promise<boolean> {
-  await savedBeforeOperation();
-  await ensureAiSettings();
-  const root = projectRoot;
-  const input = confirmedInput ?? await confirmGenerationInput(page, id, initialFeedback);
-  if (!input) { status("生成をキャンセルしました。"); return false; }
-  const ids = input.tasks.filter(task => task.kind !== "screenshot").map(task => task.id);
-  const execution = confirmedInput ? undefined : JSON.parse(await rpc("execution-begin", {page,json:{ids,limits:input.limits}},root)) as ExecutionRun;
-  let executionSucceeded = false;
-  let executionError: string | undefined;
-  let operationAttempt = 0;
-  let feedback = initialFeedback;
-  try {
-  for (;;) {
-    if (!progressRunning) {
-      try { await rpc("agent-progress-clear", {}, root); } catch { /* Optional progress logs. */ }
-      startAiProgress(id ? "generate-task" : "generate-page");
-    }
-    if (execution) await rpc("execution-checkpoint",{id:execution.id,json:{results:ids.map(id=>({id,status:"running"}))}},root);
-    logProgress(`${page} の生成候補を準備しています。`);
-    showAiPhase('generating', root, page);
-    activeGenerationRoot = root;
-    generationCancelled = false;
-    element("progress-cancel").hidden = false;
-    element<HTMLButtonElement>("progress-cancel").disabled = false;
-    let candidate: { before: Document; content: string; updated: string[] };
-    try {
-      // TUI output includes prompt echoes, reasoning and screen redraws. It has
-      // no reliable completion signal; generate through the structured backend,
-      // which waits for CLI exit and reads the final response.
-      operationAttempt++;
-      candidate = JSON.parse(await rpc("generate-review", {
-        page,
-        id,
-        feedback,
-        json: { ids, revision: input.revision, limits: input.limits },
-      }, root));
-      if (generationCancelled) throw new Error("AI生成を中断しました。生成候補は破棄しました。");
-      await pollAgentProgress();
-      await stopAiProgress(true);
-    } catch (error) {
-      if (!generationCancelled) for (const task of input.tasks.filter(task => task.kind !== "screenshot")) recordTaskResult(task, String(error), root);
-      renderTasks();
-      showAiPhase(generationCancelled ? 'cancelled' : 'partial', root, page);
-      await stopAiProgress(false);
-      if (execution && !generationCancelled && operationAttempt <= (input.limits?.retries || 0)) {
-        logProgress(`生成を再試行します（${operationAttempt}/${input.limits?.retries}）。`);
-        continue;
-      }
-      throw error;
-    }
-    if (projectRoot !== root) throw new Error("ワークスペースが切り替わったため、生成候補の反映を中止しました。");
-    for (const task of input.tasks.filter(task => task.kind !== "screenshot")) recordTaskResult(task, undefined, root);
-    renderTasks();
-    if (candidate.before.content === candidate.content) { executionSucceeded = true; showAiPhase('completed', root, page); status("AI生成による変更はありません。"); return true; }
-    showAiPhase('review', root, page);
-    const decision = await showGenerationReview(page, candidate.before.content, candidate.content);
-    if (decision.action === "restore") { showAiPhase('cancelled', root, page); status("生成候補を破棄し、現在の原稿を保持しました。"); return false; }
-    if (decision.action === "retry") { feedback = decision.feedback; operationAttempt = 0; continue; }
-    const after = JSON.parse(await rpc("editor-save", { page, json: { content: candidate.content, revision: candidate.before.revision } }, root)) as Document;
-    aiReviews.set(aiReviewKey(page), { before: candidate.before, after, id, updated: candidate.updated });
-    await refreshWorkspace(documentState?.page === page);
-    renderDocumentTags();
-    executionSucceeded = true;
-    showAiPhase('completed', root, page);
-    status(`${page}の生成結果を採用して保存しました。`);
-    return true;
-  }
-  } catch(error) { executionError=String(error); showAiPhase(generationCancelled ? 'cancelled' : 'partial', root, page); throw error; }
-  finally {
-    if (execution) {
-      await rpc("execution-checkpoint",{id:execution.id,json:{results:ids.map(id=>({id,status:executionSucceeded?"succeeded":executionError&&!generationCancelled?"failed":"cancelled",error:executionError}))}},root);
-      const finished = JSON.parse(await rpc("execution-finish",{id:execution.id},root)) as ExecutionRun;
-      if (Array.isArray(finished.entries)) { lastExecutions.set(JSON.stringify([root,page]),finished); renderLastExecution(); }
-    }
-  }
-}
-element("execution-history-open").addEventListener("click",()=>{void work(async()=>{
-  await savedBeforeOperation();
-  const root=projectRoot;
-  const history=JSON.parse(await rpc("execution-history",{},root)) as {runs:ExecutionRun[]};
-  await showExecutionHistory(history.runs,{
-    load:async id=>JSON.parse(await rpc("execution-entry",{id},root)),
-    resume:async id=>{
-      const plan=JSON.parse(await rpc("execution-resume",{id},root)) as {page:string;ids:string[];limits:ExecutionLimits};
-      await openPage(plan.page,false);await generateDocument(plan.page,plan.ids,plan.limits);
-    },
-    restore:async id=>{
-      const restored = JSON.parse(await rpc("execution-finish",{id,rollback:true},root)) as ExecutionRun;
-      if (Array.isArray(restored.entries)) {
-        lastExecutions.set(JSON.stringify([root,restored.page]),restored);
-        showAiPhase('restored',root,restored.page);
-      }
-      await refreshWorkspace(true);status("文書と画像を更新前へ復元しました。");
-    },
-  });
-});});
-element("generation-history-open").addEventListener("click", () => { void work(async () => {
-  if (!documentState) throw new Error("先に原稿を開いてください。");
-  const root = projectRoot, page = documentState.page;
-  const history = JSON.parse(await rpc("generation-history", { page }, root)) as { entries: GenerationHistorySummary[] };
-  const assertContext = () => { if (root !== projectRoot || page !== documentState?.page) throw new Error("原稿が切り替わりました。履歴を開き直してください。"); };
-  await showGenerationHistory(history.entries, {
-    load: async id => { assertContext(); return JSON.parse(await rpc("generation-history-entry", { id }, root)) as GenerationHistoryEntry; },
-    compare: async (before, after) => { assertContext(); await showGenerationReview(page, before, after, false, true); },
-    reuse: async entry => {
-      assertContext(); await savedBeforeOperation();
-      if (entry.input.page !== page) throw new Error("別の原稿の生成履歴です。");
-      const before = JSON.parse(await rpc("editor-read", { page }, root)) as Document;
-      const decision = await showGenerationReview(page, before.content, entry.candidate.content);
-      if (decision.action === "adopt") {
-        assertContext();
-        await rpc("editor-save", { page, json: { content: entry.candidate.content, revision: before.revision } }, root);
-        await refreshWorkspace(true);
-        status("生成履歴の候補を採用して保存しました。");
-      } else if (decision.action === "retry") {
-        await generateReviewed(page, undefined, decision.feedback);
-      }
-    },
-  });
-}); });
-element("review-ai-update").addEventListener("click", () => { void work(async () => {
-  await savedBeforeOperation();
-  if (!documentState) return;
-  const page = documentState.page;
-  const key = aiReviewKey(page);
-  const snapshot = aiReviews.get(key);
-  if (!snapshot) return;
-  const current = JSON.parse(await rpc("editor-read", { page })) as Document;
-  if (current.content !== snapshot.after.content) throw new Error("採用後に原稿が変更されています。編集を保護するため、以前の結果への復元を中止しました。");
-  const decision = await showGenerationReview(page, snapshot.before.content, snapshot.after.content, true);
-  if (decision.action === "retry") { await generateReviewed(page, snapshot.id, decision.feedback); return; }
-  if (decision.action === "restore") {
-    await rpc("editor-save", { page, json: { content: snapshot.before.content, revision: current.revision } });
-    aiReviews.delete(key);
-    lastExecutions.delete(JSON.stringify([projectRoot,page]));
-    showAiPhase('restored');
-    await refreshWorkspace(true);
-    renderDocumentTags();
-    status("AI更新前の原稿に戻して保存しました。");
-  }
-}); });
-function tasksForPage(page: string): Task[] {
-  const docsFolder = workspace!.config.docs.replace(/^[.\\/]+|[\\/]+$/g, "");
-  const relative = page.startsWith(`${docsFolder}/`) ? page.slice(docsFolder.length + 1) : page;
-  return workspace!.tasks.filter((task) => task.page === page || task.page === relative || `${docsFolder}/${task.page}` === page);
-}
-async function generateDocument(page: string, resumeIds?: string[], defaults?: ExecutionLimits): Promise<number | null> {
-  if (!workspace) throw new Error("先にプロジェクトを開いてください。");
-  const root = projectRoot;
-  const allTasks = JSON.parse(await rpc("page-tasks", { page }, root)) as Task[];
-  if (root !== projectRoot) throw new Error("プロジェクトが切り替わりました。");
-  const supported = allTasks.filter(task => ["text", "diagram"].includes(task.kind));
-  if (!supported.some(task => task.status !== "approved")) { status("更新できる未確定のAIタグがありません。"); return 0; }
-  await ensureAiSettings();
-  const input = await confirmGenerationInput(page, undefined, "", resumeIds, defaults);
-  if (!input) { status("生成をキャンセルしました。"); return null; }
-  const tasks = input.tasks;
-  const limits = input.limits || {timeout_seconds:300,retries:0};
-  const run = JSON.parse(await rpc("execution-begin", {page,json:{ids:tasks.map(task=>task.id),limits}}, root)) as ExecutionRun;
-  const failures: Array<{id:string;reason:string}> = [];
-  const executionEntries = tasks.map(task => ({task:{id:task.id,kind:task.kind,prompt:task.prompt},status:'pending',attempts:0,input:null,references:{},capture:null}));
-  let cancelled = false;
-  generationCancelled = false;
-  const checkpoint = (ids: string[], state: string, error?: string) => {
-    for (const entry of executionEntries) if (ids.includes(entry.task.id)) entry.status = state;
-    return rpc("execution-checkpoint", {id:run.id,json:{results:ids.map(id=>({id,status:state,error}))}},root);
-  };
-  const attempt = async <T>(selected: Task[], action: () => Promise<T>): Promise<T> => {
-    for (let count=0;;count++) {
-      if (generationCancelled) throw new Error("AI更新を中断しました。");
-      await checkpoint(selected.map(task=>task.id), "running");
-      try { return await action(); } catch(error) {
-        if (generationCancelled || count>=limits.retries) {
-          await checkpoint(selected.map(task=>task.id), generationCancelled ? "cancelled" : "failed", String(error));
-          throw error;
-        }
-        logProgress(`失敗した処理を再試行します（${count+1}/${limits.retries}）。`);
-      }
-    }
-  };
-  try {
-    try { await rpc("agent-progress-clear"); } catch { /* Optional logging. */ }
-    startAiProgress("generate-page");
-    showAiPhase('generating', root, page);
-    const generated = tasks.filter(task=>task.kind!=="screenshot");
-    if (generated.length) {
-      try {
-        const adopted=await attempt(generated,()=>generateReviewed(page,undefined,"",input));
-        if (!adopted) {cancelled=true;await checkpoint(generated.map(task=>task.id),"cancelled");}
-        else await checkpoint(generated.map(task=>task.id),"succeeded");
-      } catch(error) { for(const task of generated) failures.push({id:task.id,reason:String(error)}); }
-    }
-    if (!cancelled && !generationCancelled) {
-      if (!progressRunning) startAiProgress("generate-page");
-      activeGenerationRoot=root;
-      element("progress-cancel").hidden=false;
-      element<HTMLButtonElement>("progress-cancel").disabled=false;
-      for (const task of tasks.filter(task=>task.kind==="screenshot")) {
-        if (generationCancelled) { cancelled=true; break; }
-        showAiPhase('capturing', root, page);
-        try {
-          await attempt([task],async()=>{
-            const result=JSON.parse(await rpc("generate-page-captures",{page,json:{ids:[task.id],limits,execution_id:run.id}},root)) as {capture_errors?:Array<{id:string;reason:string}>};
-            if(result.capture_errors?.length)throw new Error(result.capture_errors.map(item=>item.reason).join("\n"));
-          });
-          recordTaskResult(task,undefined,root);await checkpoint([task.id],"succeeded");
-        }catch(error){recordTaskResult(task,String(error),root);failures.push({id:task.id,reason:String(error)});}
-      }
-    }
-    let rollback=false;
-    if(failures.length) rollback=input.failure_policy==="rollback" || input.failure_policy!=="keep" && await showPartialFailure(failures, executionEntries);
-    const finished = JSON.parse(await rpc("execution-finish",{id:run.id,rollback},root)) as ExecutionRun;
-    if (Array.isArray(finished.entries)) lastExecutions.set(JSON.stringify([root,page]),finished);
-    showAiPhase(rollback ? 'restored' : cancelled || generationCancelled ? 'cancelled' : failures.length ? 'partial' : 'completed', root, page);
-    renderLastExecution();
-    element<HTMLDetailsElement>('execution-result').open = Boolean(failures.length || cancelled || generationCancelled);
-    status(rollback ? "文書と画像を更新前へ戻しました。実行記録から再開できます。" : cancelled || generationCancelled ? "AI更新を中断しました。未実行分は実行記録から再開できます。" : `AI更新を完了しました。失敗${failures.length}件。`,failures.length>0);
-    return cancelled || generationCancelled ? null : failures.length;
-  } finally {
-    await refreshWorkspace(true);
-    await stopAiProgress(!failures.length && !cancelled);
-    await restoreManualStudioAfterCapture().catch(()=>{});
-  }
-}
-async function generateAllDocuments(): Promise<void> {
-  await savedBeforeOperation();
-  if (!workspace) throw new Error("先にプロジェクトのフォルダーを開いてください。");
-  const docsFolder = workspace.config.docs.replace(/^[.\\/]+|[\\/]+$/g, "");
-  const pages = workspace.project_entries.filter((entry) => !entry.directory && /\.md$/i.test(entry.path))
-    .map((entry) => entry.path)
-    .filter((path) => path === docsFolder || path.startsWith(`${docsFolder}/`));
-  if (!pages.length) { status("原稿フォルダーにMarkdown文書がありません。", true); return; }
-  const root = projectRoot;
-  const candidates = [];
-  for (const page of pages) {
-    const tasks = JSON.parse(await rpc("page-tasks", { page }, root)) as Task[];
-    candidates.push({ page, tasks: tasks.filter(task => ["text", "diagram"].includes(task.kind)) });
-  }
-  const selectedPages = await selectGenerationPages(candidates);
-  if (!selectedPages) { status("AI更新をキャンセルしました。"); return; }
-  if (root !== projectRoot) throw new Error("ワークスペースが切り替わりました。");
-  let completed = 0;
-  let failedCaptures = 0;
-  for (const page of selectedPages.pages) {
-    const tasks = candidates.find(item => item.page === page)!.tasks.filter(task => task.status !== "approved");
-    if (!tasks.length) continue;
-    if (documentState?.page !== page) {
-      await savedBeforeOperation();
-      await openPage(page, false);
-    }
-    const failures = await generateDocument(page,undefined,selectedPages.limits);
-    if (failures === null) { status(`AI更新を中止しました（${completed}文書完了）。`); return; }
-    failedCaptures += failures;
-    completed++;
-  }
-  status(`すべての文書のAI更新が完了しました（${completed}文書）。${failedCaptures ? `撮影失敗 ${failedCaptures}件は実行ログを確認してください。` : ""}`, failedCaptures > 0);
-}
 async function runAction(action: string, options: Record<string, unknown> = {}, resultId?: string): Promise<void> {
   await savedBeforeOperation();
-  const isAiAction = action === "draft" || action === "generate-task" || action === "capture-source-auto";
+  const isAiAction = action === "draft";
   if (isAiAction) await ensureAiSettings();
   if (isAiAction) {
     try { await rpc("agent-progress-clear"); } catch { /* Progress logs are optional. */ }
@@ -1696,10 +1054,6 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
     const actionRoot=projectRoot;
     const output = await rpc(action, options,actionRoot);
     if(actionRoot!==projectRoot)return;
-    if (typeof options.id === "string") {
-      const task = workspace?.tasks.find(task => task.id === options.id);
-      if (task) recordTaskResult(task);
-    }
     if (isAiAction) { await pollAgentProgress(); logProgress("AIの応答を受け取りました。結果を反映しています。"); }
     if (resultId) {
       let text = output;
@@ -1744,10 +1098,6 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
     status(completionMessage, completionHasError);
     succeeded = true;
   } catch (error) {
-    if (typeof options.id === "string") {
-      const task = workspace?.tasks.find(task => task.id === options.id);
-      if (task) { recordTaskResult(task, String(error)); renderTasks(); }
-    }
     if (isAiAction) { await pollAgentProgress(); logProgress(`失敗: ${String(error)}`); }
     if (resultId) element(resultId).textContent = `失敗: ${String(error)}`;
     throw error;
@@ -1756,11 +1106,7 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
     await restoreManualStudioAfterCapture().catch(() => {});
   }
 }
-function taskControl<T extends HTMLElement>(card: HTMLElement, attribute: string): T {
-  return card.querySelector<T>(`[${attribute}]`)!;
-}
-element("task-status-filter").addEventListener("change", renderTasks);
-element("task-kind-filter").addEventListener("change", renderTasks);
+setupControlIcons();
 for (const [selector, name] of [["#undo-edit", "undo"], ["#redo-edit", "redo"], ["#insert-image", "image"], ['[data-format="link"]', "link"]] as const) {
   const button = document.querySelector<HTMLButtonElement>(selector);
   if (button) button.innerHTML = uiIcon(name) + (name === "image" ? " 画像" : name === "link" ? " リンク" : "");
@@ -1804,7 +1150,7 @@ setupWorkspaceWizard({
   },
   create: async (root, options) => {
     if (busy) throw new Error("現在の処理が完了してから作成してください。");
-    assertNoActiveCaptureSession();
+
     if (!await confirmDiscard()) throw new Error("作成を中止しました。現在の原稿を保存してからやり直してください。");
     setBusy(true);
     try {
@@ -1812,7 +1158,7 @@ setupWorkspaceWizard({
       await rpc("create-workspace", options, root);
       await openProject(root, false);
       status("ワークスペースを作成しました。最初の原稿から編集を始められます。");
-    } finally { setBusy(captureNeedsUiLock()); }
+    } finally { setBusy(false); }
   },
 });
 element("cancel-open-workspace").addEventListener("click", () => element<HTMLDialogElement>("workspace-dialog").close());
@@ -1853,24 +1199,7 @@ element("browse-project").addEventListener("click", () => { void work(async () =
   const path = await invoke<string | null>("choose_project");
   if (path) { input("project-root").value = path; await openProject(path); }
 }); });
-element("browse-screenshot-launch-program").addEventListener("click", () => { void work(async () => {
-  if (!native) throw new Error("アプリ選択ダイアログはデスクトップアプリで利用できます。");
-  const path = await invoke<string | null>("choose_application");
-  if (path) input("screenshot-launch-program").value = path;
-}); });
 element("page-list").addEventListener("click", (event) => {
-  const generateButton = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-generate-page]");
-  if (generateButton) {
-    void work(async () => {
-      const page = generateButton.dataset.generatePage!;
-      if (documentState?.page !== page) {
-        if (!await confirmDiscard()) return;
-        await openPage(page, false);
-      }
-      await generateCurrentPage();
-    });
-    return;
-  }
   const image = (event.target as HTMLElement).closest<HTMLElement>('[data-image]');
   if (image) { void work(() => openImageTab(image.dataset.image!)); return; }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-page]");
@@ -1939,7 +1268,6 @@ applyEditorView();
 editor.addEventListener("editor-mode-change", () => {
   if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
 });
-element("generate-page").addEventListener("click", () => { void work(generateCurrentPage); });
 element("reload-page").addEventListener("click", () => { if (documentState) void work(async () => {
   if (!await confirmDiscard() || !documentState) return;
   await openPage(documentState.page, false);
@@ -1962,47 +1290,8 @@ editor.addEventListener("beforeinput", (event) => {
 editor.addEventListener("input", (event) => {
   recordEditHistory(event);
   dirty = editor.value !== documentState?.content; updateSaveState(); updateCursor();
-  renderDocumentTags();
+
   clearTimeout(previewTimer); previewTimer = setTimeout(() => { void renderPreview(); }, 250);
-});
-document.getElementById("document-tag-list")?.addEventListener("click", (event) => {
-  const target = event.target as HTMLElement;
-  const row = target.closest<HTMLElement>(".document-tag-row");
-  if (!row) return;
-  if (target.closest("[data-tag-confirm]")) {
-    if (busy || row.dataset.generatedStart === undefined || row.dataset.generatedHeaderEnd === undefined || !documentState) return;
-    const start = Number(row.dataset.generatedStart);
-    const headerEnd = Number(row.dataset.generatedHeaderEnd);
-    const oldHeader = editor.value.slice(start, headerEnd);
-    const approved = row.dataset.approved === "true";
-    const newHeader = approved
-      ? removeTagAttributes(oldHeader, ["approved-at"])
-      : oldHeader.replace(/\s*-->$/, ` approved-at=${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")} -->`);
-    if (oldHeader !== newHeader) {
-      replaceMarkdown(start, headerEnd, newHeader, 0, newHeader.length);
-      status(approved ? "確定を解除しました。Undo で戻せます。" : "生成結果を確定しました。Undo で戻せます。");
-    }
-    return;
-  }
-  if (target.closest("[data-tag-delete]")) {
-    if (busy || row.dataset.generatedStart === undefined || row.dataset.generatedEnd === undefined || !documentState) return;
-    const start = Number(row.dataset.generatedStart);
-    let end = Number(row.dataset.generatedEnd);
-    if (editor.value[end] === "\r" && editor.value[end + 1] === "\n") end += 2;
-    else if (editor.value[end] === "\n") end++;
-    const block = editor.value.slice(start, Number(row.dataset.generatedEnd));
-    const unified = /^<!--\s*ai:task\b/.test(block);
-    const cleared = unified ? removeTagAttributes(block.slice(0, block.indexOf("-->") + 3), ["created-at", "source-sha256", "approved-at"]) + "\n\n<!-- /ai:task -->\n" : "";
-    replaceMarkdown(start, end, cleared, 0);
-    status(`${row.querySelector("code")?.textContent || "生成結果"}を削除しました。Undo で戻せます。`);
-    return;
-  }
-  if (!target.closest("[data-tag-jump]")) return;
-  const start = Number(row.dataset.tagStart);
-  const end = Number(row.dataset.tagEnd);
-  milkdown.showSource();
-  jumpToSource(editor, start, end);
-  updateCursor();
 });
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 milkdown.host.addEventListener("scroll", () => syncScroll(milkdown.host, previewScrollElement()));
@@ -2034,30 +1323,10 @@ function replaceMarkdown(start: number, end: number, replacement: string, select
   editor.dispatchEvent(new Event("input", { bubbles: true }));
 }
 const openTableEditor = setupMarkdownTableEditor({ editor, canEdit: () => !busy && Boolean(documentState), replace: replaceMarkdown, report: message => status(message, true) });
-setupDocumentTagsPane();
+
 window.addEventListener("manual-studio-status", (event: Event) => {
   const detail = (event as CustomEvent<{ message: string; error?: boolean }>).detail;
   if (detail?.message) status(detail.message, detail.error);
-});
-window.addEventListener("manual-studio-regenerate-task", (event: Event) => {
-  const { id, kind } = (event as CustomEvent<{ id: string; kind: string }>).detail;
-  void work(async () => {
-    if (!documentState) return;
-    if (dirty) await saveDocument();
-    const page = documentState.page;
-    if (kind === "screenshot") {
-      const source = workspace?.capture_sources[id];
-      if (source) {
-        await hideManualStudioForCapture(id);
-        try { await runAction("recapture", { id }); }
-        finally { await restoreManualStudioAfterCapture(); }
-      } else {
-        status("撮影元が未設定です。「AIタグ一覧」で撮影元を設定するか、画面一覧から設定してください。", true);
-      }
-    } else {
-      await generateReviewed(page, id);
-    }
-  });
 });
 function applyAssist(edit: MarkdownEdit): void {
   replaceMarkdown(edit.start, edit.end, edit.text, edit.selectionStart - edit.start, edit.selectionEnd - edit.start);
@@ -2152,7 +1421,7 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
     const next = views[(views.indexOf(element('panel-editor').dataset.editorView as EditorView) + 1) % views.length];
     document.querySelector<HTMLButtonElement>(`.editor-view-controls button[data-editor-view="${next}"]`)!.click();
   } else if (key === 'r') { void work(renderPreview); }
-  else { void work(generateCurrentPage); }
+  else { void createSelectionDocument(); }
 }
 document.addEventListener('keydown', handleDocumentShortcut);
 element('shortcut-help').addEventListener('click', showShortcutHelp);
@@ -2161,8 +1430,6 @@ element('workspace-guide').querySelector('[data-guide-dismiss]')!.addEventListen
   try { localStorage.setItem(`manual-studio-guide:${projectRoot}`, 'hidden'); } catch { /* Optional preference. */ }
   element('workspace-guide').hidden = true;
 });
-element('generate-page').setAttribute('aria-keyshortcuts', 'Control+Shift+G Meta+Shift+G');
-element('generate-page').title += ' (Ctrl/Cmd+Shift+G)';
 element('open-workspace-settings').innerHTML = `${uiIcon('settings')} ワークスペース設定`;
 element('open-workspace-settings').title = '原稿・画像の保存先とHTML出力先を設定';
 document.querySelectorAll<HTMLButtonElement>('.editor-view-controls button[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
@@ -2186,207 +1453,6 @@ if (native) void getCurrentWindow().onCloseRequested(event => {
     finally { closingPrompt = false; }
   })();
 });
-function updateCaptureSteps(): void {
-  const step = annotationPollRunning || recordingFinishActive || externalFinishActive ? 3
-    : pendingAnnotatedImageFile || pendingScenarioFile || screenshotSubmitRunning ? 4
-    : operationRecording || recordingStarting ? 2 : 1;
-  const help = ["", "撮影するアプリの起動コマンドを選んでください。", "対象アプリを操作し、撮影ボタンまたはCtrl+Shift+F10で記録を終了します。", "撮影した画像をMarkItsで編集し、「編集終了」を押してください。", "画像と指示を原稿へ追加します。失敗時はこの画面から再試行できます。"];
-  element("capture-step-help").textContent = help[step];
-  document.querySelectorAll<HTMLElement>("[data-capture-step]").forEach(item => {
-    const number = Number(item.dataset.captureStep);
-    if (number === step) item.setAttribute("aria-current", "step"); else item.removeAttribute("aria-current");
-    item.dataset.complete = String(number < step);
-  });
-}
-function resetRecordingControls(): void {
-  operationRecording = false;
-  recordingPollGeneration++;
-  if (recordingPoll) clearTimeout(recordingPoll);
-  recordingPoll = undefined;
-  if (native) void invoke("close_recording_control").catch(() => {});
-  setButtonDisabled(element<HTMLButtonElement>("start-operation-recording"), false);
-  setButtonDisabled(element<HTMLButtonElement>("stop-operation-recording"), true);
-}
-async function acceptRecordingResult(result: RecordingResult, generation = captureSessions.active?.generation): Promise<void> {
-  if (generation === undefined || !isCurrentCaptureSession(generation)) return;
-  externalFinishActive = false;
-  if (ignoredCaptureFiles.has(result.annotationFile) || acceptedRecordingResultGeneration === generation) return;
-  acceptedRecordingResultGeneration = generation;
-  activeRecordingResult = result;
-  resetRecordingControls();
-  pendingScenarioFile = result.scenarioFile;
-  pendingRecordedOperations = result.operationText;
-  status(`${result.message}（${result.events}件の操作）`);
-  element("operation-recording-status").textContent = result.message;
-  if (!result.markitsStarted) {
-    await restoreManualStudioAfterCapture(true).catch(() => {});
-    if (isCurrentCaptureSession(generation)) updateCaptureBusyState();
-    return;
-  }
-  if (annotationPoll) clearTimeout(annotationPoll);
-  annotationPollRunning = true;
-  updateCaptureBusyState();
-  const started = Date.now();
-  let lastWaitNoticeAt = 0;
-  const checkAnnotation = async (): Promise<void> => {
-    if (!annotationPollRunning || !isCurrentCaptureSession(generation)) return;
-    try {
-      const annotation = await invoke<string | null>("markits_annotation_ready", { sourceFile: result.sourceFile, annotationFile: result.annotationFile, completionFile: result.completionFile });
-      if (!annotationPollRunning || !isCurrentCaptureSession(generation)) return;
-      if (!annotation) {
-        const elapsed = Math.floor((Date.now() - started) / 1000);
-        if (elapsed - lastWaitNoticeAt >= 15) {
-          lastWaitNoticeAt = elapsed;
-          element("operation-recording-status").textContent = `MarkItsの編集完了を待っています（${elapsed}秒）。MarkItsで「編集終了」を押してください。`;
-        }
-        annotationPoll = setTimeout(() => { void checkAnnotation(); }, 1000);
-        return;
-      }
-      annotationPoll = undefined;
-      pendingAnnotationSpec = annotation;
-      pendingAnnotatedImageFile = result.annotationFile;
-      await restoreManualStudioAfterCapture(true);
-      if (!annotationPollRunning || !isCurrentCaptureSession(generation)) return;
-      annotationPollRunning = false;
-      updateCaptureBusyState();
-      const taskForm = element<HTMLFormElement>("screenshot-task-form");
-      const dialog = element<HTMLDialogElement>("screenshot-task-dialog");
-      if (dialog.open && taskForm.reportValidity()) taskForm.requestSubmit();
-      else {
-        element("operation-recording-status").textContent = "注釈を受け取りました。入力内容を確認して「指示を追加」を押してください。";
-        status("注釈を読み込みました。入力内容を確認してください。");
-      }
-    } catch (error) {
-      if (!isCurrentCaptureSession(generation)) return;
-      annotationPollRunning = false;
-      annotationPoll = undefined;
-      updateCaptureBusyState();
-      await restoreManualStudioAfterCapture(true).catch(() => {});
-      element("operation-recording-status").textContent = `MarkItsの完了確認に失敗しました: ${String(error)}`;
-      status(`MarkItsの完了確認に失敗しました: ${String(error)}`, true);
-    }
-  };
-  void checkAnnotation();
-}
-function finishOperationRecording(): Promise<void> {
-  if (recordingFinishing) return recordingFinishing;
-  if (!operationRecording) return Promise.resolve();
-  const generation = captureSessions.active?.generation;
-  if (generation === undefined) return Promise.resolve();
-  operationRecording = false;
-  recordingPollGeneration++;
-  if (recordingPoll) clearTimeout(recordingPoll);
-  recordingPoll = undefined;
-  if (native) void invoke("close_recording_control").catch(() => {});
-  recordingFinishActive = true;
-  setButtonDisabled(element<HTMLButtonElement>("start-operation-recording"), true);
-  setButtonDisabled(element<HTMLButtonElement>("stop-operation-recording"), true);
-  updateCaptureBusyState();
-  recordingFinishing = (async () => {
-    try {
-      const result = await invoke<RecordingResult>("finish_operation_recording");
-      if (!isCurrentCaptureSession(generation)) return;
-      await acceptRecordingResult(result, generation);
-    } catch (error) {
-      if (!isCurrentCaptureSession(generation)) return;
-      resetRecordingControls();
-      updateCaptureBusyState();
-      await restoreManualStudioAfterCapture(true).catch(() => {});
-      status(String(error), true);
-      element("operation-recording-status").textContent = String(error);
-    }
-  })().finally(() => {
-    recordingFinishing = null;
-    recordingFinishActive = false;
-    updateCaptureBusyState();
-  });
-  return recordingFinishing;
-}
-async function pollRecordingStatus(generation: number): Promise<void> {
-  if (!operationRecording || generation !== recordingPollGeneration) return;
-  try {
-    const running = await invoke<boolean>("operation_recording_running");
-    if (!operationRecording || generation !== recordingPollGeneration) return;
-    if (!running) { await finishOperationRecording(); return; }
-  } catch (error) {
-    status(`操作記録の状態確認に失敗しました: ${String(error)}`, true);
-    element("operation-recording-status").textContent = `操作記録の状態確認に失敗しました。手動で終了できます。\n${String(error)}`;
-  }
-  if (operationRecording && generation === recordingPollGeneration) {
-    recordingPoll = setTimeout(() => { void pollRecordingStatus(generation); }, 800);
-  }
-}
-element("start-operation-recording").addEventListener("click", () => {
-  if (busy) {
-    const message = "別の処理が終わってから操作記録を開始してください。";
-    element("operation-recording-status").textContent = message; status(message, true); return;
-  }
-  const selectedCommand = launchCommands.find((command) => (command.id || command.name) === element<HTMLSelectElement>("screenshot-launch-command").value);
-  const program = selectedCommand?.program.trim() || input("screenshot-launch-program").value.trim();
-  const issue = !native ? "操作記録はデスクトップアプリで利用できます。"
-    : !program ? "起動するアプリを選択してください。"
-    : !projectRoot ? "先にワークスペースを開いてください。" : "";
-  if (issue) { element("operation-recording-status").textContent = issue; status(issue, true); return; }
-  void work(async () => {
-  const session = captureSessions.active;
-  if (!session || operationRecording || recordingStarting || recordingFinishActive) return;
-  const generation = session.generation;
-  const args = selectedCommand?.args ?? element<HTMLTextAreaElement>("screenshot-launch-args").value.split("\n").filter((value) => value.length > 0);
-  pendingLaunchProgram = program;
-  pendingLaunchArgs = args;
-  const progress = "アプリを起動し、ウィンドウを自動検出しています（最大30秒）。";
-  element("operation-recording-status").textContent = progress; status(progress);
-  let message: string;
-  recordingStarting = true;
-  updateCaptureBusyState();
-  try {
-    message = await invoke<string>("start_operation_recording", { root: session.root, program, args, windowTitle: "", taskId: session.id, markitsProgram: "" });
-  } catch (error) {
-    const failure = String(error);
-    element("operation-recording-status").textContent = failure; status(failure, true); throw error;
-  } finally {
-    recordingStarting = false;
-    updateCaptureBusyState();
-  }
-  if (!isCurrentCaptureSession(generation)) return;
-  operationRecording = true;
-  pendingScenarioFile = null;
-  setButtonDisabled(element<HTMLButtonElement>("start-operation-recording"), true);
-  setButtonDisabled(element<HTMLButtonElement>("stop-operation-recording"), false);
-  element("operation-recording-status").textContent = message;
-  status(message);
-  updateCaptureBusyState();
-  const pollGeneration = ++recordingPollGeneration;
-  recordingPoll = setTimeout(() => { void pollRecordingStatus(pollGeneration); }, 800);
-  if (native) void invoke("show_recording_control").catch((error) => status(`撮影ボタンを表示できません: ${String(error)}。Ctrl+Shift+F10で終了できます。`, true));
-  });
-});
-element("stop-operation-recording").addEventListener("click", () => { void finishOperationRecording(); });
-function nextAiTaskId(kind: string): string {
-  const stem = documentState!.page.replace(/\.md$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "page";
-  const prefix = `task-${stem}-${kind}`;
-  const ids = collectAiTagIds(editor.value);
-  let suffix = 1;
-  while (ids.has(`${prefix}-${suffix}`) || workspace?.tasks.some((task) => task.id === `${prefix}-${suffix}`)) suffix++;
-  return `${prefix}-${suffix}`;
-}
-function updateLaunchSelection(): void {
-  const select = element<HTMLSelectElement>("screenshot-launch-command");
-  const custom = select.value === "__custom__";
-  element<HTMLElement>("custom-launch-command").hidden = !custom;
-  element<HTMLElement>("custom-launch-args-label").hidden = !custom;
-  const summary = element("screenshot-launch-summary");
-  const command = launchCommands.find((item) => (item.id || item.name) === select.value);
-  summary.textContent = command ? `起動アプリ: ${command.program}${command.args.length ? `（引数 ${command.args.length} 件）` : ""}` : custom ? "アプリの実行ファイルと必要な引数を指定してください。" : "アプリを登録すると、ここから選べます。";
-}
-function refreshLaunchCommandOptions(): void {
-  const select = element<HTMLSelectElement>("screenshot-launch-command");
-  const previous = select.value;
-  select.replaceChildren(...launchCommands.map((command) => new Option(command.name || command.program.split(/[\\/]/).pop() || "対象アプリ", command.id || command.name)));
-  select.add(new Option("カスタム起動コマンド", "__custom__"));
-  select.value = previous && (previous === "__custom__" || launchCommands.some((item) => (item.id || item.name) === previous)) ? previous : launchCommands[0]?.id || launchCommands[0]?.name || "__custom__";
-  updateLaunchSelection();
-}
 function renderLaunchCommands(): void {
   const list = element("launch-command-list");
   list.replaceChildren();
@@ -2401,6 +1467,9 @@ function renderLaunchCommands(): void {
     programWrap.append(program, browse); programLabel.append(programWrap);
     const argsLabel = document.createElement("label"); argsLabel.textContent = "起動引数（1行に1つ）";
     const args = document.createElement("textarea"); args.rows = 2; args.value = command.args.join("\n"); args.dataset.launchArgs = String(index); argsLabel.append(args);
+    name.addEventListener("input", () => { command.name = name.value; });
+    program.addEventListener("input", () => { command.program = program.value; });
+    args.addEventListener("input", () => { command.args = args.value.split("\n").filter(value => value.length > 0); });
     const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "削除"; remove.dataset.launchRemove = String(index);
     const test = document.createElement("button"); test.type = "button"; test.textContent = "起動確認";
     test.addEventListener("click", () => { void work(async () => { if (!native) throw new Error("起動確認はデスクトップ版で利用できます。"); await invoke("test_launch_application", { program: program.value, args: args.value.split("\n").filter(value => value.length > 0) }); status("対象アプリを起動しました。"); }); });
@@ -2410,282 +1479,26 @@ function renderLaunchCommands(): void {
   list.querySelectorAll<HTMLButtonElement>("[data-launch-browse]").forEach((button) => button.addEventListener("click", () => { void work(async () => {
     if (!native) throw new Error("アプリ選択はデスクトップアプリで利用できます。");
     const path = await invoke<string | null>("choose_application");
-    if (path) list.querySelector<HTMLInputElement>(`[data-launch-program="${button.dataset.launchBrowse}"]`)!.value = path;
+    if (path) {
+      const program = list.querySelector<HTMLInputElement>(`[data-launch-program="${button.dataset.launchBrowse}"]`)!;
+      program.value = path;
+      program.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   }); }));
   list.querySelectorAll<HTMLButtonElement>("[data-launch-remove]").forEach((button) => button.addEventListener("click", () => {
-    launchCommands.splice(Number(button.dataset.launchRemove), 1); renderLaunchCommands(); refreshLaunchCommandOptions();
+    launchCommands.splice(Number(button.dataset.launchRemove), 1); renderLaunchCommands();
   }));
 }
 async function loadLaunchCommands(): Promise<void> {
   const root = projectRoot;
   launchCommands = [];
-  renderLaunchCommands(); refreshLaunchCommandOptions();
+  renderLaunchCommands();
   if (!native || !root) return;
   const commands = await invoke<LaunchCommand[]>("load_launch_commands", { root });
   if (projectRoot !== root) return;
   launchCommands = commands;
-  renderLaunchCommands(); refreshLaunchCommandOptions();
+  renderLaunchCommands();
 }
-function insertAiTask(kind: string, custom?: { id: string; prompt: string }, selection?: { start: number; end: number }, insertTag?: (markdown: string) => boolean): boolean {
-  if (!documentState) { status("先に原稿を開いてください。", true); return false; }
-  const id = custom?.id.trim() || nextAiTaskId(kind);
-  if (!/^[a-z][a-z0-9_-]*$/.test(id) || collectAiTagIds(editor.value).has(id) || workspace?.tasks.some((task) => task.id === id)) {
-    status("指示IDが不正か、すでに使われています。別のIDを指定してください。", true);
-    return false;
-  }
-  const prompt = kind === "screenshot" ? "対象アプリの画面と、表示する操作要素を指定してください。" : kind === "diagram" ? "Pythonモジュール間の依存関係を図にしてください。" : "対象読者と説明する操作手順を指定してください。";
-  const markdown = `\n\n<!-- ai:task id=${id} kind=${kind} prompt="${escapeTaskPrompt(custom?.prompt ?? prompt)}" -->\n\n<!-- /ai:task -->\n`;
-  if (insertTag) return insertTag(markdown);
-  if (milkdown.isRichEditing) return milkdown.insertAiTag(markdown);
-  rememberCurrentSelection(selection?.start, selection?.end);
-  editor.setRangeText(markdown, selection?.start ?? editor.selectionStart, selection?.end ?? editor.selectionEnd, "end");
-  editor.dispatchEvent(new Event("input")); editor.focus();
-  return true;
-}
-function requestAiTask(kind: string): void {
-  if (busy) return;
-  element("panel-editor").querySelector<HTMLDetailsElement>(".instruction-toolbar")!.open = false;
-  if (kind !== "screenshot") { insertAiTask(kind); return; }
-  if (!documentState) { status("先に原稿を開いてください。", true); return; }
-  if (pendingAnnotatedImageFile) {
-    const session = captureSessions.active;
-    if (!session || session.root !== projectRoot || session.page !== documentState.page) {
-      status("編集中のMarkIts画像と原稿の対応を確認できません。画像追加をキャンセルして最初からやり直してください。", true);
-      return;
-    }
-    element<HTMLDialogElement>("screenshot-task-dialog").showModal();
-    element("operation-recording-status").textContent = "前回のMarkIts画像追加が未完了です。保持した画像と入力で続きから再試行できます。";
-    status("前回のMarkIts画像追加を再開できます。");
-    return;
-  }
-  if (captureSessions.active) {
-    status("撮影AIタグの作成が進行中です。現在のダイアログで完了またはキャンセルしてください。", true);
-    return;
-  }
-  const selection = { start: editor.selectionStart, end: editor.selectionEnd };
-  const id = nextAiTaskId("screenshot");
-  input("screenshot-task-id").value = id;
-  captureSessions.begin({ root: projectRoot, page: documentState.page, id, selection, insertTag: milkdown.captureAiTagInsertion() });
-  acceptedRecordingResultGeneration = -1;
-  activeRecordingResult = null;
-  element<HTMLTextAreaElement>("screenshot-notes").value = "";
-  input("screenshot-launch-program").value = "";
-  element<HTMLTextAreaElement>("screenshot-launch-args").value = "";
-  refreshLaunchCommandOptions();
-  updateCaptureSteps();
-  element("operation-recording-status").textContent = "記録中は入力した文字も保存されます。機密情報を入力しないでください。対象アプリ以外を操作しないでください。Ctrl+Shift+F9で一時停止、Ctrl+Shift+F10で終了できます。";
-  pendingScenarioFile = null;
-  pendingRecordedOperations = "";
-  pendingAnnotationSpec = "";
-  updateCaptureSteps();
-  element<HTMLDialogElement>("screenshot-task-dialog").dataset.selection = JSON.stringify(selection);
-  clearScreenshotFeedback();
-  element<HTMLDialogElement>("screenshot-task-dialog").showModal();
-  if (element<HTMLSelectElement>("screenshot-launch-command").value === "__custom__") input("screenshot-launch-program").focus();
-}
-document.querySelectorAll<HTMLElement>("[data-insert]").forEach(button => button.addEventListener("click", () => requestAiTask(button.dataset.insert!)));
-element("screenshot-launch-command").addEventListener("change", updateLaunchSelection);
-async function cancelCaptureSession(): Promise<void> {
-  const session = captureSessions.active;
-  if (!session) { element<HTMLDialogElement>("screenshot-task-dialog").close(); return; }
-  if (operationRecording || recordingStarting || recordingFinishActive || externalFinishActive || screenshotSubmitRunning) {
-    status(operationRecording ? "Ctrl+Shift+F10で操作記録を終了してからキャンセルしてください。" : "処理中はキャンセルできません。完了するまでお待ちください。", true);
-    return;
-  }
-  captureSessions.invalidate(session.generation);
-  annotationPollRunning = false;
-  if (annotationPoll) clearTimeout(annotationPoll);
-  annotationPoll = undefined;
-  recordingPollGeneration++;
-  if (recordingPoll) clearTimeout(recordingPoll);
-  recordingPoll = undefined;
-  if (activeRecordingResult) {
-    ignoredCaptureFiles.add(activeRecordingResult.annotationFile);
-    if (ignoredCaptureFiles.size > 64) ignoredCaptureFiles.delete(ignoredCaptureFiles.values().next().value!);
-  }
-  const imageFile = pendingAnnotatedImageFile;
-  pendingScenarioFile = null;
-  pendingRecordedOperations = "";
-  pendingAnnotationSpec = "";
-  pendingAnnotatedImageFile = "";
-  pendingLaunchProgram = "";
-  pendingLaunchArgs = [];
-  activeRecordingResult = null;
-  acceptedRecordingResultGeneration = -1;
-  resetRecordingControls();
-  element<HTMLDialogElement>("screenshot-task-dialog").close();
-  await restoreManualStudioAfterCapture(true).catch(() => {});
-  if (imageFile) await invoke("cleanup_markits_capture", { imageFile }).catch(() => {});
-  updateCaptureBusyState();
-  status("保持した画像の自動取り込みを停止しました。原稿の変更は必要に応じて保存またはUndoしてください。");
-}
-element("cancel-screenshot-task").addEventListener("click", () => { void cancelCaptureSession(); });
-element<HTMLDialogElement>("screenshot-task-dialog").addEventListener("cancel", (event) => {
-  event.preventDefault();
-  void cancelCaptureSession();
-});
-element("screenshot-task-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const dialog = element<HTMLDialogElement>("screenshot-task-dialog");
-  const reportSubmitIssue = (message: string): void => showScreenshotFeedback(message);
-  try {
-    clearScreenshotFeedback();
-    if (operationRecording || recordingStarting || recordingFinishActive || externalFinishActive || annotationPollRunning) {
-      reportSubmitIssue("撮影処理が完了してから指示を追加してください。"); return;
-    }
-    const notes = element<HTMLTextAreaElement>("screenshot-notes").value.trim();
-    const annotationText = pendingAnnotationSpec.trim();
-    let annotationSection = "";
-    if (annotationText) {
-      try {
-        const parsed = JSON.parse(annotationText) as { canvas?: unknown; annotations?: unknown };
-        if (!Array.isArray(parsed.annotations)) throw new Error("annotations が配列ではありません。");
-        if (parsed.annotations.length > 0) {
-          const annotationOnly = JSON.stringify({ ...(parsed.canvas ? { canvas: parsed.canvas } : {}), annotations: parsed.annotations }, null, 2).replaceAll("<", "\\u003c").replaceAll("-->", "--\\u003e");
-          annotationSection = `MarkIts アノテーション仕様:\n\`\`\`json\n${annotationOnly}\n\`\`\``;
-        }
-      } catch (error) { reportSubmitIssue(`MarkIts JSON を確認してください: ${String(error)}`); return; }
-    }
-    const recordedOperations = pendingRecordedOperations ? `記録した操作:\n${pendingRecordedOperations.replaceAll("<", "&lt;").replaceAll(">", "&gt;")}` : "";
-    const hasRecordedCapture = Boolean(pendingRecordedOperations || pendingScenarioFile || pendingAnnotatedImageFile);
-    const selectedCommand = launchCommands.find((command) => (command.id || command.name) === element<HTMLSelectElement>("screenshot-launch-command").value);
-    const configuredProgram = selectedCommand?.program.trim() || input("screenshot-launch-program").value.trim();
-    const configuredArgs = selectedCommand?.args ?? element<HTMLTextAreaElement>("screenshot-launch-args").value.split("\n").filter((value) => value.length > 0);
-    const launchProgram = hasRecordedCapture ? pendingLaunchProgram : configuredProgram;
-    const launchArgs = hasRecordedCapture ? pendingLaunchArgs : configuredArgs;
-    const launch = launchProgram ? `起動アプリ: ${launchProgram}${launchArgs.length ? `\n起動引数:\n${launchArgs.map((arg) => `- ${arg}`).join("\n")}` : ""}` : "";
-    if (!launch && !notes && !recordedOperations && !annotationSection && !pendingAnnotatedImageFile) {
-      reportSubmitIssue("起動アプリまたは補足を入力してから指示を追加してください。"); return;
-    }
-    const prompt = [launch, recordedOperations, notes ? `補足: ${notes}` : "", annotationSection].filter(Boolean).join("\n\n");
-    const id = input("screenshot-task-id").value;
-    if (pendingAnnotatedImageFile) {
-      if (screenshotSubmitRunning) { reportSubmitIssue("画像を取り込んでいます。完了するまでお待ちください。"); return; }
-      const session = captureSessions.active;
-      if (!session || !isCurrentCaptureSession(session.generation) || annotationPollRunning || session.id !== id || !/^[a-z][a-z0-9_-]*$/.test(id)) {
-        reportSubmitIssue("撮影対象またはIDが一致しません。画像と入力は保持しています。やり直す場合はキャンセルして撮影AIタグを作り直してください。"); return;
-      }
-      if (!dialog.open) { reportSubmitIssue("撮影AIタグのダイアログを開いてから追加してください。"); return; }
-      const aiTagIds = collectAiTagIds(editor.value);
-      const alreadyInserted = [...editor.value.matchAll(/<!--\s*ai:(?:generated|task)\b((?:"[^"]*"|[^>"])*)-->/g)]
-        .some((match) => match[1].split(/\s+/).includes(`id=${id}`));
-      if (!alreadyInserted && (aiTagIds.has(id) || workspace?.tasks.some((task) => task.id === id))) {
-        reportSubmitIssue("撮影IDがすでに使われています。画像と入力は保持しています。キャンセルして撮影AIタグを作り直してください。"); return;
-      }
-      try {
-        screenshotSubmitRunning = true;
-        updateCaptureBusyState();
-        const submitButtons = [...dialog.querySelectorAll<HTMLButtonElement>('button[type="submit"]')];
-        submitButtons.forEach((button) => { button.disabled = true; });
-        let stageStartedAt = Date.now();
-        let stageLabel = "";
-        if (screenshotStageTimer) clearInterval(screenshotStageTimer);
-        screenshotStageTimer = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - stageStartedAt) / 1000);
-          if (elapsed >= 5) element("operation-recording-status").textContent = `${stageLabel}（処理中・${elapsed}秒）`;
-        }, 1000);
-        await completeMarkitsCapture({
-          alreadyInserted,
-          dirty,
-          importImage: async () => {
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影対象が変わりました。画像を追加せずキャンセルしてください。");
-            const block = await invoke<string>("preserve_markits_capture", { root: session.root, page: session.page, taskId: session.id, imageFile: pendingAnnotatedImageFile, prompt });
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影がキャンセルされました。タグを追加しませんでした。");
-            return block;
-          },
-          insertTag: (block) => {
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影対象が変わりました。タグを追加しませんでした。");
-            if (session.insertTag) {
-              session.insertTag(`\n\n${block}\n`);
-              return;
-            }
-            rememberCurrentSelection(session.selection.start, session.selection.end);
-            editor.setRangeText(`\n\n${block}\n`, session.selection.start, session.selection.end, "end");
-            editor.dispatchEvent(new Event("input")); editor.focus();
-          },
-          saveDocument: async () => {
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影対象が変わりました。原稿を保存しませんでした。");
-            await saveDocument(false);
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影がキャンセルされました。原稿の保存結果を確認してください。");
-          },
-          ...(pendingScenarioFile ? { saveCaptureSource: async () => {
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影対象が変わりました。撮影元を登録しませんでした。");
-            await rpc("capture-source-save", { id: session.id, input: pendingScenarioFile }, session.root);
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影がキャンセルされました。撮影元の登録結果を確認してください。");
-            pendingScenarioFile = null;
-          } } : {}),
-          refreshWorkspace: async () => {
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影対象が変わりました。画面を更新しませんでした。");
-            await refreshWorkspace();
-            if (!isCurrentCaptureSession(session.generation)) throw new Error("撮影がキャンセルされました。画面の内容を確認してください。");
-          },
-          reportStage: (stage) => {
-            const labels = { image: "1/3 編集済み画像を取り込んでいます…", document: "2/3 AIタグの本文を原稿へ保存しています…", "capture-source": "3/3 次回の再撮影設定を登録しています…", refresh: "保存結果を確認しています…" };
-            stageLabel = labels[stage];
-            stageStartedAt = Date.now();
-            element("operation-recording-status").textContent = stageLabel;
-          },
-        });
-        if (!isCurrentCaptureSession(session.generation)) return;
-        await invoke("cleanup_markits_capture", { imageFile: pendingAnnotatedImageFile });
-        if (!isCurrentCaptureSession(session.generation)) return;
-        if (screenshotStageTimer) clearInterval(screenshotStageTimer);
-        screenshotStageTimer = undefined;
-        pendingAnnotatedImageFile = ""; pendingAnnotationSpec = "";
-      captureSessions.invalidate(session.generation);
-      pendingScenarioFile = null;
-      pendingRecordedOperations = "";
-      pendingAnnotationSpec = "";
-      pendingAnnotatedImageFile = "";
-      activeRecordingResult = null;
-        acceptedRecordingResultGeneration = -1;
-        dialog.close(); pendingLaunchProgram = ""; pendingLaunchArgs = [];
-        element("operation-recording-status").textContent = "完了：注釈付き画像と撮影設定を保存しました。";
-        status("注釈付き画像をAIタグの本文として保存し、同じ操作を再撮影する設定も登録しました。");
-      } catch (error) {
-        const message = `MarkIts画像の追加で停止しました。入力と画像を保持しています。再試行できます。\n${String(error)}`;
-        reportSubmitIssue(message);
-      } finally {
-        if (screenshotStageTimer) clearInterval(screenshotStageTimer);
-        screenshotStageTimer = undefined;
-        screenshotSubmitRunning = false;
-        dialog.querySelectorAll<HTMLButtonElement>('button[type="submit"]').forEach((button) => { button.disabled = false; });
-        updateCaptureBusyState();
-      }
-      return;
-    }
-    const session = captureSessions.active;
-    if (!session || !isCurrentCaptureSession(session.generation) || session.id !== id) {
-      reportSubmitIssue("撮影セッションと原稿が一致しません。ダイアログを閉じて撮影AIタグを作り直してください。"); return;
-    }
-    if (insertAiTask("screenshot", { id, prompt }, session.selection, session.insertTag)) {
-      if (pendingScenarioFile) {
-        const taskStart = editor.value.indexOf(`<!-- ai:task id=${id} kind=screenshot`);
-        const taskEnd = taskStart >= 0 ? editor.value.indexOf("-->", taskStart) : -1;
-        if (taskEnd >= 0) { editor.setRangeText(`\n<!-- ai:scenario file=${pendingScenarioFile} -->`, taskEnd + 3, taskEnd + 3, "end"); editor.dispatchEvent(new Event("input")); }
-        pendingScenarioFile = null;
-      }
-      dialog.close();
-      captureSessions.invalidate(session.generation);
-      pendingLaunchProgram = "";
-      pendingLaunchArgs = [];
-      updateCaptureBusyState();
-      clearScreenshotFeedback();
-      const message = "撮影指示を原稿へ追加しました。自動保存後に実行できます。";
-      element("operation-recording-status").textContent = message;
-      status(message);
-    } else {
-      reportSubmitIssue("撮影IDがすでに使われています。キャンセルして撮影AIタグを作り直してください。");
-    }
-  } catch (error) {
-    reportSubmitIssue(`撮影AIタグを追加できませんでした: ${String(error)}`);
-  }
-});
-element<HTMLFormElement>("screenshot-task-form").addEventListener("invalid", (event) => {
-  const control = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-  const message = control.validationMessage || "入力内容を確認してください。";
-  showScreenshotFeedback(`指示を追加できません: ${message}`);
-}, true);
 element<HTMLImageElement>('image-tab-preview').addEventListener('load',()=>{ const image=element<HTMLImageElement>('image-tab-preview');element('image-tab-size').textContent=`${image.naturalWidth} × ${image.naturalHeight}`; });
 element('image-tab-zoom').addEventListener('click',()=>{const canvas=element('image-tab-preview').parentElement!;const actual=canvas.dataset.actual!=='true';canvas.dataset.actual=String(actual);element('image-tab-zoom').textContent=actual?'画面に合わせる':'実寸表示';});
 let contextCreateParent: string | null = null;
@@ -3193,69 +2006,9 @@ if (editorColumn) {
     }
   });
 }
-element("refresh-tasks").addEventListener("click", () => { void work(async () => { await savedBeforeOperation(); await refreshWorkspace(true); status("AIタグ一覧を更新しました。"); }); });
-element("generate-all-pages").addEventListener("click", () => { void work(generateAllDocuments); });
-element("task-list").addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button");
-  const card = button?.closest<HTMLElement>("[data-task]");
-  if (!button || !card) return;
-  const id = card.dataset.task!;
-  void work(async () => {
-    const task = workspace!.tasks.find((item) => item.id === id)!;
-    if (button.dataset.savePrompt) {
-      const prompt = taskControl<HTMLTextAreaElement>(card, "data-prompt").value;
-      await editTaskPage(task, (content) => updateTaskPrompt(content, task, prompt));
-      return;
-    }
-    if (button.dataset.toggleApproved) {
-      await editTaskPage(task, (content) => toggleTaskApproval(content, task));
-      return;
-    }
-    if (button.dataset.editPage) { await openPage(button.dataset.editPage); return; }
-    if (button.dataset.sourceConfig || button.dataset.windowList) {
-      card.querySelector<HTMLDetailsElement>("details")!.open = true;
-      const windows = JSON.parse(await rpc("list-windows")) as NativeWindow[];
-      const select = taskControl<HTMLSelectElement>(card, "data-window-select");
-      select.innerHTML = '<option value="">撮影するウィンドウを選ぶ</option>' + windows.map((item) => `<option value="${escape(item.id)}">${escape(item.title)}（${item.width}×${item.height}）</option>`).join("");
-      const source = workspace!.capture_sources[id];
-      const matches = source?.kind === "window" ? windows.filter((item) => item.title === source.title) : [];
-      if (matches.length === 1) select.value = matches[0].id;
-      return;
-    }
-  if (button.dataset.captureExpectations) {
-    const id = button.dataset.captureExpectations;
-    const initial = JSON.parse(await rpc("capture-expectations-read", { id }));
-    await showCaptureExpectations(initial, value => rpc("capture-expectations-save", { id, json: value }).then(() => {}));
-    await refreshWorkspace(); return;
-  }
-  if (button.dataset.recapture) { await hideManualStudioForCapture(id); try { await runAction("recapture", { id }); } finally { await restoreManualStudioAfterCapture(); } return; }
-    if (button.dataset.capture) {
-      const windowId = taskControl<HTMLSelectElement>(card, "data-window-select").value;
-      if (!windowId) throw new Error("一覧から撮影するウィンドウを選んでください。");
-      const selectedWindow = (JSON.parse(await rpc("list-windows")) as NativeWindow[]).find(item => item.id === windowId);
-      if (!selectedWindow || !/manual\s*studio/i.test(selectedWindow.title)) await hideManualStudioForCapture();
-      try { await runAction("capture-window", { id, window: windowId, inset: taskControl<HTMLInputElement>(card, "data-inset").value }); }
-      finally { await restoreManualStudioAfterCapture(); }
-      return;
-    }
-    if (button.dataset.generate) {
-      const page = workspace!.project_entries.some(entry => entry.path === task.page) ? task.page : `${workspace!.config.docs}/${task.page}`;
-      await generateReviewed(page, id);
-      return;
-    }
-    if (button.dataset.registerImage) {
-      if (!native) throw new Error("PNGのファイル選択はデスクトップアプリで利用できます。");
-      const image = await invoke<string | null>("choose_image");
-      if (image) await runAction("record-screenshot", { id, image });
-    }
-  });
-});
 function actionButton(id: string, action: string, options: () => Record<string, unknown> = () => ({}), result?: string): void {
   element(id).addEventListener("click", () => { void work(() => runAction(action, options(), result)); });
 }
-actionButton("map-refresh", "ui-map", () => ({ refresh: true }));
-actionButton("explore-web", "ui-explore", () => ({ url: input("explore-url").value.trim(), max_pages: "10" }));
-actionButton("import-map", "ui-map-import", () => ({ input: input("observation-path").value.trim() }));
 element("save-settings").addEventListener("click", () => { void work(async () => {
   await saveAiSettings();
   await runAction("save", {
@@ -3297,7 +2050,7 @@ element("import-launch-commands").addEventListener("click", () => { void work(as
   const commands = await invoke<LaunchCommand[]>("import_launch_commands", { root });
   if (projectRoot !== root) return;
   launchCommands = commands;
-  renderLaunchCommands(); refreshLaunchCommandOptions();
+  renderLaunchCommands();
   status("以前の共通設定をこのプロジェクトへ取り込みました。");
 }); });
 element("add-launch-command").addEventListener("click", () => {
@@ -3312,43 +2065,22 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
     args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args="${index}"]`)!.value.split("\n").filter((value) => value.length > 0),
   }));
   await invoke<void>("save_launch_commands", { root: projectRoot, commands: launchCommands });
-  renderLaunchCommands(); refreshLaunchCommandOptions(); status("このプロジェクトのアプリ登録を保存しました。");
+  renderLaunchCommands();  status("このプロジェクトのアプリ登録を保存しました。");
 }); });
 element("generate-draft").addEventListener("click", () => { void work(async () => {
   await savedBeforeOperation();
-  if (workspace?.pages.length && !window.confirm("現在の原稿をバックアップして、AIの下書きに置き換えますか？")) return;
+  if (workspace?.pages.length && !await confirmAction("現在の原稿をバックアップして、AIの下書きに置き換えますか？")) return;
   await runAction("draft", {}, "publish-result");
 }); });
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
 actionButton("build-draft", "build", () => ({ draft: true }), "publish-result");
 actionButton("build-final", "build", () => ({}), "publish-result");
 actionButton("build-mkdocs", "build-mkdocs", () => ({ draft: true }), "publish-result");
-actionButton("impact-plan", "impact-plan", () => ({ git_ref: input("git-ref").value.trim() || "HEAD" }), "publish-result");
-actionButton("fact-check", "fact-check", () => ({ check: true }), "publish-result");
 element("open-output").addEventListener("click", () => { void work(async () => {
   if (native) await invoke("open_output", { root: projectRoot });
   else status(`出力フォルダー: ${projectRoot}/${workspace?.config.output || "manual"}`);
 }); });
 setBusy(false);
-if (native && !recordingControlMode) {
-  void listen("manual-studio-screenshot-requested", () => {
-    if (!captureSessions.active) return;
-    operationRecording = false;
-    externalFinishActive = true;
-    recordingPollGeneration++;
-    if (recordingPoll) clearTimeout(recordingPoll);
-    recordingPoll = undefined;
-    setButtonDisabled(element<HTMLButtonElement>("start-operation-recording"), true);
-    setButtonDisabled(element<HTMLButtonElement>("stop-operation-recording"), true);
-    element("operation-recording-status").textContent = "指定ウィンドウを撮影しています…";
-    updateCaptureBusyState();
-  });
-  void listen<RecordingResult>("manual-studio-screenshot-finished", (event) => { void acceptRecordingResult(event.payload); });
-  void listen<string>("manual-studio-screenshot-failed", (event) => {
-    externalFinishActive = false;
-    resetRecordingControls(); updateCaptureBusyState(); status(event.payload, true); element("operation-recording-status").textContent = event.payload;
-  });
-}
 if (recordingControlMode) {
   document.body.classList.add("recording-control-mode");
   const control = document.createElement("main");
@@ -3368,7 +2100,7 @@ if (recordingControlMode) {
       const message = `撮影に失敗しました: ${String(error)}`;
       const notice = document.createElement("span");
       notice.className = "recording-control-error";
-      notice.textContent = "撮影に失敗しました。Munin Manual Studioに戻って詳細を確認してください。";
+      notice.textContent = message;
       notice.title = message;
       const returnButton = document.createElement("button");
       returnButton.type = "button";
@@ -3393,4 +2125,141 @@ if (recordingControlMode) {
 if (!recordingControlMode) {
   const initialRoot = params.get("root") || localStorage.getItem("manual-studio-project");
   if (initialRoot) void work(() => openProject(initialRoot));
+}
+
+async function createSelectionDocument(initial=""):Promise<void>{
+  if(busy||!documentState||activeImageTab)return;
+  const owner=documentState,root=projectRoot,insertionAt=editor.selectionStart;
+  let selection:SelectionDraft;
+  if(milkdown.isRichEditing){
+    const rich=milkdown.captureSelectionEdit();
+    if(!rich){status('挿入する位置を選択してください。',true);return;}
+    selection=rich;
+  }else{
+    const start=editor.selectionStart,end=editor.selectionEnd,expected=editor.value;
+    selection={text:expected.slice(start,end),apply:content=>{
+      if(editor.value!==expected)throw new Error('原稿が変更されました。範囲を選び直してください。');
+      replaceMarkdown(start,end,content,0,content.length);
+    }};
+  }
+  const captured=editor.value;
+  let instruction=await askSelectionInstruction(selection.text,initial);
+  if(!instruction)return;
+  if(root!==projectRoot||documentState?.page!==owner.page||editor.value!==captured)throw new Error('原稿が変更されました。範囲を選び直してください。');
+  await savedBeforeOperation();
+  const expected=editor.value,page=owner.page,revision=documentState?.revision;
+  while(instruction){
+    if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
+    let candidate:string|undefined;
+    await work(async()=>{
+      await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;startAiProgress('selection-generate');let succeeded=false;
+      try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{selected:selection.text,mode:selection.text?"replace":"insert",insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
+      finally{await stopAiProgress(succeeded);}
+    });
+    if(candidate===undefined)return;
+    const decision=await reviewSelection(page,selection.text,candidate);
+    if(decision.action==='restore')return;
+    if(decision.action==='retry'){instruction=decision.feedback||instruction;continue;}
+    if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
+    if(decision.content===selection.text){status("採用する変更はありません。本文を保持しました。");return;}
+    selection.apply(decision.content);updateHistoryButtons();await saveDocument(false);status(selection.text?'指定範囲へAI文書を反映しました。':'カーソル位置にAI文書を挿入しました。');return;
+  }
+}
+element('selection-ai').addEventListener('click',()=>{void createSelectionDocument().catch(error=>status(String(error),true));});
+
+let reopenReaderReview:(()=>void)|undefined;
+element("reader-review-reopen").onclick=()=>reopenReaderReview?.();
+async function reviewCurrentDocument():Promise<void>{
+  if(busy||!documentState||activeImageTab)return;
+  const root=projectRoot,page=documentState.page,captured=editor.value;
+  const start=editor.selectionStart,end=editor.selectionEnd;
+  const choices=await askReader(workspace?.brief||'',start!==end);if(choices===null)return;
+  if(root!==projectRoot||documentState?.page!==page||editor.value!==captured)throw new Error('原稿が変更されました。レビューを実行し直してください。');
+  await savedBeforeOperation();const expected=editor.value,revision=documentState?.revision;
+  const range=choices.scope==='selection'?{start,end}:undefined;
+  let report:ReaderReport|undefined;
+  await work(async()=>{
+    await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;startAiProgress('document-review');let success=false;
+    try{report=JSON.parse(await rpc('document-review',{page,json:{reader:choices.reader,revision,range}},root)) as ReaderReport;success=true;}
+    finally{await stopAiProgress(success);}
+  });
+  const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===expected;
+  if(!valid()){status('原稿が変更されました。レビューを実行し直してください。',true);return;}
+  if(report){const result=report;reopenReaderReview=()=>{if(!valid()){status("原稿が変更されました。レビューを実行し直してください。",true);return;}showReaderReport(result,valid,finding=>{
+    if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
+    milkdown.showSource();jumpToSource(editor,finding.start,finding.end);updateCursor();
+  },finding=>{
+    milkdown.showSource();jumpToSource(editor,finding.start,finding.end);
+    void createSelectionDocument(`次の指摘を反映してください。根拠のない製品仕様は追加せず、確認が必要な点は明示してください。\n指摘：${finding.message}\n修正の提案：${finding.suggestion}`).catch(error=>status(String(error),true));
+  });};element('reader-review-reopen').hidden=false;reopenReaderReview();}
+}
+element('reader-review').addEventListener('click',()=>{void reviewCurrentDocument().catch(error=>status(String(error),true));});
+
+const screenshotAi=setupScreenshotAi({root:()=>projectRoot,applications:()=>launchCommands,refresh:()=>screenshotLibrary.refresh(),reloadApplications:loadLaunchCommands,report:status,work,
+  request:async(action,json,root)=>{
+    if(action==='list-accessible-windows')return rpc(action,{},root);
+    activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;startAiProgress(action);let success=false;
+    try{await saveAiSettings();const result=await rpc(action,{json},root);success=true;return result;}
+    finally{await stopAiProgress(success);}
+  }
+});
+
+
+async function insertScreenshotHere():Promise<void>{
+  if(busy||!documentState||activeImageTab)return;
+  const root=projectRoot,page=documentState.page,captured=editor.value,position=editor.selectionStart;
+  const rich=milkdown.isRichEditing?milkdown.captureSelectionEdit(true):undefined;
+  if(milkdown.isRichEditing&&!rich)throw new Error('挿入する位置を選択してください。');
+  const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===captured&&!activeImageTab;
+  await savedBeforeOperation();
+  if(!valid())throw new Error('原稿が変更されました。挿入位置を選び直してください。');
+  const method=await chooseScreenshotMethod();
+  if(!method||!valid())return;
+  const existing=method==='existing'?await chooseExistingScreenshot(root):undefined;
+  const id=method==='ai'?await screenshotAi.create(true):method==='manual'?await screenshotLibrary.recordForInsertion():existing?.id;
+  if(!id)return;
+  if(!valid()){status('撮影画像はリソース一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
+  const library=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;edits:Array<{id:string}>}>};
+  if(!valid())return;
+  const revision=existing?.revision||library.items.find(item=>item.id===id)?.edits.at(-1)?.id;
+  if(!revision)throw new Error('撮影候補が見つかりません。');
+  const image=JSON.parse(await rpc('screenshots-image',{id,json:{revision}},root)) as {data:string;edit:{id:string};screenshot:{adopted:string|null}};
+  if(!valid())return;
+  const {dialog,body}=featureDialog('スクショを確認して挿入');dialog.id='editor-screenshot-preview';
+  const note=document.createElement('p');note.textContent=`${page} の指定位置に挿入します。閉じた場合も撮影画像と手順はリソース一覧に残ります。`;
+  const preview=document.createElement('img');preview.src=image.data;preview.alt='挿入するスクリーンショットの候補';preview.style.maxWidth='100%';preview.style.maxHeight='50vh';preview.style.objectFit='contain';
+  const insert=document.createElement('button');insert.type='button';insert.className='primary';insert.dataset.uiIcon='image';insert.textContent='この位置に挿入';body.append(note,preview,insert);
+  const accepted=await new Promise<boolean>(resolve=>{let answer=false;insert.onclick=()=>{answer=true;dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
+  if(!accepted)return;
+  await work(async()=>{
+    if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
+    if(!existing)await rpc('screenshots-change',{id,json:{adopt:image.edit.id,expected_revision:image.screenshot.adopted}},root);
+    const markdown=await rpc('screenshots-reference',{id,page},root);
+    if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
+    if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,`\n\n${markdown}\n\n`,0,markdown.length+4);
+    updateHistoryButtons();await saveDocument(false);await screenshotLibrary.refresh();status('指定位置にスクショを挿入しました。');
+  });
+}
+element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));});
+
+function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{
+  const {dialog,body}=featureDialog('スクショを挿入');dialog.id='editor-screenshot-method';
+  const help=document.createElement('p');help.textContent='指定した位置に入れるスクショの用意方法を選んでください。';body.append(help);
+  return new Promise(resolve=>{let selected:'manual'|'ai'|'existing'|undefined;
+    for(const [method,text,icon,description] of [['manual','手動で撮影','camera','アプリを操作して撮影。AI設定は不要です。'],['ai','AIに撮影を指示','sparkle','撮影する画面や番号・注釈を文章で指示します。'],['existing','撮影済み画像を選ぶ','library','リソースに保存した採用済みの画像から選びます。']] as const){
+      const button=document.createElement('button');button.type='button';button.className='screenshot-method';button.dataset.uiIcon=icon;button.textContent=text;button.onclick=()=>{selected=method;dialog.close();};const note=document.createElement('p');note.className='muted';note.textContent=description;body.append(button,note);
+    }
+    dialog.addEventListener('close',()=>resolve(selected),{once:true});
+  });
+}
+async function chooseExistingScreenshot(root:string):Promise<{id:string;revision:string}|undefined>{
+  const shots=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;name:string;output:string;adopted:string|null;thumbnail:string|null}>};
+  if(root!==projectRoot)return;
+  const {dialog,body}=featureDialog('撮影済み画像を選ぶ');dialog.id='editor-screenshot-existing';
+  const available=shots.items.filter(shot=>shot.adopted);
+  if(!available.length){const empty=document.createElement('p');empty.textContent='採用済みの画像がありません。手動撮影・AI撮影、またはリソース一覧のPNG取り込みで画像を用意してください。';body.append(empty);}
+  return new Promise(resolve=>{let selected:{id:string;revision:string}|undefined;
+    for(const shot of available){const card=document.createElement('section');card.className='card';const title=document.createElement('h2');title.textContent=shot.name||shot.output;card.append(title);if(shot.thumbnail){const image=document.createElement('img');image.src=shot.thumbnail;image.alt=title.textContent;image.style.maxWidth='100%';image.style.maxHeight='160px';card.append(image);}const button=document.createElement('button');button.type='button';button.textContent='この画像を選ぶ';button.dataset.screenshotId=shot.id;button.onclick=()=>{selected={id:shot.id,revision:shot.adopted!};dialog.close();};card.append(button);body.append(card);}
+    dialog.addEventListener('close',()=>resolve(selected),{once:true});
+  });
 }

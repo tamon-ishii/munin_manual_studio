@@ -1454,7 +1454,8 @@ mod identity_tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
         let saved =
             crate::editor::save(root.path(), "index.md", source, Some(&document.revision)).unwrap();
-        assert!(saved.content.contains(" id="));
+        assert!(!saved.content.contains("ai:task"));
+        assert!(saved.content.contains("本文"));
         assert_eq!(
             normalize_identifiers("index.md", &saved.content).unwrap(),
             saved.content

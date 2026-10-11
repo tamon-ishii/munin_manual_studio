@@ -1,6 +1,6 @@
 import {setupResourceBrowser, type Resource, type ResourceUsage} from './resourceBrowser';
 import type {ImageGenerationEntry} from './imageGeneration';
-import { featureDialog } from './screenshotWorkflow';
+import { featureDialog,confirmAction,requestText } from './screenshotWorkflow';
 import { showImageComparison } from './imageComparison';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -21,11 +21,12 @@ interface Options {
   editImage(path:string):Promise<void>;
   openUsage(usage:ResourceUsage):Promise<void>;
   generateImage(entry:ImageGenerationEntry,edit:boolean):Promise<void>;
+  annotateScreenshot(id:string):Promise<void>;
 }
 export function setupScreenshotLibrary(options: Options) {
   const list = document.getElementById('screenshot-library-list')!;
   let generation = 0;
-  let recording: {root: string; id: string} | null = null;
+  let recording: {root: string; id: string; ready?: (id:string)=>void} | null = null;
   let currentShots:Screenshot[]=[];
   const resources=setupResourceBrowser({...options,refresh},()=>render(options.root()));
   async function refresh() {
@@ -67,16 +68,16 @@ export function setupScreenshotLibrary(options: Options) {
         const {body}=featureDialog('共有原本と使用原稿');const source=document.createElement('p');source.textContent=`原本1枚 → 派生画像${group.length}枚 ／ 再撮影1回`;body.append(source);
         for(const item of group){const card=document.createElement('article');card.className='card';const title=document.createElement('h2');title.textContent=item.name||item.id;card.append(title);const usage=document.createElement('p');usage.textContent=item.usage.length?`使用原稿: ${item.usage.join('、')}`:'未使用';card.append(usage);body.append(card);}
       }, false, true);
-      button('注釈テンプレートを保存',async()=>{const name=window.prompt('テンプレート名');if(!name?.trim())return;await options.request('screenshots-change',{id:shot.id,json:{save_template:name.trim(),revision:versions.value}},root);progress.textContent='注釈テンプレートを保存しました。';},false,true);
+      button('注釈テンプレートを保存',async()=>{const name=await requestText('テンプレート名');if(!name?.trim())return;await options.request('screenshots-change',{id:shot.id,json:{save_template:name.trim(),revision:versions.value}},root);progress.textContent='注釈テンプレートを保存しました。';},false,true);
       button('注釈テンプレートを適用',async()=>{
         const templates=JSON.parse(await options.request('screenshots-templates',{},root)) as {items:Array<{id:string;name:string}>};
         const {dialog,body}=featureDialog('注釈テンプレート');const select=document.createElement('select');select.setAttribute('aria-label','注釈テンプレート');for(const template of templates.items)select.add(new Option(template.name,template.id));
         const message=document.createElement('p');message.role='status';if(!templates.items.length)message.textContent='画像の「履歴・管理」からテンプレートを保存してください。';
         const apply=document.createElement('button');apply.type='button';apply.textContent='候補として適用';apply.disabled=!templates.items.length;
         apply.onclick=()=>{void options.work(async()=>{if(root!==options.root())return;try{await options.request('screenshots-change',{id:shot.id,json:{apply_template:select.value,revision:versions.value}},root);dialog.close();progress.textContent='注釈を候補として適用しました。MarkItsで再編集し、確認後に採用できます。';await refresh();}catch(error){message.textContent=String(error);}});};
-        const remove=document.createElement('button');remove.type='button';remove.textContent='テンプレートを削除';remove.disabled=!templates.items.length;remove.onclick=()=>{void options.work(async()=>{if(root!==options.root()||!window.confirm('テンプレートを削除しますか？作成済み画像は保持されます。'))return;await options.request('screenshots-change',{id:shot.id,json:{delete_template:select.value}},root);select.selectedOptions[0]?.remove();apply.disabled=remove.disabled=!select.options.length;});};body.append(select,message,apply,remove);
+        const remove=document.createElement('button');remove.type='button';remove.textContent='テンプレートを削除';remove.disabled=!templates.items.length;remove.onclick=()=>{void options.work(async()=>{if(root!==options.root()||!await confirmAction('テンプレートを削除しますか？作成済み画像は保持されます。'))return;await options.request('screenshots-change',{id:shot.id,json:{delete_template:select.value}},root);select.selectedOptions[0]?.remove();apply.disabled=remove.disabled=!select.options.length;});};body.append(select,message,apply,remove);
       },shot.protected,true);
-      button('名前を変更', async () => { const name = window.prompt('名前（省略可）', shot.name); if (name !== null) await options.request('screenshots-change', { id: shot.id, json: { name } }, root); }, false, true);
+      button('名前を変更', async () => { const name = await requestText('名前（省略可）', shot.name); if (name !== null) await options.request('screenshots-change', { id: shot.id, json: { name } }, root); }, false, true);
       button(shot.protected ? '保護を解除' : '画像を保護', async () => { await options.request('screenshots-change', { id: shot.id, json: { protected: !shot.protected } }, root); }, false, true);
       const recaptureButton = button('再撮影', async () => { await recapture({ id: shot.id }, root); }, shot.protected || !shot.recipe);
       const versions = document.createElement('select'); versions.setAttribute('aria-label', '画像の編集版');
@@ -93,8 +94,8 @@ export function setupScreenshotLibrary(options: Options) {
       }, shot.protected);
       editButton.classList.add('primary');
       actions.replaceChildren(editButton, copyButton, insertButton, recaptureButton);
-      const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで修正';aiEdit.disabled=!shot.adopted||!shot.output;
-      aiEdit.onclick=()=>{if(root===options.root())void options.generateImage({id:shot.id,path:shot.output,prompt:'',created_at:''},true);};actions.append(aiEdit);
+      const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで注釈';aiEdit.disabled=shot.protected||!shot.edits.length;
+      aiEdit.onclick=()=>{if(root===options.root())void options.annotateScreenshot(shot.id);};actions.append(aiEdit);
       button('選択版を表示', async () => {
         const loaded = JSON.parse(await options.request('screenshots-image', { id: shot.id, json: { revision: versions.value } }, root));
         if (root !== options.root()) return;
@@ -102,8 +103,8 @@ export function setupScreenshotLibrary(options: Options) {
         if (shot.thumbnail) images.unshift({label:'採用済み',src:shot.thumbnail});
         await showImageComparison(images, '画像の比較・採用前の確認');
       }, false, true);
-      button('選択版を採用', async () => { if (window.confirm(`${shot.usage.length} 文書で使用する画像を選択版へ更新しますか？\n再撮影候補の場合、寸法と注釈の位置を比較し、必要ならMarkItsで再編集してください。`)) await options.request('screenshots-change', { id: shot.id, json: { adopt: versions.value, expected_revision: shot.adopted } }, root); }, shot.protected, true);
-      button('削除', async () => { if (window.confirm('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true);
+      button('選択版を採用', async () => { if (await confirmAction(`${shot.usage.length} 文書で使用する画像を選択版へ更新しますか？\n再撮影候補の場合、寸法と注釈の位置を比較し、必要ならMarkItsで再編集してください。`)) await options.request('screenshots-change', { id: shot.id, json: { adopt: versions.value, expected_revision: shot.adopted } }, root); }, shot.protected, true);
+      button('削除', async () => { if (await confirmAction('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true);
       if (shot.edits.some(edit => edit.flattened)) { const warning = document.createElement("p"); warning.textContent = "平坦化画像からの取り込みです。失われた画素や注釈の編集状態は復元できません。"; card.append(warning); }
       list.append(card);
     }
@@ -155,18 +156,18 @@ export function setupScreenshotLibrary(options: Options) {
     if (root !== options.root()) return;
     const ready = plan.items.filter(item => item.status === 'pending').length;
     if (!ready) { recaptureStatus.textContent = '再撮影できる画像がありません。撮影手順と保護状態を確認してください。'; return; }
-    if (!window.confirm(`撮影: ${plan.capture_count ?? ready}回 ／ 注釈画像: ${ready}件、対象外: ${plan.items.length - ready}件\n同じ原本は1回だけ撮影し、各画像の注釈・クロップを適用します。採用済みの画像は保持されます。`)) return;
+    if (!await confirmAction(`撮影: ${plan.capture_count ?? ready}回 ／ 注釈画像: ${ready}件、対象外: ${plan.items.length - ready}件\n同じ原本は1回だけ撮影し、各画像の注釈・クロップを適用します。採用済みの画像は保持されます。`)) return;
     const run = await executeRecapture(json, root);
     if (!run || root !== options.root()) return;
     const failures = run.items.filter(item => item.status === 'failed');
-    if (failures.length && window.confirm(`${failures.length}件の再撮影に失敗しました。失敗分だけ再試行しますか？`)) await executeRecapture({run: run.id, retry_failed: true}, root);
+    if (failures.length && await confirmAction(`${failures.length}件の再撮影に失敗しました。失敗分だけ再試行しますか？`)) await executeRecapture({run: run.id, retry_failed: true}, root);
   }
   document.getElementById('screenshot-library-recapture-all')!.addEventListener('click', () => { void options.work(() => recapture({})); });
   document.getElementById('screenshot-library-migrate')!.addEventListener('click', () => { void options.work(async () => {
     const root = options.root(); const plan = JSON.parse(await options.request('screenshots-migration-plan', {}, root)) as {pages:{page:string;revision:string;items:{id:string;flattened?:boolean;error?:string}[]}[]};
     if (!plan.pages.length) { window.alert('移行する旧撮影タグはありません。'); return; }
     const details=plan.pages.map(page => `${page.page}: ${page.items.map(item => item.error || (item.flattened ? '平坦化画像' : '原本あり')).join('、')}`).join('\n');
-    if (!window.confirm(`旧撮影タグを画像参照へ移行します。原稿のバックアップを保存します。\n${details}`)) return;
+    if (!await confirmAction(`旧撮影タグを画像参照へ移行します。原稿のバックアップを保存します。\n${details}`)) return;
     if (root !== options.root()) return;
     for (const page of plan.pages) await options.request('screenshots-migrate', {page:page.page,json:page}, root);
     if (root === options.root()) await refresh();
@@ -180,7 +181,7 @@ export function setupScreenshotLibrary(options: Options) {
       for(const item of run.items){const line=document.createElement('p');line.textContent=`${item.id}: ${item.status} ${item.reason||''}`;card.append(line);}
       const resume=document.createElement('button');resume.textContent='未完了を再開';resume.onclick=()=>{dialog.close();void options.work(async()=>{await executeRecapture({run:run.id},root);if(root===options.root())await refresh();});};card.append(resume);
       const retry=document.createElement('button');retry.textContent='失敗だけ再試行';retry.onclick=()=>{dialog.close();void options.work(async()=>{await executeRecapture({run:run.id,retry_failed:true},root);if(root===options.root())await refresh();});};card.append(retry);
-      const adopt=document.createElement('button');adopt.textContent='成功分を採用';adopt.onclick=()=>{if(!window.confirm('各候補の寸法と注釈の位置を比較しましたか？成功した候補を採用し、使用する全原稿へ反映します。'))return;dialog.close();void options.work(async()=>{for(const item of run.items)if(item.status==='succeeded'&&item.revision)await options.request('screenshots-change',{id:item.id,json:{adopt:item.revision}},root);if(root===options.root())await refresh();});};card.append(adopt);dialog.append(card);
+      const adopt=document.createElement('button');adopt.textContent='成功分を採用';adopt.onclick=async()=>{if(!await confirmAction('各候補の寸法と注釈の位置を比較しましたか？成功した候補を採用し、使用する全原稿へ反映します。'))return;dialog.close();void options.work(async()=>{for(const item of run.items)if(item.status==='succeeded'&&item.revision)await options.request('screenshots-change',{id:item.id,json:{adopt:item.revision}},root);if(root===options.root())await refresh();});};card.append(adopt);dialog.append(card);
     }
     dialog.addEventListener('close',()=>dialog.remove());document.body.append(dialog);dialog.showModal();
   }); });
@@ -192,6 +193,7 @@ export function setupScreenshotLibrary(options: Options) {
   let pending: Pending[] = [];
   try { pending = JSON.parse(localStorage.getItem(pendingKey) || '[]'); } catch { /* No saved sessions. */ }
   const watching = new Set<string>();
+  const handoffCallbacks=new Map<string,(id:string)=>void>();
   function updateControls() {
     const root = options.root();
     document.getElementById('screenshot-library-record')!.hidden = Boolean(recording);
@@ -200,7 +202,8 @@ export function setupScreenshotLibrary(options: Options) {
     document.getElementById('screenshot-library-retry')!.hidden = !pending.some(session => session.root === root && !watching.has(session.completionFile));
   }
   function persist() { localStorage.setItem(pendingKey, JSON.stringify(pending)); updateControls(); }
-  async function watch(session: Pending) {
+  async function watch(session: Pending,ready?: (id:string)=>void) {
+    if(ready)handoffCallbacks.set(session.completionFile,ready);
     if (!pending.some(item => item.completionFile === session.completionFile)) { pending.push(session); persist(); }
     if (watching.has(session.completionFile)) return;
     watching.add(session.completionFile); updateControls();
@@ -212,6 +215,7 @@ export function setupScreenshotLibrary(options: Options) {
         pending = pending.filter(item => item.completionFile !== session.completionFile); persist(); watching.delete(session.completionFile);
         updateControls();
         if (session.root === options.root()) { progress.textContent = '編集内容を画像一覧へ保存しました。'; await refresh(); }
+        const complete=handoffCallbacks.get(session.completionFile);handoffCallbacks.delete(session.completionFile);complete?.(session.id);
       } catch (error) { watching.delete(session.completionFile); updateControls(); if (session.root === options.root()) progress.textContent = `${String(error)} 編集内容を保持しています。「編集結果を再確認」で再試行できます。`; }
     };
     void poll();
@@ -222,8 +226,9 @@ export function setupScreenshotLibrary(options: Options) {
     if (!recording) return;
     const owner = recording; recording = null; updateControls();
     progress.textContent = result.message;
-    if (result.markitsStarted) await watch({ ...result, ...owner, id: result.screenshotId });
+    if (result.markitsStarted) await watch({ ...result, ...owner, id: result.screenshotId },owner.ready);
     if (owner.root === options.root()) await refresh();
+    if(!result.markitsStarted)owner.ready?.(result.screenshotId);
   }
   if (native) void listen<Handoff & { screenshotId: string; markitsStarted: boolean; message: string }>('manual-studio-screenshot-finished', event => { void accept(event.payload); });
   document.getElementById('screenshot-library-diagnose')!.addEventListener('click',()=>{void options.work(async()=>{
@@ -233,8 +238,9 @@ export function setupScreenshotLibrary(options: Options) {
     for(const issue of report.environment){const line=document.createElement('p');line.textContent=issue;body.append(line);}
     for(const item of report.items){const card=document.createElement('article');card.className='card';const title=document.createElement('h2');title.textContent=`${item.name}：${item.status==='ready'?'準備完了':'要確認'}`;card.append(title);for(const check of item.checks){const line=document.createElement('p');line.textContent=check;card.append(line);}body.append(card);}
   });});
-  document.getElementById('screenshot-library-record')!.addEventListener('click', () => { void options.work(async () => {
+  async function startRecording(ready?: (id:string)=>void,started?:()=>void,cancelled?:()=>void) {
     if (!native) throw new Error('操作の記録はデスクトップ版で利用できます。');
+    if(recording)throw new Error('操作の記録が進行中です。撮影を完了してから開始してください。');
     const root = options.root(); if (!root) throw new Error('プロジェクトを開いてください。');
     const profiles = options.applications(); if (!profiles.length) throw new Error('「アプリ登録」で撮影するアプリを登録してください。');
     const dialog = document.createElement('dialog'); dialog.className = 'capture-application-dialog';
@@ -249,17 +255,35 @@ export function setupScreenshotLibrary(options: Options) {
       const profile = profiles[Number(select.value)]; const id = `shot-${crypto.randomUUID()}`;
       if (root !== options.root()) return;
       await invoke('start_operation_recording', { root, program: profile.program, args: [...profile.args], windowTitle: '', taskId: id, markitsProgram: '' });
-      recording = {root,id}; updateControls(); dialog.close(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
+      recording = {root,id,ready}; updateControls(); dialog.close();started?.(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
       await invoke('show_recording_control');
     }); };
-    field.append(select); actions.append(cancel,start); start.className = "primary"; dialog.append(heading,field,actions); dialog.addEventListener('close',()=>dialog.remove()); document.body.append(dialog); dialog.showModal();
-  }); });
-  document.getElementById('screenshot-library-stop')!.addEventListener('click', () => { void options.work(async () => {
+    field.append(select); actions.append(cancel,start); start.className = "primary"; dialog.append(heading,field,actions); dialog.addEventListener('close',()=>{dialog.remove();if(!recording)cancelled?.();}); document.body.append(dialog); dialog.showModal();
+  }
+  document.getElementById('screenshot-library-record')!.addEventListener('click',()=>{void options.work(()=>startRecording());});
+  async function finishRecording() {
     if (!recording) return;
     await invoke('hide_manual_studio');
     try { const result = await invoke<Handoff & {screenshotId:string;markitsStarted:boolean;message:string}>('finish_operation_recording'); await accept(result); }
     finally { await invoke('restore_manual_studio'); await invoke('close_recording_control'); }
-  }); });
+  }
+  document.getElementById('screenshot-library-stop')!.addEventListener('click',()=>{void options.work(finishRecording);});
+  async function recordForInsertion():Promise<string|undefined>{
+    const root=options.root();
+    return new Promise((resolve,reject)=>{
+      let waiting:HTMLDialogElement|undefined,completed=false;
+      const ready=(id:string)=>{completed=true;waiting?.close();resolve(root===options.root()?id:undefined);};
+      void startRecording(ready,()=>{
+        const {dialog,body}=featureDialog('手動でスクショを撮影');waiting=dialog;dialog.id='editor-screenshot-recording';
+        const help=document.createElement('p');help.textContent='対象アプリを操作し、撮影したい画面で「撮影する」を押してください。MarkItsで注釈を編集して保存すると、挿入候補を表示します。';
+        const capture=document.createElement('button');capture.type='button';capture.textContent='撮影する';capture.className='primary';capture.dataset.uiIcon='camera';
+        capture.onclick=()=>{void options.work(async()=>{try{if(recording?.root!==root)throw new Error('記録対象が変更されました。');await finishRecording();capture.hidden=true;help.textContent='MarkItsで編集して保存してください。保存後も候補が表示されない場合は「編集結果を再確認」を押してください。';}catch(error){help.textContent=String(error);}});};
+        const retry=document.createElement('button');retry.type='button';retry.textContent='編集結果を再確認';retry.onclick=()=>{for(const session of pending.filter(item=>item.root===root))void watch(session);};
+        const note=document.createElement('p');note.className='muted';note.textContent='閉じると挿入を取り消します。記録は撮影用の操作ウィンドウから完了でき、画像はリソース一覧に保存されます。';body.append(help,capture,retry,note);
+        dialog.addEventListener('close',()=>{if(!completed){if(recording?.root===root)recording.ready=undefined;for(const session of pending.filter(item=>item.root===root))handoffCallbacks.delete(session.completionFile);resolve(undefined);}},{once:true});
+      },()=>resolve(undefined)).catch(reject);
+    });
+  }
   const input = document.getElementById('screenshot-library-import') as HTMLInputElement;
   document.getElementById('screenshot-library-import-button')!.addEventListener('click', () => input.click());
   input.addEventListener('change', () => {
@@ -272,5 +296,5 @@ export function setupScreenshotLibrary(options: Options) {
   });
   document.getElementById('screenshot-library-refresh')!.addEventListener('click', () => { void options.work(refresh); });
   updateControls();
-  return { refresh };
+  return { refresh,recordForInsertion };
 }

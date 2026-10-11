@@ -7,11 +7,26 @@ Generate and review image assets separately from manuscript AI tasks. See [AI画
 ## Requirements
 
 ### Requirement: Explicitly choose image generation providers
-Manual Studio SHALL offer Agy, Codex and image API generation through an icon-labeled AI作画 action in the editor toolbar and resource library. The selection SHALL persist per project independently from manuscript AI settings. Failures SHALL NOT automatically switch providers. API credentials SHALL NOT be stored in settings or execution metadata.
+Manual Studio SHALL offer Agy, Codex and image API generation through an icon-labeled AI作画 action in the editor toolbar and resource library. AI settings SHALL separate manuscript and image configuration. Image connection selection SHALL persist per project, with either an independent provider or an explicit shared manuscript connection. Failures SHALL NOT automatically switch providers. Image API credentials SHALL NOT be stored in image settings or execution metadata.
 
 #### Scenario: Generate with Codex
 - **WHEN** the user chooses Codex
 - **THEN** generation invokes the Codex CLI with its built-in image generation workflow without silently falling back to Agy or an API.
+
+#### Scenario: Configure an independent image AI
+- **WHEN** the user saves an image provider, model, API URL and session-only API key in AI settings
+- **THEN** the manuscript AI configuration remains unchanged
+- **AND** the image preference survives reopening without persisting its API key.
+
+#### Scenario: Use the manuscript connection for images
+- **WHEN** the user selects the shared manuscript connection
+- **THEN** image generation follows the current manuscript Agy or Codex CLI, or its API connection and credential
+- **AND** API generation uses an image model distinct from the manuscript model and the connection's images/generations endpoint
+- **AND** the independent image API URL remains available when switching back.
+
+#### Scenario: Shared manuscript AI cannot generate images
+- **WHEN** the shared connection is unset or uses an unsupported CLI
+- **THEN** the UI explains that an independent image AI must be configured and generation fails without falling back or changing the manuscript.
 
 ### Requirement: Report generation capability checks accurately
 Manual Studio SHALL report CLI installation and supported login or connection checks, and Codex CLI image-generation feature availability. API key presence SHALL be distinct from a successful API connection. Account and model image-generation entitlement SHALL only be established by actual execution.

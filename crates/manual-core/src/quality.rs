@@ -90,18 +90,10 @@ pub fn check(root: &Path) -> Result<Value, String> {
     let config = read_config(root);
     let files = task::collect_target_markdown_files(root, &config);
     let mut issues = Vec::new();
-    let runs = crate::workflow::history(root, None)?;
+
     for (page, path) in files {
         let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        for tag in task::parse_page_tags(&page, &content, &mut Default::default())? {
-            let (task,range) = match tag {
-                task::PageTag::Task { task, range } | task::PageTag::Generated { task, range, .. } => (task,range),
-            };
-            if task.status == "missing" || task.status == "stale" {
-                issues.push(issue(&page,if task.status=="missing" {"ungenerated"} else {"stale_answer"},
-                    if task.status=="missing" {"未生成のAIタグです。"} else {"指示変更後の古いAI回答です。"}, &content,range,Some(&task.id)));
-            }
-        }
+        let content = crate::legacy_ai::plain_markdown(&content, Some(&root.join("manual/ai")));
         let html_links = regex::Regex::new(r#"(?i)(href|src)\s*=\s*["']([^"']+)["']"#).unwrap();
         let links: Vec<(String, bool, std::ops::Range<usize>)> = Parser::new_ext(&content, Options::all()).into_offset_iter()
             .flat_map(|(event, range)| match event {
@@ -165,36 +157,6 @@ pub fn check(root: &Path) -> Result<Value, String> {
             }
         }
     }
-    let mut seen = BTreeSet::new();
-    for run in runs["runs"].as_array().unwrap() {
-        if let Some(entries) = run["entries"].as_array() {
-            for entry in entries {
-                if entry["task"]["kind"] == "screenshot" {
-                    continue;
-                }
-                let key = (
-                    run["page"].as_str().unwrap_or_default(),
-                    entry["task"]["id"].as_str().unwrap_or_default(),
-                );
-                if !seen.insert(key) {
-                    continue;
-                }
-                if entry["status"] == "failed" {
-                    let mut value=json!({"page":key.0,"tag":key.1,"kind":"execution_failure","message":entry["error"]});
-                    if let Ok(path)=crate::editor::document_path(root,key.0) {
-                        if let Ok(content)=fs::read_to_string(path) {
-                            if let Ok(tags)=task::parse_page_tags(key.0,&content,&mut Default::default()) {
-                                for tag in tags { let (task,range)=match tag {task::PageTag::Task{task,range}|task::PageTag::Generated{task,range,..}=>(task,range)};
-                                    if task.id==key.1 {value=issue(key.0,"execution_failure",entry["error"].as_str().unwrap_or("生成に失敗しました。"),&content,range,Some(key.1));break;}
-                                }
-                            }
-                        }
-                    }
-                    issues.push(value);
-                }
-            }
-        }
-    }
     Ok(json!({"passed":issues.is_empty(),"issues":issues}))
 }
 pub fn require_ready(root: &Path) -> Result<(), String> {
@@ -211,22 +173,22 @@ pub fn require_ready(root: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     #[test]
-    fn issue_locations_handle_unicode_repeated_links_and_stale_answers() {
+    fn issue_locations_handle_unicode_repeated_links_without_legacy_blockers() {
         let root=tempfile::tempdir().unwrap();fs::create_dir_all(root.path().join("docs")).unwrap();
         let content="# 😀日本語\n\n[First](missing.md)\n[Again](missing.md)\n\n```md\n![Example](missing.png)\n```\n\n<!-- ai:task id=stale kind=text prompt=\"New\" source-sha256=0000000000000000000000000000000000000000000000000000000000000000 -->\nOld answer\n<!-- /ai:task -->\n";
         fs::write(root.path().join("docs/index.md"),content).unwrap();let report=check(root.path()).unwrap();let issues=report["issues"].as_array().unwrap();
         let links:Vec<_>=issues.iter().filter(|v|v["kind"]=="broken_link").collect();assert_eq!(links.len(),2);assert_eq!(links[0]["line"],3);assert_eq!(links[1]["line"],4);
         let start=content.find("[First]").unwrap();assert_eq!(links[0]["start"],content[..start].encode_utf16().count());assert_eq!(links[0]["snippet"],"[First](missing.md)");
-        assert!(issues.iter().any(|v|v["kind"]=="stale_answer"&&v["tag"]=="stale"));assert!(!issues.iter().any(|v|v["kind"]=="missing_image"));
+        assert!(!issues.iter().any(|v|v["kind"]=="stale_answer"));assert!(!issues.iter().any(|v|v["kind"]=="missing_image"));
     }
     #[test]
-    fn missing_images_links_and_ungenerated_tasks_block_final() {
+    fn missing_images_and_links_block_final_without_legacy_tags() {
         let root = tempfile::tempdir().unwrap();
         fs::create_dir(root.path().join("docs")).unwrap();
         fs::write(root.path().join("docs/index.md"),"# Home\n[Missing](no.md)\n![Image](missing.png)\n<!-- ai:task id=todo kind=text prompt=\"Write\" -->\n<!-- /ai:task -->").unwrap();
         let report = check(root.path()).unwrap();
         assert_eq!(report["passed"], false);
-        assert!(report["issues"].as_array().unwrap().len() >= 3);
+        assert_eq!(report["issues"].as_array().unwrap().len(),2);
     }
     #[test]
     fn internal_links_allow_parent_but_never_escape() {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet};
 use std::fs;
 use std::path::{Component, Path};
 use std::process::Command;
@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 
 use super::agent::which_binary;
 use super::config::read_config;
-use super::task::{collect_markdown_files, parse_page_tags, read_answer, utc_now, PageTag};
+use super::task::{collect_markdown_files, utc_now};
 
 const SITE_MANIFEST: &str = ".moduleloom-site-files.json";
 
@@ -166,7 +166,6 @@ struct BuildPage {
     source: std::path::PathBuf,
     original: std::path::PathBuf,
     destination: std::path::PathBuf,
-    name: String,
 }
 
 fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, String> {
@@ -179,7 +178,7 @@ fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, 
         if templates.canonicalize().map_err(|e| e.to_string())? == docs {
             return super::task::collect_target_markdown_files(&canonical_root, &config)
                 .into_iter()
-                .map(|(name, source)| {
+                .map(|(_name, source)| {
                     let destination = if let Ok(relative) = source.strip_prefix(&docs) {
                         relative.to_path_buf()
                     } else {
@@ -193,7 +192,6 @@ fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, 
                         original: source.clone(),
                         source,
                         destination,
-                        name,
                     })
                 })
                 .collect();
@@ -205,7 +203,6 @@ fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, 
                 let destination = source.strip_prefix(templates).unwrap().to_path_buf();
                 BuildPage {
                     original: docs.join(&destination),
-                    name: destination.to_string_lossy().replace('\\', "/"),
                     source,
                     destination,
                 }
@@ -218,7 +215,6 @@ fn build_pages(templates: &Path, root: Option<&Path>) -> Result<Vec<BuildPage>, 
             let destination = source.strip_prefix(templates).unwrap().to_path_buf();
             BuildPage {
                 original: source.clone(),
-                name: destination.to_string_lossy().replace('\\', "/"),
                 source,
                 destination,
             }
@@ -431,47 +427,6 @@ fn build_inner(
             ));
         }
     }
-    let mut task_list = Vec::new();
-    let mut seen_ids = std::collections::HashSet::new();
-    for page in &pages {
-        for tag in parse_page_tags(
-            &page.name,
-            &fs::read_to_string(&page.source).map_err(|e| e.to_string())?,
-            &mut seen_ids,
-        )? {
-            let (PageTag::Task { task, .. } | PageTag::Generated { task, .. }) = tag;
-            task_list.push(task);
-        }
-    }
-    let mut answers = HashMap::new();
-
-    for task in &task_list {
-        if task.status == "approved" || task.status == "current" {
-            continue;
-        }
-        let answer_path = generated.join("answers").join(format!("{}.md", task.id));
-        if !answer_path.is_file() {
-            if !draft {
-                return Err(format!(
-                    "Missing answer for {}: {}",
-                    task.id,
-                    answer_path.display()
-                ));
-            }
-            continue;
-        }
-        match read_answer(&answer_path, task) {
-            Ok(ans) => {
-                answers.insert(task.id.clone(), ans);
-            }
-            Err(e) => {
-                if !draft {
-                    return Err(e);
-                }
-            }
-        }
-    }
-
     let tmp = tempdir().map_err(|e| e.to_string())?;
     let temp_root = tmp.path();
     let temp_docs = temp_root.join("docs");
@@ -482,34 +437,8 @@ fn build_inner(
 
     for page in &pages {
         let content = fs::read_to_string(&page.source).map_err(|e| e.to_string())?;
-        let page_rel = &page.name;
-        let mut ids = std::collections::HashSet::new();
-        let tags = parse_page_tags(&page_rel, &content, &mut ids)?;
-
-        let mut rendered = String::new();
-        let mut last_idx = 0;
-
-        for tag in tags {
-            if let PageTag::Task { range, task } = tag {
-                rendered.push_str(&content[last_idx..range.start]);
-                let task_id = &task.id;
-                let kind = &task.kind;
-
-                if let Some((created, body, approved)) = answers.get(task_id) {
-                    rendered.push_str(&super::task::render_task_block(
-                        &task,
-                        body,
-                        created,
-                        approved.as_deref(),
-                    ));
-                } else {
-                    rendered.push_str(&format!("> **作成待ち:** `{task_id}` ({kind})"));
-                }
-                last_idx = range.end;
-            }
-        }
-        rendered.push_str(&content[last_idx..]);
-        let final_page = rendered.replace("{{BUILD_TIMESTAMP}}", &built_at);
+        let final_page = crate::legacy_ai::plain_markdown(&content, Some(generated))
+            .replace("{{BUILD_TIMESTAMP}}", &built_at);
         let final_page = if let Some(root) = root {
             stage_page_links(root, page, &pages, &final_page, &temp_docs)?
         } else {

@@ -198,3 +198,36 @@ AI作画の履歴で画像が欠落した場合、指示とエラーを保持し
 - Studio Rustは26件成功、manual-coreは171件成功・1件ignored。型チェック、ファイルツリー単体チェック、OpenSpec全5仕様のstrict validation、`git diff --check` も成功。
 - ブラウザ統合テストは編集・保存・競合・プロジェクト切替・リソース一覧・AIターミナルを確認。統合テストの一時プロジェクトではMkDocs未設定の案内経路を通過し、別のMkDocsビルドボタンテストではHTML出力を確認した。
 - 今回はLinux上の確認。画像APIはローカルの模擬応答を使用し、Agy／Codex／外部APIによる実画像生成とWindows／macOS実GUIの再確認は実施していない。
+
+## 2026-10-11 画像生成AIの個別設定と共通接続
+
+AI設定を文章・図と画像生成に分け、画像側でAgy・Codex・画像APIの個別設定または文章・図と同じ接続を選択できるようにした。共通接続は現在の文章設定に追従し、APIでは文章の接続先・端末保存キーと、画像専用モデルを使う。個別の画像URLとモデルを保持し、画像APIキーは起動中だけプロジェクト・接続先ごとに保持する。AI未設定や画像非対応CLIでは個別設定を案内し、別の方法へ自動切り替えしない。
+
+- `cargo test -p manual-core image_generation --offline`: 8件成功。共通CLIの切替、API URLの解決、モデル分離、未設定・非対応CLI、秘密情報の保存防止を含む。
+- `npm run manual:check -- --group ui`: 全10段階成功。個別画像設定が文章設定を変更しないこと、両APIモードでの生成、共通接続の再読込、画像専用モデル、キーを画像設定・履歴へ保存しないことをブラウザで確認。
+- `npm run manual:build`、TypeScript型チェック、OpenSpec全5仕様のstrict validation、`git diff --check` が成功。
+- 画像APIはローカルの模擬応答で検証。外部APIやCLIでの実画像生成、およびWindows／macOS実GUIは今回再確認していない。
+
+## 2026-10-11 画面一覧／UIMapの削除
+
+上部の画面一覧ボタン、一覧ダイアログ、コード解析によるUIMap生成・保存、Web探索、観測JSON・画像・デスクトップからのUIMap取り込みを削除した。専用CLIアクションも廃止し、ワークスペース状態とAI原稿作成のコンテキストからUIMapを除いた。事実確認と変更影響の検査は現行ソースの要素IDを直接参照する。旧UIMapの保存ファイルは読み込まず、利用者のファイル自体は保持する。
+
+録画・再撮影のアクセシビリティ検出と画像照合、画像内の要素メタデータ、MarkItsの注釈・クロップは維持する。旧UIMapにしかない要素を根拠にしないこと、生成HTMLを要素の根拠にしないこと、廃止アクションの拒否、旧データの保持を回帰テストで確認した。
+
+- Core Rust: 166件成功・1件ignored。Studio Rust: 26件成功。
+- `manual:check -- --group ui`: 全10段階成功。画面一覧が存在せず、残る13ダイアログが3種類の画面寸法に収まることを確認。
+- `manual:check -- --group generation`: 全4段階成功。AI更新・レビュー・履歴・採用・再試行を確認。
+- フロントエンドビルド、TypeScript型チェック、OpenSpec全5仕様のstrict validation、`git diff --check` が成功。
+
+## 2026-10-11: 読者レビュー・範囲編集・AI撮影指示
+
+- 文書全体／選択範囲の読者レビュー、校正、実画像との整合チェックを追加。引用位置はUTF-16で検証し、未対応・未読画像は未確認として表示する。
+- 指摘の分類・移動・見送り・修正候補と、Diffでの変更ごとの採用・見送りを追加。カーソル位置への新規文章挿入も同じ確認フローで扱う。
+- 自然文の撮影指示にアプリ候補の確認・登録・起動を追加。観測された要素から撮影手順を提案し、実画面の原本・再撮影手順・MarkIts注釈候補を保存する。再撮影の事前診断を旧AIタグに依存しない検証へ変更した。
+- `npm run manual:check-generation`: 成功。ローカルの互換AI APIと実際のmanual-core APIを使い、実画像添付・認証、範囲レビュー、画像未対応時の継続、指摘移動・修正候補、Diffの一部採用、ソース／リッチ編集での挿入、複数段落と太字の境界、Undo/Redo、キャンセル・原稿変更時の保護を確認。スクショは注釈候補、原本・手順の保存、採用、タグ不要の再撮影診断も確認した。
+- アプリ登録から撮影・注釈までの画面フローは、OS起動・ウィンドウ列挙・実撮影をモックして確認。既存アプリの再利用と注釈失敗時の原本保持を確認した。
+- `npx tsx scripts/test_manual_studio_selectable_diff.ts`: 成功。部分採用、全採用／全見送り、挿入・削除、Unicode、末尾改行を確認。
+- `node scripts/test_manual_studio_ui_improvements.mjs`: 成功。廃止済みタグ操作のテストを退役し、新しいレビュー・編集入口と既存の設定、表示、書式、撮影入口を確認。
+- `cargo test -p manual-core --offline`: 177成功・1無視。`cargo test --manifest-path apps/manual-studio/src-tauri/Cargo.toml --offline`: 26成功。
+- `npm run manual:build`、`openspec validate add-reader-review-and-selection-edit --strict`、`git diff --check`: 成功。
+- 外部サービスの実モデルによる出力品質、実機での対象アプリの操作・撮影・再撮影はこの確認では未実施。対象アプリのアクセシビリティ対応と表示セッションに依存するため、実機で確認する。画像入力非対応時と要素取得失敗時の代替動作は自動テスト済み。

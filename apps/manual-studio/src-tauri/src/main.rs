@@ -152,17 +152,24 @@ fn import_launch_commands_from_path(root: String, legacy: &std::path::Path) -> R
     Ok(commands)
 }
 
+#[derive(serde::Serialize)]
+struct LaunchedApplication {
+    pid: u32,
+    host_pid: u32,
+    program: String,
+}
+
 #[tauri::command]
-fn test_launch_application(program: String, args: Vec<String>) -> Result<(), String> {
-    if program.trim().is_empty() {
-        return Err("アプリのパスを指定してください。".into());
-    }
+fn test_launch_application(program: String, args: Vec<String>, root: Option<String>) -> Result<LaunchedApplication, String> {
+    if program.trim().is_empty() { return Err("アプリのパスを指定してください。".into()); }
     let executable = manual_core::platform::application_executable(&program)?;
-    std::process::Command::new(executable)
-        .args(args)
-        .spawn()
-        .map_err(|e| format!("アプリを起動できません: {e}"))?;
-    Ok(())
+    let mut command = std::process::Command::new(&executable);
+    command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    if let Some(root) = root { command.current_dir(root); }
+    let mut child = command.spawn().map_err(|e| format!("アプリを起動できません: {e}"))?;
+    let pid = child.id();
+    std::thread::spawn(move || { let _ = child.wait(); });
+    Ok(LaunchedApplication { pid, host_pid: std::process::id(), program: executable.to_string_lossy().into_owned() })
 }
 
 #[tauri::command]

@@ -12,7 +12,7 @@ const tasks = [
   { id:'protected', kind:'text', page:'docs/index.md', prompt:'Keep', status:'approved' },
 ];
 const content = '# Guide\n\n' + (production ? '```mermaid\ngraph TD\n A[Start] --> B[End]\n```\n\n' : '') + tasks.map(task => `<!-- ai:task id=${task.id} kind=${task.kind} prompt="${task.prompt}" ${task.status === 'approved' ? 'approved-at=2026-10-08T00:00:00Z' : ''} -->\n${task.status === 'missing' ? '' : 'Existing result'}\n<!-- /ai:task -->`).join('\n\n');
-const state = { has_config:true, config:{docs:'docs', output:'manual', agent:'codex', model:'test', connection_type:'local_llm', endpoint_url:'http://localhost:11434/v1', mkdocs:{site_name:'Guide',theme:'material',language:'ja',use_directory_urls:true}}, brief:'', pages:['docs/index.md'], project_entries:[{path:'docs/index.md',directory:false}], tasks, capture_sources:{}, image_assets:{}, ui_map:null, agents:[] };
+const state = { has_config:true, config:{docs:'docs', output:'manual', agent:'codex', model:'test', connection_type:'local_llm', endpoint_url:'http://localhost:11434/v1', mkdocs:{site_name:'Guide',theme:'material',language:'ja',use_directory_urls:true}}, brief:'', pages:['docs/index.md'], project_entries:[{path:'docs/index.md',directory:false}], tasks, capture_sources:{}, image_assets:{},  agents:[] };
 const inputFor = ids => ({page:'docs/index.md',revision:'r1',existing_content:content,tasks:tasks.filter(task => task.kind !== 'screenshot' && task.status !== 'approved' && (!ids || ids.includes(task.id))),references:[],source_note:'Test',feedback:'',connection_type:'local_llm',agent:'codex',model:'test',requests:[]});
 let browser, server, saveFails=false, saveDelay=0, previewFails=false, previewDelay=0;
 const actions=[];
@@ -47,6 +47,7 @@ try {
     await route.fulfill({json:{output:typeof result==='string'?result:JSON.stringify(result)}});
   });
   await page.goto(`${base}/?root=${encodeURIComponent('/tmp/munin-ui-fixture')}`);
+  assert.equal(await page.locator('[data-tab=uimap],#panel-uimap,#map-refresh,#explore-web,#import-map').count(),0);
   await page.waitForFunction(()=>document.querySelector('#editor-title').textContent==='docs/index.md');
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await idle();
   // The panel shares data-editor-view with the controls, but must never inherit
@@ -79,7 +80,7 @@ try {
   previewFails=true;await page.locator('#preview-nav-refresh').click();await idle();
   assert.equal(await page.locator('#preview-nav-status').getAttribute('data-state'),'error');
   previewFails=false;await page.locator('#preview-nav-refresh').click();await idle();
-  await page.locator('#shortcut-help').click();assert.equal(await page.locator('#shortcut-help-dialog').isVisible(),true);
+  await page.locator('#editor-more > summary').click();await page.locator('#shortcut-help').click();assert.equal(await page.locator('#shortcut-help-dialog').isVisible(),true);
   await page.locator('#shortcut-help-dialog [data-close]').click();
   const priorView=await page.locator('#panel-editor').getAttribute('data-editor-view');
   await page.keyboard.press('Control+Shift+P');assert.notEqual(await page.locator('#panel-editor').getAttribute('data-editor-view'),priorView);
@@ -101,35 +102,8 @@ try {
   await page.locator('#ai-model').focus();await page.keyboard.press('Control+s');
   assert.equal(actions.filter(action=>action==='editor-save').length,savesBefore,'settings shortcuts do not save the document');
   await page.locator('[data-close-dialog=panel-settings]').click();
-  await page.locator('[data-tab=tasks]').click();
-  assert.equal(await page.locator('#task-list article').count(),3);
-  for(const [filter,id,label] of [['missing','write','未生成'],['stale','diagram','更新候補'],['approved','protected','確定済み']]) {
-    await page.locator('#task-status-filter').selectOption(filter);
-    assert.equal(await page.locator('#task-list article').count(),1);
-    assert.equal(await page.locator('#task-list article').getAttribute('data-task'),id);
-    assert.match(await page.locator('#task-list .badge').textContent(),new RegExp(label));
-  }
-  await page.locator('#task-status-filter').selectOption('all');await page.locator('#task-kind-filter').selectOption('diagram');
-  assert.equal(await page.locator('#task-list article').count(),1);
-  await page.locator('#task-kind-filter').selectOption('all');
-  await page.locator('[data-tab=editor]').click();
-  await page.locator('#generate-page').click();
-  assert.match(await page.locator('#generation-input-summary').textContent(),/文章1件・図1件を更新／確定済み1件は維持/);
-  assert.equal(await page.locator('#generation-input-tasks input[value=protected]').count(),0);
-  assert.equal(await page.locator('#generation-input-tasks input[value=screen]').count(),0);
-  assert.doesNotMatch(await page.locator('#generation-input-summary').textContent(),/画像/);
-  await page.locator('#generation-input-cancel').click();await idle();
-  assert.ok(!actions.includes('generate-review'),'cancel does not generate');
-  await page.locator('#generate-all-pages').click();
-  assert.match(await page.locator('#generation-pages-summary').textContent(),/1文書.*確定済み1件/);
-  await page.locator('.generation-page-choices input').uncheck();assert.equal(await page.locator('[data-run]').isDisabled(),true);
-  await page.locator('[data-cancel]').click();await idle();
-  // A failed AI run appears in the status filter without touching protected tags.
-  await page.locator('#generate-page').click();await page.locator('#generation-input-run').click();await page.locator('#execution-failure-dialog [data-keep]').click();await idle();
-  await page.locator('[data-tab=tasks]').click();await page.locator('#task-status-filter').selectOption('failed');
-  assert.equal(await page.locator('#task-list article').count(),2);
-  assert.match(await page.locator('#task-list').textContent(),/Test generation failure/);
-  await page.locator('[data-tab=editor]').click();
+  assert.equal(await page.locator('[data-tab=tasks],#generate-page,#generate-all-pages').count(),0);
+  assert.equal(await page.locator('#reader-review,#selection-ai').count(),2);
   const rich=page.locator('#milkdown-editor');
   await rich.getByText('挿入・その他',{exact:true}).click();
   assert.equal(await rich.getByText('Mermaidの図を挿入',{exact:true}).isVisible(),true);
@@ -159,5 +133,5 @@ try {
   assert.equal(await page.locator('#panel-settings').isVisible(),true);await page.locator('[data-close-dialog=panel-settings]').click();
   await page.locator('[data-guide-dismiss]').click();await page.reload();await idle();
   assert.equal(await page.locator('#workspace-guide').isVisible(),false);
-  console.log('UI improvements passed: settings separation, filters, protected counts, cancellation, bulk selection, failure states, rich insert menu and capture step.');
+  console.log('UI improvements passed: settings separation, AI assistance entry points, rich insert menu, source formatting, capture entry and themes.');
 } finally { await browser?.close();server?.kill(); }

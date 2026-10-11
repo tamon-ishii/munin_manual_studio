@@ -7,6 +7,18 @@ export function featureDialog(title: string): {dialog: HTMLDialogElement; body: 
   header.append(heading,close);const body=document.createElement('div');dialog.append(header,body);
   dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();return {dialog,body};
 }
+export function confirmAction(message:string,acceptLabel='続ける'):Promise<boolean>{
+  const {dialog,body}=featureDialog('内容を確認');dialog.dataset.confirmAction='true';dialog.style.maxWidth='560px';
+  const note=document.createElement('p');note.textContent=message;note.style.whiteSpace='pre-line';
+  const actions=document.createElement('div');actions.className='actions';const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
+  const accept=document.createElement('button');accept.type='button';accept.className='primary';accept.textContent=acceptLabel;accept.dataset.confirmAccept='true';actions.append(cancel,accept);body.append(note,actions);
+  return new Promise(resolve=>{let accepted=false;accept.onclick=()=>{accepted=true;dialog.close();};dialog.addEventListener('close',()=>resolve(accepted),{once:true});});
+}
+export function requestText(label:string,initial=''):Promise<string|null>{
+  const {dialog,body}=featureDialog(label);dialog.dataset.requestText='true';dialog.style.maxWidth='560px';
+  const form=document.createElement('form');const field=document.createElement('label');field.textContent=label;const input=document.createElement('input');input.value=initial;input.setAttribute('aria-label',label);field.append(input);const save=document.createElement('button');save.type='submit';save.className='primary';save.textContent='保存';form.append(field,save);body.append(form);input.focus();input.select();
+  return new Promise(resolve=>{let value:string|null=null;form.onsubmit=event=>{event.preventDefault();value=input.value;dialog.close();};dialog.addEventListener('close',()=>resolve(value),{once:true});});
+}
 export function headings(markdown: string): Array<{label:string;offset:number;index:number}> {
   let offset=0,fence='',index=0;const result:Array<{label:string;offset:number;index:number}>=[];
   for(const line of markdown.split(/(?<=\n)/)) {

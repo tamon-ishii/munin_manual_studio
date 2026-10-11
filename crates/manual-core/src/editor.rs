@@ -89,6 +89,13 @@ pub fn create_folder_at(root: &Path, folder: &str, project_relative: bool) -> Re
 }
 
 pub fn read(root: &Path, page: &str) -> Result<Document, String> {
+    let mut document=read_raw(root,page)?;
+    document.content=crate::legacy_ai::plain_markdown(&document.content,Some(&root.join("manual/ai")));
+    Ok(document)
+}
+
+/// Original markup is needed only by explicit legacy migration and history readers.
+pub(crate) fn read_raw(root: &Path, page: &str) -> Result<Document, String> {
     let path = document_path(root, page)?;
     let bytes = fs::read(&path).map_err(|error| format!("原稿を開けません: {error}"))?;
     let revision = revision(&bytes);
@@ -115,15 +122,7 @@ pub fn save(
     if existing.as_deref().map(revision).as_deref() != expected_revision {
         return Err("別の画面やツールで原稿が更新されています。編集内容をコピーしてから原稿を読み直してください。".into());
     }
-    let docs = crate::config::project_path(root, &crate::config::read_config(root).docs)?;
-    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
-    let identity_page = path
-        .strip_prefix(&docs)
-        .or_else(|_| path.strip_prefix(&canonical_root))
-        .map_err(|e| e.to_string())?
-        .to_string_lossy()
-        .replace('\\', "/");
-    let content = super::task::normalize_identifiers(&identity_page, content)?;
+    let content = crate::legacy_ai::plain_markdown(content, None);
     let parent = path.parent().ok_or("Invalid Markdown path")?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let mut temporary = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
@@ -252,11 +251,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn editing_preserves_tags_and_detects_external_changes() {
+    fn editing_removes_legacy_tags_and_detects_external_changes() {
         let root = tempfile::tempdir().unwrap();
         let original = "# Guide\n<!-- ai:task id=shot kind=screenshot\nCapture\n-->\n";
         let created = save(root.path(), "guide.md", original, None).unwrap();
-        assert_eq!(read(root.path(), "guide.md").unwrap().content, original);
+        assert_eq!(read(root.path(), "guide.md").unwrap().content, crate::legacy_ai::plain_markdown(original,None));
         let updated = save(
             root.path(),
             "guide.md",
@@ -264,7 +263,8 @@ mod tests {
             Some(&created.revision),
         )
         .unwrap();
-        assert!(updated.content.contains("ai:task"));
+        assert!(!updated.content.contains("ai:task"));
+        assert!(updated.content.contains("Updated"));
         fs::write(root.path().join("docs/guide.md"), "External edit").unwrap();
         assert!(save(
             root.path(),

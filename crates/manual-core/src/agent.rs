@@ -378,6 +378,10 @@ pub fn http_agent_json(
     model: &str,
     api_key: Option<&str>,
 ) -> Result<Value, String> {
+    http_agent_json_images(root,prompt,schema,endpoint_url,model,api_key,&[])
+}
+
+pub(crate) fn http_agent_json_images(root:&Path,prompt:&str,schema:&Value,endpoint_url:&str,model:&str,api_key:Option<&str>,images:&[String])->Result<Value,String>{
     let base_url = if endpoint_url.trim().is_empty() {
         "http://localhost:11434/v1"
     } else {
@@ -400,11 +404,16 @@ pub fn http_agent_json(
     let user_prompt =
         format!("{prompt}\n\nRespond with a valid JSON object matching this schema:\n{schema_str}");
 
+    let user_content = if images.is_empty() { json!(user_prompt) } else {
+        let mut parts=vec![json!({"type":"text","text":user_prompt})];
+        parts.extend(images.iter().map(|url|json!({"type":"image_url","image_url":{"url":url}})));
+        json!(parts)
+    };
     let body = serde_json::json!({
         "model": model_name,
         "messages": [
             { "role": "system", "content": system_prompt },
-            { "role": "user", "content": user_prompt }
+            { "role": "user", "content": user_content }
         ],
         "response_format": { "type": "json_object" },
         "temperature": 0.2

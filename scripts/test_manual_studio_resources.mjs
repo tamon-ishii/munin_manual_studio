@@ -101,7 +101,7 @@ try{
   await drawing.locator('.panel-header button').click();await page.locator('[data-tab=editor]').click();
   if(!await page.locator('#markdown-editor').isVisible())await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   await page.locator('#markdown-editor').evaluate(editor=>{const start=editor.value.indexOf('![Imported]');editor.setSelectionRange(start,start+'![Imported](assets/imported.png)'.length);});
-  await page.locator('#image-presentation').click();const presentation=page.locator('dialog[data-image-presentation=true]');
+  await page.locator('#editor-more > summary').click();await page.locator('#image-presentation').click();const presentation=page.locator('dialog[data-image-presentation=true]');
   await presentation.getByRole('spinbutton',{name:'表示幅（％）'}).fill('0');await presentation.getByRole('button',{name:'表示設定を適用'}).click();assert.match(await presentation.textContent(),/1〜100/);
   await presentation.getByRole('spinbutton',{name:'表示幅（％）'}).fill('80');await presentation.getByRole('combobox',{name:'画像の配置'}).selectOption('right');
   const caption='説明 <安全> & "引用"';await presentation.getByRole('textbox',{name:'画像のキャプション'}).fill(caption);await presentation.getByRole('button',{name:'表示設定を適用'}).click();
@@ -165,5 +165,47 @@ try{
   assert.equal(await drawing.locator('.image-selection-info').textContent(),currentSelection);
   assert.equal(await drawing.getByRole('textbox',{name:'画像の指示',exact:true}).inputValue(),'Second mountain');
   await mkdir('/tmp/munin-resources-review',{recursive:true});await page.screenshot({path:'/tmp/munin-resources-review/image-history.png'});await drawing.locator('.panel-header button').click();await page.locator('[data-tab=screenshots]').click();await page.screenshot({path:'/tmp/munin-resources-review/resources.png'});
+  // Image AI is configured independently, or explicitly linked to the
+  // manuscript connection. Image models remain distinct from text models.
+  await page.locator('[data-tab=settings]').click();
+  const imageSettings=page.locator('#image-ai-settings');
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
+  const manuscriptBefore=JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8'));
+  await imageSettings.locator('#image-ai-provider').selectOption('api');
+  await imageSettings.locator('#image-ai-model').fill('separate-image-model');
+  await imageSettings.locator('#image-ai-key').fill('fixture-key');
+  await imageSettings.getByRole('button',{name:'画像生成AIを保存',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
+  assert.deepEqual(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')),manuscriptBefore,'image settings never overwrite manuscript settings');
+  assert.doesNotMatch(await readFile(path.join(root,'.munin/image-generation.json'),'utf8'),/fixture-key/);
+  await page.locator('[data-close-dialog=panel-settings]').click();await page.locator('#resource-generate-image').click();await idle();drawing=page.locator('[data-ai-image]');
+  await drawing.getByRole('textbox',{name:'画像の指示',exact:true}).fill('Independent image AI');
+  await drawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();assert.match(await drawing.locator('.image-generation-status').textContent(),/画像を保存/);
+  assert.equal(JSON.parse(bodies.at(-1).raw).model,'separate-image-model','image settings key is available during this session');
+  await drawing.locator('.panel-header button').click();await page.locator('[data-tab=settings]').click();
+  await page.locator('#ai-connection-type').selectOption('api');await page.locator('#ai-endpoint-url').fill(`http://127.0.0.1:${api.address().port}/v1`);
+  await page.locator('#ai-api-key').fill('fixture-key');await page.locator('#ai-model').fill('text-model');
+  await page.waitForFunction(()=>document.querySelector('#ai-save-state').textContent==='保存済み');
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
+  await imageSettings.locator('#image-ai-provider').selectOption('shared');
+  await imageSettings.getByRole('button',{name:'画像生成AIを保存',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
+  assert.equal(await imageSettings.locator('#image-ai-endpoint').isVisible(),false);
+  assert.equal(await imageSettings.locator('#image-ai-key').isVisible(),false);
+  await page.locator('[data-close-dialog=panel-settings]').click();await page.reload();await idle();
+  await page.locator('#generate-ai-image').click();await idle();drawing=page.locator('[data-ai-image]');
+  assert.equal(await drawing.getByRole('combobox',{name:'生成方法',exact:true}).inputValue(),'shared','shared preference survives reload');
+  await drawing.getByRole('textbox',{name:'画像の指示',exact:true}).fill('Shared image AI');
+  await drawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();assert.match(await drawing.locator('.image-generation-status').textContent(),/画像を保存/);
+  assert.equal(bodies.at(-1).url,'/v1/images/generations');assert.equal(JSON.parse(bodies.at(-1).raw).model,'separate-image-model');
+  assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).model,'text-model');
+  assert.doesNotMatch(await rpc('image-generation-history'),/fixture-key/);
+  await drawing.locator('.panel-header button').click();await page.locator('[data-tab=settings]').click();
+  await page.locator('#ai-connection-type').selectOption('none');await page.waitForFunction(()=>document.querySelector('#ai-save-state').textContent==='保存済み');
+  await page.waitForFunction(()=>document.querySelector('#image-ai-connection').textContent.includes('未設定'));
+  await imageSettings.locator('#image-ai-provider').selectOption('agy');await imageSettings.getByRole('button',{name:'画像生成AIを保存',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
+  assert.equal(JSON.parse(await rpc('image-generation-settings')).provider,'agy','independent image AI remains selectable with manuscript AI unset');
+  assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).connection_type,'none');
   assert.deepEqual(errors,[]);console.log('Unified resource filters, usage jumps, replacement impact, durable image history, reference edits, comparison, capability status, retry, cancellation, replacement restoration, quality navigation, interrupted-job recovery and resource drag/drop, image presentation and image replacement passed.');
 }finally{await browser?.close();server?.kill();api?.closeAllConnections();await new Promise(resolve=>api?api.close(resolve):resolve());await rm(root,{recursive:true,force:true});}

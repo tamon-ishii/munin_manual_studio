@@ -1,9 +1,8 @@
 import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePresentation} from './imagePresentation';
+import { Slice } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { uiIcon } from './uiIcons';
-import { aiTaskBlockPlugins } from './milkdownAiTaskBlock';
-import { aiTagItems, createAiTagsPlugin, type AiTaskKind } from './milkdownAiTags';
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import type { Ctx } from '@milkdown/kit/ctx';
@@ -11,7 +10,7 @@ import { Crepe } from '@milkdown/crepe';
 import { imageBlockSchema } from '@milkdown/kit/component/image-block';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
-import { type Editor, editorViewCtx, editorViewOptionsCtx, serializerCtx } from '@milkdown/kit/core';
+import { type Editor, editorViewCtx, editorViewOptionsCtx, serializerCtx, parserCtx } from '@milkdown/kit/core';
 import { imageSchema, clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
 import { undo, redo } from '@milkdown/kit/prose/history';
 import { Plugin } from '@milkdown/kit/prose/state';
@@ -47,7 +46,7 @@ export function setupMilkdownEditor(
   report: (message: string) => void,
   resolveImage: (source: string) => Promise<string> = async source => source,
   uploadImage?: (file: File) => Promise<string>,
-  requestAiTask?: (kind: AiTaskKind) => void,
+  _requestAiTask?: undefined,
   onEditImage?: (source: string, img: HTMLImageElement) => void,
   onImageSettings?: (img: HTMLImageElement) => void
 ) {
@@ -301,7 +300,6 @@ export function setupMilkdownEditor(
       } finally { syncing = false; }
     } }),
   }));
-  const aiTags = createAiTagsPlugin(requestAiTask);
   const icon = (label: string) => `<span>${label}</span>`;
   const mermaidSource = '```mermaid\ngraph TD\n    A[開始] --> B[完了]\n```';
   const topBarLabels: string[] = [];
@@ -332,10 +330,6 @@ export function setupMilkdownEditor(
             .addItem('undo', { icon: uiIcon('undo'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); undo(view.state, view.dispatch); } })
             .addItem('redo', { icon: uiIcon('redo'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); redo(view.state, view.dispatch); } });
           builder.getGroup('block').addItem('mermaid', { icon: icon('Mermaid'), active: () => false, onRun: (ctx: Ctx) => insert(mermaidSource)(ctx) });
-          if (requestAiTask) builder.addGroup('ai-tags', 'AIタグ').addItem('ai-tags', {
-            icon: '', active: () => false,
-            selector: { activeLabel: () => 'AIタグを追加', options: aiTagItems.map(item => ({ label: item.label, onSelect: ctx => { callCommand(aiTags.requestAiTag.key, item.kind)(ctx); } })) },
-          });
           const advancedKeys = new Set(['strikethrough', 'code', 'code-block', 'math', 'quote', 'hr', 'task-list', 'mermaid']);
           const advanced = builder.build().flatMap(group => group.items).filter(item => advancedKeys.has(item.key) && item.onRun);
           for (const group of builder.build()) group.items = group.items.filter(item => !advancedKeys.has(item.key));
@@ -368,13 +362,6 @@ export function setupMilkdownEditor(
         advancedGroup: { label: '挿入', image: { label: '画像' }, codeBlock: { label: 'コードブロック' }, table: { label: '表' }, math: { label: '数式' } },
         buildMenu: builder => {
           builder.addGroup('diagrams', '図').addItem('mermaid', { label: 'Mermaid', icon: icon('◇'), onRun: (ctx: Ctx) => { callCommand(clearTextInCurrentBlockCommand.key)(ctx); insert(mermaidSource)(ctx); } });
-          if (requestAiTask) {
-            const group = builder.addGroup('ai-tags', 'AIタグ');
-            for (const item of aiTagItems) group.addItem(`ai-${item.kind}`, { label: item.label, icon: item.icon, onRun: (ctx: Ctx) => {
-              callCommand(clearTextInCurrentBlockCommand.key)(ctx);
-              callCommand(aiTags.requestAiTag.key, item.kind)(ctx);
-            } });
-          }
         },
       },
     },
@@ -403,7 +390,7 @@ export function setupMilkdownEditor(
         } },
       };
     });
-  }).use(aiTaskBlockPlugins).use(imagePresentationPlugin).use(bridge).use(aiTags.plugins);
+  }).use(imagePresentationPlugin).use(bridge);
   void crepe.create().then(editor => {
     instance = editor; ready = true; refresh(); updateReadonly();
     if (!sourceMode) source.hidden = true;
@@ -426,21 +413,29 @@ export function setupMilkdownEditor(
     captureState: () => ready && instance ? instance.action(ctx => ctx.get(editorViewCtx).state) : null,
     restoreState: (state: EditorState) => { if (ready && instance && state) instance.action(ctx => ctx.get(editorViewCtx).updateState(state)); },
     get isRichEditing() { return ready && !sourceMode; },
-    captureAiTagInsertion: (): ((markdown: string) => boolean) | undefined => {
-      if (sourceMode || !ready || !instance) return undefined;
-      const editor = instance;
-      const { bookmark, document } = editor.action(ctx => {
-        const state = ctx.get(editorViewCtx).state;
-        return { bookmark: state.selection.getBookmark(), document: state.doc };
-      });
-      return markdown => editor.action(ctx => {
-        const view = ctx.get(editorViewCtx);
-        if (!view.state.doc.eq(document)) throw new Error('撮影中に原稿が変更されました。撮影タグを追加する位置を選び直してください。');
-        view.dispatch(view.state.tr.setSelection(bookmark.resolve(view.state.doc)));
-        // Programmatic capture completion also runs while the UI is readonly.
-        insert(markdown)(ctx);
-        view.focus();
-        return true;
+    captureSelectionEdit: (insertionOnly=false) => {
+      if(sourceMode||!ready||!instance)return;
+      const editor=instance;
+      return editor.action(ctx=>{
+        const view=ctx.get(editorViewCtx),state=view.state;
+        const from=state.selection.from,to=insertionOnly?from:state.selection.to;
+        const text=insertionOnly||state.selection.empty?"":ctx.get(serializerCtx)(state.doc.cut(from,to));
+        return {text,apply:(markdown:string,blockInsertion=false)=>editor.action(ctx=>{
+          const current=ctx.get(editorViewCtx);
+          if(!current.state.doc.eq(state.doc))throw new Error('原稿が変更されました。範囲を選び直してください。');
+          const parsed=ctx.get(parserCtx)(markdown);
+          if(!parsed)throw new Error('AIの本文を読み取れませんでした。');
+          const selected = TextSelection.create(current.state.doc,from,to);
+          const point=current.state.doc.resolve(from);
+          let transaction=current.state.tr.setSelection(selected);
+          if(blockInsertion&&selected.empty&&point.parentOffset===0&&point.parent.isTextblock){
+            const insertAt=point.before();
+            transaction=current.state.tr.insert(insertAt,parsed.content);
+            transaction.setSelection(TextSelection.near(transaction.doc.resolve(insertAt+parsed.content.size),1));
+          }else transaction=transaction.replaceSelection(blockInsertion?new Slice(parsed.content,0,0):Slice.maxOpen(parsed.content));
+          current.dispatch(transaction.scrollIntoView());
+          current.focus();
+        })};
       });
     },
     selectInsertionHeading: (index: number|null): void => {
@@ -455,10 +450,6 @@ export function setupMilkdownEditor(
       if (sourceMode || !ready || !instance) return false;
       instance.action(ctx => { insert(markdown)(ctx); ctx.get(editorViewCtx).focus(); });
       return true;
-    },
-    insertAiTag: (markdown: string): boolean => {
-      if (sourceMode || !ready || !instance) return false;
-      return instance.action(callCommand(aiTags.insertAiTag.key, markdown));
     },
     historyState: () => sourceMode || !instance || !ready ? null : instance.action(ctx => {
       const state = ctx.get(editorViewCtx).state;

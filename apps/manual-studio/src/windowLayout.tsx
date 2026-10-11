@@ -20,11 +20,10 @@ export const PANELS: PanelDef[] = [
   { id: "screenshots", name: "リソース一覧", elementId: "panel-screenshots" },
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
-  { id: "ai-tags", name: "AIタグ一覧", elementId: "panel-tasks" },
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
 ];
 
-export const STORAGE_KEY = "manual-studio-flexlayout-model-v6";
+export const STORAGE_KEY = "manual-studio-flexlayout-model-v7";
 
 export const defaultLayoutJson: IJsonModel = {
   global: {

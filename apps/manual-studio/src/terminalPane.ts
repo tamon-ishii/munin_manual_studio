@@ -1,3 +1,4 @@
+import { uiIcon } from "./uiIcons";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { extractDelimitedResult, DELIMITER_START } from "./terminalOutputParser";
@@ -300,7 +301,7 @@ export function setupTerminalPane(
 
   function updateStatus(status: "connected" | "stopped" | "starting" | "stopping" | "error", message?: string): void {
     const labels = { connected: "接続中", stopped: "未接続", starting: "起動中", stopping: "終了中", error: "接続失敗" };
-    if (badge) { badge.className = `badge ${status}`; badge.textContent = `● ${labels[status]}`; }
+    if (badge) { badge.className = `badge ${status}`; badge.innerHTML = `${uiIcon(status === "connected" ? "connect" : status === "starting" || status === "stopping" ? "refresh" : "disconnect")}<span>${labels[status]}</span>`; }
     if (connectBtn) connectBtn.disabled = status === "connected" || status === "starting" || status === "stopping" || (status === "error" && sessionId !== null);
     if (disconnectBtn) disconnectBtn.disabled = status !== "connected" && status !== "starting" && !(status === "error" && ownerId !== null);
     if (stateNote) stateNote.textContent = message || (status === "stopped" ? "接続ボタンでAI CLIを起動します。" : labels[status]);

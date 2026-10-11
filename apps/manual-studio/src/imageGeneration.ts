@@ -1,11 +1,13 @@
 import { featureDialog } from './screenshotWorkflow';
 import { showImageComparison } from './imageComparison';
+import type {ImageAiSettings} from './imageAiSettings';
 export interface ImageGenerationEntry {
   id:string;path?:string;prompt:string;provider?:string;model?:string;endpoint?:string;
   created_at:string;status?:string;error?:string;reference?:string;parent_id?:string;
 }
 interface Capability {provider:string;installed:boolean;login:string;image:string;message:string}
 interface Options {
+  prepare?():Promise<void>;imageKey?(root:string,endpoint:string):string;sharedKey?(root:string):string;
   root():string;page():string|undefined;
   request(action:string,options:Record<string,unknown>,root:string):Promise<string>;
   work(operation:()=>Promise<void>):Promise<void>;refresh():Promise<void>;insert(path:string):Promise<boolean>;
@@ -14,7 +16,8 @@ export function setupImageGeneration(options:Options) {
   async function open(seed?:ImageGenerationEntry,edit=false) {
     await options.work(async()=>{
       const root=options.root();if(!root)throw new Error('プロジェクトを開いてください。');
-      const settings=JSON.parse(await options.request('image-generation-settings',{},root)) as {model:string;endpoint:string;provider?:string};
+      let settings=JSON.parse(await options.request('image-generation-settings',{},root)) as ImageAiSettings;
+      if(settings.provider==='shared'){await options.prepare?.();settings=JSON.parse(await options.request('image-generation-settings',{},root)) as ImageAiSettings;}
       if(root!==options.root())return;
       const {dialog,body}=featureDialog('AI作画');dialog.dataset.aiImage='true';
       const close=dialog.querySelector<HTMLButtonElement>('.panel-header button')!;
@@ -24,8 +27,8 @@ export function setupImageGeneration(options:Options) {
       }
       const providerLabel=document.createElement('label');providerLabel.textContent='生成方法';
       const provider=document.createElement('select');provider.setAttribute('aria-label','生成方法');
-      for(const [value,label] of [['agy','Agy（Antigravity）'],['codex','Codex'],['api','画像API']])provider.add(new Option(label,value));
-      provider.value=seed?.provider&&['agy','codex','api'].includes(seed.provider)?seed.provider:settings.provider==='codex'||settings.provider==='api'?settings.provider:'agy';providerLabel.append(provider);
+      for(const [value,label] of [['shared','文章・図の生成AIと同じ接続'],['agy','Agy（Antigravity）'],['codex','Codex'],['api','画像API']])provider.add(new Option(label,value));
+      provider.value=settings.provider==='shared'?'shared':seed?.provider&&['agy','codex','api'].includes(seed.provider)?seed.provider:settings.provider==='codex'||settings.provider==='api'?settings.provider:'agy';providerLabel.append(provider);
       const providerHint=document.createElement('p');providerHint.className='form-hint';
       const connectionStatus=document.createElement('p');connectionStatus.className='image-connection-status';connectionStatus.role='status';
       const check=document.createElement('button');check.type='button';check.textContent='接続状態を確認';
@@ -40,7 +43,7 @@ export function setupImageGeneration(options:Options) {
       const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='作画の接続設定（オプション）';details.append(summary);
       const model=field('画像モデル',seed?.provider==='api'?seed.model||settings.model:settings.model);
       const endpoint=field('画像APIのURL',seed?.endpoint||settings.endpoint);
-      const key=field('外部画像APIキー（保存しません）','','password');key.input.autocomplete='off';
+      const key=field('外部画像APIキー（保存しません）',options.imageKey?.(root,settings.endpoint)||'','password');key.input.autocomplete='off';
       const apiHint=document.createElement('p');apiHint.className='form-hint';apiHint.textContent='APIキーを入力するか、起動環境の MUNIN_IMAGE_API_KEY / OPENAI_API_KEY を利用します。';details.append(model.wrapper,endpoint.wrapper,key.wrapper,apiHint);
       const actions=document.createElement('div');actions.className='actions';
       function action(label:string){const button=document.createElement('button');button.type='button';button.textContent=label;actions.append(button);return button;}
@@ -74,17 +77,19 @@ export function setupImageGeneration(options:Options) {
         for(const button of historyFailures.querySelectorAll<HTMLButtonElement>('button'))button.disabled=running;
       }
       function updateProvider(){
-        details.hidden=provider.value!=='api';
-        providerHint.textContent=provider.value==='codex'?'Codexの組み込み画像生成を使います。':provider.value==='agy'?'Agyの画像生成を使います。':'画像APIに直接接続します。';
-        connectionStatus.textContent=capabilities.find(item=>item.provider===provider.value)?.message||'接続状態は未確認です。';
+        const shared=provider.value==='shared',effective=shared?settings.shared_provider:provider.value;
+        details.hidden=effective!=='api';endpoint.wrapper.hidden=key.wrapper.hidden=shared;
+        providerHint.textContent=shared?settings.shared_error||`文章・図と同じ接続を使います：${settings.shared_provider}${settings.shared_endpoint?` ／ ${settings.shared_endpoint}`:''}`:provider.value==='codex'?'Codexの組み込み画像生成を使います。':provider.value==='agy'?'Agyの画像生成を使います。':'画像APIに直接接続します。';
+        connectionStatus.textContent=shared&&settings.shared_error?settings.shared_error:capabilities.find(item=>item.provider===effective)?.message||'接続状態は未確認です。';
       }
       async function checkConnection(){
         const version=++probeVersion;check.disabled=true;connectionStatus.textContent='接続状態を確認中…';
-        try{const result=JSON.parse(await options.request('image-generation-capabilities',{json:{api_key:provider.value==='api'?key.input.value:''}},root)) as {items:Capability[]};if(version!==probeVersion||!dialog.isConnected||root!==options.root())return;capabilities=result.items||[];updateProvider();}
+        try{const result=JSON.parse(await options.request('image-generation-capabilities',{json:{api_key:provider.value==='shared'?options.sharedKey?.(root)||'':provider.value==='api'?key.input.value:''}},root)) as {items:Capability[]};if(version!==probeVersion||!dialog.isConnected||root!==options.root())return;capabilities=result.items||[];updateProvider();}
         catch(error){if(version===probeVersion)connectionStatus.textContent=String(error);}
         finally{if(version===probeVersion)check.disabled=running;}
       }
       key.input.addEventListener('input',()=>{if(provider.value==='api')connectionStatus.textContent=key.input.value.trim()?'APIキーを入力済みです。利用権限は生成時に確認します。':capabilities.find(item=>item.provider==='api')?.message||'APIキーを入力してください。';});
+      endpoint.input.addEventListener('input',()=>{key.input.value=options.imageKey?.(root,endpoint.input.value)||'';});
       provider.addEventListener('change',()=>{updateProvider();});check.onclick=()=>{void checkConnection();};updateProvider();
       async function preview(entry:ImageGenerationEntry){
         if(!entry.path)return '';let source=previews.get(entry.path);
@@ -92,9 +97,9 @@ export function setupImageGeneration(options:Options) {
       }
       async function select(entry:ImageGenerationEntry){
         if(running)return;const version=++selectionVersion;selected=undefined;prompt.value=entry.prompt||'';
-        if(entry.provider&&['agy','codex','api'].includes(entry.provider))provider.value=entry.provider;
+        if(provider.value!=='shared'&&entry.provider&&['agy','codex','api'].includes(entry.provider))provider.value=entry.provider;
         if(entry.provider==='api'&&entry.model)model.input.value=entry.model;
-        if(entry.endpoint)endpoint.input.value=entry.endpoint;
+        if(entry.endpoint&&entry.endpoint!==endpoint.input.value){endpoint.input.value=entry.endpoint;key.input.value=options.imageKey?.(root,entry.endpoint)||'';}
         referencePath=entry.path||entry.reference||'';parentId=entry.path?entry.id:entry.parent_id||'';reference.checked=!entry.path&&Boolean(entry.reference);referenceLabel.hidden=!referencePath;
         image.hidden=true;image.removeAttribute('src');
         retry.hidden=!['failed','cancelled','interrupted'].includes(entry.status||'');status.textContent=entry.error||'';updateProvider();sync();
@@ -135,8 +140,9 @@ export function setupImageGeneration(options:Options) {
         const timer=setInterval(()=>{if(!cancelRequested)status.textContent=`画像を生成中です… ${Math.floor((Date.now()-started)/1000)}秒`;},1000);
         await options.work(async()=>{
           try{
+            if(provider.value==='shared')await options.prepare?.();
             await options.request('image-generation-settings',{json:{save:true,provider:provider.value,model:model.input.value,endpoint:endpoint.input.value}},root);
-            const result=JSON.parse(await options.request('image-generate',{json:{job_id:activeJob,prompt:prompt.value,provider:provider.value,model:model.input.value,endpoint:endpoint.input.value,api_key:provider.value==='api'?key.input.value:'',reference:reference.checked?referencePath:undefined,parent_id:reference.checked?parentId:undefined}},root)) as ImageGenerationEntry;
+            const result=JSON.parse(await options.request('image-generate',{json:{job_id:activeJob,prompt:prompt.value,provider:provider.value,model:model.input.value,endpoint:endpoint.input.value,api_key:provider.value==='shared'?options.sharedKey?.(root)||'':provider.value==='api'?key.input.value:'',reference:reference.checked?referencePath:undefined,parent_id:reference.checked?parentId:undefined}},root)) as ImageGenerationEntry;
             if(root!==options.root())return;
             selected=result;referencePath=result.path||'';parentId=result.id;reference.checked=false;referenceLabel.hidden=!referencePath;
             image.src=await preview(result);image.hidden=false;await options.refresh();status.textContent='画像を保存しました。プレビューを確認して原稿へ挿入できます。';

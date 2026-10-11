@@ -200,7 +200,7 @@ fn reference_fingerprints(
     page: &str,
     id: &str,
 ) -> Result<BTreeMap<String, String>, String> {
-    let content = editor::read(root, page)?.content;
+    let content = editor::read_raw(root, page)?.content;
     let mut paths = BTreeSet::new();
     for tag in task::parse_page_tags(page, &content, &mut Default::default())? {
         if let PageTag::Generated { task, body, .. } = tag {

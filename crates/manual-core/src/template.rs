@@ -6,7 +6,7 @@ use walkdir::WalkDir;
 use super::config::{
     config_path, project_path, read_config, ManualConfig, MkDocsConfig, DEFAULT_BRIEF,
 };
-use super::task::{collect_markdown_files, parse_page_tags, utc_now, PageTag};
+use super::task::{collect_markdown_files, utc_now};
 use crate::analyze_directory;
 
 pub fn init_template(
@@ -269,41 +269,7 @@ fn generate_template_with_llm(
         DEFAULT_BRIEF.to_string()
     };
 
-    let prompt = if template_type == "api" {
-        format!(
-            "Read the application context, AST module structure, UI Map, and manual brief below.\n\
-            Create a concise, focused Japanese MkDocs architecture & API reference outline (たたき台) as JSON pages for this specific application.\n\
-            The API documentation must focus strictly on facts, architecture designs, module specifications, and public interfaces without UI operation narratives.\n\
-            IMPORTANT RULES FOR TASKS & LAYOUT:\n\
-            - index.md is required. Include an architecture overview, module hierarchy, and table of contents.\n\
-            - Create 2 to 3 core pages (e.g. architecture.md for system architecture & data flows, api_reference.md for core module API signatures).\n\
-            - Write comprehensive, factual Japanese descriptions, module specifications, and class summaries DIRECTLY as markdown body text (DO NOT use kind=text tasks, write the real content directly).\n\
-            - For architecture and dependency diagrams, write valid Mermaid diagram blocks (```mermaid ... ```) directly in the markdown body.\n\
-            - Do not invent non-existent modules. Return exactly 3 to 4 pages total. Keep the draft concise, clean, and fast to generate.\n\n\
-            {}\n\n\
-            Brief:\n{}",
-            app_context.prompt_summary,
-            brief
-        )
-    } else {
-        format!(
-            "Read the application context, AST module structure, UI Map, and manual brief below.\n\
-            Create a concise, focused Japanese MkDocs user manual outline (たたき台) as JSON pages for this specific application.\n\
-            The manual must explain features, workflows, and step-by-step user operations.\n\
-            IMPORTANT RULES FOR TASKS & LAYOUT:\n\
-            - index.md is required. You MUST add at least one screenshot update task with kind=screenshot to index.md; this is mandatory and must not be omitted or replaced with a static image link.\n\
-            - Put the task immediately after the short introduction and before navigation. Use a paired ai:task block with id=overview-screenshot, kind=screenshot and a quoted prompt attribute describing the real overview screen; close it with <!-- /ai:task --> . This task appears in ModuleLoom's 「更新対象アセット」 list so the instruction can be copied for an agent with access to the target application and the resulting PNG can be registered.\n\
-            - The screenshot prompt must name a real UI view and relevant controls from the UI Map; do not invent controls or give a generic instruction.\n\
-            - Divide into 2 to 3 core chapters matching the application's actual workflows (e.g. quickstart.md for initial setup, features.md for main operations).\n\
-            - Write detailed explanatory text, feature overviews, and step-by-step guides DIRECTLY as markdown body text (DO NOT use kind=text tasks, write the actual Japanese text directly into the markdown body).\n\
-            - Add more screenshot or diagram tasks only when they help explain a real operation or dependency.\n\
-            - Return exactly 3 to 4 pages total. Keep the draft concise, clean, and fast to generate.\n\n\
-            {}\n\n\
-            Brief:\n{}",
-            app_context.prompt_summary,
-            brief
-        )
-    };
+    let prompt = format!("Create a factual Japanese Markdown {template_type} document set as JSON pages, including index.md. Write actual prose and Mermaid directly. Do not create AI tags, metadata comments, or automatic screenshot tasks. Only describe controls verified from the project source. Context: {}\nBrief: {brief}",app_context.prompt_summary);
 
     let schema = serde_json::json!({
         "type": "object",
@@ -357,59 +323,25 @@ fn generate_template_with_llm(
         return Err(format!("{agent} draft must include index.md"));
     }
 
-    if template_type == "manual" {
-        let index_content = valid_pages
-            .iter()
-            .find(|(path, _)| path == "index.md")
-            .map(|(_, content)| content.as_str())
-            .unwrap_or_default();
-        let mut ids = std::collections::HashSet::new();
-        let tags = parse_page_tags("index.md", index_content, &mut ids)?;
-        if !tags
-            .iter()
-            .any(|tag| matches!(tag, PageTag::Task { task, .. } if task.kind == "screenshot"))
-        {
-            return Err(format!(
-                "{agent} manual draft must include an index.md screenshot ai:task for the 更新対象アセット list"
-            ));
-        }
-    }
-
     fs::create_dir_all(templates).map_err(|e| e.to_string())?;
     for (rel_path, content) in &valid_pages {
         let dest = templates.join(rel_path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        fs::write(&dest, format!("{}\n", content.trim_end())).map_err(|e| e.to_string())?;
+        fs::write(&dest, format!("{}\n", crate::legacy_ai::plain_markdown(content,None).trim_end())).map_err(|e| e.to_string())?;
     }
 
     Ok(())
 }
 
 fn finish_generated_template(root: &Path, templates: &Path, output_dir_name: &str) {
-    // 生成されたタスクのうち diagram と text の回答を自動生成して保存
-    if let Ok(task_list) = super::task::tasks(templates) {
-        let generated = root.join("manual").join("ai");
-        for t in &task_list {
-            if t.kind == "diagram" {
-                if super::author::generate_task(root, &t.id, "", "").is_err() {
-                    let fallback_diagram =
-                        "```mermaid\ngraph TD\n    Main[メイン処理] --> Sub[主要モジュール]\n```";
-                    let _ = super::task::save_answer(&generated, t, fallback_diagram);
-                }
-            } else if t.kind == "text" {
-                let default_body = format!(
-                    "{}\n\n本プロジェクトの仕様および構造に基づいた解説です。",
-                    t.prompt
-                );
-                let _ = super::task::save_answer(&generated, t, &default_body);
-            }
+    for path in collect_markdown_files(templates) {
+        if let Ok(content)=fs::read_to_string(&path) {
+            let plain=crate::legacy_ai::plain_markdown(&content,Some(&root.join("manual/ai")));
+            let _=fs::write(path,plain);
         }
     }
-
-    let app_context = super::context::build_application_context(root);
-    let _ = super::uimap::save_ui_map(root, &app_context.ui_map);
     let _ = super::deps::build_manual_dependency_graph(root, templates);
     let _ = super::builder::build(
         templates,
@@ -420,19 +352,19 @@ fn finish_generated_template(root: &Path, templates: &Path, output_dir_name: &st
     );
 }
 
-fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Result<(), String> {
+fn init_manual_template(_root: &Path, templates: &Path, project_name: &str) -> Result<(), String> {
     let index_md = format!(
         r#"# {project_name} 利用マニュアル
 
 このドキュメントでは、{project_name} の主な機能と操作方法について説明します。
 
-<!-- ai:task id=overview-screenshot kind=screenshot prompt="対象アプリのメイン画面を開き、主要な操作領域が見える状態をPNGで撮影する" -->
 
-<!-- /ai:task -->
 
-<!-- ai:task id=overview-intro-text kind=text prompt="本ツールの目的と提供する価値を読者に向けて簡潔に説明する" -->
 
-<!-- /ai:task -->
+
+
+
+
 
 ## ドキュメント構成
 - [はじめに・クイックスタート](quickstart.md): 基本的な操作手順と初期設定
@@ -448,16 +380,16 @@ fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Re
 本ツールの基本的な使い方と操作手順をステップ順に説明します。
 
 ## ステップ 1: 起動とプロジェクト選択
-<!-- ai:task id=quickstart-step1-screenshot kind=screenshot prompt="対象アプリの起動直後の画面とプロジェクト選択エリアをPNGで撮影する" -->
 
-<!-- /ai:task -->
+
+
 
 アプリケーション起動後、対象のソースコードディレクトリを選択します。自動的に構文解析が実行され、モジュール一覧および依存関係が読み込まれます。
 
 ## ステップ 2: 主要機能の実行
-<!-- ai:task id=quickstart-step2-screenshot kind=screenshot prompt="対象アプリの解析結果が表示されたメインワークスペースをPNGで撮影する" -->
 
-<!-- /ai:task -->
+
+
 
 解析完了後、メインビューにモジュール関係図が表示されます。各ノードをクリックすると詳細なプロパティや接続関係を確認できます。
 "#
@@ -470,13 +402,13 @@ fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Re
 {project_name} に備わっている機能の詳細と活用方法を説明します。
 
 ## 主要機能一覧
-<!-- ai:task id=features-main-screenshot kind=screenshot prompt="対象アプリの主要機能パネルまたはダイアログをPNGで撮影する" -->
 
-<!-- /ai:task -->
 
-<!-- ai:task id=features-guide-text kind=text prompt="主要機能の操作方法、パラメータ、活用のポイントを解説" -->
 
-<!-- /ai:task -->
+
+
+
+
 "#
     );
     fs::write(templates.join("features.md"), features_md).map_err(|e| e.to_string())?;
@@ -486,32 +418,19 @@ fn init_manual_template(root: &Path, templates: &Path, project_name: &str) -> Re
 
 環境設定およびオプション項目について説明します。
 
-<!-- ai:task id=settings-screenshot kind=screenshot prompt="対象アプリの設定ダイアログを開き、設定項目が見える状態をPNGで撮影する" -->
 
-<!-- /ai:task -->
 
-<!-- ai:task id=settings-guide-text kind=text prompt="各設定項目の意味とおすすめの設定値を解説" -->
 
-<!-- /ai:task -->
+
+
+
+
 "#
     );
     fs::write(templates.join("settings.md"), settings_md).map_err(|e| e.to_string())?;
 
     // text タスクのデフォルト回答を自動生成して保存
-    let generated = root.join("manual").join("ai");
-    if let Ok(task_list) = super::task::tasks(templates) {
-        for t in &task_list {
-            if t.kind == "text" {
-                let default_body = match t.id.as_str() {
-                    "overview-intro-text" => format!("{project_name} は、複雑化しやすいソースコードの構造を視覚化し、アーキテクチャの健全性を保つための支援ツールです。直感的な UI で依存関係の把握や品質測定を容易に行えます。"),
-                    "features-guide-text" => "主要パネルでは、モジュール間の依存関係グラフの探索、循環インポートの検出・診断、および詳細レポートの出力が行えます。".to_string(),
-                    "settings-guide-text" => "設定画面では、ドキュメントの出力先ディレクトリ、MkDocs テーマ設定、使用する AI エージェントの切り替えが可能です。".to_string(),
-                    _ => format!("{} に関する解説です。プロジェクト構成に基づいて自動生成されています。", t.prompt),
-                };
-                let _ = super::task::save_answer(&generated, t, &default_body);
-            }
-        }
-    }
+
 
     Ok(())
 }
@@ -524,9 +443,9 @@ fn init_api_template(root: &Path, templates: &Path, project_name: &str) -> Resul
 
 ## システム全体アーキテクチャ
 
-<!-- ai:task id=system-architecture-diagram kind=diagram prompt="プロジェクト全体の主要モジュール間依存関係をMermaidダイアグラムで生成" -->
 
-<!-- /ai:task -->
+
+
 
 ## 仕様書構成
 - [モジュール依存関係とアーキテクチャ](architecture.md): レイヤー構造と依存ルール
@@ -542,9 +461,9 @@ fn init_api_template(root: &Path, templates: &Path, project_name: &str) -> Resul
 
 ## パッケージ間依存図
 
-<!-- ai:task id=package-dependency-diagram kind=diagram prompt="パッケージ間の推移的依存とレイヤー構造をMermaidダイアグラムで生成" -->
 
-<!-- /ai:task -->
+
+
 
 ## 循環インポート・メトリクス
 コード解析によって検出されたモジュール間結合度および循環参照の状況です。
@@ -553,19 +472,7 @@ fn init_api_template(root: &Path, templates: &Path, project_name: &str) -> Resul
     fs::write(templates.join("architecture.md"), architecture_md).map_err(|e| e.to_string())?;
 
     // diagram タスクのデフォルト回答を自動生成して保存
-    let generated = root.join("manual").join("ai");
-    if let Ok(task_list) = super::task::tasks(templates) {
-        for t in &task_list {
-            if t.kind == "diagram" {
-                let default_body = match t.id.as_str() {
-                    "system-architecture-diagram" => "```mermaid\ngraph TD\n    Entrypoint[メインエントリポイント] --> Core[コアモジュール群]\n    Core --> Common[共通ユーティリティ・インフラ]\n```".to_string(),
-                    "package-dependency-diagram" => "```mermaid\ngraph LR\n    API[インターフェース層] --> Service[ビジネスロジック層]\n    Service --> Data[データアクセス層]\n```".to_string(),
-                    _ => "```mermaid\ngraph TD\n    A[モジュール A] --> B[モジュール B]\n```".to_string(),
-                };
-                let _ = super::task::save_answer(&generated, t, &default_body);
-            }
-        }
-    }
+
 
     // API リファレンス：AST解析からモジュール一覧を自動生成
     let mut api_content = format!(

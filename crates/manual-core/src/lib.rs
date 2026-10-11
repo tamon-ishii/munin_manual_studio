@@ -16,7 +16,10 @@ pub mod semantic_target;
 pub mod visual_target;
 pub mod editor;
 pub mod fact;
-mod generation_review;
+mod legacy_ai;
+mod selection_ai;
+mod document_review;
+mod screenshot_ai;
 pub mod platform;
 pub mod preview;
 pub mod pty;
@@ -27,21 +30,20 @@ mod image_generation;
 pub mod resources;
 pub mod task;
 pub mod template;
-pub mod ui_explore;
-pub mod uimap;
 pub mod window_capture;
 pub mod workflow;
 mod workspace;
 
+#[cfg(test)]
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 use serde::Serialize;
 
 use config::{project_path, read_config, save_settings};
 use preview::{get_state, preview_asset, preview_html, preview_page};
-use task::{approve_task, save_answer, scan_entries, update_task_in_docs};
 
 fn crop_margin(crop: bool, margin: Option<&str>) -> Result<Option<u32>, String> {
     if !crop {
@@ -58,6 +60,9 @@ fn crop_margin(crop: bool, margin: Option<&str>) -> Result<Option<u32>, String> 
 }
 
 pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
+    if matches!(action, "scan" | "generate-task" | "generate-page" | "generate-review" | "generation-input" | "generation-history" | "generation-history-entry" | "generate-page-captures" | "update-task" | "generate-text-all" | "generate-diagram-all" | "generate-api" | "approve" | "record" | "record-screenshot" | "record-diagram" | "page-tasks" | "impact-plan" | "generate-impacted" | "execution-begin" | "execution-checkpoint" | "execution-finish" | "execution-resume" | "execution-rollback") {
+        return Err(format!("AIタグ機能は廃止されました: {action}"));
+    }
     let raw_json: serde_json::Value = serde_json::from_str(
         options
             .iter()
@@ -80,117 +85,17 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
         let _lock = workflow::page_lock(root, page)?;
         return run_inner(root, action, options);
     }
-    let tracked = matches!(
-        action,
-        "generate-task"
-            | "generate-page"
-            | "generate-page-captures"
-            | "recapture"
-            | "capture-window"
-            | "record-screenshot"
-            | "record-diagram"
-            | "update-task"
-    );
-    if !tracked {
-        return run_inner(root, action, options);
-    }
-    let get = |key: &str| options.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
-    let all = task::tasks_for_config(root, &read_config(root))?;
-    let selected_json: serde_json::Value =
-        serde_json::from_str(get("--json").unwrap_or("{}")).map_err(|e| e.to_string())?;
-    if let Some(id) = selected_json["execution_id"].as_str() {
-        let run = workflow::load(root, id)?;
-        if run.status != "running" {
-            return Err("実行記録が終了しています。".into());
-        }
-        let ids = selected_json["ids"]
-            .as_array()
-            .ok_or("実行対象を指定してください。")?;
-        if ids.iter().any(|id| {
-            !run.entries
-                .iter()
-                .any(|entry| Some(entry.task.id.as_str()) == id.as_str())
-        }) {
-            return Err("実行記録の対象外です。".into());
-        }
-        let _lock = workflow::page_lock(root, &run.page)?;
-        let result = run_inner(root, action, options);
-        let parsed = result
-            .as_ref()
-            .ok()
-            .and_then(|output| serde_json::from_str::<serde_json::Value>(output).ok());
-        let results:Vec<_>=ids.iter().map(|id|{
-            let failure=parsed.as_ref().and_then(|value|value["capture_errors"].as_array()).and_then(|errors|errors.iter().find(|e|e["id"]==*id)).and_then(|e|e["reason"].as_str()).map(str::to_owned).or_else(||result.as_ref().err().cloned());
-            serde_json::json!({"id":id,"status":if failure.is_some(){"failed"}else{"succeeded"},"error":failure})
-        }).collect();
-        workflow::checkpoint(root, id, &serde_json::json!({"results":results}))?;
-        return result;
-    }
-    let selected: Vec<_> = all
-        .into_iter()
-        .filter(|task| {
-            get("--id").map_or_else(
-                || {
-                    task.status != "approved"
-                        && get("--page").is_some_and(|page| {
-                            task::tasks_for_page(root, page)
-                                .is_ok_and(|tasks| tasks.iter().any(|item| item.id == task.id))
-                        })
-                },
-                |id| task.id == id,
-            ) && (action != "generate-page-captures" || task.kind == "screenshot")
-                && selected_json["ids"]
-                    .as_array()
-                    .is_none_or(|ids| ids.iter().any(|id| id == &task.id))
-        })
-        .collect();
-    if selected.is_empty() {
-        return run_inner(root, action, options);
-    }
-    let page = get("--page").unwrap_or(&selected[0].page);
-    let _lock = workflow::page_lock(root, page)?;
-    let asset_names: Vec<_> = get("--image")
-        .and_then(|image| Path::new(image).file_name())
-        .map(|name| vec![name.to_string_lossy().into_owned()])
-        .unwrap_or_default();
-    let run = workflow::begin(
-        root,
-        page,
-        &serde_json::json!({"asset_names":asset_names,"ids":selected.iter().map(|t|&t.id).collect::<Vec<_>>(),"limits":selected_json["limits"]}),
-    )?;
-    let id = run["id"].as_str().ok_or("Invalid run")?;
-    workflow::checkpoint(
-        root,
-        id,
-        &serde_json::json!({"results":selected.iter().map(|task|serde_json::json!({"id":task.id,"status":"running"})).collect::<Vec<_>>()}),
-    )?;
-    let result = run_inner(root, action, options);
-    let mut failures = std::collections::HashMap::new();
-    if let Ok(output) = &result {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
-            if let Some(errors) = value["capture_errors"].as_array() {
-                for error in errors {
-                    if let Some(id) = error["id"].as_str() {
-                        failures.insert(
-                            id.to_owned(),
-                            error["reason"].as_str().unwrap_or("撮影失敗").to_owned(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    let results:Vec<_>=selected.iter().map(|task|{
-        let error=result.as_ref().err().cloned().or_else(||failures.get(&task.id).cloned());
-        serde_json::json!({"id":task.id,"status":if error.is_some(){"failed"}else{"succeeded"},"error":error})
-    }).collect();
-    workflow::checkpoint(root, id, &serde_json::json!({"results":results}))?;
-    workflow::finish(root, id, false)?;
-    result
+    run_inner(root, action, options)
 }
 
 fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
     let allowed = [
+        "screenshot-ai-application",
+        "screenshot-ai-plan",
+        "screenshot-ai-capture",
+        "screenshot-ai-annotate",
+        "document-review",
+        "selection-generate",
         "screenshots-migration-plan",
         "screenshots-migrate",
         "screenshots-list",
@@ -219,7 +124,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "agent-progress",
         "agent-progress-clear",
         "agent-cancel",
-        "scan",
         "models",
         "preview-page",
         "preview-html",
@@ -227,56 +131,27 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "save",
         "draft",
         "init-template",
-        "generate-task",
-        "generate-page",
-        "generate-review",
-        "generation-input",
-        "generation-history",
-        "generation-history-entry",
-        "generate-page-captures",
-        "update-task",
-        "generate-text-all",
-        "generate-diagram-all",
-        "generate-api",
-        "approve",
-        "record",
-        "record-screenshot",
-        "record-diagram",
         "build",
         "build-mkdocs",
-        "ui-map",
-        "ui-map-import",
-        "ui-explore",
         "deps",
         "impact",
-        "impact-plan",
-        "generate-impacted",
         "context",
         "markits-render",
         "markits-capture",
-        "ui-map-from-image",
-        "ui-map-from-desktop",
         "list-windows",
         "list-accessible-windows",
         "inspect-window",
         "activate-window",
-        "capture-window",
-        "recapture",
-        "capture-source-save",
-        "capture-source-auto",
         "editor-read",
         "editor-save",
         "editor-preview",
-        "page-tasks",
         "create-folder",
         "save-asset",
         "scenario-run",
         "scenario-save",
         "scenario-load",
-        "scenario-link",
         "scenario-test",
         "e2e",
-        "fact-check",
         "pty-spawn",
         "pty-write",
         "pty-read",
@@ -313,28 +188,17 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
     let mut page_opt: Option<&str> = None;
     let mut asset_opt: Option<&str> = None;
     let mut image_opt: Option<&str> = None;
-    let mut cli_opt: Option<&str> = None;
     let mut draft_flag = false;
     let mut format_opt: Option<&str> = None;
     let mut mkdocs_settings_opt: Option<&str> = None;
-    let mut feedback_opt: Option<&str> = None;
     let mut body_opt: Option<&str> = None;
-    let mut bodies_opt: Option<&str> = None;
-    let mut project_opt: Option<&str> = None;
-    let mut lang_opt: Option<&str> = None;
     let mut ref_opt: Option<&str> = None;
     let mut json_opt: Option<&str> = None;
     let mut input_opt: Option<&str> = None;
     let mut window_opt: Option<&str> = None;
-    let mut inset_opt: Option<&str> = None;
     let mut targets_opt: Option<&str> = None;
     let mut template_opt: Option<&str> = None;
     let mut clear_flag = false;
-    let mut refresh_flag = false;
-    let mut check_flag = false;
-    let mut ai_flag = false;
-    let mut url_opt: Option<&str> = None;
-    let mut max_pages_opt: Option<&str> = None;
     let mut audience_opt: Option<&str> = None;
     let mut path_opt: Option<&str> = None;
     let mut data_opt: Option<&str> = None;
@@ -364,9 +228,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             "--targets" => targets_opt = Some(*value),
             "--template" => template_opt = Some(*value),
             "--clear" => clear_flag = true,
-            "--refresh" => refresh_flag = true,
-            "--check" => check_flag = true,
-            "--ai" => ai_flag = true,
             "--detect-ui" => detect_ui_flag = true,
             "--crop" => crop_flag = true,
             "--crop-margin" => crop_margin_opt = Some(*value),
@@ -391,23 +252,15 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             "--page" => page_opt = Some(*value),
             "--asset" => asset_opt = Some(*value),
             "--image" => image_opt = Some(*value),
-            "--cli" => cli_opt = Some(*value),
             "--draft" => draft_flag = true,
             "--format" => format_opt = Some(*value),
             "--mkdocs-settings" => mkdocs_settings_opt = Some(*value),
-            "--feedback" => feedback_opt = Some(*value),
             "--body" => body_opt = Some(*value),
-            "--bodies" => bodies_opt = Some(*value),
-            "--project" => project_opt = Some(*value),
-            "--lang" => lang_opt = Some(*value),
             "--git-ref" | "--ref" => ref_opt = Some(*value),
             "--json" => json_opt = Some(*value),
             "--input" => input_opt = Some(*value),
             "--window" => window_opt = Some(*value),
-            "--url" => url_opt = Some(*value),
-            "--max-pages" => max_pages_opt = Some(*value),
             "--audience" => audience_opt = Some(*value),
-            "--inset" => inset_opt = Some(*value),
             "--path" => path_opt = Some(*value),
             "--data" => data_opt = Some(*value),
             "--assets" => assets_opt = Some(*value),
@@ -533,11 +386,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             page_opt.ok_or("editor-preview requires --page")?,
             body_opt.ok_or("editor-preview requires --body")?,
         ),
-        "page-tasks" => serde_json::to_string(&task::tasks_for_page(
-            root,
-            page_opt.ok_or("page-tasks requires --page")?,
-        )?)
-        .map_err(|error| error.to_string()),
         "create-folder" => {
             let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}"))
                 .map_err(|error| error.to_string())?;
@@ -562,25 +410,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             serde_json::to_string(&window_capture::activate_window(window_id)?)
                 .map_err(|error| error.to_string())
         }
-        "capture-window" => {
-            let task_id = id_opt.ok_or("capture-window requires --id")?;
-            let window_id = window_opt.ok_or("capture-window requires --window")?;
-            let inset = inset_opt
-                .unwrap_or("0")
-                .parse::<u32>()
-                .map_err(|_| "Invalid --inset value")?;
-            if inset > 64 {
-                return Err("Inset cannot exceed 64 pixels".into());
-            }
-            capture_source::capture(root, task_id, window_id, inset)
-        }
-        "recapture" => capture_source::recapture(root, id_opt.ok_or("recapture requires --id")?),
-        "capture-source-save" => capture_source::save_scenario(
-            root,
-            id_opt.ok_or("capture-source-save requires --id")?,
-            input_opt.ok_or("capture-source-save requires --input")?,
-        ),
-        "capture-source-auto" => capture_source::auto_assign_and_capture(root),
         "scenario-run" => {
             let input = input_opt.ok_or("scenario-run requires --input")?;
             scenario::run(root, input)
@@ -594,24 +423,14 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let input = input_opt.ok_or("scenario-load requires --input")?;
             scenario::load(root, input)
         }
-        "scenario-link" => {
-            let input = input_opt.ok_or("scenario-link requires --input")?;
-            let page = page_opt.ok_or("scenario-link requires --page")?;
-            scenario::link(root, input, page)
-        }
         "scenario-test" => {
             let input = input_opt.ok_or("scenario-test requires --input")?;
             scenario::test(root, input)
         }
         "e2e" => scenario::test_manual(root),
-        "fact-check" => fact::verify_with_ai(root, check_flag, ai_flag),
         "state" => {
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
-        }
-        "scan" => {
-            let entries = scan_entries(&templates_path, &generated_path);
-            serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
         }
         "models" => {
             let target_agent = agent_opt.unwrap_or(&cfg.agent);
@@ -665,6 +484,12 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
+        "screenshot-ai-application" | "screenshot-ai-plan" | "screenshot-ai-capture" | "screenshot-ai-annotate" => {
+            let options:serde_json::Value=serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
+            match action {"screenshot-ai-application"=>screenshot_ai::application(root,&options),"screenshot-ai-plan"=>screenshot_ai::plan(root,&options),"screenshot-ai-capture"=>screenshot_ai::capture(root,&options),_=>screenshot_ai::annotate(root,&options)}
+        }
+        "document-review" => document_review::review(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
+        "selection-generate" => selection_ai::generate(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "draft" => {
             author::draft(root)?;
             let state_val = get_state(root)?;
@@ -677,160 +502,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             )?;
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
-        }
-        "generation-input" => {
-            let options: generation_review::GenerationOptions =
-                serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
-            Ok(generation_review::input(
-                root,
-                page_opt.ok_or("generation-input requires page")?,
-                id_opt,
-                feedback_opt.unwrap_or(""),
-                &options,
-            )?
-            .to_string())
-        }
-        "generation-history" => Ok(generation_review::history(
-            root,
-            page_opt.ok_or("generation-history requires page")?,
-        )?
-        .to_string()),
-        "generation-history-entry" => Ok(generation_review::history_entry(
-            root,
-            id_opt.ok_or("generation-history-entry requires id")?,
-        )?
-        .to_string()),
-        "generate-review" => {
-            let bodies_map = if let Some(b_json) = bodies_opt {
-                serde_json::from_str::<std::collections::HashMap<String, String>>(b_json).ok()
-            } else {
-                None
-            };
-            let options: generation_review::GenerationOptions =
-                serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
-            generation_review::generate_with_options(
-                root,
-                page_opt.ok_or("generate-review requires --page")?,
-                id_opt,
-                feedback_opt.unwrap_or(""),
-                body_opt,
-                bodies_map,
-                &options,
-            )
-        }
-        "generate-page-captures" => {
-            let page = page_opt.ok_or("generate-page-captures requires --page")?;
-            let options: generation_review::GenerationOptions =
-                serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
-            generation_review::selected_tasks(root, page, None, &options)?;
-            Ok(author::generate_page_at_selected(
-                root,
-                page,
-                "",
-                &templates_path,
-                &generated_path,
-                true,
-                false,
-                "",
-                options.ids.as_deref(),
-            )?
-            .to_string())
-        }
-        "generate-task" => {
-            let task_id = id_opt.ok_or("generate-task requires --id")?;
-            let cli = cli_opt.unwrap_or("");
-            let feedback = feedback_opt.unwrap_or("");
-            author::generate_task(root, task_id, cli, feedback)?;
-            Ok(String::new())
-        }
-        "generate-page" => {
-            let page = page_opt.ok_or("generate-page requires --page")?;
-            Ok(author::generate_page(root, page, cli_opt.unwrap_or(""))?.to_string())
-        }
-        "update-task" => {
-            let task_id = id_opt.ok_or("update-task requires --id")?;
-            let prompt = feedback_opt.ok_or("update-task requires --feedback")?;
-            task::update_task_prompt(&templates_path, task_id, prompt)?;
-            Ok(String::new())
-        }
-        "generate-text-all" => {
-            let cli = cli_opt.unwrap_or("");
-            let task_list = task::tasks(&templates_path)?;
-            let mut updated = 0;
-            for t in task_list {
-                if t.kind == "text" {
-                    if author::generate_task(root, &t.id, cli, "").is_ok() {
-                        updated += 1;
-                    }
-                }
-            }
-            let res = serde_json::json!({
-                "updated": updated
-            });
-            Ok(res.to_string())
-        }
-        "generate-diagram-all" => {
-            let cli = cli_opt.unwrap_or("");
-            let task_list = task::tasks(&templates_path)?;
-            let mut updated = 0;
-            for t in task_list {
-                if t.kind == "diagram" {
-                    author::generate_task(root, &t.id, cli, "")?;
-                    updated += 1;
-                }
-            }
-            let res = serde_json::json!({
-                "updated": updated
-            });
-            Ok(res.to_string())
-        }
-        "generate-api" => {
-            let lang = lang_opt.unwrap_or("auto");
-            let result = crate::analyze_directory(root)?;
-            let count = crate::mkdocs::generate_api_reference(&result, &templates_path, lang)?;
-            let res = serde_json::json!({
-                "count": count,
-                "api_page": "api.md",
-                "modules_dir": "modules"
-            });
-            Ok(res.to_string())
-        }
-        "approve" => {
-            let task_id = id_opt.ok_or("approve requires --id")?;
-            approve_task(&templates_path, &generated_path, task_id)?;
-            Ok(String::new())
-        }
-        "record" => {
-            let task_id = id_opt.ok_or("record requires --id")?;
-            let body_file = body_opt.ok_or("record requires --body")?;
-            let body_path = root.join(body_file);
-            let body = fs::read_to_string(&body_path)
-                .map_err(|e| format!("Failed to read body file: {e}"))?;
-            let task = task::find_task(&templates_path, task_id)?;
-            update_task_in_docs(&templates_path, &task, &body, None)?;
-            save_answer(&generated_path, &task, &body)?;
-            Ok(String::new())
-        }
-        "record-screenshot" => {
-            let task_id = id_opt.ok_or("record-screenshot requires --id")?;
-            let img = image_opt.ok_or("record-screenshot requires --image")?;
-            let image_path = Path::new(img);
-            author::record_screenshot(root, task_id, image_path)?;
-            Ok(String::new())
-        }
-        "record-diagram" => {
-            let task_id = id_opt.ok_or("record-diagram requires --id")?;
-            let cli = cli_opt.unwrap_or("");
-            let proj = project_opt.unwrap_or("manual/fixtures/diagram_project");
-            let project_path = root.join(proj);
-            author::record_diagram(
-                &templates_path,
-                &generated_path,
-                task_id,
-                cli,
-                &project_path,
-            )?;
-            Ok(String::new())
         }
         "build" | "build-mkdocs" => {
             let result = if let Some(audience) = audience_opt {
@@ -856,34 +527,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             }
             Ok(result)
         }
-        "ui-map" => {
-            let map = if refresh_flag {
-                uimap::refresh_ui_map(root)
-            } else {
-                uimap::extract_ui_map(root)
-            };
-            let _ = uimap::save_ui_map(root, &map);
-            serde_json::to_string_pretty(&map).map_err(|e| e.to_string())
-        }
-        "ui-map-import" => {
-            let input = input_opt.ok_or("ui-map-import requires --input")?;
-            let input_path = Path::new(input);
-            let input_path = if input_path.is_absolute() {
-                input_path.to_path_buf()
-            } else {
-                root.join(input_path)
-            };
-            let map = uimap::import_ui_observation(root, &input_path)?;
-            serde_json::to_string_pretty(&map).map_err(|e| e.to_string())
-        }
-        "ui-explore" => {
-            let url = url_opt.ok_or("ui-explore requires --url")?;
-            let max_pages = max_pages_opt
-                .unwrap_or("10")
-                .parse::<usize>()
-                .map_err(|_| "Invalid --max-pages value")?;
-            ui_explore::explore(root, url, max_pages)
-        }
         "deps" => {
             let graph = deps::build_manual_dependency_graph(root, &templates_path)?;
             serde_json::to_string_pretty(&graph).map_err(|e| e.to_string())
@@ -891,29 +534,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "impact" => {
             let report = deps::analyze_git_impact(root, ref_opt)?;
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
-        }
-        "impact-plan" | "generate-impacted" => {
-            let report = deps::analyze_git_impact(root, ref_opt)?;
-            let all_tasks = task::tasks(&templates_path)?;
-            let plan = plan_impacted_tasks(report, &all_tasks);
-            if action == "impact-plan" {
-                return serde_json::to_string_pretty(&plan).map_err(|e| e.to_string());
-            }
-            let cli = cli_opt.unwrap_or("");
-            let mut generated = Vec::new();
-            for task_id in &plan.generate_tasks {
-                author::generate_task(root, task_id, cli, "").map_err(|error| {
-                    format!("Failed to generate impacted task {task_id}: {error}")
-                })?;
-                generated.push(task_id.clone());
-            }
-            serde_json::to_string_pretty(&serde_json::json!({
-                "generated": generated,
-                "manual_tasks": plan.manual_tasks,
-                "approved_tasks": plan.approved_tasks,
-                "page_only": plan.page_only,
-            }))
-            .map_err(|e| e.to_string())
         }
         "context" => {
             let ctx = context::build_application_context(root);
@@ -1119,29 +739,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             });
             serde_json::to_string_pretty(&res).map_err(|e| e.to_string())
         }
-        "ui-map-from-image" => {
-            let img = image_opt.ok_or("ui-map-from-image requires --image")?;
-            let img_path = if Path::new(img).is_absolute() {
-                PathBuf::from(img)
-            } else {
-                root.join(img)
-            };
-            let map = uimap::import_from_markits_image(root, &img_path)?;
-            serde_json::to_string_pretty(&map).map_err(|e| e.to_string())
-        }
-        "ui-map-from-desktop" => {
-            let x = x_opt.and_then(|v| v.parse::<f64>().ok());
-            let y = y_opt.and_then(|v| v.parse::<f64>().ok());
-            let w = width_opt.and_then(|v| v.parse::<f64>().ok());
-            let h = height_opt.and_then(|v| v.parse::<f64>().ok());
-            let bounds = if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, w, h) {
-                Some((x, y, w, h))
-            } else {
-                None
-            };
-            let map = uimap::import_from_desktop(root, bounds)?;
-            serde_json::to_string_pretty(&map).map_err(|e| e.to_string())
-        }
         _ => unreachable!(),
     }
 }
@@ -1160,6 +757,7 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
     let options = &request["options"];
     let id = || options["id"].as_str().ok_or("実行IDを指定してください。");
     let page = || options["page"].as_str().ok_or("原稿を指定してください。");
+    if matches!(action,"execution-begin"|"execution-checkpoint"|"execution-finish"|"execution-resume"){return Err(format!("AIタグ機能は廃止されました: {action}"));}
     let workflow_result = match action {
         "execution-begin" => Some(workflow::begin(project, page()?, &options["json"])),
         "execution-checkpoint" => Some(workflow::checkpoint(project, id()?, &options["json"])),
@@ -1229,6 +827,7 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
     run(Path::new(root), action, &options)
 }
 
+#[cfg(test)]
 #[derive(Serialize)]
 struct ImpactPlan {
     impact: deps::ImpactReport,
@@ -1238,6 +837,7 @@ struct ImpactPlan {
     page_only: Vec<String>,
 }
 
+#[cfg(test)]
 fn plan_impacted_tasks(impact: deps::ImpactReport, all_tasks: &[task::Task]) -> ImpactPlan {
     let affected: HashSet<&str> = impact
         .impacted_pages
@@ -1283,6 +883,7 @@ fn plan_impacted_tasks(impact: deps::ImpactReport, all_tasks: &[task::Task]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::task::{update_task_in_docs,approve_task};
     use tempfile::tempdir;
 
     #[test]
@@ -1397,10 +998,7 @@ mod tests {
         assert!(pages.iter().any(|p| p.as_str() == Some("README.md")));
         assert!(pages.iter().any(|p| p.as_str() == Some("index.md")));
 
-        let tasks = state["tasks"].as_array().unwrap();
-        assert_eq!(tasks.len(), 2);
-        assert!(tasks.iter().any(|t| t["id"] == "readme-intro"));
-        assert!(tasks.iter().any(|t| t["id"] == "doc-intro"));
+        assert!(state.get("tasks").is_none());
 
         // update_task_in_docs for README.md
         let readme_task = task::find_task(&docs, "readme-intro").unwrap();
@@ -1451,10 +1049,7 @@ mod tests {
         let direct = task::tasks_for_page(root, "Readme.md").unwrap();
         assert_eq!(direct.len(), 1);
         assert_eq!(direct[0].page, "Readme.md");
-        let through_action: Vec<task::Task> =
-            serde_json::from_str(&run(root, "page-tasks", &[("--page", "Readme.md")]).unwrap())
-                .unwrap();
-        assert_eq!(through_action, direct);
+        assert!(run(root, "page-tasks", &[("--page", "Readme.md")]).unwrap_err().contains("廃止"));
 
         let task = direct[0].clone();
         update_task_in_docs(&root.join("docs"), &task, "Generated body", None).unwrap();
@@ -1526,9 +1121,8 @@ mod tests {
         assert!(docs.join("settings.md").is_file());
 
         let state = get_state(root).unwrap();
-        let tasks = state["tasks"].as_array().unwrap();
-        assert!(tasks.iter().any(|t| t["kind"] == "screenshot"));
-        assert!(tasks.iter().any(|t| t["kind"] == "text"));
+        assert!(state.get("tasks").is_none());
+        assert!(!fs::read_to_string(docs.join("index.md")).unwrap().contains("ai:task"));
     }
 
     #[test]
@@ -1556,11 +1150,8 @@ mod tests {
         assert_eq!(state["config"]["agent"], "claude");
         assert_eq!(state["config"]["model"], "test-model");
         assert!(root.join("guide/index.md").is_file());
-        assert!(state["tasks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|task| task["kind"] == "screenshot"));
+        assert!(state.get("tasks").is_none());
+        assert!(!fs::read_to_string(root.join("guide/index.md")).unwrap().contains("ai:task"));
     }
 
     #[test]
@@ -1667,8 +1258,8 @@ mod tests {
         assert!(!docs.join("quickstart.md").is_file());
 
         let state = get_state(root).unwrap();
-        let tasks = state["tasks"].as_array().unwrap();
-        assert!(tasks.iter().any(|t| t["kind"] == "diagram"));
+        assert!(state.get("tasks").is_none());
+        assert!(!fs::read_to_string(docs.join("architecture.md")).unwrap().contains("ai:task"));
 
         // バックアップが存在すること
         let backup_dir = root.join("manual").join(".backup");
@@ -1849,9 +1440,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(fs::read_to_string(docs.join("index.md"))
-            .unwrap()
-            .contains("ai:task id=overview-screenshot kind=screenshot"));
+        let index=fs::read_to_string(docs.join("index.md")).unwrap();
+        assert!(index.contains("# New guide"));
+        assert!(!index.contains("ai:task"));
         assert_eq!(
             fs::read_to_string(docs.join("chapters/start.md")).unwrap(),
             "# Getting started\n"
@@ -1860,14 +1451,14 @@ mod tests {
     }
 
     #[test]
-    fn test_ai_manual_draft_requires_overview_screenshot_task() {
+    fn test_ai_manual_draft_accepts_plain_manuscript() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let docs = root.join("docs");
         fs::create_dir_all(&docs).unwrap();
         fs::write(docs.join("index.md"), "Original guide").unwrap();
 
-        let err = template::init_template_with_response(
+        template::init_template_with_response(
             root,
             "manual",
             true,
@@ -1876,14 +1467,14 @@ mod tests {
                 {"path": "quickstart.md", "content": "# Quickstart"}
             ]})),
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(err.contains("index.md screenshot ai:task"));
         assert_eq!(
             fs::read_to_string(docs.join("index.md")).unwrap(),
-            "Original guide"
+            "# New guide\n"
         );
-        assert!(!root.join("manual_setting.json").exists());
+        assert!(root.join("manual_setting.json").exists());
+        assert!(root.join("manual/.backup").is_dir());
     }
 
     #[test]
@@ -2195,201 +1786,6 @@ mod tests {
     }
 
     #[test]
-    fn test_uimap_extraction() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let html_content = r#"
-            <div id="main-view">
-                <button id="btn-start" title="Start analysis">開始</button>
-                <input id="query-input" placeholder="Search..." />
-            </div>
-        "#;
-        fs::write(root.join("index.html"), html_content).unwrap();
-
-        let src_dir = root.join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-        let ts_content = r#"
-            const panel = document.getElementById("results-panel");
-        "#;
-        fs::write(src_dir.join("main.ts"), ts_content).unwrap();
-
-        let map = uimap::extract_ui_map(root);
-        assert!(!map.views.is_empty());
-        let all_elements: Vec<_> = map.views.iter().flat_map(|v| &v.elements).collect();
-        assert!(all_elements.iter().any(|e| e.id == "btn-start"));
-        assert!(all_elements.iter().any(|e| e.id == "query-input"));
-        assert!(all_elements.iter().any(|e| e.id == "results-panel"));
-    }
-
-    #[test]
-    fn test_generated_uimap_refreshes_when_source_changes() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        fs::write(
-            root.join("index.html"),
-            "<button id=\"old-button\">Old</button>",
-        )
-        .unwrap();
-        let first = uimap::extract_ui_map(root);
-        uimap::save_ui_map(root, &first).unwrap();
-
-        fs::write(
-            root.join("index.html"),
-            "<button id=\"new-button\">New</button>",
-        )
-        .unwrap();
-        let refreshed = uimap::extract_ui_map(root);
-        let ids: Vec<_> = refreshed
-            .views
-            .iter()
-            .flat_map(|view| &view.elements)
-            .map(|element| element.id.as_str())
-            .collect();
-        assert!(ids.contains(&"new-button"));
-        assert!(!ids.contains(&"old-button"));
-        assert_ne!(first.source_hash, refreshed.source_hash);
-    }
-
-    #[test]
-    fn test_manual_uimap_override_is_preserved() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        fs::write(
-            root.join("index.html"),
-            "<button id=\"source-button\">Source</button>",
-        )
-        .unwrap();
-        let mut manual_map = uimap::extract_ui_map(root);
-        manual_map.project_name = "custom".to_string();
-        manual_map.source_hash = None;
-        uimap::save_ui_map(root, &manual_map).unwrap();
-
-        fs::write(
-            root.join("index.html"),
-            "<button id=\"new-button\">New</button>",
-        )
-        .unwrap();
-        assert_eq!(uimap::extract_ui_map(root).project_name, "custom");
-        let refreshed = run(root, "ui-map", &[("--refresh", "")]).unwrap();
-        assert!(refreshed.contains("new-button"));
-        assert!(!refreshed.contains("source-button"));
-    }
-
-    #[test]
-    fn test_uimap_ignores_generated_manual_and_scans_each_app_html() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        fs::create_dir_all(root.join("manual")).unwrap();
-        fs::write(
-            root.join("index.html"),
-            "<button id=\"first\">First</button>",
-        )
-        .unwrap();
-        fs::write(
-            root.join("settings.html"),
-            "<button id=\"second\">Second</button>",
-        )
-        .unwrap();
-        fs::write(
-            root.join("manual/index.html"),
-            "<button id=\"docs-only\">Docs</button>",
-        )
-        .unwrap();
-
-        let map = uimap::extract_ui_map(root);
-        let ids: Vec<_> = map
-            .views
-            .iter()
-            .flat_map(|view| &view.elements)
-            .map(|element| element.id.as_str())
-            .collect();
-        assert!(ids.contains(&"first"));
-        assert!(ids.contains(&"second"));
-        assert!(!ids.contains(&"docs-only"));
-    }
-
-    #[test]
-    fn test_ui_observation_import_merges_runtime_elements() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        fs::write(
-            root.join("index.html"),
-            "<button id=\"settings\">Settings</button>",
-        )
-        .unwrap();
-        let observation = serde_json::json!({
-            "source": "http://127.0.0.1:3000/settings",
-            "platform": "web",
-            "views": [{
-                "id": "main-view",
-                "name": "Settings dialog",
-                "elements": [
-                    {"id": "settings", "selector": "#settings", "name": "Open Settings", "role": "button"},
-                    {"id": "model", "selector": "#model", "name": "AI model", "role": "combobox"}
-                ]
-            }]
-        });
-        fs::write(root.join("observation.json"), observation.to_string()).unwrap();
-
-        run(root, "ui-map-import", &[("--input", "observation.json")]).unwrap();
-        let map = uimap::extract_ui_map(root);
-        let view = map
-            .views
-            .iter()
-            .find(|view| view.id == "main-view")
-            .unwrap();
-        assert_eq!(view.name, "Settings dialog");
-        assert_eq!(
-            view.observed_from.as_deref(),
-            Some("http://127.0.0.1:3000/settings")
-        );
-        assert_eq!(view.elements.len(), 2);
-        assert!(view
-            .elements
-            .iter()
-            .any(|element| element.name == "AI model"));
-        assert!(root.join("manual/ui_observations.json").is_file());
-
-        fs::write(
-            root.join("index.html"),
-            "<button id=\"changed\">Changed</button>",
-        )
-        .unwrap();
-        let updated = uimap::extract_ui_map(root);
-        assert!(updated
-            .views
-            .iter()
-            .flat_map(|view| &view.elements)
-            .any(|element| element.id == "changed"));
-        assert!(!updated
-            .views
-            .iter()
-            .flat_map(|view| &view.elements)
-            .any(|element| element.id == "model"));
-    }
-
-    #[test]
-    fn test_ui_observation_rejects_duplicate_selectors() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let observation = serde_json::json!({
-            "source": "PyCharm Settings",
-            "platform": "linux-x11",
-            "views": [{
-                "id": "settings",
-                "name": "Settings",
-                "elements": [
-                    {"id": "one", "selector": "accessibility:Settings", "name": "First", "role": "button"},
-                    {"id": "two", "selector": "accessibility:Settings", "name": "Second", "role": "button"}
-                ]
-            }]
-        });
-        fs::write(root.join("observation.json"), observation.to_string()).unwrap();
-        assert!(run(root, "ui-map-import", &[("--input", "observation.json")]).is_err());
-        assert!(!root.join("manual/ui_observations.json").exists());
-    }
-
-    #[test]
     fn test_context_building() {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
@@ -2419,6 +1815,22 @@ mod tests {
         assert!(ctx.readme_summary.contains("Sample App"));
         assert!(ctx.key_modules.iter().any(|m| m.contains("service")));
         assert!(ctx.prompt_summary.contains("sample_app"));
+    }
+
+    #[test]
+    fn removed_ui_map_actions_are_rejected_and_legacy_data_is_preserved() {
+        let root = tempdir().unwrap();
+        fs::create_dir_all(root.path().join("manual")).unwrap();
+        let legacy = root.path().join("manual/ui_map.json");
+        fs::write(&legacy, "legacy user data").unwrap();
+        for action in ["ui-map", "ui-map-import", "ui-explore", "ui-map-from-image", "ui-map-from-desktop"] {
+            assert!(run(root.path(), action, &[]).unwrap_err().contains("Unsupported manual action"));
+        }
+        let context = serde_json::to_value(context::build_application_context(root.path())).unwrap();
+        assert!(context.get("ui_map").is_none());
+        let state: serde_json::Value = serde_json::from_str(&run(root.path(), "state", &[]).unwrap()).unwrap();
+        assert!(state.get("ui_map").is_none());
+        assert_eq!(fs::read_to_string(legacy).unwrap(), "legacy user data");
     }
 
     #[test]
@@ -2590,10 +2002,7 @@ mod tests {
             .reasons
             .iter()
             .any(|r| r.contains("src/settings.rs")));
-        let plan: serde_json::Value =
-            serde_json::from_str(&run(root, "impact-plan", &[("--ref", "HEAD")]).unwrap()).unwrap();
-        assert_eq!(plan["manual_tasks"], serde_json::json!(["settings-shot"]));
-        assert_eq!(plan["generate_tasks"], serde_json::json!([]));
+        assert!(run(root,"impact-plan", &[("--ref","HEAD")]).unwrap_err().contains("廃止"));
         assert!(deps::analyze_git_impact(root, Some("no-such-ref"))
             .unwrap_err()
             .contains("Failed to compare Git ref"));
@@ -2861,92 +2270,6 @@ mod tests {
         assert!(fs::read_to_string(&page)
             .unwrap()
             .contains(&format!("id={}", original.id)));
-    }
-
-    #[test]
-    fn test_markits_uimap_import_and_uid_generation() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let manual_dir = root.join("manual");
-        fs::create_dir_all(&manual_dir).unwrap();
-
-        // 10x10 PNG with embedded MarkIts UIMap
-        let elements = vec![
-            markits::UiElement::new("button", "保存", 10.0, 20.0, 80.0, 30.0),
-            markits::UiElement::new("input", "ユーザー名", 10.0, 60.0, 150.0, 25.0),
-        ];
-        let img = image::RgbaImage::new(100, 100);
-        let mut png_bytes = Vec::new();
-        img.write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .unwrap();
-        let embedded = markits::raster::embed_png_uimap(&png_bytes, &elements).unwrap();
-        let img_path = manual_dir.join("login_screen.png");
-        fs::write(&img_path, embedded).unwrap();
-
-        // Import into UIMap
-        let map = uimap::import_from_markits_image(root, &img_path).unwrap();
-        assert_eq!(map.views.len(), 1);
-        let view = &map.views[0];
-        assert_eq!(view.id, "login_screen");
-        assert_eq!(view.elements.len(), 2);
-
-        // Check UID and selectors
-        assert_eq!(view.elements[0].role, "button");
-        assert_eq!(view.elements[0].name, "保存");
-        assert_eq!(view.elements[0].selector, "button[name=\"保存\"]");
-        assert!(view.elements[0].id.starts_with("button-"));
-
-        assert_eq!(view.elements[1].role, "input");
-        assert_eq!(view.elements[1].name, "ユーザー名");
-        assert_eq!(view.elements[1].selector, "input[name=\"ユーザー名\"]");
-
-        // Verify saved manual/ui_map.json
-        let saved_json = fs::read_to_string(manual_dir.join("ui_map.json")).unwrap();
-        let parsed: uimap::UIMap = serde_json::from_str(&saved_json).unwrap();
-        assert_eq!(parsed.views[0].id, "login_screen");
-        assert_eq!(
-            parsed.views[0].elements[0].selector,
-            "button[name=\"保存\"]"
-        );
-    }
-
-    #[test]
-    fn test_ui_map_from_image_action() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let assets_dir = root.join("docs").join("assets");
-        fs::create_dir_all(&assets_dir).unwrap();
-
-        let elements = vec![markits::UiElement::new(
-            "button", "送信", 5.0, 5.0, 40.0, 20.0,
-        )];
-        let img = image::RgbaImage::new(50, 50);
-        let mut png_bytes = Vec::new();
-        img.write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .unwrap();
-        let embedded = markits::raster::embed_png_uimap(&png_bytes, &elements).unwrap();
-        let img_path = assets_dir.join("submit_shot.png");
-        fs::write(&img_path, embedded).unwrap();
-
-        let result = run(
-            root,
-            "ui-map-from-image",
-            &[("--image", "docs/assets/submit_shot.png")],
-        )
-        .unwrap();
-        let parsed: uimap::UIMap = serde_json::from_str(&result).unwrap();
-        assert_eq!(parsed.views[0].id, "submit_shot");
-        assert_eq!(parsed.views[0].elements[0].name, "送信");
-        assert_eq!(
-            parsed.views[0].elements[0].selector,
-            "button[name=\"送信\"]"
-        );
     }
 
     #[test]

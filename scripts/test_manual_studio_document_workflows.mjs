@@ -26,7 +26,10 @@ try {
   async function tree(file){await page.locator('#tree-search').fill(file.split('/').at(-1));await page.locator(`[data-page="${file}"],[data-image="${file}"]`).click();await idle();await page.locator('#tree-search').fill('');}
   await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   assert.equal(await page.locator('#save-page').count(),0,'the editor has no save button');
-  assert.equal(await page.locator('#shortcut-help + #generate-page').textContent(),'更新');
+  assert.equal(await page.locator('#generate-page').count(),0,'the retired task update button is not present');
+  await page.locator('#editor-more>summary').click();
+  assert.equal(await page.locator('#shortcut-help').textContent(),'ショートカット');
+  await page.locator('#editor-more>summary').click();
   await page.locator('#markdown-editor').fill(initial+'Autosaved draft.\n');
   await page.waitForFunction(()=>document.querySelector('#document-tabs [data-document-page="index.md"]').textContent==='index.md');
   assert.match(await readFile(path.join(root,'docs/index.md'),'utf8'),/Autosaved draft/,'idle edits are persisted without a save action');
@@ -85,11 +88,11 @@ try {
   await readFile(path.join(root,'docs/index.md'));assert.equal((await rpc('state')).includes('docs/nested/new-folder'),true);
   await page.locator('[data-folder="docs/nested"]>summary').click({button:'right'});await page.getByRole('menuitem',{name:'Markdownを作成',exact:true}).click();await page.locator('#new-page-path').fill('docs/nested/new-page.md');await page.locator('#new-page-title').fill('New page');await page.locator('#new-page-form button[type=submit]').click();await idle();assert.match(await readFile(path.join(root,'docs/nested/new-page.md'),'utf8'),/# New page/);
   await tree('docs/output.md');await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
-  await page.locator('.ai-output-metadata').first().waitFor({state:'attached'});assert.equal(await page.locator('.ai-output-metadata').first().isVisible(),false);assert.match(await page.locator('.milkdown-ai-task-body').textContent(),/Generated body/);assert.match(await page.locator('#markdown-editor').inputValue(),/ai:generated/);
+  assert.equal(await page.locator('.milkdown-ai-task').count(),0);assert.match(await page.locator('.ProseMirror').textContent(),/Generated body/);assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/ai:generated|ai:task/);
   // Preserve rich editor undo state when switching between document tabs.
-  await page.locator('.milkdown-ai-task-body p:not(.ai-output-metadata)').last().click();await page.keyboard.press('End');await page.keyboard.type(' rich draft');const richDraft=await page.locator('#markdown-editor').inputValue();
+  await page.locator('.ProseMirror p').filter({hasText:'Generated body'}).click();await page.keyboard.press('End');await page.keyboard.type(' rich draft');const richDraft=await page.locator('#markdown-editor').inputValue();
   await page.locator('[data-document-page="index.md"]').click();await idle();await page.locator('[data-document-page="output.md"]').click();await idle();assert.equal(await page.locator('#markdown-editor').inputValue(),richDraft);
-  await page.locator('.milkdown-ai-task-body p:not(.ai-output-metadata)').last().click();await page.keyboard.press('Control+z');assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/rich draft/);
+  await page.locator('.ProseMirror p').filter({hasText:'Generated body'}).click();await page.keyboard.press('Control+z');assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/rich draft/);
   // Display customization persists and can be reset.
   await page.locator('#settings-menu>summary').click();await page.getByRole('button',{name:'外観設定',exact:true}).click();await page.locator('#toolbar-customization>summary').click();
   const bold=page.locator('#toolbar-customization-list label').filter({hasText:/^太字$/}).locator('input');await bold.uncheck();assert.equal(await page.locator('.milkdown-top-bar button[aria-label="太字"]').isVisible(),false);

@@ -36,7 +36,7 @@ fn main() {
         }
         match args.get(1).map(String::as_str) {
             None | Some("--help" | "-h") => {
-                println!("Usage: manualctl ACTION --root PROJECT [OPTIONS]\nActions: state, editor-read, editor-save, editor-preview, capture-window, recapture, capture-source-save, ui-map, scenario-run, build, ...");
+                println!("Usage: manualctl ACTION --root PROJECT [OPTIONS]\nActions: state, editor-read, editor-save, editor-preview, selection-generate, document-review, screenshots-list, screenshots-recapture, scenario-run, build, ...");
                 return;
             }
             Some(action) => manual_core::run(std::path::Path::new(root), action, &options),
