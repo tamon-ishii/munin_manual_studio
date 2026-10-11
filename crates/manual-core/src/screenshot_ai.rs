@@ -136,7 +136,7 @@ pub(crate) fn plan(root: &Path, options: &Value) -> Result<String, String> {
     crate::platform::application_executable_in(root, app["program"].as_str().unwrap())?;
     let config = crate::config::read_config(root);
     let schema = json!({"type":"object","properties":{"steps":{"type":"array","items":{"type":"object","properties":{"action":{"type":"string","enum":["click","expect_visible","wait_ms"]},"selector":{"type":"string"},"milliseconds":{"type":"integer"}},"required":["action","selector","milliseconds"],"additionalProperties":false}},"summary":{"type":"string"},"annotate":{"type":"boolean"}},"required":["steps","summary","annotate"],"additionalProperties":false});
-    let prompt=format!("Prepare minimal desktop navigation steps to reach the requested screen. Only use observed accessibility selectors from the tree. Each step has action, selector and milliseconds. Allowed actions are click or expect_visible with an observed selector (milliseconds=0), and wait_ms with milliseconds up to 3000 (selector empty). Do not include launch/window/screenshot, coordinates, text entry, keys or destructive actions. If the screen is already visible return an empty steps array. Never invent controls. Return annotate=true only when numbering, explanations or highlighting are requested; for a plain screenshot return annotate=false. Input JSON: {}",json!({"instruction":instruction,"window":window,"accessibility":tree}));
+    let prompt=format!("Prepare minimal desktop navigation steps to reach the requested screen. Only use observed accessibility selectors from the tree. A selector MUST use role[name='exact accessible name'], for example button[name='AI設定']. Use the role and complete name exactly as shown in the tree, never a bare name, CSS id, XPath or translated label. Each step has action, selector and milliseconds. Allowed actions are click or expect_visible with an observed selector (milliseconds=0), and wait_ms with milliseconds up to 3000 (selector empty). Do not include launch/window/screenshot, coordinates, text entry, keys or destructive actions. If the screen is already visible return an empty steps array. Never invent controls. Return annotate=true only when numbering, explanations or highlighting are requested; for a plain screenshot return annotate=false. Input JSON: {}",json!({"instruction":instruction,"window":window,"accessibility":tree}));
     let result = crate::agent::agent_json(root, &prompt, &schema, &config.agent, &config.model)?;
     let mut steps = vec![
         json!({"launch":{"program":app["program"],"args":app["args"]}}),
@@ -152,7 +152,7 @@ pub(crate) fn plan(root: &Path, options: &Value) -> Result<String, String> {
             "click" | "expect_visible" => {
                 let selector = operation["selector"].as_str().ok_or("操作対象が不正です。")?;
                 observed_selector(selector, &tree)?;
-                if action == "click" {json!({"click":{"selector":selector}})} else {json!({"expect_visible":selector})}
+                if action == "click" {json!({"press":selector})} else {json!({"expect_visible":selector})}
             }
             "wait_ms" => {
                 let duration = operation["milliseconds"].as_u64().filter(|n| *n<=3000).ok_or("待機時間が不正です。")?;
@@ -172,7 +172,7 @@ fn observed_selector(selector: &str, tree: &str) -> Result<(), String> {
     let name = names
         .captures(selector)
         .and_then(|c| c.get(1))
-        .ok_or("名前付きの実在する画面要素を指定してください。")?;
+        .ok_or_else(|| format!("操作対象の形式が不正です: {selector}。button[name='画面上の名前']の形式で指定してください。"))?;
     if !tree.contains(name.as_str()) {
         return Err(
             "現在の画面で確認できない操作です。対象画面まで操作を記録してから撮影してください。"
@@ -199,6 +199,7 @@ fn validate_recipe(root: &Path, recipe: &Value) -> Result<(), String> {
             "launch",
             "window",
             "click",
+            "press",
             "expect_visible",
             "wait_ms",
             "screenshot",
@@ -331,6 +332,7 @@ fn scene(
                 .filter(|n| *n > 0 && *n <= 999)
                 .ok_or("注釈番号が不正です。")?;
             annotation["step"] = json!(step);
+            annotation["arrow"] = json!(true);
         }
         if kind == "callout" {
             annotation["text"] = mark["text"].clone();
@@ -355,6 +357,9 @@ mod tests {
         std::fs::create_dir(root.path().join("docs")).unwrap();
         let valid = json!({"version":1,"platform":"desktop","window":"Fixture","steps":[{"launch":{"program":"/usr/bin/true","args":[]}},{"window":"Fixture"},{"screenshot":{"task":"ai-capture"}}]});
         assert!(validate_recipe(root.path(), &valid).is_ok());
+        let mut navigated = valid.clone();
+        navigated["steps"].as_array_mut().unwrap().insert(2, json!({"press":"button[name='AI設定']"}));
+        assert!(validate_recipe(root.path(), &navigated).is_ok());
         let mut invalid = valid.clone();
         invalid["steps"][0] = json!({"launch":{"program":"bash","args":["-c","other"]}});
         assert!(validate_recipe(root.path(), &invalid).is_err());
@@ -373,6 +378,7 @@ mod tests {
             scene["annotations"][0]["target"],
             json!([2.0, 3.0, 10.0, 8.0])
         );
+        assert_eq!(scene["annotations"][0]["arrow"], json!(true));
         assert!(super::scene(&value, &[], 30, 20).is_err());
     }
 }

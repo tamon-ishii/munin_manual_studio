@@ -200,6 +200,11 @@ function logProgress(message: string): void {
 }
 let progressInFlight: Promise<void> | undefined;
 let progressGeneration = 0;
+let progressFailureMessage = "";
+function logAiFailure(error: unknown): void {
+  progressFailureMessage = String(error);
+  logProgress(`失敗: ${progressFailureMessage}`);
+}
 function pollAgentProgress(): Promise<void> {
   if (progressInFlight) return progressInFlight;
   const generation = progressGeneration;
@@ -208,7 +213,7 @@ function pollAgentProgress(): Promise<void> {
 }
 async function readAgentProgress(generation: number): Promise<void> {
   try {
-    const result = JSON.parse(await rpc("agent-progress")) as { logs: Array<{ time: string; message: string }>; total?: number };
+    const result = JSON.parse(await rpc("agent-progress", {}, activeGenerationRoot || projectRoot)) as { logs: Array<{ time: string; message: string }>; total?: number };
     if (generation !== progressGeneration) return;
     const total = result.total ?? result.logs.length;
     if (total > progressAgentTotal) {
@@ -226,15 +231,29 @@ async function restoreManualStudioAfterCapture(force = false): Promise<void> {
   await invoke("restore_manual_studio");
   manualStudioHiddenForCapture = false;
 }
+async function beginAiProgress(action: string, root: string): Promise<void> {
+  ++progressGeneration;
+  if (progressInFlight) await progressInFlight;
+  try { await rpc("agent-progress-clear", {}, root); } catch { /* Progress logs are optional. */ }
+  startAiProgress(action);
+}
 function startAiProgress(action: string): void {
   ++progressGeneration;
   const labels: Record<string, string> = { codex: "Codex", claude: "Claude Code", grok: "Grok Build", agy: "Agy" };
   const agent = workspace?.config.agent || element<HTMLSelectElement>("ai-agent").value || "AI";
-  const operation = action === "draft" ? "原稿の下書きを生成中" : "AI文書の候補を作成中";
+  const operation = ({
+    draft: "原稿の下書きを生成中",
+    "document-review": "文章をレビュー・校正中",
+    "screenshot-ai-application": "撮影アプリの起動設定を調査中",
+    "screenshot-ai-plan": "撮影手順を作成中",
+    "screenshot-ai-capture": "スクリーンショットを撮影中",
+    "screenshot-ai-annotate": "撮影画像の注釈を作成中",
+  } as Record<string, string>)[action] || "AI文書の候補を作成中";
   element("progress-label").textContent = `${labels[agent] || agent}で${operation}`;
   progressRunning = true;
   element("ai-error-advice").hidden = true;
   progressDisplayLogs = [];
+  progressFailureMessage = "";
   progressAgentTotal = 0;
   progressStartedAt = Date.now();
   progressLastEventAt = progressStartedAt;
@@ -243,6 +262,7 @@ function startAiProgress(action: string): void {
   element("operation-progress").hidden = false;
   element("progress-open").hidden = true;
   logProgress(`${labels[agent] || agent}で${operation}。処理を開始しました。`);
+  status(`${labels[agent] || agent}で${operation}…`);
   const update = () => {
     const elapsed = Math.floor((Date.now() - progressStartedAt) / 1000);
     element("progress-elapsed").textContent = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
@@ -267,6 +287,7 @@ element("progress-cancel").addEventListener("click", () => {
   generationCancelRequest = rpc("agent-cancel", {}, root).then(() => {}).catch((error) => logProgress(`中断要求の送信に失敗しました: ${String(error)}`));
 });
 async function stopAiProgress(succeeded: boolean): Promise<void> {
+  const cancelled = Boolean(generationCancelRequest);
   await generationCancelRequest;
   generationCancelRequest = undefined;
   await pollAgentProgress();
@@ -277,11 +298,16 @@ async function stopAiProgress(succeeded: boolean): Promise<void> {
   progressRunning = false;
   activeGenerationRoot = null;
   element("progress-cancel").hidden = true;
-  if (!succeeded) {
-    element("progress-label").textContent = "処理の一部が完了しませんでした。ログを確認してください。";
+  if (!succeeded && cancelled) {
+    element("progress-label").textContent = "AI処理を中断しました";
+    element("progress-track").classList.add("progress-failed");
+    element("progress-track").setAttribute("aria-valuetext", "中断");
+    logProgress("処理を中断しました。原稿は変更していません。再実行できます。");
+  } else if (!succeeded) {
+    element("progress-label").textContent = "AI処理に失敗しました";
     element("progress-track").classList.add("progress-failed");
     element("progress-track").setAttribute("aria-valuetext", "失敗");
-    logProgress("未完了の処理があります。上の実行ログで失敗理由を確認してください。");
+    logProgress(progressFailureMessage ? `処理に失敗しました: ${progressFailureMessage}` : "AI処理を完了できませんでした。実行ログを確認してください。");
   } else {
     element("progress-label").textContent = "AI処理が完了しました";
     element("progress-track").classList.add("progress-completed");
@@ -1042,9 +1068,11 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
   const isAiAction = action === "draft";
   if (isAiAction) await ensureAiSettings();
   if (isAiAction) {
-    try { await rpc("agent-progress-clear"); } catch { /* Progress logs are optional. */ }
+    activeGenerationRoot = projectRoot;
+    element("progress-cancel").hidden = false;
+    element<HTMLButtonElement>("progress-cancel").disabled = false;
+    await beginAiProgress(action, projectRoot);
   }
-  if (isAiAction) startAiProgress(action);
   if (isAiAction) logProgress("AIエージェントへ指示を送り、応答を待っています。");
   status(isAiAction ? "AIを実行中…" : "処理中…");
   let succeeded = false;
@@ -1098,7 +1126,7 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
     status(completionMessage, completionHasError);
     succeeded = true;
   } catch (error) {
-    if (isAiAction) { await pollAgentProgress(); logProgress(`失敗: ${String(error)}`); }
+    if (isAiAction) { await pollAgentProgress(); logAiFailure(error); }
     if (resultId) element(resultId).textContent = `失敗: ${String(error)}`;
     throw error;
   } finally {
@@ -2070,6 +2098,7 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
 element("generate-draft").addEventListener("click", () => { void work(async () => {
   await savedBeforeOperation();
   if (workspace?.pages.length && !await confirmAction("現在の原稿をバックアップして、AIの下書きに置き換えますか？")) return;
+  element<HTMLDialogElement>("panel-publish").close();
   await runAction("draft", {}, "publish-result");
 }); });
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
@@ -2152,8 +2181,9 @@ async function createSelectionDocument(initial=""):Promise<void>{
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
     let candidate:string|undefined;
     await work(async()=>{
-      await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;startAiProgress('selection-generate');let succeeded=false;
+      await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('selection-generate',root);let succeeded=false;
       try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{selected:selection.text,mode:selection.text?"replace":"insert",insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
+      catch(error){logAiFailure(error);throw error;}
       finally{await stopAiProgress(succeeded);}
     });
     if(candidate===undefined)return;
@@ -2179,8 +2209,9 @@ async function reviewCurrentDocument():Promise<void>{
   const range=choices.scope==='selection'?{start,end}:undefined;
   let report:ReaderReport|undefined;
   await work(async()=>{
-    await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;startAiProgress('document-review');let success=false;
+    await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('document-review',root);let success=false;
     try{report=JSON.parse(await rpc('document-review',{page,json:{reader:choices.reader,revision,range}},root)) as ReaderReport;success=true;}
+    catch(error){logAiFailure(error);throw error;}
     finally{await stopAiProgress(success);}
   });
   const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===expected;
@@ -2198,8 +2229,9 @@ element('reader-review').addEventListener('click',()=>{void reviewCurrentDocumen
 const screenshotAi=setupScreenshotAi({root:()=>projectRoot,applications:()=>launchCommands,refresh:()=>screenshotLibrary.refresh(),reloadApplications:loadLaunchCommands,report:status,work,
   request:async(action,json,root)=>{
     if(action==='list-accessible-windows')return rpc(action,{},root);
-    activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;startAiProgress(action);let success=false;
+    activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress(action,root);let success=false;
     try{await saveAiSettings();const result=await rpc(action,{json},root);success=true;return result;}
+    catch(error){logAiFailure(error);throw error;}
     finally{await stopAiProgress(success);}
   }
 });
@@ -2226,6 +2258,7 @@ async function insertScreenshotHere():Promise<void>{
   const image=JSON.parse(await rpc('screenshots-image',{id,json:{revision}},root)) as {data:string;edit:{id:string};screenshot:{adopted:string|null}};
   if(!valid())return;
   const {dialog,body}=featureDialog('スクショを確認して挿入');dialog.id='editor-screenshot-preview';
+  if(method==='ai'&&screenshotAi.insertionWarning()){const warning=document.createElement('p');warning.className='error';warning.setAttribute('role','alert');warning.textContent=screenshotAi.insertionWarning()!;body.append(warning);}
   const note=document.createElement('p');note.textContent=`${page} の指定位置に挿入します。閉じた場合も撮影画像と手順はリソース一覧に残ります。`;
   const preview=document.createElement('img');preview.src=image.data;preview.alt='挿入するスクリーンショットの候補';preview.style.maxWidth='100%';preview.style.maxHeight='50vh';preview.style.objectFit='contain';
   const insert=document.createElement('button');insert.type='button';insert.className='primary';insert.dataset.uiIcon='image';insert.textContent='この位置に挿入';body.append(note,preview,insert);

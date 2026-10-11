@@ -200,6 +200,8 @@ fn cli_image_arguments(provider: &str, prompt: &str, reference: bool) -> Vec<Str
         ];
         if reference {
             args.extend(["--image".into(), "reference.png".into()]);
+            // --image accepts multiple files; terminate it before the prompt.
+            args.push("--".into());
         }
         args.push(format!("$imagegen {instruction} Use the built-in image generation tool. After generation, copy the selected image into the current directory as generated.png in PNG format. Do not use an API fallback or draw a substitute with code. If image generation is unavailable, report the error. Do not modify any other files. Instruction:\n{prompt}"));
         args
@@ -659,6 +661,9 @@ mod tests {
         assert!(args.last().unwrap().contains("$imagegen"));
         assert!(args.last().unwrap().ends_with("a mountain"));
         assert!(!args.iter().any(|arg| arg.contains("dangerously")));
+        let edit_args = cli_image_arguments("codex", "make it green", true);
+        assert!(edit_args.windows(3).any(|args| args == ["--image", "reference.png", "--"]));
+        assert!(edit_args.last().unwrap().ends_with("make it green"));
     }
 
     #[cfg(unix)]

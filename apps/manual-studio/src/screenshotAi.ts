@@ -6,6 +6,7 @@ interface LaunchIdentity{pid:number;host_pid:number;program:string;}
 interface TargetApplication extends LaunchCommand{launch?:LaunchIdentity;}
 interface TargetWindow{query:string;title:string;app:string;pid?:number;program?:string;}
 export function setupScreenshotAi(options:Options){
+  let insertionWarning:string|undefined;
   async function foreground(){await invoke("restore_manual_studio");}
   async function ai(action:string,json:Record<string,unknown>,root:string){let result='',failure:unknown;await options.work(async()=>{try{result=await options.request(action,json,root);}catch(error){failure=error;throw error;}});if(failure)throw failure;if(!result)throw new Error('処理を開始できませんでした。実行中の処理が終わってから再実行してください。');return JSON.parse(result);}
   function applicationDialog(root:string,instruction:string,initial:LaunchCommand & {available?:boolean;reason?:string}):Promise<TargetApplication|null>{
@@ -31,7 +32,7 @@ export function setupScreenshotAi(options:Options){
   async function chooseWindow(root:string,application:TargetApplication):Promise<TargetWindow|null>{
     const launch=application.launch;
     let windows:TargetWindow[]=[];
-    const deadline=Date.now()+15000;
+    const deadline=Date.now()+45000;
     do{
       const result=await options.request('list-accessible-windows',{},root);if(root!==options.root())return null;
       windows=(JSON.parse(result) as TargetWindow[]).filter(window=>!launch||window.pid!==launch.host_pid);
@@ -59,15 +60,21 @@ export function setupScreenshotAi(options:Options){
   }
   function askInstruction(title:string,chooseApplication?:(app:LaunchCommand|undefined)=>void):Promise<string|null>{
     const {dialog,body}=featureDialog(title);dialog.id='screenshot-ai-instruction';const label=document.createElement('label');label.textContent='撮影・注釈への指示';const input=document.createElement('textarea');input.rows=4;input.placeholder='例：〇〇アプリの設定画面を撮影し、ツールバーのボタンに左から番号を振って';label.append(input);const run=document.createElement('button');run.type='button';run.textContent='指示から作成';const profiles=options.applications();let select:HTMLSelectElement|undefined;if(chooseApplication){const appLabel=document.createElement('label');appLabel.textContent='撮影するアプリ';select=document.createElement('select');select.setAttribute('aria-label','撮影するアプリ');profiles.forEach((app,index)=>select!.add(new Option(app.name||app.program,String(index))));select.add(new Option('新しいアプリ（AIで登録）','new'));appLabel.append(select);const note=document.createElement('p');note.className='muted';note.textContent='登録済みアプリは保存済みの起動パス・引数を使います。アプリ登録のためのAI呼び出しは省略します。';body.append(appLabel,note);}body.append(label,run);
+    run.disabled=true;
+    input.addEventListener('input',()=>{run.disabled=!input.value.trim();});
+    input.focus();
     return new Promise(resolve=>{let value:string|null=null;run.onclick=()=>{if(input.value.trim()){chooseApplication?.(select?.value==='new'?undefined:profiles[Number(select?.value)]);value=input.value.trim();dialog.close();}};dialog.addEventListener('close',()=>resolve(value),{once:true});});
   }
   async function create(fromEditor=false){
+    insertionWarning=undefined;
     if(!('__TAURI_INTERNALS__' in window))throw new Error('実画面のAI撮影はデスクトップ版で利用できます。');
     const root=options.root();if(!root)throw new Error('プロジェクトを開いてください。');let registered:LaunchCommand|undefined;const instruction=await askInstruction(fromEditor?'この位置に入れるスクショを指示':'AIに撮影・注釈を指示',app=>registered=app);if(!instruction||root!==options.root())return;
     let app:TargetApplication|null;
-    if(registered){app={...registered,args:[...registered.args]};let launched=false;await options.work(async()=>{app!.launch=await invoke<LaunchIdentity|undefined>('test_launch_application',{program:app!.program,args:app!.args,root});launched=true;});if(!launched)return;}
+    if(registered){options.report('登録済みアプリを起動しています…');app={...registered,args:[...registered.args]};let launched=false;await options.work(async()=>{app!.launch=await invoke<LaunchIdentity|undefined>('test_launch_application',{program:app!.program,args:app!.args,root});launched=true;});if(!launched)return;}
     else{const proposed=await ai('screenshot-ai-application',{instruction,applications:options.applications()},root) as LaunchCommand;if(root!==options.root())return;app=await applicationDialog(root,instruction,proposed);}
     if(!app||root!==options.root())return;
+    await foreground();
+    options.report('起動したアプリのウィンドウを確認しています…');
     const targetWindow=await chooseWindow(root,app);if(!targetWindow||root!==options.root())return;
     await foreground();
     const plan=await ai('screenshot-ai-plan',{instruction,window:targetWindow.query,application:app},root) as {summary:string;recipe:unknown;annotate?:boolean};
@@ -75,9 +82,9 @@ export function setupScreenshotAi(options:Options){
     if(root!==options.root()||!await confirmPlan(plan)||root!==options.root())return;
     const captured=await ai('screenshot-ai-capture',{instruction,recipe:plan.recipe,window:targetWindow.query},root) as {screenshot:{id:string}};
     if(root!==options.root())return;await options.refresh();
-    try{if(plan.annotate!==false)await annotate(captured.screenshot.id,instruction);}catch(error){await options.refresh();options.report(`撮影原本と再撮影手順は保存しました。AI注釈は未完了です：${String(error)}`,true);}
+    try{if(plan.annotate!==false)await annotate(captured.screenshot.id,instruction);}catch(error){await options.refresh();insertionWarning=`AI注釈は未完了です。番号・注釈なしの撮影原本を表示しています：${String(error)}`;options.report(`撮影原本と再撮影手順は保存しました。${insertionWarning}`,true);}
     return root===options.root()?captured.screenshot.id:undefined;
   }
   document.getElementById('screenshot-ai-create')!.onclick=()=>{void create().catch(error=>options.report(String(error),true));};
-  return {create,annotate:(id:string)=>annotate(id).catch(error=>options.report(String(error),true))};
+  return {create,insertionWarning:()=>insertionWarning,annotate:(id:string)=>annotate(id).catch(error=>options.report(String(error),true))};
 }
