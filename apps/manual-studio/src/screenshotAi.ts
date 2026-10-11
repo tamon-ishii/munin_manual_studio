@@ -7,6 +7,30 @@ interface TargetApplication extends LaunchCommand{launch?:LaunchIdentity;}
 interface TargetWindow{query:string;title:string;app:string;pid?:number;program?:string;}
 export function setupScreenshotAi(options:Options){
   let insertionWarning:string|undefined;
+  const rawOriginal=Symbol('raw-original');
+  function retryStage<T>(stage:string,run:()=>Promise<T>,root:string,allowOriginal?:false):Promise<T|undefined>;
+  function retryStage<T>(stage:string,run:()=>Promise<T>,root:string,allowOriginal:true):Promise<T|typeof rawOriginal|undefined>;
+  async function retryStage<T>(stage:string,run:()=>Promise<T>,root:string,allowOriginal=false):Promise<T|typeof rawOriginal|undefined>{
+    while(root===options.root()){
+      try{return await run();}catch(error){
+        if(root!==options.root()||/AI.*中断|cancelled|canceled/i.test(String(error)))return;
+        await foreground();
+        const {dialog,body}=featureDialog(`${stage}を再試行`);dialog.id='screenshot-ai-retry';
+        const message=document.createElement('p');message.role='alert';message.textContent=`${stage}で失敗しました：${String(error)}`;
+        const retained=document.createElement('p');retained.textContent=allowOriginal?'撮影原本・指示・再撮影手順は保存済みです。注釈だけを再試行します。':'入力した指示と完了した段階は保持しています。失敗した段階から再開します。';
+        const retry=document.createElement('button');retry.type='button';retry.className='primary';retry.textContent=`${stage}だけ再試行`;retry.dataset.uiIcon='refresh';
+        const stop=document.createElement('button');stop.type='button';stop.textContent='ここで終了';body.append(message,retained,retry,stop);
+        const choice=await new Promise<'retry'|'original'|'stop'>(resolve=>{let selected:'retry'|'original'|'stop'='stop';retry.onclick=()=>{selected='retry';dialog.close();};stop.onclick=()=>dialog.close();if(allowOriginal){const original=document.createElement('button');original.type='button';original.textContent='注釈なしの原本を使う';original.onclick=()=>{selected='original';dialog.close();};body.append(original);}dialog.addEventListener('close',()=>{resolve(selected);dialog.remove();},{once:true});});
+        if(root!==options.root()||choice==='stop')return;
+        if(choice==='original'){insertionWarning=`AI注釈は未完了です。番号・注釈なしの撮影原本を表示しています：${String(error)}`;return rawOriginal;}
+      }
+    }
+  }
+  async function launch(application:TargetApplication,root:string):Promise<TargetApplication>{
+    let failure:unknown,launched=false;
+    await options.work(async()=>{try{application.launch=await invoke<LaunchIdentity|undefined>('test_launch_application',{program:application.program,args:application.args,root});launched=true;}catch(error){failure=error;throw error;}});
+    if(failure)throw failure;if(!launched)throw new Error('処理を開始できませんでした。実行中の処理が終わってから再試行してください。');return application;
+  }
   async function foreground(){await invoke("restore_manual_studio");}
   async function ai(action:string,json:Record<string,unknown>,root:string){let result='',failure:unknown;await options.work(async()=>{try{result=await options.request(action,json,root);}catch(error){failure=error;throw error;}});if(failure)throw failure;if(!result)throw new Error('処理を開始できませんでした。実行中の処理が終わってから再実行してください。');return JSON.parse(result);}
   function applicationDialog(root:string,instruction:string,initial:LaunchCommand & {available?:boolean;reason?:string}):Promise<TargetApplication|null>{
@@ -70,21 +94,24 @@ export function setupScreenshotAi(options:Options){
     if(!('__TAURI_INTERNALS__' in window))throw new Error('実画面のAI撮影はデスクトップ版で利用できます。');
     const root=options.root();if(!root)throw new Error('プロジェクトを開いてください。');let registered:LaunchCommand|undefined;const instruction=await askInstruction(fromEditor?'この位置に入れるスクショを指示':'AIに撮影・注釈を指示',app=>registered=app);if(!instruction||root!==options.root())return;
     let app:TargetApplication|null;
-    if(registered){options.report('登録済みアプリを起動しています…');app={...registered,args:[...registered.args]};let launched=false;await options.work(async()=>{app!.launch=await invoke<LaunchIdentity|undefined>('test_launch_application',{program:app!.program,args:app!.args,root});launched=true;});if(!launched)return;}
-    else{const proposed=await ai('screenshot-ai-application',{instruction,applications:options.applications()},root) as LaunchCommand;if(root!==options.root())return;app=await applicationDialog(root,instruction,proposed);}
+    if(registered){options.report('登録済みアプリを起動しています…');app=await retryStage('アプリ起動',()=>launch({...registered!,args:[...registered!.args]},root),root)||null;}
+    else{const proposed=await retryStage('アプリ調査',()=>ai('screenshot-ai-application',{instruction,applications:options.applications()},root),root) as LaunchCommand|undefined;if(!proposed||root!==options.root())return;app=await applicationDialog(root,instruction,proposed);}
     if(!app||root!==options.root())return;
     await foreground();
     options.report('起動したアプリのウィンドウを確認しています…');
-    const targetWindow=await chooseWindow(root,app);if(!targetWindow||root!==options.root())return;
+    const targetWindow=await retryStage('ウィンドウ確認',()=>chooseWindow(root,app!),root);if(!targetWindow||root!==options.root())return;
     await foreground();
-    const plan=await ai('screenshot-ai-plan',{instruction,window:targetWindow.query,application:app},root) as {summary:string;recipe:unknown;annotate?:boolean};
+    const plan=await retryStage('撮影手順作成',()=>ai('screenshot-ai-plan',{instruction,window:targetWindow.query,application:app},root),root) as {summary:string;recipe:unknown;annotate?:boolean}|undefined;
+    if(!plan||root!==options.root())return;
     await foreground();
     if(root!==options.root()||!await confirmPlan(plan)||root!==options.root())return;
-    const captured=await ai('screenshot-ai-capture',{instruction,recipe:plan.recipe,window:targetWindow.query},root) as {screenshot:{id:string}};
+    const captured=await retryStage('撮影',()=>ai('screenshot-ai-capture',{instruction,recipe:plan.recipe,window:targetWindow.query},root),root) as {screenshot:{id:string}}|undefined;
+    if(!captured)return;
     if(root!==options.root())return;await options.refresh();
-    try{if(plan.annotate!==false)await annotate(captured.screenshot.id,instruction);}catch(error){await options.refresh();insertionWarning=`AI注釈は未完了です。番号・注釈なしの撮影原本を表示しています：${String(error)}`;options.report(`撮影原本と再撮影手順は保存しました。${insertionWarning}`,true);}
+    if(plan.annotate!==false){const annotated=await retryStage('注釈',async()=>{await annotate(captured.screenshot.id,instruction);return true;},root,true);if(annotated===undefined)return;await options.refresh();if(annotated===rawOriginal)options.report(`撮影原本と再撮影手順は保存しました。${insertionWarning}`,true);}
     return root===options.root()?captured.screenshot.id:undefined;
   }
   document.getElementById('screenshot-ai-create')!.onclick=()=>{void create().catch(error=>options.report(String(error),true));};
-  return {create,insertionWarning:()=>insertionWarning,annotate:(id:string)=>annotate(id).catch(error=>options.report(String(error),true))};
+  async function annotateExisting(id:string){const root=options.root();const instruction=await askInstruction('撮影画像にAIで注釈');if(!instruction||root!==options.root())return;await retryStage('注釈',()=>annotate(id,instruction),root);}
+  return {create,insertionWarning:()=>insertionWarning,annotate:(id:string)=>annotateExisting(id).catch(error=>options.report(String(error),true))};
 }

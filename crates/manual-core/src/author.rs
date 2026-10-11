@@ -41,75 +41,7 @@ pub fn draft(root: &Path) -> Result<(), String> {
         }
     }
 
-    let brief_path = root.join("manual").join("brief.md");
-    if !brief_path.is_file() {
-        if let Some(parent) = brief_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        fs::write(&brief_path, DEFAULT_BRIEF).map_err(|e| e.to_string())?;
-    }
-    let brief = fs::read_to_string(&brief_path).map_err(|e| e.to_string())?;
-
-    log_progress(root, "プロジェクトの構造と画面情報を調べています");
-    let app_context = super::context::build_application_context(root);
-
-    let draft_prompt = format!("Create a comprehensive Japanese MkDocs manual as JSON pages, with index.md required and at most eight pages. Write actual prose and Mermaid directly as ordinary Markdown. Do not use AI tags, metadata comments or screenshot tasks. Do not invent UI labels or product facts. Context: {}\nBrief: {brief}",app_context.prompt_summary);
-
-    let schema = json!({
-        "type": "object",
-        "properties": {
-            "pages": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"},
-                        "content": {"type": "string"}
-                    },
-                    "required": ["path", "content"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["pages"],
-        "additionalProperties": false
-    });
-
-    log_progress(root, "AIに章立てと原稿案を依頼しています");
-    let result = agent_json(root, &draft_prompt, &schema, &config.agent, &config.model)?;
-    log_progress(root, "AIの回答を検査し、原稿ファイルを準備しています");
-    let pages = result
-        .get("pages")
-        .and_then(|p| p.as_array())
-        .ok_or_else(|| format!("{} returned an invalid page list", config.agent))?;
-
-    if pages.is_empty() || pages.len() > 8 {
-        return Err(format!("{} returned an invalid page list", config.agent));
-    }
-
-    let mut validated = Vec::new();
-    let mut has_index = false;
-
-    for p in pages {
-        let path_str = p.get("path").and_then(|v| v.as_str()).unwrap_or("");
-        let content = p.get("content").and_then(|v| v.as_str()).unwrap_or("");
-        let rel = Path::new(path_str);
-        if rel.is_absolute()
-            || path_str.contains("..")
-            || rel.extension().is_none_or(|ext| ext != "md")
-            || path_str.is_empty()
-        {
-            return Err(format!("Invalid draft page path: {path_str}"));
-        }
-        if path_str == "index.md" {
-            has_index = true;
-        }
-        validated.push((path_str.to_string(), content.to_string()));
-    }
-
-    if !has_index {
-        return Err(format!("{} draft must include index.md", config.agent));
-    }
+    let validated = draft_pages(root)?;
 
     fs::create_dir_all(&templates).map_err(|e| e.to_string())?;
 
@@ -145,6 +77,81 @@ pub fn draft(root: &Path) -> Result<(), String> {
     let _ = super::deps::build_manual_dependency_graph(root, &templates);
 
     Ok(())
+}
+
+pub(crate) fn draft_pages(root: &Path) -> Result<Vec<(String, String)>, String> {
+    let config = read_config(root);
+    let brief_path = root.join("manual").join("brief.md");
+    if !brief_path.is_file() {
+        if let Some(parent) = brief_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        fs::write(&brief_path, DEFAULT_BRIEF).map_err(|e| e.to_string())?;
+    }
+    let brief = fs::read_to_string(&brief_path).map_err(|e| e.to_string())?;
+
+    log_progress(root, "プロジェクトの構造と画面情報を調べています");
+    let app_context = super::context::build_application_context(root);
+
+    let draft_prompt = format!("Create a comprehensive Japanese MkDocs manual as JSON pages, with index.md required and at most eight pages. Write actual prose and Mermaid directly as ordinary Markdown. Do not use AI tags, metadata comments or screenshot tasks. Do not invent UI labels or product facts.\nInput JSON: {}",json!({"context":app_context.prompt_summary,"brief":brief}));
+
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "pages": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"}
+                    },
+                    "required": ["path", "content"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["pages"],
+        "additionalProperties": false
+    });
+
+    log_progress(root, "AIに章立てと原稿案を依頼しています");
+    let result = super::agent::agent_json_detached(root, &draft_prompt, &schema, &config.agent, &config.model)?;
+    log_progress(root, "AIの回答を検査し、原稿ファイルを準備しています");
+    let pages = result
+        .get("pages")
+        .and_then(|p| p.as_array())
+        .ok_or_else(|| format!("{} returned an invalid page list", config.agent))?;
+
+    if pages.is_empty() || pages.len() > 8 {
+        return Err(format!("{} returned an invalid page list", config.agent));
+    }
+
+    let mut validated = Vec::new();
+    let mut has_index = false;
+
+    for p in pages {
+        let path_str = p.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let content = p.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        let rel = Path::new(path_str);
+        if rel.is_absolute()
+            || path_str.contains("..")
+            || rel.extension().is_none_or(|ext| ext != "md")
+            || path_str.is_empty()
+        {
+            return Err(format!("Invalid draft page path: {path_str}"));
+        }
+        if path_str == "index.md" {
+            has_index = true;
+        }
+        validated.push((path_str.to_string(), content.to_string()));
+    }
+
+    if !has_index {
+        return Err(format!("{} draft must include index.md", config.agent));
+    }
+
+    Ok(validated)
 }
 
 pub fn generate_task(root: &Path, task_id: &str, cli: &str, feedback: &str) -> Result<(), String> {

@@ -19,6 +19,7 @@ pub mod fact;
 mod legacy_ai;
 mod selection_ai;
 mod document_review;
+mod draft_review;
 mod screenshot_ai;
 pub mod platform;
 pub mod preview;
@@ -95,6 +96,9 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "screenshot-ai-capture",
         "screenshot-ai-annotate",
         "document-review",
+        "document-review-capabilities",
+        "draft-propose",
+        "draft-apply",
         "selection-generate",
         "screenshots-migration-plan",
         "screenshots-migrate",
@@ -489,6 +493,9 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             match action {"screenshot-ai-application"=>screenshot_ai::application(root,&options),"screenshot-ai-plan"=>screenshot_ai::plan(root,&options),"screenshot-ai-capture"=>screenshot_ai::capture(root,&options),_=>screenshot_ai::annotate(root,&options)}
         }
         "document-review" => document_review::review(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
+        "document-review-capabilities" => document_review::capabilities(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
+        "draft-propose" => draft_review::propose(root),
+        "draft-apply" => draft_review::apply(root, json_opt.unwrap_or("{}")),
         "selection-generate" => selection_ai::generate(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "draft" => {
             author::draft(root)?;

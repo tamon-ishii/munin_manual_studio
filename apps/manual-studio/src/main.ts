@@ -1,11 +1,12 @@
 import {setupScreenshotAi} from './screenshotAi';
-import {askReader,showReaderReport,type ReaderReport} from './readerReview';
+import {askReader,showReaderReport,type ReaderReport,type ReviewCapabilities} from './readerReview';
+import {reviewDraft,type DraftCandidate} from './draftReview';
 import {imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
 import type {ResourceUsage} from './resourceBrowser';
 import { setupImageAiSettings } from './imageAiSettings';
 import { setupImageGeneration } from './imageGeneration';
 import { setupToolbarCustomization } from './toolbarCustomization';
-import { chooseDestination,featureDialog,confirmAction } from './screenshotWorkflow';
+import { chooseDestination,featureDialog } from './screenshotWorkflow';
 import { setupScreenshotLibrary } from "./screenshotLibrary";
 import { uiIcon } from './uiIcons';
 import { setupControlIcons } from './controlIcons';
@@ -201,6 +202,8 @@ function logProgress(message: string): void {
 let progressInFlight: Promise<void> | undefined;
 let progressGeneration = 0;
 let progressFailureMessage = "";
+let progressConnection = "AI";
+let progressStage = "";
 function logAiFailure(error: unknown): void {
   progressFailureMessage = String(error);
   logProgress(`失敗: ${progressFailureMessage}`);
@@ -221,7 +224,7 @@ async function readAgentProgress(generation: number): Promise<void> {
       progressDisplayLogs.push(...newEntries.map((entry) => `[${entry.time}] ${entry.message}`));
       progressAgentTotal = total;
       progressLastEventAt = Date.now();
-      if (progressRunning && result.logs.length) element("progress-note").textContent = result.logs.at(-1)!.message;
+      if (progressRunning && result.logs.length) {progressStage=result.logs.at(-1)!.message;element("progress-note").textContent = progressStage;}
       renderProgressLog();
     }
   } catch { /* The progress endpoint can be briefly unavailable while the request starts. */ }
@@ -241,34 +244,42 @@ function startAiProgress(action: string): void {
   ++progressGeneration;
   const labels: Record<string, string> = { codex: "Codex", claude: "Claude Code", grok: "Grok Build", agy: "Agy" };
   const agent = workspace?.config.agent || element<HTMLSelectElement>("ai-agent").value || "AI";
+  const connection=workspace?.config.connection_type;
+  progressConnection=connection==='api'?`API（${workspace?.config.model||'設定済みモデル'}）`:connection==='local_llm'?`ローカルAI（${workspace?.config.model||'設定済みモデル'}）`:labels[agent]||agent;
   const operation = ({
     draft: "原稿の下書きを生成中",
+    "draft-propose": "原稿の下書き候補を生成中",
     "document-review": "文章をレビュー・校正中",
     "screenshot-ai-application": "撮影アプリの起動設定を調査中",
     "screenshot-ai-plan": "撮影手順を作成中",
     "screenshot-ai-capture": "スクリーンショットを撮影中",
     "screenshot-ai-annotate": "撮影画像の注釈を作成中",
   } as Record<string, string>)[action] || "AI文書の候補を作成中";
-  element("progress-label").textContent = `${labels[agent] || agent}で${operation}`;
+  element("progress-label").textContent = `${progressConnection}で${operation}`;
   progressRunning = true;
   element("ai-error-advice").hidden = true;
   progressDisplayLogs = [];
   progressFailureMessage = "";
   progressAgentTotal = 0;
   progressStartedAt = Date.now();
+  progressStage = '処理を開始しています';
   progressLastEventAt = progressStartedAt;
   element("progress-track").classList.remove("progress-failed", "progress-completed");
   element("progress-track").setAttribute("aria-valuetext", "実行中");
   element("operation-progress").hidden = false;
   element("progress-open").hidden = true;
-  logProgress(`${labels[agent] || agent}で${operation}。処理を開始しました。`);
+  element("progress-compact-cancel").hidden = true;
+  element<HTMLButtonElement>('progress-compact-cancel').disabled=false;
+  logProgress(`${progressConnection}で${operation}。処理を開始しました。`);
   status(`${labels[agent] || agent}で${operation}…`);
   const update = () => {
     const elapsed = Math.floor((Date.now() - progressStartedAt) / 1000);
     element("progress-elapsed").textContent = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
     if (progressRunning && Date.now() - progressLastEventAt >= 15_000) {
-      element("progress-note").textContent = `新しい出力を待っています（最終ログから${Math.floor((Date.now() - progressLastEventAt) / 1000)}秒）。`;
+      const waiting=progressStage.includes('応答を待っています')?`${progressConnection}の応答を待っています`:progressStage;
+      element("progress-note").textContent = `${waiting}。経過 ${elapsed}秒（最終ログから${Math.floor((Date.now() - progressLastEventAt) / 1000)}秒）。中断できます。`;
     }
+    if(progressRunning){element('progress-open').textContent=`${progressConnection}・${operation}・経過 ${elapsed}秒 — ${element('progress-note').textContent}`;}
   };
   update();
   if (progressTimer) clearInterval(progressTimer);
@@ -278,14 +289,18 @@ function startAiProgress(action: string): void {
 }
 let activeGenerationRoot: string | null = null;
 let generationCancelRequest: Promise<void> | undefined;
-element("progress-cancel").addEventListener("click", () => {
+function cancelAiGeneration():void {
   if (!activeGenerationRoot) return;
+  if(generationCancelRequest)return;
 
   const root = activeGenerationRoot;
   element<HTMLButtonElement>("progress-cancel").disabled = true;
+  element<HTMLButtonElement>("progress-compact-cancel").disabled = true;
   logProgress("中断を要求しました。実行中の処理を停止します。");
   generationCancelRequest = rpc("agent-cancel", {}, root).then(() => {}).catch((error) => logProgress(`中断要求の送信に失敗しました: ${String(error)}`));
-});
+}
+element('progress-cancel').addEventListener('click',cancelAiGeneration);
+element('progress-compact-cancel').addEventListener('click',cancelAiGeneration);
 async function stopAiProgress(succeeded: boolean): Promise<void> {
   const cancelled = Boolean(generationCancelRequest);
   await generationCancelRequest;
@@ -298,6 +313,8 @@ async function stopAiProgress(succeeded: boolean): Promise<void> {
   progressRunning = false;
   activeGenerationRoot = null;
   element("progress-cancel").hidden = true;
+  element("progress-compact-cancel").hidden = true;
+  element('progress-open').textContent='AI実行ログを表示';
   if (!succeeded && cancelled) {
     element("progress-label").textContent = "AI処理を中断しました";
     element("progress-track").classList.add("progress-failed");
@@ -320,14 +337,16 @@ async function stopAiProgress(succeeded: boolean): Promise<void> {
 element("progress-dismiss").addEventListener("click", () => {
   element("operation-progress").hidden = true;
   element("progress-open").hidden = false;
+  element("progress-compact-cancel").hidden = !progressRunning;
 });
 element("progress-open").addEventListener("click", () => {
   element("operation-progress").hidden = false;
   element("progress-open").hidden = true;
+  element("progress-compact-cancel").hidden = true;
 });
 async function rpc(action: string, options: Record<string, unknown> = {}, root = projectRoot): Promise<string> {
   const mergedOptions = { ...options };
-  const aiActions = new Set(["selection-generate", "document-review", "screenshot-ai-application", "screenshot-ai-plan", "screenshot-ai-annotate", "draft", "fact-check", "scenario-save"]);
+  const aiActions = new Set(["selection-generate", "document-review", "screenshot-ai-application", "screenshot-ai-plan", "screenshot-ai-annotate", "draft", "draft-propose", "fact-check", "scenario-save"]);
   if (aiActions.has(action) && mergedOptions.api_key === undefined) {
     mergedOptions.api_key = root === projectRoot ? readAiCredential(root, workspace?.config.endpoint_url || "") : "";
   }
@@ -2095,12 +2114,32 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
   await invoke<void>("save_launch_commands", { root: projectRoot, commands: launchCommands });
   renderLaunchCommands();  status("このプロジェクトのアプリ登録を保存しました。");
 }); });
-element("generate-draft").addEventListener("click", () => { void work(async () => {
+async function createFullDraft():Promise<void>{
+  if(busy)return;
   await savedBeforeOperation();
-  if (workspace?.pages.length && !await confirmAction("現在の原稿をバックアップして、AIの下書きに置き換えますか？")) return;
+  const root=projectRoot;
   element<HTMLDialogElement>("panel-publish").close();
-  await runAction("draft", {}, "publish-result");
-}); });
+  let candidate:DraftCandidate|undefined;
+  await work(async()=>{
+    await ensureAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('draft-propose',root);let success=false;
+    try{candidate=JSON.parse(await rpc('draft-propose',{},root)) as DraftCandidate;success=true;}
+    catch(error){logAiFailure(error);throw error;}
+    finally{await stopAiProgress(success);}
+  });
+  if(!candidate||root!==projectRoot)return;
+  const pages=await reviewDraft(candidate,()=>root===projectRoot&&!dirty&&!Array.from(documentTabs.values()).some(tab=>tab.content!==tab.document.content));
+  if(!pages){status('下書き候補を破棄しました。原稿は変更していません。');return;}
+  await work(async()=>{
+    if(root!==projectRoot||dirty)throw new Error('原稿が変更されました。候補を作り直してください。');
+    const result=JSON.parse(await rpc('draft-apply',{json:{docs:candidate!.docs,pages}},root)) as {applied:number};
+    for(const page of pages){documentTabs.delete(page.path);documentTabs.delete(`${candidate!.docs.replace(/\/$/,'')}/${page.path}`);}
+    await refreshWorkspace();
+    const selectedPage=pages.find(page=>page.path==='index.md')||pages[0];
+    if(selectedPage){await openPage(`${candidate!.docs.replace(/\/$/,'')}/${selectedPage.path}`,false);chooseTab('editor');}
+    status(`${result.applied}ページへ選んだ変更を反映しました。変更前の原稿はバックアップしました。`);
+  });
+}
+element('generate-draft').addEventListener('click',()=>{void createFullDraft().catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
 actionButton("build-draft", "build", () => ({ draft: true }), "publish-result");
 actionButton("build-final", "build", () => ({}), "publish-result");
@@ -2203,7 +2242,8 @@ async function reviewCurrentDocument():Promise<void>{
   if(busy||!documentState||activeImageTab)return;
   const root=projectRoot,page=documentState.page,captured=editor.value;
   const start=editor.selectionStart,end=editor.selectionEnd;
-  const choices=await askReader(workspace?.brief||'',start!==end);if(choices===null)return;
+  await savedBeforeOperation();await saveAiSettings();
+  const choices=await askReader(workspace?.brief||'',start!==end,async scope=>JSON.parse(await rpc('document-review-capabilities',{page,json:{range:scope==='selection'?{start,end}:undefined}},root)) as ReviewCapabilities);if(choices===null)return;
   if(root!==projectRoot||documentState?.page!==page||editor.value!==captured)throw new Error('原稿が変更されました。レビューを実行し直してください。');
   await savedBeforeOperation();const expected=editor.value,revision=documentState?.revision;
   const range=choices.scope==='selection'?{start,end}:undefined;

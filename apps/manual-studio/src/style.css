@@ -1096,3 +1096,4 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 .icon-control[hidden]{display:none!important}
 .screenshot-method{width:100%;justify-content:flex-start;padding:12px}
 #editor-screenshot-method .muted{margin:6px 0 16px}
+.progress-compact{position:fixed;z-index:5;right:18px;bottom:38px;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 36px)}.progress-compact .progress-open{position:static;max-width:min(680px,calc(100vw - 160px));white-space:normal;text-align:left}.progress-compact button[hidden]{display:none}.draft-page>label{font-weight:600}.draft-page .selectable-diff{max-height:42vh;overflow:auto}#draft-diff-dialog{width:min(1000px,95vw)}#reader-review-capabilities{padding:12px;border:1px solid var(--border-color);border-radius:8px;background:var(--surface-soft);color:var(--text-primary)}

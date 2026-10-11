@@ -294,13 +294,14 @@ fn run_codex(
     args: &[String],
     root: &Path,
     answer_path: &Path,
+    workdir: &Path,
 ) -> Result<Value, String> {
     let log_path = progress_log_path(root);
     append_progress(&log_path, "Codex CLIを起動しています");
     let started = Instant::now();
 
     let checkpoint = cancellation_checkpoint(root);
-    let mut child = cli_command(binary, args, root)
+    let mut child = cli_command(binary, args, workdir)
         .spawn()
         .map_err(|error| format!("Failed to run {binary}: {error}"))?;
     let stdout = child.stdout.take().ok_or("Failed to read Codex output")?;
@@ -513,6 +514,17 @@ pub fn agent_json(
     agent: &str,
     model: &str,
 ) -> Result<Value, String> {
+    agent_json_in(root, prompt, schema, agent, model, root)
+}
+
+/// Candidate authoring must not give a CLI agent the manuscript workspace.
+pub(crate) fn agent_json_detached(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str) -> Result<Value, String> {
+    let workdir = tempdir().map_err(|e|e.to_string())?;
+    let prompt = format!("Return the requested JSON only. All necessary context is provided below. Do not create, edit or delete any files, and do not inspect another workspace.\n{prompt}");
+    agent_json_in(root, &prompt, schema, agent, model, workdir.path())
+}
+
+fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str, workdir: &Path) -> Result<Value, String> {
     let config = crate::config::read_config(root);
     if config.connection_type == "none" {
         return Err("AI接続は未設定です。「AI設定・出力」で接続方式を選択してください。".into());
@@ -551,7 +563,7 @@ pub fn agent_json(
                 "-c".into(),
                 "model_reasoning_effort=\"low\"".into(),
                 "--cd".into(),
-                root.to_string_lossy().into_owned(),
+                workdir.to_string_lossy().into_owned(),
                 "--output-schema".into(),
                 schema_path.to_string_lossy().into_owned(),
                 "--json".into(),
@@ -582,7 +594,7 @@ pub fn agent_json(
                 "-p".into(),
                 grok_prompt,
                 "--cwd".into(),
-                root.to_string_lossy().into_owned(),
+                workdir.to_string_lossy().into_owned(),
                 "--output-format".into(),
                 "json".into(),
                 "--tools".into(),
@@ -616,12 +628,15 @@ pub fn agent_json(
         cmd_args.insert(0, model.to_string());
         cmd_args.insert(0, "--model".to_string());
     }
+    if agent == "agy" && workdir != root {
+        cmd_args.extend(["--mode".into(), "plan".into()]);
+    }
 
     let binary =
         which_binary(binary_name).ok_or_else(|| format!("AI CLI is unavailable: {binary_name}"))?;
 
     if agent == "codex" {
-        let payload = run_codex(&binary.to_string_lossy(), &cmd_args, root, &answer_path)?;
+        let payload = run_codex(&binary.to_string_lossy(), &cmd_args, root, &answer_path, workdir)?;
         validate_payload(&payload, schema, "answer")?;
         return Ok(payload);
     }
@@ -630,7 +645,7 @@ pub fn agent_json(
     append_progress(&log_path, &format!("{binary_name} CLIを起動しています"));
     let started = Instant::now();
     let checkpoint = cancellation_checkpoint(root);
-    let mut child = cli_command(&binary.to_string_lossy(), &cmd_args, root)
+    let mut child = cli_command(&binary.to_string_lossy(), &cmd_args, workdir)
         .spawn()
         .map_err(|e| format!("Failed to run {binary_name}: {e}"))?;
     append_progress(&log_path, "AIエージェントの応答を待っています");
@@ -1186,7 +1201,7 @@ printf '%s' '{"markdown":"Final manual text"}' > "$1"
             "fake-codex".to_string(),
             answer_path.to_string_lossy().into_owned(),
         ];
-        let result = run_codex("/bin/sh", &args, root.path(), &answer_path).unwrap();
+        let result = run_codex("/bin/sh", &args, root.path(), &answer_path, root.path()).unwrap();
         assert_eq!(result["markdown"], "Final manual text");
         clear_progress(root.path());
     }

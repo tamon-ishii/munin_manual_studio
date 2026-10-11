@@ -3,6 +3,16 @@ use pulldown_cmark::{Event, Options, Parser, Tag};
 use serde_json::{json, Value};
 use std::{fs, path::Path};
 
+pub(crate) fn capabilities(root: &Path, page: &str, options: &str) -> Result<String, String> {
+    let options: Value = serde_json::from_str(options).map_err(|e| e.to_string())?;
+    let document = crate::editor::read(root, page)?;
+    let (reviewed, _) = review_range(&document.content, &options["range"])?;
+    let config = crate::config::read_config(root);
+    let supports_images = config.connection_type == "api" || config.connection_type == "local_llm";
+    let count = image_paths(reviewed).into_iter().collect::<std::collections::HashSet<_>>().len();
+    serde_json::to_string(&json!({"supports_images":supports_images,"images":count,"connection":config.connection_type,"agent":config.agent,"note":if supports_images{"画像入力を送信できます（PNG・JPEG・WebP、最大6枚・各8MB）。モデルが画像を読めたかは結果で確認します。"}else{"現在のCLI接続は画像入力に非対応です。画像と説明の整合チェックはできません。文章のレビュー・校正は実行できます。"}})).map_err(|e| e.to_string())
+}
+
 pub(crate) fn review(root: &Path, page: &str, options: &str) -> Result<String, String> {
     let options: Value = serde_json::from_str(options).map_err(|e| e.to_string())?;
     let document = crate::editor::read(root, page)?;

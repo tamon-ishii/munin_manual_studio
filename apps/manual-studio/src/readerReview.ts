@@ -1,13 +1,19 @@
 import {featureDialog} from './screenshotWorkflow';
 export interface ReviewFinding {category:'reader'|'proofreading'|'image';severity:string;quote:string;message:string;suggestion:string;image:string;start:number;end:number;}
 export interface ReaderReport {issues:ReviewFinding[];images:Array<{path:string;status:string;reason?:string}>;warnings:string[];}
-export function askReader(defaultReader:string,hasSelection=false):Promise<{reader:string;scope:"document"|"selection"}|null>{
+export interface ReviewCapabilities {supports_images:boolean;images:number;connection:string;agent:string;note:string;}
+export function askReader(defaultReader:string,hasSelection=false,preflight?:(scope:"document"|"selection")=>Promise<ReviewCapabilities>):Promise<{reader:string;scope:"document"|"selection"}|null>{
   const {dialog,body}=featureDialog('読者目線のレビュー・校正');dialog.id='reader-review-options';
   const scope=document.createElement('select');scope.setAttribute('aria-label','レビュー対象');scope.add(new Option('文書全体','document'));if(hasSelection)scope.add(new Option('選択範囲','selection'));scope.value=hasSelection?'selection':'document';
   const help=document.createElement('p');help.textContent='説明不足・操作手順・用語・誤字脱字・表記揺れと、画像と説明の整合性を確認します。原稿は変更しません。';
   const label=document.createElement('label');label.textContent='想定する読者・目的';const input=document.createElement('textarea');input.rows=3;input.value=defaultReader||'初めてこのアプリを使う人。操作を迷わず完了できるか確認する。';label.append(input);
   const note=document.createElement('p');note.textContent='画像を確認するため、文書内の対応画像も文章生成AIへ送信します。画像入力を利用できない接続では未確認と表示します。';note.className='muted';
   const run=document.createElement('button');run.type='button';run.className='primary';run.textContent='レビューを実行';run.dataset.uiIcon="review";const scopeLabel=document.createElement('label');scopeLabel.textContent='レビュー対象';scopeLabel.append(scope);body.append(help,scopeLabel,label,note,run);
+  if(preflight){
+    note.id='reader-review-capabilities';note.role='status';let generation=0;
+    const update=async()=>{const current=++generation;run.disabled=true;note.textContent='画像レビューの対応状況を確認しています…';try{const result=await preflight(scope.value as "document"|"selection");if(current!==generation||!dialog.open)return;note.textContent=`対象画像 ${result.images}件。${result.note}`;run.disabled=false;}catch(error){if(current===generation&&dialog.open)note.textContent=`対応状況を確認できませんでした：${String(error)}`;}};
+    scope.onchange=()=>{void update();};void update();
+  }
   return new Promise(resolve=>{let result:{reader:string;scope:"document"|"selection"}|null=null;run.onclick=()=>{result={reader:input.value.trim(),scope:scope.value as "document"|"selection"};dialog.close();};dialog.addEventListener('close',()=>{resolve(result);dialog.remove();},{once:true});});
 }
 export function showReaderReport(report:ReaderReport,valid:()=>boolean,jump:(finding:ReviewFinding)=>void,fix:(finding:ReviewFinding)=>void):void{
