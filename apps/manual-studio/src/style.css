@@ -793,8 +793,7 @@ dialog.panel-dialog .actions {
 .editor-more-menu button{text-align:left}
 .editor-view-controls{display:flex;gap:4px;margin-bottom:8px;flex-shrink:0}
 .editor-view-controls button{padding:5px 10px;font-size:12px}
-.editor-view-controls .ai-image-button{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:600}
-.editor-view-controls .ai-image-button:hover{filter:brightness(.92)}
+.editor-view-controls .ai-image-button{display:inline-flex;align-items:center;gap:6px}
 .editor-view-controls .ai-image-button .ui-icon{width:18px;height:18px;flex-shrink:0}
 .editor-view-controls button[aria-pressed=true]{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
 #panel-editor[data-editor-view=edit] .editor-split,#panel-editor[data-editor-view=preview] .editor-split{grid-template-columns:minmax(0,1fr)}
