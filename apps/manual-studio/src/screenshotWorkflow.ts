@@ -1,11 +1,11 @@
 /** Small project-scoped dialogs shared by the screenshot library workflows. */
-export function featureDialog(title: string): {dialog: HTMLDialogElement; body: HTMLDivElement} {
+export function featureDialog(title: string, modal = true): {dialog: HTMLDialogElement; body: HTMLDivElement} {
   const dialog=document.createElement('dialog');dialog.className='panel-dialog';
   const header=document.createElement('div');header.className='panel-header';
   const heading=document.createElement('h1');heading.textContent=title;
   const close=document.createElement('button');close.type='button';close.textContent='閉じる';close.onclick=()=>dialog.close();
   header.append(heading,close);const body=document.createElement('div');dialog.append(header,body);
-  dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();return {dialog,body};
+  dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);if(modal)dialog.showModal();else dialog.show();return {dialog,body};
 }
 export function confirmAction(message:string,acceptLabel='続ける'):Promise<boolean>{
   const {dialog,body}=featureDialog('内容を確認');dialog.dataset.confirmAction='true';dialog.style.maxWidth='560px';

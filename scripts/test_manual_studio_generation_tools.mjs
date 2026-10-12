@@ -96,7 +96,7 @@ try {
     const body = request.postDataJSON();
     if (['state','editor-read','editor-preview','save'].includes(body.action)) ordinaryRequests.push(body);
   });
-  await page.locator('#settings-menu summary').click();
+
   await page.locator('[data-tab=settings]').click();
   await page.locator('#ai-connection-type').selectOption('api');
   const originalEndpoint = `http://127.0.0.1:${ai.address().port}/v1`;

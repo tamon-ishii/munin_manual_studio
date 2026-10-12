@@ -11,13 +11,16 @@ export function askReader(defaultReader:string,hasSelection=false,preflight?:(sc
   const run=document.createElement('button');run.type='button';run.className='primary';run.textContent='レビューを実行';run.dataset.uiIcon="review";const scopeLabel=document.createElement('label');scopeLabel.textContent='レビュー対象';scopeLabel.append(scope);body.append(help,scopeLabel,label,note,run);
   if(preflight){
     note.id='reader-review-capabilities';note.role='status';let generation=0;
-    const update=async()=>{const current=++generation;run.disabled=true;note.textContent='画像レビューの対応状況を確認しています…';try{const result=await preflight(scope.value as "document"|"selection");if(current!==generation||!dialog.open)return;note.textContent=`対象画像 ${result.images}件。${result.note}`;run.disabled=false;}catch(error){if(current===generation&&dialog.open)note.textContent=`対応状況を確認できませんでした：${String(error)}`;}};
-    scope.onchange=()=>{void update();};void update();
+    const retry=document.createElement('button');retry.type='button';retry.textContent='対応状況を再確認';retry.hidden=true;body.append(retry);
+    const update=async()=>{const current=++generation;retry.hidden=true;run.disabled=true;note.textContent='画像レビューの対応状況を確認しています…';try{const result=await preflight(scope.value as "document"|"selection");if(current!==generation||!dialog.open)return;note.textContent=`対象画像 ${result.images}件。${result.note}`;run.disabled=false;}catch(error){if(current===generation&&dialog.open){note.textContent=`対応状況を確認できませんでした：${String(error)}`;retry.hidden=false;}}};
+    scope.onchange=retry.onclick=()=>{void update();};void update();
   }
   return new Promise(resolve=>{let result:{reader:string;scope:"document"|"selection"}|null=null;run.onclick=()=>{result={reader:input.value.trim(),scope:scope.value as "document"|"selection"};dialog.close();};dialog.addEventListener('close',()=>{resolve(result);dialog.remove();},{once:true});});
 }
 export function showReaderReport(report:ReaderReport,valid:()=>boolean,jump:(finding:ReviewFinding)=>void,fix:(finding:ReviewFinding)=>void):void{
-  const {dialog,body}=featureDialog('読者レビュー・校正の結果');dialog.id='reader-review-results';
+  const existing=document.querySelector<HTMLDialogElement>('#reader-review-results');
+  if(existing?.open){existing.focus();return;}
+  const {dialog,body}=featureDialog('読者レビュー・校正の結果',false);dialog.id='reader-review-results';
   const summary=document.createElement('p');summary.role='status';summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;
   const stale=document.createElement('p');stale.role='alert';
   const filter=document.createElement('select');filter.setAttribute('aria-label','指摘の分類');for(const [value,text] of [['all','すべて'],['reader','読者目線'],['proofreading','校正'],['image','画像と説明']])filter.add(new Option(text,value));
@@ -29,7 +32,7 @@ export function showReaderReport(report:ReaderReport,valid:()=>boolean,jump:(fin
     const quote=document.createElement('blockquote');quote.textContent=finding.quote;
     const suggestion=document.createElement('p');suggestion.textContent=finding.suggestion;const image=document.createElement('small');image.textContent=finding.category==='image'?`対象画像：${finding.image}`:'';
     const actions=document.createElement('div');actions.className='actions';
-    for(const [text,callback] of [['該当箇所へ',()=>{dialog.close();jump(finding);}] ,['修正案を作成',()=>{dialog.close();fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon=text==='該当箇所へ'?'eye':'sparkle';button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}
+    for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を作成',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon=text==='該当箇所へ'?'eye':'sparkle';button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}
     const ignore=document.createElement('button');ignore.type='button';ignore.textContent='見送り';ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();};actions.append(ignore);
     card.append(badges,heading,quote,suggestion,image,actions);list.append(card);
   }

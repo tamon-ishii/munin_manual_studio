@@ -17,7 +17,7 @@ try {
   });
   await page.goto(`${base}/?root=/tmp/munin-dialog-layout-fixture`);
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  await page.getByRole('button',{name:'アプリ登録',exact:true}).click();
+  await page.getByRole('button',{name:'撮影アプリの登録',exact:true}).click();
   for(let i=0;i<4;i++) await page.locator('#add-launch-command').click();
   await page.locator('[data-launch-program="0"]').fill('/path with spaces/'+ 'very-long-folder/'.repeat(12)+'app');
   const dialogs=await page.locator('dialog[id]').evaluateAll(nodes=>nodes.map(node=>node.id));
@@ -49,10 +49,23 @@ try {
   assert.ok(libraryBox.width>150&&libraryBox.x+libraryBox.width<=editorBox.x+4,'resource library opens alongside the editor for drag/drop');
   assert.equal(await page.locator('.screenshot-primary-actions button').count(),15,'five primary actions per image, including AI editing');
   assert.equal(await page.locator('.screenshot-management[open]').count(),0,'management begins collapsed');
+  assert.equal(await page.locator('.resource-item-menu[open]').count(),0);
+  assert.equal(await page.locator('.screenshot-primary-actions button:visible').count(),0);
+  const heights=await page.locator('.resource-list-item').evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect().height));
+  assert.ok(heights.every(height=>height<110),`compact rows: ${heights}`);
+  await page.locator('.resource-item-menu > summary').first().click();
+  const operationWidth=await page.locator('.resource-item-operations').first().evaluate(node=>node.getBoundingClientRect().width);
+  const rowWidth=await page.locator('.resource-list-item').first().evaluate(node=>node.getBoundingClientRect().width);
+  assert.ok(operationWidth>=rowWidth-24,`expanded operations must use row width: ${operationWidth}/${rowWidth}`);
+  await page.screenshot({path:'/tmp/munin-ui-resource-expanded.png'});
   await page.locator('.screenshot-library-card').first().getByRole('button',{name:'文書に挿入',exact:true}).click();
   await page.locator('[data-screenshot-destination]').waitFor();
   assert.equal(await page.getByRole('button',{name:'ここに挿入',exact:true}).isEnabled(),false,'missing destination cannot be inserted');
   await page.locator('[data-screenshot-destination]').getByRole('button',{name:'閉じる',exact:true}).click();
+  await page.locator('#screenshot-library-refresh').click();
+  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  assert.equal(await page.locator('.resource-item-menu[open]').count(),1,'refresh retains expanded menu');
+  await page.locator('.resource-item-menu > summary').first().click();
   for(const viewport of [{width:1440,height:960},{width:960,height:640},{width:640,height:480}]){
     await page.setViewportSize(viewport);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'workspace fits viewport horizontally');

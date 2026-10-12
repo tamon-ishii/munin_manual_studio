@@ -15,7 +15,7 @@ assert.equal(first.selection.start, 12, 'the stored text selection is copied at 
 assert.equal(sessions.matchesTarget(first.generation, '/workspace/one', 'docs/guide.md'), true);
 assert.equal(sessions.matchesTarget(first.generation, '/workspace/one', 'docs/other.md'), false, 'a different page is not the capture target');
 assert.equal(sessions.matchesTarget(first.generation, '/workspace/two', 'docs/guide.md'), false, 'a different project is not the capture target');
-assert.throws(() => sessions.assertInactive(), /撮影AIタグ/);
+assert.throws(() => sessions.assertInactive(), /スクリーンショット処理中.*プロジェクト・文書/);
 assert.throws(() => { first.root = '/workspace/two'; }, TypeError, 'the captured target cannot be mutated after begin');
 assert.throws(() => { first.selection.start = 55; }, TypeError, 'the captured selection cannot be mutated after begin');
 

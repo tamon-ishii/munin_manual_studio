@@ -25,13 +25,16 @@ try {
   const first=JSON.parse(await rpc('screenshots-list')).items[0];assert.equal(first.adopted!==null,true);
   const original=JSON.parse(await rpc('screenshots-image',{id:first.id,json:{original:true}}));
   const sourceHash=hash(Buffer.from(original.data.split(',')[1],'base64'));
+  if(!await page.locator('.resource-item-menu').evaluate(node=>node.open))await page.locator('.resource-item-menu>summary').click();
   await page.locator('.screenshot-library-card').getByRole('button',{name:'文書に挿入',exact:true}).click();
   await page.getByRole('button',{name:'ここに挿入',exact:true}).click();
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   assert.equal(await page.locator('#milkdown-editor').isVisible(),true,'insertion returns to the rich editor');
   await page.locator('#milkdown-editor img[data-type=image-block]').waitFor();
+  await page.locator('#milkdown-editor .ProseMirror').focus();
   await page.keyboard.press('Control+z');
   await page.waitForFunction(()=>!document.querySelector('#markdown-editor').value.includes('screenshot:ref'));
+  await page.locator('#milkdown-editor .ProseMirror').focus();
   await page.keyboard.press('Control+Shift+z');
   await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('screenshot:ref'));
 
@@ -41,6 +44,7 @@ try {
   await page.locator('#markdown-editor').evaluate(editor=>editor.setSelectionRange(0,editor.value.length));
   const sourceBefore=await page.locator('#markdown-editor').inputValue();
   await page.locator('[data-tab=screenshots]').click();
+  if(!await page.locator('.resource-item-menu').evaluate(node=>node.open))await page.locator('.resource-item-menu>summary').click();
   await page.locator('.screenshot-library-card').getByRole('button',{name:'文書に挿入',exact:true}).click();
   await page.getByRole('button',{name:'ここに挿入',exact:true}).click();
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
@@ -51,13 +55,68 @@ try {
   await page.keyboard.press('Control+Shift+z');
   assert.equal((await page.locator('#markdown-editor').inputValue()).match(/<!-- screenshot:ref id=/g).length,2,'source insertion can be redone');
   await page.keyboard.press('Control+s');await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  // Cancel and a failed reference request preserve the same source cursor.
+  const beforeReferenceRetry=await page.locator('#markdown-editor').inputValue();
+  await page.locator('#markdown-editor').evaluate(editor=>{editor.focus();editor.setSelectionRange(0,0);});
+  async function openReferenceDestination(){
+    await page.locator('[data-tab=screenshots]').click();
+    if(!await page.locator('.resource-item-menu').evaluate(node=>node.open))await page.locator('.resource-item-menu>summary').click();
+    await page.locator('.screenshot-library-card').getByRole('button',{name:'文書に挿入',exact:true}).click();
+    await page.locator('[data-screenshot-destination]').waitFor();
+  }
+  await openReferenceDestination();await page.locator('[data-screenshot-destination]').getByRole('button',{name:'閉じる',exact:true}).click();
+  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  assert.equal(await page.locator('#markdown-editor').inputValue(),beforeReferenceRetry);
+  assert.equal(await page.locator('#markdown-editor').evaluate(editor=>editor.selectionStart),0);
+  await page.route('**/__manual/rpc',async route=>{
+    if(route.request().postDataJSON().action==='screenshots-reference')await route.fulfill({json:{error:'Fixture reference unavailable'}});
+    else await route.continue();
+  });
+  await openReferenceDestination();await page.getByRole('button',{name:'ここに挿入',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Fixture reference unavailable')&&document.body.getAttribute('aria-busy')==='false');
+  assert.equal(await page.locator('#markdown-editor').inputValue(),beforeReferenceRetry);
+  assert.equal(await page.locator('#markdown-editor').evaluate(editor=>editor.selectionStart),0);
+  await page.unroute('**/__manual/rpc');
+  await openReferenceDestination();await page.getByRole('button',{name:'ここに挿入',exact:true}).click();
+  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  assert.ok((await page.locator('#markdown-editor').inputValue()).endsWith(beforeReferenceRetry));
+  await page.locator('#markdown-editor').press('Control+z');
+  assert.equal(await page.locator('#markdown-editor').inputValue(),beforeReferenceRetry);
+  // Reference loading blocks navigation; keep that contract explicit rather
+  // than simulating a manuscript switch through disabled controls.
+  const beforeLateReference=await page.locator('#markdown-editor').inputValue();
+  let releaseReference,referenceStarted;
+  const heldReference=new Promise(resolve=>referenceStarted=resolve);
+  await page.route('**/__manual/rpc',async route=>{
+    if(route.request().postDataJSON().action==='screenshots-reference'){
+      referenceStarted();await new Promise(resolve=>releaseReference=resolve);
+    }
+    await route.continue();
+  });
+  await page.locator('[data-tab=screenshots]').click();
+  if(!await page.locator('.resource-item-menu').evaluate(node=>node.open))await page.locator('.resource-item-menu>summary').click();
+  await page.locator('.screenshot-library-card').getByRole('button',{name:'文書に挿入',exact:true}).click();
+  await page.getByRole('button',{name:'ここに挿入',exact:true}).click();
+  await Promise.race([heldReference,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('Screenshot reference did not start')),10000);timer.unref();})]);
+  assert.equal(await page.locator('[data-tab=editor]').isDisabled(),true,'reference loading prevents leaving the resource panel');
+  assert.equal(await page.locator('[data-document-page="index.md"]').isDisabled(),true,'reference loading prevents manuscript navigation');
+  assert.equal(await page.locator('#markdown-editor').inputValue(),beforeLateReference,'pending reference leaves the manuscript intact');
+  const lateReference=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='screenshots-reference');
+  releaseReference();await lateReference;
+  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  assert.equal((await page.locator('#markdown-editor').inputValue()).match(/<!-- screenshot:ref id=/g).length,3);
+  await page.locator('#markdown-editor').press('Control+z');
+  assert.equal(await page.locator('#markdown-editor').inputValue(),beforeLateReference,'Undo restores the manuscript after the delayed reference');
+  await page.unroute('**/__manual/rpc');
+  await page.locator('#markdown-editor').press('Control+s');await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   const listed=JSON.parse(await rpc('screenshots-list')).items[0];assert.equal(listed.usage.length,1);
   await assert.rejects(()=>rpc('screenshots-change',{id:first.id,json:{delete:true}}),/参照中/);
   await rpc('screenshots-register',{json:{id:first.id,source:original.data,render:original.data,scene:{canvas:{width:128,height:128},annotations:[]},adopt:false}});
   assert.equal(hash(Buffer.from(JSON.parse(await rpc('screenshots-image',{id:first.id,json:{original:true}})).data.split(',')[1],'base64')),sourceHash);
   const plan=JSON.parse(await rpc('screenshots-recapture-plan'));assert.equal(plan.items[0].status,'skipped');assert.equal(plan.items[0].reason,'撮影手順なし');
   await page.locator('[data-tab=screenshots]').click();
-  await page.locator('.screenshot-library-card').getByRole('button',{name:'選択版をコピー',exact:true}).click();
+  if(!await page.locator('.resource-item-menu').evaluate(node=>node.open))await page.locator('.resource-item-menu>summary').click();
+  await page.locator('.screenshot-library-card').getByRole('button',{name:'コピー',exact:true}).click();
   await page.waitForFunction(()=>document.querySelectorAll('.screenshot-library-card').length===2);
   const copiedItems=JSON.parse(await rpc('screenshots-list')).items;
   const copy=copiedItems.find(item=>item.id!==first.id);
@@ -72,14 +131,16 @@ try {
     window.__libraryMock={calls};window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener(){}};
     window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'main'}},transformCallback(){return next++;},unregisterCallback(){},convertFileSrc:path=>path,invoke(command,args={}){
       calls.push({command,args});
+      if(command==='paste_clipboard_image')return new Promise((resolve,reject)=>{window.__libraryMock.releasePaste=()=>resolve({filePath:'docs/assets/native-paste.png',filename:'native-paste.png',alt:'Native paste'});window.__libraryMock.failPaste=()=>reject(new Error('Fixture native clipboard failure'));});
       if(command==='plugin:event|listen')return Promise.resolve(next++);
       if(command==='choose_application')return Promise.resolve('/path with spaces/app');
       if(command==='test_launch_application')return args.program==='/missing/app'?Promise.reject(new Error('起動パスが見つかりません')):Promise.resolve();
       if(command==='load_launch_commands')return Promise.resolve(profiles[args.root]||[]);
       if(command==='save_launch_commands'){if(!args.root)return Promise.reject(new Error("project required"));profiles[args.root]=args.commands;return Promise.resolve();}
       if(command==='start_operation_recording'){recordedId=args.taskId;recordedRoot=args.root;return Promise.resolve('recording');}
-      if(command==='finish_operation_recording'){shot={ownerRoot:recordedRoot,id:recordedId,name:'',adopted:null,protected:false,edits:[{id:'edit-one',created_at:'now',flattened:false}],usage:[],thumbnail:null,recipe:{steps:[]}};return Promise.resolve({screenshotId:recordedId,sourceFile:'/tmp/source',annotationFile:'/tmp/output',completionFile:'/tmp/complete',markitsStarted:true,message:'edited'});}
-      if(command==='markits_annotation_ready')return Promise.resolve('{"annotations":[]}');
+      if(command==='finish_operation_recording'){if(window.__libraryMock.failFinish)return Promise.reject(new Error('simulated capture failure'));shot={ownerRoot:recordedRoot,id:recordedId,name:'',adopted:null,protected:false,edits:[{id:'edit-one',created_at:'now',flattened:false}],usage:[],thumbnail:null,recipe:{steps:[]}};return Promise.resolve({screenshotId:recordedId,sourceFile:'/tmp/source',annotationFile:'/tmp/output',completionFile:'/tmp/complete',markitsStarted:true,message:'edited'});}
+      if(command==='edit_library_screenshot')return window.__libraryMock.failEdit?Promise.reject(new Error('simulated MarkIts startup failure')):Promise.resolve({sourceFile:'/tmp/edit-source',annotationFile:'/tmp/edit-output',completionFile:'/tmp/edit-complete',revision:'edit-one'});
+      if(command==='markits_annotation_ready')return Promise.resolve(window.__libraryMock.holdAnnotations?null:'{"annotations":[]}');
       if(command==='import_library_capture'){imports++;if(imports===1)return Promise.reject(new Error('simulated import failure'));const complete=()=>{shot.adopted='edit-one';shot.thumbnail=png;return '{}';};if(window.__libraryMock.holdImports)return new Promise(resolve=>{window.__libraryMock.release=()=>resolve(complete());});return Promise.resolve(complete());}
       if(command==='manual_request'){
         const {action}=args.request;
@@ -104,7 +165,7 @@ try {
   await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   assert.equal(await nativePage.locator('.workspace-nav-tools #open-applications').count(),1,'application registration is grouped with screen tools');
   assert.equal(await nativePage.locator('#open-applications').isVisible(),true);
-  await nativePage.getByRole('button',{name:'アプリ登録',exact:true}).click();await nativePage.locator('#add-launch-command').click();
+  await nativePage.getByRole('button',{name:'撮影アプリの登録',exact:true}).click();await nativePage.locator('#add-launch-command').click();
   await nativePage.locator('[data-launch-program="0"]').fill('/missing/app');
   await nativePage.getByRole('button',{name:'起動確認',exact:true}).click();
   await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('起動パスが見つかりません'));
@@ -150,10 +211,43 @@ try {
   await nativePage.waitForFunction(()=>document.querySelector('#editor-title').textContent==='index.md');await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await nativePage.locator('[data-tab=editor]').click();await nativePage.getByRole('button',{name:'Markdownソース',exact:true}).click();const nativeEditor=nativePage.locator('#markdown-editor');const manuscript=await nativeEditor.inputValue();
   await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'キャンセル',exact:true}).click();assert.equal(await nativeEditor.inputValue(),manuscript);
-  await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();await nativePage.locator('#editor-screenshot-preview').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'この位置に挿入',exact:true}).click();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  await nativePage.evaluate(()=>{__libraryMock.failFinish=true;});await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();await nativePage.waitForFunction(()=>!document.querySelector('#editor-screenshot-recording')&&document.querySelector('#screenshot-library-record').hidden===false);assert.equal(await nativeEditor.inputValue(),manuscript);assert.equal(await nativeEditor.evaluate(el=>el.selectionStart),10);
+  await nativePage.evaluate(()=>{__libraryMock.failFinish=false;});await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();await nativePage.locator('#editor-screenshot-preview').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'この位置に挿入',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('指定位置にスクショを挿入しました。')&&document.body.getAttribute('aria-busy')==='false');
   const inserted=await nativeEditor.inputValue();assert.ok(inserted.startsWith(manuscript.slice(0,10)));assert.ok(inserted.endsWith(manuscript.slice(10)));assert.match(inserted,/assets\/screenshots\//);await nativeEditor.press('Control+z');assert.equal(await nativeEditor.inputValue(),manuscript);
   assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.some(call=>call.command==='manual_request'&&call.args.request.action.startsWith('screenshot-ai-'))),false,'manual insertion needs no AI requests');
+  // Native clipboard invocation is mocked: check UI/session guards without
+  // claiming an actual OS clipboard read or an asset write.
+  for(const outcome of ['cancel','failure','retry','stale']){
+    await nativePage.evaluate(()=>{delete __libraryMock.releasePaste;delete __libraryMock.failPaste;});
+    await nativeEditor.evaluate(node=>{node.focus();node.setSelectionRange(10,10);});
+    await nativePage.waitForTimeout(650);await nativeEditor.press('Control+v');
+    await nativePage.waitForFunction(()=>typeof __libraryMock.releasePaste==='function');
+    assert.equal(await nativePage.locator('#cancel-image-paste').isVisible(),true);
+    if(outcome==='cancel')await nativePage.locator('#cancel-image-paste').click();
+    if(outcome==='retry')await nativeEditor.evaluate(node=>node.setSelectionRange(0,0));
+    if(outcome==='stale')await nativeEditor.fill(manuscript+'Changed while clipboard waits.');
+    await nativePage.evaluate(outcome=>outcome==='failure'?__libraryMock.failPaste():__libraryMock.releasePaste(),outcome);
+    await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+    assert.equal(await nativePage.locator('#cancel-image-paste').isVisible(),false);
+    if(outcome==='retry'){
+      assert.equal(await nativeEditor.inputValue(),manuscript.slice(0,10)+'![Native paste](assets/native-paste.png)'+manuscript.slice(10));
+      await nativeEditor.press('Control+z');assert.equal(await nativeEditor.inputValue(),manuscript);
+    }else if(outcome==='stale'){
+      assert.equal(await nativeEditor.inputValue(),manuscript+'Changed while clipboard waits.');
+      assert.match(await nativePage.locator('#status').textContent(),/原稿が変更されました/);
+      await nativeEditor.fill(manuscript);
+    }else{
+      assert.equal(await nativeEditor.inputValue(),manuscript);
+      assert.match(await nativePage.locator('#status').textContent(),outcome==='cancel'?/挿入はキャンセルされました/:/Fixture native clipboard failure/);
+    }
+  }
+  await nativePage.locator('[data-tab=screenshots]').click();await nativePage.evaluate(()=>{__libraryMock.failEdit=true;});
+  if(!await nativePage.locator('.resource-item-menu').evaluate(node=>node.open))await nativePage.locator('.resource-item-menu>summary').click();
+  await nativePage.getByRole('button',{name:'編集',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('simulated MarkIts startup failure'));assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isEnabled(),true);
+  await nativePage.evaluate(()=>{__libraryMock.failEdit=false;__libraryMock.holdAnnotations=true;});await nativePage.getByRole('button',{name:'編集',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('MarkItsで編集中'));assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isDisabled(),true,'pending editing cannot launch duplicate editors');
+  await nativePage.evaluate(()=>{__libraryMock.holdAnnotations=false;});await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('候補として保存'));assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isEnabled(),true);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.filter(call=>call.command==='edit_library_screenshot').length),2);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.some(call=>call.command==='restore_manual_studio')),true);
   await nativePage.close();
   assert.deepEqual(errors,[]);
-  console.log('Independent screenshot import, immutable original, Markdown insertion, reference protection, recapture eligibility and editor manual capture/preview/cursor insertion/Undo without AI checks passed.');
+  console.log('Independent screenshot import, immutable original, Markdown insertion, reference protection, recapture eligibility and editor manual capture failure/retry/preview/cursor insertion/Undo without AI checks passed.');
 } finally {await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

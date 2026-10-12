@@ -1,6 +1,7 @@
 import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePresentation} from './imagePresentation';
 import { Slice } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
+import { uploadConfig, uploadPlugin } from '@milkdown/kit/plugin/upload';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { uiIcon } from './uiIcons';
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
@@ -57,6 +58,18 @@ export function setupMilkdownEditor(
   const toggle = document.createElement('button');
   toggle.type = 'button'; toggle.textContent = 'Markdownソース';
   source.parentElement!.querySelector('.column-label')!.append(toggle);
+  const pendingUploads: Array<{ cancelled: boolean }> = [];
+  function cancelLatestUpload(): boolean {
+    const pending = [...pendingUploads].reverse().find(upload => !upload.cancelled);
+    if (!pending) return false;
+    pending.cancelled = true;
+    return true;
+  }
+  function undoOrCancel(ctx: Ctx): boolean {
+    const view = ctx.get(editorViewCtx);
+    if (undo(view.state)) return undo(view.state, view.dispatch);
+    return cancelLatestUpload();
+  }
   let instance: Editor | undefined;
   let crepe: Crepe | undefined;
   const sourceToolbar = source.closest('#panel-editor')?.querySelector<HTMLElement>('.formatting-toolbar');
@@ -275,7 +288,7 @@ export function setupMilkdownEditor(
           ? doc.copy(doc.content.cut(0, doc.content.size - last.nodeSize)) : doc;
         valueProperty.set!.call(source, ctx.get(serializerCtx)(serializable));
       }
-      if (changed || !view.state.selection.eq(previous.selection)) {
+      if (!sourceMode && (changed || !view.state.selection.eq(previous.selection))) {
         let offset = 0;
         let start = 0;
         let end = 0;
@@ -327,7 +340,7 @@ export function setupMilkdownEditor(
         headingOptions: [{ label: '本文', level: null }, ...Array.from({ length: 6 }, (_, index) => ({ label: `見出し${index + 1}`, level: index + 1 }))],
         buildTopBar: builder => {
           builder.addGroup('history', '履歴')
-            .addItem('undo', { icon: uiIcon('undo'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); undo(view.state, view.dispatch); } })
+            .addItem('undo', { icon: uiIcon('undo'), active: () => false, onRun: (ctx: Ctx) => { undoOrCancel(ctx); } })
             .addItem('redo', { icon: uiIcon('redo'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); redo(view.state, view.dispatch); } });
           builder.getGroup('block').addItem('mermaid', { icon: icon('Mermaid'), active: () => false, onRun: (ctx: Ctx) => insert(mermaidSource)(ctx) });
           const advancedKeys = new Set(['strikethrough', 'code', 'code-block', 'math', 'quote', 'hr', 'task-list', 'mermaid']);
@@ -367,6 +380,16 @@ export function setupMilkdownEditor(
     },
   });
   crepe.editor.config(ctx => {
+    // The upload plugin leaves its placeholder behind when its uploader rejects.
+    // The upload callback already reports the error; an empty result lets the
+    // plugin remove the placeholder without inserting an image.
+    ctx.update(uploadConfig.key, previous => ({ ...previous, uploader: async (...args) => {
+      const pending = { cancelled: false };
+      pendingUploads.push(pending);
+      try { const result = await previous.uploader(...args); return pending.cancelled ? [] : result; }
+      catch { return []; }
+      finally { pendingUploads.splice(pendingUploads.indexOf(pending), 1); }
+    } }));
     // Remark uses null for absent image titles; the preset's string validator rejects it.
     ctx.update(imageSchema.key, previous => ctx => {
       const schema = previous(ctx);
@@ -396,9 +419,19 @@ export function setupMilkdownEditor(
     if (!sourceMode) source.hidden = true;
     source.dispatchEvent(new Event('editor-mode-change'));
   }).catch(error => { showSource(); toggle.disabled = true; report(`Milkdownの起動に失敗しました: ${String(error)}`); });
+  host.addEventListener('keydown', event => {
+    if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror') || event.target.closest('input,textarea')) return;
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'z') return;
+    if (!instance || !ready || sourceMode) return;
+    const cancelled = instance.action(ctx => {
+      const view = ctx.get(editorViewCtx);
+      return !undo(view.state) && cancelLatestUpload();
+    });
+    if (cancelled) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
   function stepHistory(direction: number): boolean {
     if (sourceMode || !instance || !ready) return false;
-    instance.action(ctx => { const view = ctx.get(editorViewCtx); (direction < 0 ? undo : redo)(view.state, view.dispatch); view.focus(); });
+    instance.action(ctx => { const view = ctx.get(editorViewCtx); if (direction < 0) undoOrCancel(ctx); else redo(view.state, view.dispatch); view.focus(); });
     return true;
   }
   function imageSourceRange(image:HTMLImageElement):DocumentImage|undefined{
@@ -410,14 +443,30 @@ export function setupMilkdownEditor(
     selectedImageSourceRange:()=>{if(!ready||!instance||sourceMode)return;let image:HTMLImageElement|undefined;instance.action(ctx=>{const view=ctx.get(editorViewCtx);const dom=view.nodeDOM(view.state.selection.from);image=dom instanceof HTMLImageElement?dom:dom instanceof HTMLElement?dom.querySelector<HTMLImageElement>('img')||undefined:undefined;});return image?imageSourceRange(image):undefined;},
     replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(replaceAll(markdown));return true;},
     focus: () => { if (sourceMode) source.focus(); else instance?.action(ctx=>ctx.get(editorViewCtx).focus()); },
-    captureState: () => ready && instance ? instance.action(ctx => ctx.get(editorViewCtx).state) : null,
+    captureState: () => ready && instance ? instance.action(ctx => {
+      let state = ctx.get(editorViewCtx).state;
+      const key = uploadPlugin.key();
+      const decorations = key?.getState(state);
+      // Pending upload widgets are transient UI, not document tab state. Drop
+      // them from the cached snapshot so a failed or stale upload cannot return.
+      for (const decoration of decorations?.find() || []) {
+        const id = decoration.spec.id;
+        if (id !== undefined && key) state = state.apply(state.tr.setMeta(key, { remove: { id } }));
+      }
+      return state;
+    }) : null,
     restoreState: (state: EditorState) => { if (ready && instance && state) instance.action(ctx => ctx.get(editorViewCtx).updateState(state)); },
     get isRichEditing() { return ready && !sourceMode; },
-    captureSelectionEdit: (insertionOnly=false) => {
+    captureSelectionEdit: (insertionOnly=false, coordinates?:{left:number;top:number}) => {
       if(sourceMode||!ready||!instance)return;
       const editor=instance;
       return editor.action(ctx=>{
-        const view=ctx.get(editorViewCtx),state=view.state;
+        const view=ctx.get(editorViewCtx);
+        if(coordinates){
+          const point=view.posAtCoords(coordinates);
+          if(point)view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(point.pos))));
+        }
+        const state=view.state;
         const from=state.selection.from,to=insertionOnly?from:state.selection.to;
         const text=insertionOnly||state.selection.empty?"":ctx.get(serializerCtx)(state.doc.cut(from,to));
         return {text,apply:(markdown:string,blockInsertion=false)=>editor.action(ctx=>{

@@ -151,7 +151,7 @@ export function setupImageGeneration(options:Options) {
         });sync();
       }
       generate.onclick=retry.onclick=()=>{void run();};
-      insert.onclick=()=>{if(!selected?.path||running)return;const path=selected.path;dialog.close();void options.work(async()=>{if(root===options.root())await options.insert(path);});};
+      insert.onclick=()=>{if(!selected?.path||running)return;const path=selected.path;void options.work(async()=>{if(root===options.root()&&await options.insert(path))dialog.close();});};
       modify.onclick=()=>{if(!selected?.path||running)return;referencePath=selected.path;parentId=selected.id;reference.checked=true;referenceLabel.hidden=false;prompt.value='';prompt.focus();status.textContent='この画像から変更したい点を入力してください。元画像は保持します。';};
       compare.onclick=()=>{void options.work(async()=>{const entries=history.filter(entry=>entry.path&&comparison.has(entry.id));await showImageComparison(await Promise.all(entries.map(async entry=>({label:`${entry.provider||entry.model||'画像'} ／ ${entry.prompt}`,src:await preview(entry)}))),'AI画像の比較',false);});};
       await loadHistory();if(seed?.path){await select(seed);if(edit){prompt.value='';reference.checked=true;}}sync();void checkConnection();

@@ -92,10 +92,10 @@ try {
   saveFails=false;saveDelay=0;await page.keyboard.press('Control+s');await idle();
   assert.equal(await page.locator('#save-state').getAttribute('data-state'),'saved');
   await page.locator('[data-tab=publish]').click();
-  assert.equal(await page.locator('#build-draft').isVisible(),true);
+  assert.equal(await page.locator('#build-html').isVisible(),true);assert.equal(await page.locator('#build-mode').isVisible(),true);assert.equal(await page.locator('#generate-draft').isVisible(),false,'AI draft creation is an authoring action, not an output action');
   assert.equal(await page.locator('#ai-connection-type').isVisible(),false);
   await page.locator('[data-close-dialog=panel-publish]').click();
-  await page.locator('#settings-menu summary').click();await page.locator('[data-tab=settings]').click();
+  await page.locator('[data-tab=settings]').click();
   assert.equal(await page.locator('#ai-connection-type').isVisible(),true);
   assert.equal(await page.locator('#save-launch-commands').isVisible(),false);
   const savesBefore=actions.filter(action=>action==='editor-save').length;

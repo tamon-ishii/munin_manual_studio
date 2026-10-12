@@ -48,13 +48,13 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
   }
   function decorate(card:HTMLElement,resource:Resource){
     card.dataset.resourcePath=resource.path;card.dataset.resourceKind=resource.kind;card.dataset.resourceRoot=options.root();
-    const info=document.createElement('div');info.className='resource-card-info';const badge=document.createElement('span');badge.className='badge';badge.textContent=labels[resource.kind];const path=document.createElement('span');path.className='resource-path';path.textContent=resource.path;path.title=resource.path;info.append(badge,path);card.querySelector('h2')?.after(info);
+    const info=document.createElement('div');info.className='resource-card-info';const badge=document.createElement('span');badge.className='badge';badge.textContent=labels[resource.kind];const path=document.createElement('span');path.className='resource-path';path.textContent=resource.path;path.title=resource.path;if(resource.kind!=='imported')info.append(badge);info.append(path);card.querySelector('h2')?.after(info);
     usageLinks(card,resource);
   }
   async function replace(resource:Resource,root:string){
     const detail=JSON.parse(await options.request('resources-detail',{asset:resource.path},root)) as {sha256:string;usages:ResourceUsage[]};
     if(root!==options.root())return;resource={...resource,...detail};
-    const {dialog,body}=featureDialog('画像の差し替え');dialog.dataset.resourceReplacement='true';
+    const {dialog,body}=featureDialog('画像の差し替え',false);dialog.dataset.resourceReplacement='true';
     const notice=document.createElement('p');notice.textContent=`${resource.path} を差し替えると、下記の使用箇所すべてに反映されます。元画像はバックアップに保存します。`;body.append(notice);usageLinks(body,resource);
     const label=document.createElement('label');label.textContent='新しい画像';const replacement=document.createElement('select');replacement.setAttribute('aria-label','差し替え先の画像');
     for(const item of items.filter(item=>!item.missing&&item.path!==resource.path&&/\.(png|jpe?g)$/i.test(item.path)))replacement.add(new Option(`${item.name} — ${item.path}`,item.path));label.append(replacement);
@@ -69,6 +69,34 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
     });};
     body.append(label,preview,status,confirm);if(replacement.options.length)replacement.onchange(new Event('change'));
   }
+  const views=new Map<string,{open:boolean;management:boolean;revision?:string;revisionCount:number}>();
+  const viewKey=(card:HTMLElement)=>JSON.stringify([card.dataset.resourceRoot,card.dataset.resourcePath||card.dataset.screenshotId]);
+  function captureViews(list:HTMLElement){
+    for(const card of list.querySelectorAll<HTMLElement>('.resource-list-item')){
+      const revisions=card.querySelector<HTMLSelectElement>('select[aria-label="画像の編集版"]');
+      views.set(viewKey(card),{open:Boolean(card.querySelector<HTMLDetailsElement>('.resource-item-menu')?.open),management:Boolean(card.querySelector<HTMLDetailsElement>('.screenshot-management')?.open),revision:revisions?.value,revisionCount:revisions?.options.length||0});
+    }
+  }
+  function compactCard(card:HTMLElement,usageCount=0){
+    card.dataset.resourceRoot ||= options.root();
+    const state=views.get(viewKey(card));
+    const image=card.querySelector<HTMLImageElement>(':scope>img');
+    const title=card.querySelector<HTMLHeadingElement>(':scope>h2')!;
+    title.title=title.textContent||'';
+    const summary=document.createElement('div');summary.className='resource-item-summary';summary.append(title);
+    const info=card.querySelector<HTMLElement>(':scope>.resource-card-info');if(info)summary.append(info);
+    const usage=document.createElement('p');usage.className='resource-item-usage';usage.textContent=usageCount?`使用中 ${usageCount}箇所`:'未使用';summary.append(usage);
+    const menu=document.createElement('details');menu.className='resource-item-menu';menu.open=state?.open||false;
+    const trigger=document.createElement('summary');trigger.textContent='操作';trigger.setAttribute('aria-label',`${title.textContent}の操作`);menu.append(trigger);
+    const body=document.createElement('div');body.className='resource-item-operations';
+    for(const child of [...card.children])if(child!==image)body.append(child);
+    menu.append(body);
+    const management=body.querySelector<HTMLDetailsElement>('.screenshot-management');if(management)management.open=state?.management||false;
+    const revisions=body.querySelector<HTMLSelectElement>('select[aria-label="画像の編集版"]');
+    if(revisions&&state?.revision&&state.revisionCount===revisions.options.length&&[...revisions.options].some(option=>option.value===state.revision))revisions.value=state.revision;
+    card.classList.add('resource-list-item');card.replaceChildren();if(image)card.append(image);card.append(summary,menu);
+    const status=body.querySelector<HTMLElement>('.screenshot-edit-status');if(status)card.append(status);
+  }
   function renderExtras(list:HTMLElement,root:string){
     for(const resource of items.filter(item=>!item.screenshot_id&&matches(item))){
       const card=document.createElement('article');card.className='card screenshot-library-card resource-card';const title=document.createElement('h2');title.textContent=resource.name||resource.path.split('/').at(-1)||'画像';card.append(title);decorate(card,resource);
@@ -80,7 +108,7 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
       }
       button('画像を表示',()=>options.openImage(resource.path));
       button('文書に挿入',()=>options.insertAsset(resource.path));
-      button('MarkItsで編集',async()=>{const copied=JSON.parse(await options.request('resources-copy',{asset:resource.path},root)) as {path:string};await options.editImage(copied.path);},false,Boolean(resource.missing)||!('__TAURI_INTERNALS__' in window)||!/\.(png|jpe?g)$/i.test(resource.path));
+      button('編集',()=>options.editImage(resource.path),false,Boolean(resource.missing)||!('__TAURI_INTERNALS__' in window)||!/\.(png|jpe?g)$/i.test(resource.path));
       const seed:ImageGenerationEntry=resource.generation||{id:resource.path,path:resource.path,prompt:'',created_at:''};
       button('AIで修正',()=>options.generateImage(seed,true),true);
       if(resource.generation)button('指示を再利用',()=>options.generateImage(seed,false),true,false);
@@ -101,7 +129,7 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
         catch(error){restoreStatus.textContent=String(error);restore.disabled=false;}
       });};
       management.append(restore,restoreStatus);
-      const swap=document.createElement('button');swap.type='button';swap.textContent='差し替えと影響確認';swap.disabled=Boolean(resource.missing)||!/\.(png|jpe?g)$/i.test(resource.path);swap.onclick=()=>{if(root===options.root())void replace(resource,root);};management.append(swap);card.append(management);list.append(card);
+      const swap=document.createElement('button');swap.type='button';swap.textContent='差し替えと影響確認';swap.disabled=Boolean(resource.missing)||!/\.(png|jpe?g)$/i.test(resource.path);swap.onclick=()=>{if(root===options.root())void replace(resource,root);};management.append(swap);card.append(management);compactCard(card,resource.usages.length);list.append(card);
     }
     const displayed=list.querySelectorAll('.screenshot-library-card').length;count.textContent=`${displayed} / ${Math.max(items.length,displayed)}件`;
     if(!displayed){list.textContent=items.length?'条件に合うリソースがありません。':'撮影・画像の取り込み・AI作画でリソースを追加できます。';}
@@ -109,6 +137,6 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
   return {
     setItems(next:Resource[]){observer?.disconnect();observer=null;queue.length=0;thumbnails.clear();items=next;byPath=new Map(next.map(item=>[item.path,item]));},
     matchesShot(path:string,fallback:Resource){return matches(byPath.get(path)||fallback);},
-    decorateShot(card:HTMLElement,path:string){const item=byPath.get(path);if(item)decorate(card,item);},renderExtras,
+    decorateShot(card:HTMLElement,path:string){const item=byPath.get(path);if(item)decorate(card,item);},renderExtras,captureViews,compactCard,
   };
 }

@@ -173,6 +173,7 @@ jobs:
       - name: Check UI, generation, capture, and integrated workflows
         if: runner.os == 'Linux'
         run: |
+          npm run manual:build-verification
           npm run manual:check -- --group unit
           npm run manual:check-ui
           npm run manual:check-generation
@@ -180,6 +181,23 @@ jobs:
           npm run manual:check -- --group smoke
       - name: Build Manual Studio and CLI
         run: cargo build --locked --release --target ${{ matrix.target }} -p manual-studio -p manual-core
+      - name: Prepare required Linux desktop workflow
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb openbox wmctrl x11-utils python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 at-spi2-core dbus-x11 gcc libx11-dev
+      - name: Check Studio button to real MarkIts and adoption
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bash scripts/run_manual_studio_desktop_ci.sh
+      - name: Save UI workflow evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-ui-workflow-evidence
+          path: |
+            ui-coverage-results/
+            native-workflow-results/
+            native-clipboard-results/
+          if-no-files-found: warn
       - name: Package applications
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}

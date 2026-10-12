@@ -1,0 +1,101 @@
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {chromium} from 'playwright-core';
+import {beginVerification,finishVerification} from './lib/manual_ui_report.mjs';
+
+const start=await beginVerification();
+const reportDir='ui-coverage-results/author-settings';
+await rm(path.join(reportDir,'result.json'),{force:true});
+const root=await mkdtemp(path.join(os.tmpdir(),'munin-author-settings-'));
+const base='http://127.0.0.1:5181';
+const original='# Author settings\n\nOriginal paragraph.\n';
+const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+const registry=JSON.parse(await readFile('scripts/fixtures/manual-studio-ui-inventory.json','utf8'));
+const results=[];
+let server,browser,page;
+function entry(feature,needle){
+ const matches=registry.actions.filter(action=>action.feature===feature&&action.expression.includes(needle));
+ assert.equal(matches.length,1,`ambiguous registry operation: ${feature} ${needle}`);
+ return matches[0].id;
+}
+async function record(caseId,feature,needles,steps,stored){
+ const names=needles.map(needle=>entry(feature,needle));
+ const stem=caseId.replaceAll('.','-');
+ const screenshot=`${stem}.png`,state=`${stem}.json`;
+ await page.screenshot({path:path.join(reportDir,screenshot)});
+ await writeFile(path.join(reportDir,state),JSON.stringify({caseId,steps,stored,editor:await page.locator('#markdown-editor').inputValue(),originalHash:hash(original),manuscriptHash:hash(await readFile(path.join(root,'docs/index.md'))),settingsHash:hash(await readFile(path.join(root,'manual_setting.json'))),localStorage:await page.evaluate(()=>({toolbar:localStorage.getItem('manual-studio-toolbar-hidden'),font:localStorage.getItem('manual-studio-editor-font-size')}))},null,2));
+ const artifacts=await Promise.all([screenshot,state].map(async file=>({path:file,sha256:hash(await readFile(path.join(reportDir,file)))})));
+ for(const entryPoint of names)results.push({caseId,entryPoint,type:feature==='P13'?'browser-mock':'real-backend',status:'passed',steps,assertions:{visible:true,stored:true,preserved:true,returnTarget:true},artifacts});
+}
+try{
+ await mkdir(path.join(root,'docs'),{recursive:true});
+ await mkdir(reportDir,{recursive:true});
+ await writeFile(path.join(root,'docs/index.md'),original);
+ await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',assets:'docs/assets',output:'manual',targets:['docs'],connection_type:'none'}));
+ server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts','--port','5181','--strictPort'],{stdio:'ignore'});
+ for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
+ assert.equal((await fetch(base)).ok,true,'isolated Vite server must start');
+ browser=await chromium.launch({channel:'chrome',headless:true});
+ const context=await browser.newContext({viewport:{width:1440,height:960}});
+ page=await context.newPage();
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.route('**/__manual/rpc',async route=>{const response=await route.fetch({headers:{...route.request().headers(),origin:'http://127.0.0.1:5174'}});await route.fulfill({response});});
+ const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+ await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=index.md`);
+ await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('Original paragraph')).catch(async error=>{throw new Error(`${error.message}; status=${await page.locator('#status').textContent()}; body=${(await page.locator('body').textContent()).slice(0,500)}`)});
+ await idle();
+ const settingsBefore=await readFile(path.join(root,'manual_setting.json'));
+ await page.locator('#project-menu>summary').click();await page.locator('#open-workspace-settings').click();
+ await page.locator('#site-name').fill('Contract manual');
+ await page.locator('#cancel-workspace-settings').click();
+ assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsBefore,'cancel leaves actual configuration file unchanged');
+ await page.locator('#project-menu>summary').click();await page.locator('#open-workspace-settings').click();
+ await page.locator('#site-name').fill('Contract manual');
+ await page.locator('#workspace-settings-form button[type=submit]').click();
+ await page.waitForFunction(()=>document.querySelector('#workspace-save-state')?.textContent==='保存済み');
+ assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).mkdocs?.site_name,'Contract manual');
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);
+ await page.reload();await idle();
+ await page.locator('#project-menu>summary').click();await page.locator('#open-workspace-settings').click();
+ assert.equal(await page.locator('#site-name').inputValue(),'Contract manual','saved workspace value is restored after reload');
+ await page.locator('#cancel-workspace-settings').click();
+ await record('P01.workspace-settings-save','P01',['id="open-workspace-settings" aria-haspopup','id="cancel-workspace-settings"','id="save-workspace-settings"'],['open workspace settings','edit site title then cancel and compare actual config bytes','reopen and save title','reload and read stored title','verify manuscript file unchanged'],{siteName:'Contract manual',persistence:'manual_setting.json',cancel:'unchanged bytes'});
+ const settingsAfterWorkspace=await readFile(path.join(root,'manual_setting.json'));
+
+ await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
+ const editor=page.locator('#markdown-editor');
+ const draft=original+'Saved through editor.\n';
+ await editor.fill(draft);
+ await page.waitForFunction(()=>document.querySelector('#save-state')?.dataset.state==='saved');
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft,'autosave writes the real manuscript');
+ await page.reload();await idle();
+ assert.equal(await editor.inputValue(),draft,'editor reload restores actual saved content');
+ assert.equal(await page.locator('#editor-title').textContent(),'index.md');
+ assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsAfterWorkspace);
+ await record('P02.editor-autosave','P02',['id="markdown-editor" spellcheck'],['edit source manuscript','wait for autosave state','read actual docs/index.md','reload editor and compare body and active title'],{manuscript:'docs/index.md',contentHash:hash(draft)});
+
+ await page.getByRole('button',{name:'外観',exact:true}).click();
+ await page.locator('#toolbar-customization>summary').click();
+ const bold=page.locator('#toolbar-customization-list label').filter({hasText:/^太字$/}).locator('input');
+ await bold.uncheck();
+ assert.equal(await page.locator('[data-format="bold"]').getAttribute('data-toolbar-hidden'),'true');
+ assert.ok((await page.evaluate(()=>JSON.parse(localStorage.getItem('manual-studio-toolbar-hidden')||'[]'))).includes('太字'));
+ await page.locator('[data-close-dialog=panel-appearance]').click();
+ await page.reload();await idle();
+ await page.getByRole('button',{name:'外観',exact:true}).click();
+ await page.locator('#toolbar-customization>summary').click();
+ assert.equal(await bold.isChecked(),false,'hidden toolbar state restores from browser storage');
+ await page.locator('#reset-toolbar-customization').click();
+ assert.equal(await bold.isChecked(),true);
+ assert.equal(await page.evaluate(()=>localStorage.getItem('manual-studio-toolbar-hidden')),null);
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft);
+ assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsAfterWorkspace);
+ await record('P13.toolbar-visibility','P13',['data-tab="appearance" data-ui-icon','id="reset-toolbar-customization"','checkbox.onchange=()=>{if(checkbox.checked)hidden.delete'],['open appearance panel','hide bold control','verify toolbar and localStorage','reload and verify preference restores','reset toolbar visibility','verify manuscript unchanged'],{persistence:'browser localStorage',reset:'storage key removed'});
+ assert.deepEqual(errors,[]);
+ await writeFile(path.join(reportDir,'result.json'),JSON.stringify({...await finishVerification(start),type:'real-backend',scope:'P01 workspace settings, P02 source autosave, P13 toolbar preference; browser UI with actual local backend files; remaining actions unverified',notes:'Vite fixture ran on port 5181. Browser RPC Origin was adapted to its development allowlist on port 5174 while requests passed through the actual backend.',results},null,2));
+ console.log(`Author/settings contracts passed: ${results.length} entry-specific results across 3 scenarios.`);
+}finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

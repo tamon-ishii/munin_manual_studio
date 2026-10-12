@@ -16,3 +16,11 @@
 /manual/scenarios/recorded-shot-*.json
 /sample_project/manual/ai/
 /sample_project/docs/assets/
+
+# Reproducible UI verification evidence (uploaded by CI)
+/ui-coverage-results/
+/native-workflow-results/
+/native-clipboard-results/
+/native-clipboard-probe-results/
+/native-manual-capture-results/
+/native-manual-capture-probe-results/

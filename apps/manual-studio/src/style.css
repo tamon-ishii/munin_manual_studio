@@ -267,7 +267,7 @@ button[data-toggle-approved].is-approved::before,
 #milkdown-editor .milkdown-ai-task.is-approved{border-color:var(--accent)}
 
 #markdown-editor,.task-prompt-label textarea{font-size:var(--editor-font-size,14px)}
-#editor-font-size{width:120px}
+.display-settings input[type="number"]{width:120px;max-width:100%}
 /* Keep native text selections visible over Crepe's node/drag selection rules. */
 #markdown-editor::selection,
 #milkdown-editor .milkdown .ProseMirror::selection,
@@ -925,7 +925,7 @@ dialog input,dialog textarea,dialog select{min-width:0;max-width:100%}
 dialog button{max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
 dialog .settings-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
 dialog .actions:last-child{justify-content:flex-end}
-.launch-command-row{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;padding:16px;gap:12px}
+.launch-command-row{grid-template-columns:minmax(0,1fr);align-items:start;padding:16px;gap:12px}
 .launch-program-field,.launch-row-actions{grid-column:1/-1}.launch-row-actions{justify-content:flex-end}
 .ui-help{margin:0 0 16px;color:var(--text-muted);font-size:12px}.ui-help summary{cursor:pointer}.ui-help p{margin:8px 0}
 .screenshot-library-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));align-items:start}
@@ -1012,8 +1012,8 @@ dialog.panel-dialog>.panel-header{position:sticky;top:-16px;z-index:2;background
 .sidebar .page-heading{gap:8px;flex-wrap:wrap}.sidebar .eyebrow{font-size:11px;letter-spacing:0;margin:0}
 .tree-create-actions button{min-height:28px;padding:4px 7px}
 .tree-generate-all{margin:10px 0;background:var(--surface-bg);border-color:var(--border-color);color:var(--accent);font-weight:600}
-.screenshot-library-toolbar{padding:10px;border:1px solid var(--border-color);border-radius:8px;background:var(--surface-soft);margin-bottom:16px}
-.screenshot-library-toolbar>button,.screenshot-library-toolbar .library-tools>summary{min-height:34px;font-size:12px;padding:7px 10px}
+.screenshot-library-toolbar{padding:0;border:0;background:transparent;gap:5px;margin-bottom:8px}
+.screenshot-library-toolbar>button,.screenshot-library-toolbar .library-tools>summary{min-height:30px;font-size:12px;padding:5px 8px}
 .screenshot-library-toolbar>.library-tools{margin-left:auto}
 .screenshot-library-card img{width:100%;height:180px;background:var(--surface-soft);border-radius:6px}
 button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -1097,3 +1097,38 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 .screenshot-method{width:100%;justify-content:flex-start;padding:12px}
 #editor-screenshot-method .muted{margin:6px 0 16px}
 .progress-compact{position:fixed;z-index:5;right:18px;bottom:38px;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 36px)}.progress-compact .progress-open{position:static;max-width:min(680px,calc(100vw - 160px));white-space:normal;text-align:left}.progress-compact button[hidden]{display:none}.draft-page>label{font-weight:600}.draft-page .selectable-diff{max-height:42vh;overflow:auto}#draft-diff-dialog{width:min(1000px,95vw)}#reader-review-capabilities{padding:12px;border:1px solid var(--border-color);border-radius:8px;background:var(--surface-soft);color:var(--text-primary)}
+
+#reader-review-results,dialog[data-resource-replacement]{position:fixed;transform:none;inset:12px 12px 48px auto;margin:0;width:min(440px,calc(100vw - 24px));max-width:none;height:calc(100dvh - 60px);max-height:none;overflow:auto;box-shadow:0 8px 32px var(--shadow-color);z-index:6}
+
+.operation-progress,.progress-compact{z-index:7}
+
+#panel-screenshots>.panel-header{margin-bottom:8px}#panel-screenshots>.panel-header h1{font-size:16px}
+#panel-screenshots>.resource-filters{gap:6px;margin-bottom:8px}#panel-screenshots>.resource-filters input,#panel-screenshots>.resource-filters select{font-size:12px;padding:6px 8px}
+
+.screenshot-library-list{display:flex;flex-direction:column;gap:6px;padding:0}
+.screenshot-library-card.resource-list-item{display:grid;grid-template-columns:56px minmax(0,1fr) auto;align-items:center;gap:8px;padding:8px 10px}
+.resource-list-item>img{grid-column:1;grid-row:1;width:56px;height:48px;max-height:48px;object-fit:contain;border-radius:4px}
+.resource-item-summary{grid-column:2;grid-row:1;min-width:0}
+.resource-item-summary h2{font-size:13px;line-height:1.35;margin:0 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resource-item-summary .resource-card-info{margin:0;gap:4px}.resource-item-summary .resource-path{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resource-item-summary .resource-item-usage{font-size:11px;color:var(--text-secondary);margin:2px 0 0;line-height:1.3}
+.resource-item-menu{display:contents}.resource-item-menu>summary{grid-column:3;grid-row:1;cursor:pointer;font-size:12px;padding:5px 7px;border:1px solid var(--border-color);border-radius:5px;white-space:nowrap}
+.resource-item-operations{grid-column:1/-1;border-top:1px solid var(--border-color);padding-top:8px;margin-top:2px;min-width:0}
+.resource-item-menu:not([open])>.resource-item-operations{display:none}
+.resource-list-item>.screenshot-edit-status{grid-column:1/-1;font-size:11px;margin:0;line-height:1.4}.resource-list-item>.screenshot-edit-status:empty{display:none}
+/* Keep disclosure content in a full-width grid row: WebKit details does not reliably flatten with display:contents. */
+.screenshot-library-card.resource-list-item{position:relative;grid-template-columns:56px minmax(0,1fr);row-gap:0}
+.resource-item-summary{padding-right:64px}
+.resource-item-menu{display:block;grid-column:1/-1;grid-row:2;min-width:0}
+.resource-item-menu>summary{position:absolute;top:8px;right:10px}
+.resource-item-menu:not([open]){height:0;min-height:0}
+.resource-item-operations{margin-top:8px}
+.resource-list-item>.screenshot-edit-status:not(:empty){margin-top:8px}
+.screenshot-library-list{container-type:inline-size}
+.resource-item-summary .resource-item-usage{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@container (max-width:220px){
+  .screenshot-library-card.resource-list-item{grid-template-columns:32px minmax(0,1fr);column-gap:6px;padding:8px}
+  .resource-list-item>img{width:32px;height:40px;max-height:40px}
+  .resource-item-summary{padding-right:54px}
+  .resource-item-menu>summary{right:8px;padding:5px}
+}

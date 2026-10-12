@@ -887,7 +887,8 @@ fn prepare_library_screenshot(
         if edit["ui"].is_null() {
             None
         } else {
-            Some(serde_json::from_value(edit["ui"].clone()).map_err(|e| e.to_string())?)
+            let elements = edit["ui"].get("elements").unwrap_or(&edit["ui"]);
+            Some(serde_json::from_value(elements.clone()).map_err(|e| format!("画面要素データを読み込めません: {e}"))?)
         };
     let ui = if let Some(crop) = &crop {
         ui.map(|elements| {
@@ -949,7 +950,7 @@ async fn edit_library_screenshot(
         let handoff = prepare_library_screenshot(root, id, revision)?;
         let mut command =
             std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
-        command
+        let mut child = command
             .arg("--manual-studio-annotate")
             .arg("--manual-studio-input")
             .arg(handoff["sourceFile"].as_str().ok_or("Invalid input")?)
@@ -963,6 +964,13 @@ async fn edit_library_screenshot(
             )
             .spawn()
             .map_err(|e| e.to_string())?;
+        let completion = PathBuf::from(handoff["completionFile"].as_str().ok_or("Invalid session")?);
+        std::thread::spawn(move || {
+            let result = child.wait();
+            if !completion.is_file() && !completion.with_extension("exit").is_file() {
+                let _ = fs::write(completion.with_extension("exit"),format!("MarkItsが編集完了前に終了しました ({result:?})。元画像は保持しています。再度編集できます。"));
+            }
+        });
         Ok(handoff)
     })
     .await
@@ -990,6 +998,24 @@ async fn edit_document_image(
             return Err(format!("画像ファイルが見つかりません: {relative_path}"));
         }
 
+        // Managed images must use the original/scene handoff and candidate
+        // adoption flow, even when editing starts in the manuscript.
+        let library = manual_core::screenshots::list(&root_path)?;
+        for shot in library["items"].as_array().into_iter().flatten() {
+            if let Some(output) = shot["output"].as_str() {
+                let managed = manual_core::config::project_path(&root_path, output)?;
+                if managed.canonicalize().ok() == Some(full_path.canonicalize().map_err(|e| e.to_string())?) {
+                    return Ok(serde_json::json!({"managedScreenshotId": shot["id"], "revision": shot["adopted"]}));
+                }
+            }
+        }
+
+        let original_relative = full_path.strip_prefix(&canonical_root)
+            .map_err(|_| "プロジェクト外の画像は編集できません。")?
+            .to_string_lossy().replace('\\', "/");
+        let copied = manual_core::resources::copy(&root_path, &original_relative)?;
+        let copy_relative = copied["path"].as_str().ok_or("編集コピーを作成できませんでした。")?;
+        let target_path = manual_core::config::project_path(&root_path, copy_relative)?;
         let bytes = fs::read(&full_path).map_err(|e| e.to_string())?;
         let session_id = manual_core::screenshots::new_id("session");
         let home = manual_core::config::project_path(
@@ -1023,12 +1049,14 @@ async fn edit_document_image(
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         let completion_marker = completion.clone();
         std::thread::spawn(move || {
-            let _ = child.wait();
+            let result = child.wait();
             let exit_marker = completion_marker.with_extension("exit");
-            let _ = fs::write(exit_marker, "closed");
+            if !completion_marker.is_file() && !exit_marker.is_file() {
+                let _ = fs::write(exit_marker, format!("MarkItsが編集完了前に終了しました ({result:?})。元画像は保持しています。再度編集できます。"));
+            }
         });
 
-        let rel = full_path
+        let rel = target_path
             .strip_prefix(&canonical_root)
             .unwrap_or(&full_path)
             .to_string_lossy()
@@ -1038,7 +1066,7 @@ async fn edit_document_image(
             "sourceFile": input.to_string_lossy(),
             "annotationFile": output.to_string_lossy(),
             "completionFile": completion.to_string_lossy(),
-            "targetFile": full_path.to_string_lossy(),
+            "targetFile": target_path.to_string_lossy(),
             "relativePath": rel,
         }))
     })
@@ -1063,11 +1091,7 @@ async fn document_image_edit_ready(
         }
         let exit_marker = completion.with_extension("exit");
         if exit_marker.is_file() {
-            if fs::metadata(&output).map(|m| m.len() > 0).unwrap_or(false) {
-                return Ok(Some(true));
-            } else {
-                return Err("MarkItsが保存前に終了しました。".into());
-            }
+            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| "MarkItsが保存前に終了しました。".into()));
         }
         Ok(None)
     })
@@ -1236,6 +1260,25 @@ mod application_profile_tests {
         assert_eq!(after["screenshot"]["adopted"],before["screenshot"]["adopted"]);
         assert_eq!(after["screenshot"]["edits"].as_array().unwrap().len(),2,"repeated empty-annotation completion saves one candidate");
         assert_eq!(manual_core::screenshots::image(root.path(),&id,None,true).unwrap()["data"],format!("data:image/png;base64,{source}"));
+    }
+    #[test]
+    fn library_handoff_accepts_wrapped_and_array_ui_elements() {
+        use base64::Engine;
+        let root = tempfile::tempdir().unwrap();
+        let image = image::DynamicImage::new_rgba8(20,16);
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut buffer,image::ImageFormat::Png).unwrap();
+        let source = base64::engine::general_purpose::STANDARD.encode(buffer.into_inner());
+        let elements = serde_json::json!([{"role":"button","name":"Save","x":1.0,"y":2.0,"width":8.0,"height":5.0}]);
+        for ui in [elements.clone(),serde_json::json!({"elements":elements})] {
+            let saved = manual_core::screenshots::register(root.path(),&serde_json::json!({"source":source,"ui":ui})).unwrap();
+            let id = saved["screenshot"]["id"].as_str().unwrap().to_string();
+            let handoff = prepare_library_screenshot(root.path().to_string_lossy().into_owned(),id,None).unwrap();
+            let png = fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap();
+            let metadata = markits_desktop_lib::metadata::extract_ui_elements(&png).unwrap().unwrap();
+            assert_eq!(metadata.len(),1);
+            assert_eq!(metadata[0].name.as_deref(),Some("Save"));
+        }
     }
     #[test]
     fn handoff_reconstructs_raw_crop_scene_and_full_original_after_reload() {

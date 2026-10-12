@@ -38,6 +38,7 @@ import { aiErrorAdvice } from "./aiErrors";
 import { setupTerminalPane, type TerminalController } from "./terminalPane";
 import { emit } from "@tauri-apps/api/event";
 import "./style.css";
+import { captureInsertionContext, isInsertionCurrent, STALE_INSERTION_MESSAGE } from "./insertionContext";
 
 import type { State, Document, RecordingResult, LaunchCommand } from "./types";
 
@@ -47,7 +48,19 @@ const editor = element<HTMLTextAreaElement>("markdown-editor");
 const milkdown = setupMilkdownEditor(editor, message => status(message, true), source => {
   if (!documentState || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(source)) return Promise.resolve(source);
   return rpc("preview-asset", { page: documentState.page, asset: source });
-}, uploadMilkdownImage, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img));
+}, async file => {
+  const uploadInput=Array.from(milkdown.host.querySelectorAll<HTMLInputElement>('input[type=file]')).find(input=>input.files?.[0]===file);
+  try {
+    const reference=await uploadMilkdownImage(file);
+    status('画像を保存しました。');
+    return reference;
+  }
+  catch (error) {
+    if(uploadInput)uploadInput.value='';
+    status(`画像を挿入できませんでした。${String(error)} 画像を選び直して再試行できます。`, true);
+    throw error;
+  }
+}, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img));
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 const params = new URLSearchParams(location.search);
@@ -193,11 +206,40 @@ function renderProgressLog(): void {
   log.textContent = progressDisplayLogs.join("\n");
   if (followTail) log.scrollTop = log.scrollHeight;
 }
+function saveAiProgressLogs(): void {
+  if (!projectRoot) return;
+  try {
+    localStorage.setItem(`manual-studio-ai-logs:${projectRoot}`, JSON.stringify({
+      logs: progressDisplayLogs.slice(-200),
+      running: progressRunning,
+      stage: progressStage,
+      timestamp: Date.now(),
+    }));
+  } catch { /* LocalStorage error */ }
+}
+function loadAiProgressLogs(root: string): void {
+  try {
+    const raw = localStorage.getItem(`manual-studio-ai-logs:${root}`);
+    if (!raw) return;
+    const data = JSON.parse(raw) as { logs?: string[]; running?: boolean; stage?: string };
+    if (Array.isArray(data.logs) && data.logs.length > 0) {
+      progressDisplayLogs = [...data.logs];
+      if (data.running) {
+        progressDisplayLogs.push(`[${new Date().toLocaleTimeString("ja-JP", { hour12: false })}] アプリ再起動: 前回のAI処理は中断されました。`);
+        saveAiProgressLogs();
+      }
+      renderProgressLog();
+      element("progress-open").textContent = `直近のAI実行ログ (${progressDisplayLogs.length}件)`;
+      element("progress-open").hidden = false;
+    }
+  } catch { /* LocalStorage error */ }
+}
 function logProgress(message: string): void {
   progressDisplayLogs.push(`[${new Date().toLocaleTimeString("ja-JP", { hour12: false })}] ${message}`);
   progressLastEventAt = Date.now();
   element("progress-note").textContent = message;
   renderProgressLog();
+  saveAiProgressLogs();
 }
 let progressInFlight: Promise<void> | undefined;
 let progressGeneration = 0;
@@ -226,6 +268,7 @@ async function readAgentProgress(generation: number): Promise<void> {
       progressLastEventAt = Date.now();
       if (progressRunning && result.logs.length) {progressStage=result.logs.at(-1)!.message;element("progress-note").textContent = progressStage;}
       renderProgressLog();
+      saveAiProgressLogs();
     }
   } catch { /* The progress endpoint can be briefly unavailable while the request starts. */ }
 }
@@ -418,10 +461,10 @@ function setBusy(value: boolean): void {
     for (const [button, wasDisabled] of busyButtonStates) button.disabled = wasDisabled;
     busyButtonStates = null;
   }
-  if (!value && pendingEditorFocus) { pendingEditorFocus = false; requestAnimationFrame(()=>milkdown.focus()); }
   editor.readOnly = value;
   editor.disabled = !documentState;
   updateHistoryButtons();
+  if (!value && pendingEditorFocus) { pendingEditorFocus = false; milkdown.focus(); }
 
 }
 function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
@@ -445,8 +488,8 @@ async function confirmDiscard(): Promise<boolean> {
     if (dirty) throw new Error("原稿を保存できなかったため、移動を中止しました。");
   });
 }
-function closeAllPanelDialogs(): void {
-  document.querySelectorAll<HTMLDialogElement>("dialog.panel-dialog").forEach((d) => {
+function closeAllPanelDialogs(all = false): void {
+  document.querySelectorAll<HTMLDialogElement>(all ? 'dialog.panel-dialog' : 'dialog.panel-dialog[id^="panel-"]').forEach((d) => {
     if (d.open) d.close();
   });
 }
@@ -480,7 +523,6 @@ function chooseTab(name: string): void {
   if (name === "publish" || name === "appearance" || name === "settings" || name === "applications") {
     if(name==='settings')void imageAiSettings.refresh();
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
-    element<HTMLDetailsElement>("settings-menu").open = false;
     openPanelDialog(`panel-${name}`);
     return;
   }
@@ -498,6 +540,13 @@ function chooseTab(name: string): void {
 }
 interface OpenDocumentTab { document: Document; content: string; start: number; end: number; scroll: number; richScroll: number; history: EditorHistory; richState: ReturnType<typeof milkdown.captureState>; }
 const documentTabs = new Map<string, OpenDocumentTab>();
+let restoringDocumentTabs = false;
+function saveDocumentTabSession(active: string | null = documentState?.page || null): void {
+  if (!projectRoot || restoringDocumentTabs || !workspace) return;
+  if (!documentTabs.size && !workspace.pages.length && !workspace.project_entries.some(entry => !entry.directory && /\.md$/i.test(entry.path))) return;
+  try { localStorage.setItem(`manual-studio-document-tabs:${projectRoot}`, JSON.stringify({pages:[...documentTabs.keys()],active})); }
+  catch { /* Session preferences must not interrupt editing. */ }
+}
 const imageTabs = new Set<string>();
 let activeImageTab: string | null = null;
 function showDocumentView(): void { activeImageTab = null; element('panel-editor').removeAttribute('data-image-open'); element('image-tab-view').hidden = true; }
@@ -548,6 +597,7 @@ function renderDocumentTabs(): void {
   }
   strip.hidden = !documentTabs.size && !imageTabs.size;
   element('editor-title').hidden = !strip.hidden;
+  saveDocumentTabSession();
 }
 async function confirmAllDocumentTabs(): Promise<boolean> {
   retainDocumentTab();
@@ -661,6 +711,7 @@ async function openPage(page: string, check = true): Promise<void> {
   await renderPreview();
   previewNavigator.pushPage(page);
   chooseTab("editor");
+  loadReaderReviewSession(projectRoot, page);
 
 }
 function renderPages(): void {
@@ -727,6 +778,15 @@ async function openResourceUsage(usage:ResourceUsage):Promise<void>{
 }
 const screenshotLibrary = setupScreenshotLibrary({
   root: () => projectRoot, request: rpc, work, applications: () => launchCommands,
+  refreshAssets: async root => {
+    if (root !== projectRoot) return;
+    if (documentState) await Promise.all([renderPreview(), milkdown.refreshImages()]);
+    const image = activeImageTab;
+    if (image) {
+      const src = await rpc('preview-asset', {page:documentState?.page || `${workspace?.config.docs || 'docs'}/index.md`,asset:image}, root);
+      if (root === projectRoot && activeImageTab === image) element<HTMLImageElement>('image-tab-preview').src = src;
+    }
+  },
   annotateScreenshot:id=>screenshotAi.annotate(id),
   page: () => documentState?.page,
   openPage: async page => { await openPage(page); },
@@ -741,6 +801,10 @@ const imageAiSettings=setupImageAiSettings({root:()=>projectRoot,request:rpc,pre
 const imageGeneration=setupImageGeneration({prepare:saveAiSettings,imageKey:(root,url)=>imageAiSettings.key(root,url),sharedKey:root=>root===projectRoot?readAiCredential(root,workspace?.config.endpoint_url||''):'',root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
 
 let documentImageEditing = false;
+let retryDocumentImageEdit: (() => Promise<void>) | null = null;
+element('document-image-retry').addEventListener('click', () => {
+  if (retryDocumentImageEdit) void work(retryDocumentImageEdit);
+});
 function changeImageMarkdown(next:string,expected:string){
   if(editor.value!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');
   if(!milkdown.replaceMarkdownDocument(next,expected)){rememberCurrentSelection();editor.setRangeText(next,0,editor.value.length,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
@@ -764,7 +828,7 @@ function showImagePresentation(image?:HTMLImageElement){
 element('image-presentation').addEventListener('click',()=>showImagePresentation());
 async function handleEditDocumentImage(imageSource: string, _img: HTMLImageElement): Promise<void> {
   if (documentImageEditing) {
-    status("他の画像をMarkItsで編集中です。MarkItsの編集を完了してください。", true);
+    status(retryDocumentImageEdit ? "保存待ちの画像があります。「画像の編集保存を再試行」で保存してください。" : "他の画像をMarkItsで編集中です。MarkItsの編集を完了してください。", true);
     return;
   }
   if (!native) {
@@ -776,6 +840,7 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
     return;
   }
   documentImageEditing = true;
+  const editingRoot = projectRoot;
   try {
     status("MarkItsを起動しています…");
     const result = await invoke<{
@@ -784,11 +849,19 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
       completionFile: string;
       targetFile: string;
       relativePath: string;
+      managedScreenshotId?: string;
+      revision?: string;
     }>("edit_document_image", {
-      root: projectRoot,
+      root: editingRoot,
       relativePath: imageSource,
       page: documentState?.page || null,
     });
+    if (result.managedScreenshotId) {
+      await screenshotLibrary.editManaged(result.managedScreenshotId, result.revision, editingRoot);
+      documentImageEditing = false;
+      status('MarkItsで編集中です。編集終了後に候補を保存します。リソース一覧で比較して採用してください。');
+      return;
+    }
     status("MarkItsで画像を編集中です。編集が完了したらMarkItsで「編集終了」または「Manual Studioへ注釈を返す」を押してください。");
     const checkReady = async () => {
       try {
@@ -805,8 +878,10 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
           annotationFile: result.annotationFile,
         });
         documentImageEditing = false;
-        status("画像の編集を原稿に反映しました。");
-        milkdown.refresh();
+        retryDocumentImageEdit = null;
+        element('document-image-retry').hidden = true;
+        if (editingRoot !== projectRoot) return;
+        status(`編集コピーを保存しました: ${result.relativePath}。元画像と原稿は保持しています。リソース一覧から挿入・差し替えできます。`);
         await milkdown.refreshImages();
         void renderPreview();
         await refreshWorkspace();
@@ -814,8 +889,17 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
           void openImageTab(activeImageTab);
         }
       } catch (err) {
-        documentImageEditing = false;
-        status(`画像の編集保存に失敗しました: ${String(err)}`, true);
+        const message = String(err);
+        const ended = message.includes('編集を中止しました') || message.includes('編集完了前に終了しました') || message.includes('保存前に終了しました');
+        if (ended) {
+          documentImageEditing = false;
+          retryDocumentImageEdit = null;
+          element('document-image-retry').hidden = true;
+        } else {
+          retryDocumentImageEdit = checkReady;
+          element('document-image-retry').hidden = false;
+        }
+        status(ended ? message : `画像の編集保存に失敗しました: ${message}。編集結果は保持しています。保存を再試行できます。`, true);
       }
     };
     void checkReady();
@@ -1012,7 +1096,9 @@ async function openProject(root: string, check = true): Promise<void> {
   ++documentRequestVersion; ++workspaceRequestVersion;
   if (projectRoot !== root) expandedFolders.clear();
   if (terminalController && projectRoot !== root) await terminalController.kill();
-  closeAllPanelDialogs();
+  closeAllPanelDialogs(true);
+  saveDocumentTabSession();
+  restoringDocumentTabs = true;
   documentTabs.clear(); imageTabs.clear(); showDocumentView();
   projectRoot = root; workspace = loaded; documentState = null; dirty = false;
   await loadLaunchCommands();
@@ -1040,14 +1126,34 @@ async function openProject(root: string, check = true): Promise<void> {
   }
   element("workspace-name").textContent = root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
   element<HTMLDialogElement>("workspace-dialog").close();
-  await refreshWorkspace(); renderSettings();
+  await refreshWorkspace(); renderSettings(); loadAiProgressLogs(root);
+  const validPage = (page:unknown): page is string => typeof page === 'string' && (loaded.pages.includes(page) || loaded.project_entries.some(entry => !entry.directory && entry.path === page && /\.md$/i.test(entry.path)));
+  let saved: {pages:string[];active:string|null} | null = null;
+  try {
+    const value = JSON.parse(localStorage.getItem(`manual-studio-document-tabs:${root}`) || 'null');
+    if (value && Array.isArray(value.pages)) saved = {pages:[...new Set(value.pages.filter(validPage))] as string[],active:validPage(value.active)?value.active:null};
+  } catch { /* Ignore invalid optional session data. */ }
   const preferred = params.get("page");
-  const page = preferred && (loaded.pages.includes(preferred) || loaded.project_entries.some((entry) => entry.path === preferred && /\.md$/i.test(entry.path)))
-    ? preferred
-    : loaded.pages[0] || loaded.project_entries.find((entry) => !entry.directory && /\.md$/i.test(entry.path))?.path;
-  if (page) await openPage(page, false);
-  else { editor.value = ""; updateSaveState(); status("「＋」から最初のMarkdownページを作ってください。"); }
-  if (page) status(`プロジェクトを開きました。${page}を編集できます。`);
+  let page = validPage(preferred) ? preferred : saved?.active || saved?.pages.at(-1);
+  try {
+    for (const tab of saved?.pages || []) {
+      if (version !== projectRequestVersion) return;
+      try {
+        const opened = JSON.parse(await rpc('editor-read', {page:tab}, root)) as Document;
+        if (version !== projectRequestVersion) return;
+        const history = new EditorHistory(); history.reset({value:opened.content,start:0,end:0});
+        documentTabs.set(tab, {document:opened,content:opened.content,start:0,end:0,scroll:0,richScroll:0,history,richState:null});
+      } catch { /* A removed/unreadable page does not prevent restoring the remaining tabs. */ }
+    }
+    if (page && saved?.pages.includes(page) && !documentTabs.has(page)) page = [...documentTabs.keys()].at(-1);
+    if (!page && !saved) page = loaded.pages[0] || loaded.project_entries.find(entry => !entry.directory && /\.md$/i.test(entry.path))?.path;
+    if (page) await openPage(page, false);
+    else if (!documentTabs.size) { editor.value = ""; updateSaveState(); status("一覧から原稿を開くか、「＋」でMarkdownページを作成してください。"); }
+  } finally {
+    if (version === projectRequestVersion) { restoringDocumentTabs = false; saveDocumentTabSession(); }
+  }
+  const restoredDocument = documentState as Document | null;
+  if (restoredDocument) status(`プロジェクトを開きました。${restoredDocument.page}を編集できます。`);
   if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は「設定 → AI・撮影設定」で確認できます。");
 
 }
@@ -1160,7 +1266,7 @@ for (const [selector, name] of [["#undo-edit", "undo"], ["#redo-edit", "redo"], 
 }
 document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => button.addEventListener("click", () => chooseTab(button.dataset.tab!)));
 
-document.querySelectorAll<HTMLDialogElement>("dialog.panel-dialog").forEach((dialog) => {
+document.querySelectorAll<HTMLDialogElement>('dialog.panel-dialog[id^="panel-"]').forEach((dialog) => {
   dialog.querySelectorAll("[data-close-dialog]").forEach((button) => {
     button.addEventListener("click", () => dialog.close());
   });
@@ -1267,8 +1373,6 @@ element("editor-more").addEventListener("click", event => {
 document.addEventListener("click", event => {
   const menu = element<HTMLDetailsElement>("editor-more");
   if (!menu.contains(event.target as Node)) menu.open = false;
-  const settings = element<HTMLDetailsElement>("settings-menu");
-  if (!settings.contains(event.target as Node)) settings.open = false;
   const projectMenu = element<HTMLDetailsElement>("project-menu");
   if (!projectMenu.contains(event.target as Node)) projectMenu.open = false;
 });
@@ -1280,7 +1384,7 @@ element("editor-more").addEventListener("keydown", event => {
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
-  const openMenu = document.querySelector<HTMLDetailsElement>("#project-menu[open], #settings-menu[open], .format-insert-menu[open]");
+  const openMenu = document.querySelector<HTMLDetailsElement>("#project-menu[open], .format-insert-menu[open]");
   if (openMenu) { openMenu.open = false; openMenu.querySelector<HTMLElement>("summary")?.focus(); }
 });
 document.querySelector(".format-insert-actions")?.addEventListener("click", event => {
@@ -1492,7 +1596,9 @@ if (native) void getCurrentWindow().onCloseRequested(event => {
   closingPrompt = true;
   void (async () => {
     try {
+      const activeAtClose = documentState?.page || null;
       if (!await confirmAllDocumentTabs()) return;
+      saveDocumentTabSession(activeAtClose);
       await terminalController?.kill();
       closingApproved = true;
       await getCurrentWindow().destroy();
@@ -1521,7 +1627,7 @@ function renderLaunchCommands(): void {
     const test = document.createElement("button"); test.type = "button"; test.textContent = "起動確認";
     test.addEventListener("click", () => { void work(async () => { if (!native) throw new Error("起動確認はデスクトップ版で利用できます。"); await invoke("test_launch_application", { program: program.value, args: args.value.split("\n").filter(value => value.length > 0) }); status("対象アプリを起動しました。"); }); });
     const actions = document.createElement("div"); actions.className = "actions launch-row-actions"; actions.append(test, remove);
-    row.append(programLabel, nameLabel, argsLabel, actions); list.append(row);
+    row.append(nameLabel, programLabel, argsLabel, actions); list.append(row);
   });
   list.querySelectorAll<HTMLButtonElement>("[data-launch-browse]").forEach((button) => button.addEventListener("click", () => { void work(async () => {
     if (!native) throw new Error("アプリ選択はデスクトップアプリで利用できます。");
@@ -1599,10 +1705,13 @@ for (const target of [editor,milkdown.host] as HTMLElement[]) {
       const next=replaceDocumentImage(expected,existing,relativeProjectAsset(asset.path,page),asset.screenshot_id);
       try{changeImageMarkdown(next,expected);void milkdown.refreshImages();status('画像の参照を置き換えました。説明と表示設定は保持しています。');}catch(error){status(String(error),true);}return;
     }
+    const origin=captureInsertionContext(insertionState());
+    // Resolve rich viewport coordinates before awaiting a reference or changing readonly layout.
+    const richDrop=target===milkdown.host?milkdown.captureSelectionEdit(true,{left,top}):undefined;
     const insert=(markdown:string)=>{
-      if(root!==projectRoot||documentState?.page!==page||activeImageTab)return;
-      if(target===milkdown.host)milkdown.insertMarkdownAt(markdown,left,top);
-      else {rememberCurrentSelection();editor.setRangeText(markdown,start,end,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
+      if(!isInsertionCurrent(origin,insertionState())||activeImageTab)throw new Error('原稿が変更されました。挿入位置を選び直してください。');
+      if(target===milkdown.host){if(!richDrop)throw new Error('挿入する位置を選択してください。');richDrop.apply(markdown,true);}
+      else {rememberCurrentSelection(start,end);editor.setRangeText(markdown,start,end,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
       status('画像の参照を挿入しました。');
     };
     if(asset.screenshot_id){void work(async()=>{insert(await rpc('screenshots-reference',{id:asset.screenshot_id,page},root));});}
@@ -1655,6 +1764,7 @@ element("new-folder-form").addEventListener("submit", (event) => {
 });
 let pendingImageDataUrl: string | null = null;
 let pendingImageSelection: { start: number; end: number } | null = null;
+let pendingImageOwner: {root:string;page:string;content:string;documentSession:number} | null = null;
 const toolbarImageInput = element<HTMLInputElement>("toolbar-image-input");
 element("insert-image").addEventListener("click", () => {
   if (!documentState) { status("先にMarkdown原稿を開いてください。", true); return; }
@@ -1662,6 +1772,7 @@ element("insert-image").addEventListener("click", () => {
   toolbarImageInput.click();
 });
 toolbarImageInput.addEventListener("change", () => {
+  const origin = captureInsertionContext(insertionState());
   const file = toolbarImageInput.files?.[0];
   const selection = { start: editor.selectionStart, end: editor.selectionEnd };
   toolbarImageInput.value = "";
@@ -1673,6 +1784,11 @@ toolbarImageInput.addEventListener("change", () => {
   }
   const reader = new FileReader();
   reader.onload = () => {
+    if (!isInsertionCurrent(origin, insertionState())) {
+      pendingImageSelection = null;
+      status(STALE_INSERTION_MESSAGE, true);
+      return;
+    }
     if (typeof reader.result === "string") {
       const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       pendingImageSelection = selection;
@@ -1682,22 +1798,31 @@ toolbarImageInput.addEventListener("change", () => {
   reader.onerror = () => { pendingImageSelection = null; status("画像を読み込めませんでした。", true); };
   reader.readAsDataURL(file);
 });
+const insertionState = () => ({ document: documentState, root: projectRoot, content: editor.value, documentSession: documentRequestVersion });
 async function uploadMilkdownImage(file: File): Promise<string> {
   if (busy || !documentState) throw new Error("先に原稿を開いてください。");
   const current = documentState;
   const root = projectRoot;
+  // The rich editor edits the text while the upload waits, so only document and project identity are compared.
+  const origin = captureInsertionContext(insertionState(), { checksContent: false });
   const extension = file.name.split('.').at(-1)?.toLowerCase() || '';
   if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) throw new Error("対応していない画像形式です。");
   const data = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
+    reader.onload = () => {
+      if (!isInsertionCurrent(origin, insertionState())) {
+        reject(new Error(STALE_INSERTION_MESSAGE));
+        return;
+      }
+      resolve(String(reader.result));
+    };
     reader.onerror = () => reject(new Error("画像を読み込めませんでした。"));
     reader.readAsDataURL(file);
   });
   const directory = current.page.split('/').slice(0, -1).join('/');
   const path = `${directory ? `${directory}/` : ''}assets/image-${crypto.randomUUID()}.${extension}`;
   await rpc("save-asset", { path, data }, root);
-  if (documentState !== current || projectRoot !== root) throw new Error("編集中の原稿が切り替わりました。画像を挿入し直してください。");
+  if (!isInsertionCurrent(origin, insertionState())) throw new Error(STALE_INSERTION_MESSAGE);
   return computeRelativeMarkdownPath(current.page, path, workspace?.config.docs || "docs");
 }
 
@@ -1724,6 +1849,8 @@ function updateMarkdownInsertPreview(): void {
   element("image-markdown-preview").textContent = `![${alt}](${relPath})`;
 }
 function openImageSaveDialog(dataUrl: string, suggestedFilename?: string, defaultAlt?: string): void {
+  if(!documentState)return;
+  pendingImageOwner={root:projectRoot,page:documentState.page,content:editor.value,documentSession:documentRequestVersion};
   if (!documentState) {
     status("先にMarkdown原稿を開いてください。", true);
     return;
@@ -1745,11 +1872,17 @@ function openImageSaveDialog(dataUrl: string, suggestedFilename?: string, defaul
 element("image-save-folder").addEventListener("input", updateMarkdownInsertPreview);
 element("image-save-filename").addEventListener("input", updateMarkdownInsertPreview);
 element("image-save-alt").addEventListener("input", updateMarkdownInsertPreview);
-element("cancel-image-save").addEventListener("click", () => {
+function cancelImageSave():void {
+  const owner=pendingImageOwner,selection=pendingImageSelection;
+  const restore=owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion;
   pendingImageDataUrl = null;
   pendingImageSelection = null;
+  pendingImageOwner = null;
   element<HTMLDialogElement>("image-save-dialog").close();
-});
+  if(restore&&selection){editor.focus();editor.setSelectionRange(selection.start,selection.end);updateCursor();}
+}
+element("cancel-image-save").addEventListener("click", cancelImageSave);
+element("image-save-dialog").addEventListener("cancel", event=>{event.preventDefault();cancelImageSave();});
 element("image-save-form").addEventListener("submit", (event) => {
   event.preventDefault();
   if (!pendingImageDataUrl || !documentState) return;
@@ -1762,14 +1895,21 @@ element("image-save-form").addEventListener("submit", (event) => {
   }
   const fullAssetPath = folder ? `${folder}/${filename}` : filename;
   const dataUrl = pendingImageDataUrl;
+  const owner=pendingImageOwner;
+  const selection=pendingImageSelection||{start:editor.selectionStart,end:editor.selectionEnd};
   void work(async () => {
-    await rpc("save-asset", { path: fullAssetPath, data: dataUrl });
+    const valid=()=>owner&&pendingImageOwner===owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion;
+    if(!valid())throw new Error('原稿が変更されました。画像の挿入をやり直してください。');
+    await rpc("save-asset", { path: fullAssetPath, data: dataUrl },owner!.root);
+    if(pendingImageOwner!==owner){if(owner!.root===projectRoot)status('画像を保存しました。挿入はキャンセルされました。');return;}
+    if(!valid())throw new Error('原稿が変更されました。保存した画像はリソース一覧に残しています。');
     element<HTMLDialogElement>("image-save-dialog").close();
     pendingImageDataUrl = null;
+    pendingImageOwner = null;
     const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
     const markdownCode = `![${alt}](${relPath})`;
-    const start = pendingImageSelection?.start ?? editor.selectionStart;
-    const end = pendingImageSelection?.end ?? editor.selectionEnd;
+    const start = selection.start;
+    const end = selection.end;
     pendingImageSelection = null;
     rememberCurrentSelection(start, end);
     editor.setRangeText(markdownCode, start, end, "end");
@@ -1785,13 +1925,41 @@ let pasteCounter = 0;
 let isPastingImage = false;
 let lastImagePasteTime = 0;
 
-async function saveAndInsertImage(dataUrl: string, defaultFileType = "image/png"): Promise<void> {
+type ImagePaste = { origin: ReturnType<typeof captureInsertionContext<Document>>; start:number; end:number; cancelled:boolean };
+let activeImagePaste: ImagePaste | null = null;
+function beginImagePaste(): ImagePaste | null {
+  if (activeImagePaste || !documentState) return null;
+  const paste = { origin:captureInsertionContext(insertionState()), start:editor.selectionStart, end:editor.selectionEnd, cancelled:false };
+  activeImagePaste = paste;
+  element('cancel-image-paste').hidden = false;
+  document.body.setAttribute('aria-busy','true');
+  return paste;
+}
+function finishImagePaste(paste:ImagePaste):void {
+  if(activeImagePaste!==paste)return;
+  activeImagePaste=null;
+  element('cancel-image-paste').hidden=true;
+  document.body.setAttribute('aria-busy',String(busy));
+}
+element('cancel-image-paste').addEventListener('click',()=>{
+  if(!activeImagePaste)return;
+  activeImagePaste.cancelled=true;
+  element('cancel-image-paste').hidden=true;
+  status('画像の挿入をキャンセルしました。保存処理の完了を待っています。');
+});
+function allowImagePaste(paste:ImagePaste):boolean {
+  if(paste.cancelled){status('画像の挿入はキャンセルされました。保存した画像はリソース一覧に残しています。');return false;}
+  if(!isInsertionCurrent(paste.origin,insertionState()))throw new Error('原稿が変更されました。保存した画像はリソース一覧に残しています。');
+  return true;
+}
+async function saveAndInsertImage(dataUrl: string, defaultFileType: string, paste:ImagePaste): Promise<void> {
   document.body.setAttribute("aria-busy", "true");
   try {
     if (!documentState) {
       status("先にMarkdown原稿を開いてください。", true);
       return;
     }
+    const owner={root:paste.origin.root,page:paste.origin.document!.page,start:paste.start,end:paste.end};
     let fileType = defaultFileType;
     if (dataUrl.startsWith("data:")) {
       const mime = dataUrl.slice(5, dataUrl.indexOf(";"));
@@ -1813,12 +1981,13 @@ async function saveAndInsertImage(dataUrl: string, defaultFileType = "image/png"
     const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
     const fullAssetPath = folder ? `${folder}/${filename}` : filename;
 
-    await rpc("save-asset", { path: fullAssetPath, data: dataUrl });
-    const relPath = computeRelativeMarkdownPath(documentState.page, fullAssetPath, workspace?.config.docs || "docs");
+    await rpc("save-asset", { path: fullAssetPath, data: dataUrl },owner.root);
+    if(!allowImagePaste(paste))return;
+    const relPath = computeRelativeMarkdownPath(owner.page, fullAssetPath, workspace?.config.docs || "docs");
     const alt = filename.replace(/\.[^.]+$/, "");
     const markdownCode = `![${alt}](${relPath})`;
-    const start = editor.selectionStart;
-    const end = editor.selectionEnd;
+    const start = owner.start;
+    const end = owner.end;
     rememberCurrentSelection(start, end);
     editor.setRangeText(markdownCode, start, end, "end");
     dirty = true;
@@ -1829,7 +1998,7 @@ async function saveAndInsertImage(dataUrl: string, defaultFileType = "image/png"
   } catch (error) {
     status(String(error), true);
   } finally {
-    document.body.setAttribute("aria-busy", "false");
+    finishImagePaste(paste);
   }
 }
 
@@ -1867,17 +2036,23 @@ function handleImagePaste(clipboardData: DataTransfer | null): boolean {
 
   if (!targetFile) return false;
 
-  document.body.setAttribute("aria-busy", "true");
+  const paste=beginImagePaste();
+  if(!paste)return true;
   const reader = new FileReader();
   reader.onload = () => {
+    if (paste.cancelled || !isInsertionCurrent(paste.origin, insertionState())) {
+      finishImagePaste(paste);
+      status(paste.cancelled ? "画像の挿入をキャンセルしました。" : STALE_INSERTION_MESSAGE, !paste.cancelled);
+      return;
+    }
     if (typeof reader.result === "string") {
-      void saveAndInsertImage(reader.result, fileType || targetFile!.type);
+      void saveAndInsertImage(reader.result, fileType || targetFile!.type, paste);
     } else {
-      document.body.setAttribute("aria-busy", "false");
+      finishImagePaste(paste);
     }
   };
   reader.onerror = () => {
-    document.body.setAttribute("aria-busy", "false");
+    finishImagePaste(paste);
   };
   reader.readAsDataURL(targetFile);
   return true;
@@ -1918,21 +2093,24 @@ async function tryNativeImagePaste(): Promise<boolean> {
     return false;
   }
 
+  const paste=beginImagePaste();
+  if(!paste)return false;
   isPastingImage = true;
   try {
     if (native) {
       const folder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
       const result = await invoke<PastedImageResult | null>("paste_clipboard_image", {
-        root: projectRoot,
-        page: documentState.page,
+        root: paste.origin.root,
+        page: paste.origin.document!.page,
         assetsFolder: folder,
       });
       if (!result) return false;
+      if (!allowImagePaste(paste)) return true;
       lastImagePasteTime = Date.now();
       const relPath = computeRelativeMarkdownPath(documentState.page, result.filePath, workspace?.config.docs || "docs");
       const markdownCode = `![${result.alt}](${relPath})`;
-      const start = editor.selectionStart;
-      const end = editor.selectionEnd;
+      const start = paste.start;
+      const end = paste.end;
       rememberCurrentSelection(start, end);
       editor.setRangeText(markdownCode, start, end, "end");
       dirty = true;
@@ -1945,14 +2123,15 @@ async function tryNativeImagePaste(): Promise<boolean> {
       const dataUrl = await readBrowserClipboardImage();
       if (!dataUrl) return false;
       lastImagePasteTime = Date.now();
-      await saveAndInsertImage(dataUrl);
+      await saveAndInsertImage(dataUrl, "image/png", paste);
       return true;
     }
   } catch (error) {
-    console.error("Failed to read image from clipboard:", error);
+    status(String(error), true);
     return false;
   } finally {
     isPastingImage = false;
+    finishImagePaste(paste);
   }
 }
 
@@ -2034,6 +2213,8 @@ if (editorColumn) {
       status("先にMarkdown原稿を開いてください。", true);
       return;
     }
+    const origin = captureInsertionContext(insertionState());
+    const selection = { start: editor.selectionStart, end: editor.selectionEnd };
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;
     for (let i = 0; i < files.length; i++) {
@@ -2041,9 +2222,15 @@ if (editorColumn) {
       if (file.type.startsWith("image/") || /\.(png|jpe?g|gif|svg|webp)$/i.test(file.name)) {
         const reader = new FileReader();
         reader.onload = () => {
+          if (!isInsertionCurrent(origin, insertionState())) {
+            pendingImageSelection = null;
+            status(STALE_INSERTION_MESSAGE, true);
+            return;
+          }
           if (typeof reader.result === "string") {
             const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
             const alt = cleanName.replace(/\.[^.]+$/, "");
+            pendingImageSelection = selection;
             openImageSaveDialog(reader.result, cleanName, alt);
           }
         };
@@ -2112,26 +2299,43 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
     args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args="${index}"]`)!.value.split("\n").filter((value) => value.length > 0),
   }));
   await invoke<void>("save_launch_commands", { root: projectRoot, commands: launchCommands });
-  renderLaunchCommands();  status("このプロジェクトのアプリ登録を保存しました。");
+  renderLaunchCommands();  status("このプロジェクトの撮影アプリの登録を保存しました。");
 }); });
+function saveDraftCandidate(root: string, candidate: DraftCandidate): void {
+  try { localStorage.setItem(`manual-studio-draft-candidate:${root}`, JSON.stringify(candidate)); }
+  catch { /* LocalStorage error */ }
+}
+function clearDraftCandidate(root: string): void {
+  try { localStorage.removeItem(`manual-studio-draft-candidate:${root}`); }
+  catch { /* LocalStorage error */ }
+}
+function loadDraftCandidate(root: string): DraftCandidate | null {
+  try {
+    const raw = localStorage.getItem(`manual-studio-draft-candidate:${root}`);
+    return raw ? JSON.parse(raw) as DraftCandidate : null;
+  } catch { return null; }
+}
 async function createFullDraft():Promise<void>{
   if(busy)return;
   await savedBeforeOperation();
   const root=projectRoot;
   element<HTMLDialogElement>("panel-publish").close();
-  let candidate:DraftCandidate|undefined;
-  await work(async()=>{
-    await ensureAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('draft-propose',root);let success=false;
-    try{candidate=JSON.parse(await rpc('draft-propose',{},root)) as DraftCandidate;success=true;}
-    catch(error){logAiFailure(error);throw error;}
-    finally{await stopAiProgress(success);}
-  });
+  let candidate:DraftCandidate|undefined = loadDraftCandidate(root) || undefined;
+  if (!candidate) {
+    await work(async()=>{
+      await ensureAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('draft-propose',root);let success=false;
+      try{candidate=JSON.parse(await rpc('draft-propose',{},root)) as DraftCandidate;success=true;saveDraftCandidate(root,candidate);}
+      catch(error){logAiFailure(error);throw error;}
+      finally{await stopAiProgress(success);}
+    });
+  }
   if(!candidate||root!==projectRoot)return;
   const pages=await reviewDraft(candidate,()=>root===projectRoot&&!dirty&&!Array.from(documentTabs.values()).some(tab=>tab.content!==tab.document.content));
-  if(!pages){status('下書き候補を破棄しました。原稿は変更していません。');return;}
+  if(!pages){clearDraftCandidate(root);status('下書き候補を破棄しました。原稿は変更していません。');return;}
   await work(async()=>{
     if(root!==projectRoot||dirty)throw new Error('原稿が変更されました。候補を作り直してください。');
     const result=JSON.parse(await rpc('draft-apply',{json:{docs:candidate!.docs,pages}},root)) as {applied:number};
+    clearDraftCandidate(root);
     for(const page of pages){documentTabs.delete(page.path);documentTabs.delete(`${candidate!.docs.replace(/\/$/,'')}/${page.path}`);}
     await refreshWorkspace();
     const selectedPage=pages.find(page=>page.path==='index.md')||pages[0];
@@ -2141,9 +2345,8 @@ async function createFullDraft():Promise<void>{
 }
 element('generate-draft').addEventListener('click',()=>{void createFullDraft().catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
-actionButton("build-draft", "build", () => ({ draft: true }), "publish-result");
-actionButton("build-final", "build", () => ({}), "publish-result");
-actionButton("build-mkdocs", "build-mkdocs", () => ({ draft: true }), "publish-result");
+// One HTML entry point: "final" is strict (stops on problems, keeps existing output); "preview" tolerates remaining problems.
+actionButton("build-html", "build-mkdocs", () => ({ draft: element<HTMLSelectElement>("build-mode").value === "preview" }), "publish-result");
 element("open-output").addEventListener("click", () => { void work(async () => {
   if (native) await invoke("open_output", { root: projectRoot });
   else status(`出力フォルダー: ${projectRoot}/${workspace?.config.output || "manual"}`);
@@ -2195,7 +2398,7 @@ if (!recordingControlMode) {
   if (initialRoot) void work(() => openProject(initialRoot));
 }
 
-async function createSelectionDocument(initial=""):Promise<void>{
+async function createSelectionDocument(initial=""):Promise<boolean|void>{
   if(busy||!documentState||activeImageTab)return;
   const owner=documentState,root=projectRoot,insertionAt=editor.selectionStart;
   let selection:SelectionDraft;
@@ -2216,26 +2419,80 @@ async function createSelectionDocument(initial=""):Promise<void>{
   if(root!==projectRoot||documentState?.page!==owner.page||editor.value!==captured)throw new Error('原稿が変更されました。範囲を選び直してください。');
   await savedBeforeOperation();
   const expected=editor.value,page=owner.page,revision=documentState?.revision;
+  let previousCandidate:{content:string;accepted:number[];feedback:string}|undefined;
   while(instruction){
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
-    let candidate:string|undefined;
+    let candidate:string|undefined,failure="",cancelled=false;
     await work(async()=>{
       await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('selection-generate',root);let succeeded=false;
       try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{selected:selection.text,mode:selection.text?"replace":"insert",insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
-      catch(error){logAiFailure(error);throw error;}
-      finally{await stopAiProgress(succeeded);}
+      catch(error){failure=String(error);logAiFailure(error);throw error;}
+      finally{cancelled=Boolean(generationCancelRequest);await stopAiProgress(succeeded);}
     });
-    if(candidate===undefined)return;
-    const decision=await reviewSelection(page,selection.text,candidate);
+    if(candidate===undefined){
+      if(root!==projectRoot||documentState?.page!==page||editor.value!==expected)return;
+      if(previousCandidate){candidate=previousCandidate.content;failure=`再作成を完了できませんでした。前の候補と採用の選択を保持しています。${failure}`;}
+      else{if(cancelled)return;instruction=await askSelectionInstruction(selection.text,instruction,failure||'候補を作成できませんでした。');continue;}
+    }
+    const decision=await reviewSelection(page,selection.text,candidate,failure?previousCandidate:undefined,failure);
     if(decision.action==='restore')return;
-    if(decision.action==='retry'){instruction=decision.feedback||instruction;continue;}
+    if(decision.action==='retry'){previousCandidate={content:candidate,accepted:decision.accepted,feedback:decision.feedback};instruction=decision.feedback||instruction;continue;}
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
     if(decision.content===selection.text){status("採用する変更はありません。本文を保持しました。");return;}
-    selection.apply(decision.content);updateHistoryButtons();await saveDocument(false);status(selection.text?'指定範囲へAI文書を反映しました。':'カーソル位置にAI文書を挿入しました。');return;
+    selection.apply(decision.content);updateHistoryButtons();await saveDocument(false);status(selection.text?'指定範囲へAI文書を反映しました。':'カーソル位置にAI文書を挿入しました。');return true;
   }
 }
 element('selection-ai').addEventListener('click',()=>{void createSelectionDocument().catch(error=>status(String(error),true));});
 
+function saveReaderReviewSession(root: string, page: string, expected: string, report: ReaderReport): void {
+  try { localStorage.setItem(`manual-studio-reader-review:${root}:${page}`, JSON.stringify({ expected, report })); }
+  catch { /* LocalStorage error */ }
+}
+function loadReaderReviewSession(root: string, page: string): void {
+  try {
+    const raw = localStorage.getItem(`manual-studio-reader-review:${root}:${page}`);
+    if (!raw) {
+      element('reader-review-reopen').hidden = true;
+      reopenReaderReview = undefined;
+      return;
+    }
+    const data = JSON.parse(raw) as { expected: string; report: ReaderReport };
+    if (!data.report || typeof data.expected !== 'string') return;
+    let expected = data.expected;
+    const result = data.report;
+    const valid = () => root === projectRoot && documentState?.page === page && editor.value === expected;
+    reopenReaderReview = () => {
+      if (!valid()) {
+        status("原稿が変更されました。レビューを実行し直してください。", true);
+        return;
+      }
+      showReaderReport(result, valid, finding => {
+        if (preferredEditorView === 'preview') { preferredEditorView = 'edit'; applyEditorView(); }
+        milkdown.showSource(); jumpToSource(editor, finding.start, finding.end); updateCursor();
+      }, finding => {
+        milkdown.showSource(); jumpToSource(editor, finding.start, finding.end);
+        const beforeCorrection = expected;
+        const previousFilter = document.querySelector<HTMLSelectElement>('#reader-review-results select')?.value || 'all';
+        void createSelectionDocument(`次の指摘を反映してください。根拠のない製品仕様は追加せず、確認が必要な点は明示してください。\n指摘：${finding.message}\n修正の提案：${finding.suggestion}`).then(adopted => {
+          if (!adopted) return;
+          const after = editor.value;
+          if (root !== projectRoot || documentState?.page !== page || after === beforeCorrection) return;
+          if (!after.startsWith(beforeCorrection.slice(0, finding.start)) || !after.endsWith(beforeCorrection.slice(finding.end))) return;
+          const delta = after.length - beforeCorrection.length;
+          result.issues = result.issues.filter(issue => issue.end <= finding.start || issue.start >= finding.end);
+          for (const issue of result.issues) if (issue.start >= finding.end) { issue.start += delta; issue.end += delta; }
+          expected = after;
+          saveReaderReviewSession(root, page, expected, result);
+          document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();
+          reopenReaderReview?.();
+          const filter = document.querySelector<HTMLSelectElement>('#reader-review-results select');
+          if (filter) { filter.value = previousFilter; filter.dispatchEvent(new Event('change')); }
+        }).catch(error => status(String(error), true));
+      });
+    };
+    element('reader-review-reopen').hidden = false;
+  } catch { /* LocalStorage error */ }
+}
 let reopenReaderReview:(()=>void)|undefined;
 element("reader-review-reopen").onclick=()=>reopenReaderReview?.();
 async function reviewCurrentDocument():Promise<void>{
@@ -2245,7 +2502,7 @@ async function reviewCurrentDocument():Promise<void>{
   await savedBeforeOperation();await saveAiSettings();
   const choices=await askReader(workspace?.brief||'',start!==end,async scope=>JSON.parse(await rpc('document-review-capabilities',{page,json:{range:scope==='selection'?{start,end}:undefined}},root)) as ReviewCapabilities);if(choices===null)return;
   if(root!==projectRoot||documentState?.page!==page||editor.value!==captured)throw new Error('原稿が変更されました。レビューを実行し直してください。');
-  await savedBeforeOperation();const expected=editor.value,revision=documentState?.revision;
+  await savedBeforeOperation();let expected=editor.value;const revision=documentState?.revision;
   const range=choices.scope==='selection'?{start,end}:undefined;
   let report:ReaderReport|undefined;
   await work(async()=>{
@@ -2256,13 +2513,31 @@ async function reviewCurrentDocument():Promise<void>{
   });
   const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===expected;
   if(!valid()){status('原稿が変更されました。レビューを実行し直してください。',true);return;}
-  if(report){const result=report;reopenReaderReview=()=>{if(!valid()){status("原稿が変更されました。レビューを実行し直してください。",true);return;}showReaderReport(result,valid,finding=>{
+  if(report){document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();const result=report;reopenReaderReview=()=>{if(!valid()){status("原稿が変更されました。レビューを実行し直してください。",true);return;}showReaderReport(result,valid,finding=>{
     if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
     milkdown.showSource();jumpToSource(editor,finding.start,finding.end);updateCursor();
   },finding=>{
     milkdown.showSource();jumpToSource(editor,finding.start,finding.end);
-    void createSelectionDocument(`次の指摘を反映してください。根拠のない製品仕様は追加せず、確認が必要な点は明示してください。\n指摘：${finding.message}\n修正の提案：${finding.suggestion}`).catch(error=>status(String(error),true));
-  });};element('reader-review-reopen').hidden=false;reopenReaderReview();}
+    const beforeCorrection=expected;
+    const previousFilter=document.querySelector<HTMLSelectElement>('#reader-review-results select')?.value||'all';
+    void createSelectionDocument(`次の指摘を反映してください。根拠のない製品仕様は追加せず、確認が必要な点は明示してください。\n指摘：${finding.message}\n修正の提案：${finding.suggestion}`).then(adopted=>{
+      if(!adopted)return;
+      const after=editor.value;
+      if(root!==projectRoot||documentState?.page!==page||after===beforeCorrection)return;
+      // Only the correction's captured range may move the remaining anchors.
+      // Unrelated edits retain the stale-result rejection.
+      if(!after.startsWith(beforeCorrection.slice(0,finding.start))||!after.endsWith(beforeCorrection.slice(finding.end)))return;
+      const delta=after.length-beforeCorrection.length;
+      result.issues=result.issues.filter(issue=>issue.end<=finding.start||issue.start>=finding.end);
+      for(const issue of result.issues)if(issue.start>=finding.end){issue.start+=delta;issue.end+=delta;}
+      expected=after;
+      saveReaderReviewSession(root, page, expected, result);
+      document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();
+      reopenReaderReview?.();
+      const filter=document.querySelector<HTMLSelectElement>('#reader-review-results select');
+      if(filter){filter.value=previousFilter;filter.dispatchEvent(new Event('change'));}
+    }).catch(error=>status(String(error),true));
+  });};saveReaderReviewSession(root, page, expected, result);element('reader-review-reopen').hidden=false;reopenReaderReview();status(`レビュー完了：指摘 ${result.issues.length}件。`);}
 }
 element('reader-review').addEventListener('click',()=>{void reviewCurrentDocument().catch(error=>status(String(error),true));});
 
@@ -2279,15 +2554,16 @@ const screenshotAi=setupScreenshotAi({root:()=>projectRoot,applications:()=>laun
 
 async function insertScreenshotHere():Promise<void>{
   if(busy||!documentState||activeImageTab)return;
-  const root=projectRoot,page=documentState.page,captured=editor.value,position=editor.selectionStart;
+  const root=projectRoot,page=documentState.page,position=editor.selectionStart;
+  const origin=captureInsertionContext(insertionState());
   const rich=milkdown.isRichEditing?milkdown.captureSelectionEdit(true):undefined;
   if(milkdown.isRichEditing&&!rich)throw new Error('挿入する位置を選択してください。');
-  const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===captured&&!activeImageTab;
+  const valid=()=>isInsertionCurrent(origin,insertionState())&&!activeImageTab;
   await savedBeforeOperation();
   if(!valid())throw new Error('原稿が変更されました。挿入位置を選び直してください。');
   const method=await chooseScreenshotMethod();
   if(!method||!valid())return;
-  const existing=method==='existing'?await chooseExistingScreenshot(root):undefined;
+  const existing=method==='existing'?await chooseExistingScreenshot(root,valid):undefined;
   const id=method==='ai'?await screenshotAi.create(true):method==='manual'?await screenshotLibrary.recordForInsertion():existing?.id;
   if(!id)return;
   if(!valid()){status('撮影画像はリソース一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
@@ -2325,9 +2601,9 @@ function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{
     dialog.addEventListener('close',()=>resolve(selected),{once:true});
   });
 }
-async function chooseExistingScreenshot(root:string):Promise<{id:string;revision:string}|undefined>{
+async function chooseExistingScreenshot(root:string,valid:()=>boolean):Promise<{id:string;revision:string}|undefined>{
   const shots=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;name:string;output:string;adopted:string|null;thumbnail:string|null}>};
-  if(root!==projectRoot)return;
+  if(root!==projectRoot||!valid()){status('原稿が変更されたため挿入していません。画像はリソース一覧から選び直してください。',true);return;}
   const {dialog,body}=featureDialog('撮影済み画像を選ぶ');dialog.id='editor-screenshot-existing';
   const available=shots.items.filter(shot=>shot.adopted);
   if(!available.length){const empty=document.createElement('p');empty.textContent='採用済みの画像がありません。手動撮影・AI撮影、またはリソース一覧のPNG取り込みで画像を用意してください。';body.append(empty);}

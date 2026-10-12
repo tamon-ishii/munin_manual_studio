@@ -24,13 +24,35 @@ try {
   await page.goto(`${base}/?root=${encodeURIComponent(root)}`);
   try { await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false' && document.querySelector('#markdown-editor').value.includes('Current manuscript')); } catch(error) { console.error(await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,busy:document.body.getAttribute('aria-busy'),editor:document.querySelector('#markdown-editor')?.value}))); throw error; }
   await page.locator('[data-tab=publish]').click();
-  const invoked=page.waitForRequest(request=>request.url().includes('/__manual/rpc') && request.postData()?.includes('build-mkdocs'));
-  await page.getByRole('button',{name:'MkDocsでビルド',exact:true}).click();
-  await invoked;
-  await page.waitForFunction(()=>document.querySelector('#publish-result').textContent.includes('Site:'));
-  assert.match(await readFile(path.join(root,'manual/index.html'),'utf8'),/Built via button|Current manuscript/);
-  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),source);
-  console.log('MkDocs button checks passed: explicit build request, HTML output, source preservation.');
+  const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  const invocations=[];
+  for(const [label,mode,draft] of [['確認用の出力','preview',true],['通常の出力','final',false]]) {
+    const action='build-mkdocs';
+    const response=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action===action);
+    await page.locator('#build-mode').selectOption(mode);await page.getByRole('button',{name:'HTML出力',exact:true}).click();
+    const result=await response;const request=result.request().postDataJSON();
+    assert.equal(Boolean(request.options.draft),draft);assert.equal(result.ok(),true);
+    await idle();
+    assert.match(await readFile(path.join(root,'manual/index.html'),'utf8'),/Built via button|Current manuscript/);
+    assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),source);
+    invocations.push({label,action,draft,entry:'HTML出力'});
+  }
+  const published=await readFile(path.join(root,'manual/index.html'),'utf8');
+  await page.locator('[data-close-dialog=panel-publish]').click();
+  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
+  await page.locator('#markdown-editor').fill(source+'\n[Missing](missing.md)\n');await page.keyboard.press('Control+s');await idle();
+  await page.locator('[data-tab=publish]').click();
+  const failed=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='build-mkdocs');
+  await page.locator('#build-mode').selectOption('final');await page.locator('#build-html').click();await failed;await idle();
+  assert.equal(await readFile(path.join(root,'manual/index.html'),'utf8'),published,'strict failure preserves the published output');
+  assert.match(await page.locator('#status').textContent(),/チェック|リンク|問題|missing/);
+  await page.locator('#quality-check').click();await idle();await page.locator('.quality-issue').first().getByRole('button').click();await idle();
+  assert.equal(await page.locator('#markdown-editor').isVisible(),true);
+  const selected=await page.locator('#markdown-editor').evaluate(el=>el.value.slice(el.selectionStart,el.selectionEnd));assert.match(selected,/missing\.md/);
+  await page.locator('#markdown-editor').fill(source);await page.keyboard.press('Control+s');await idle();
+  await page.locator('[data-tab=publish]').click();await page.locator('#quality-check').click();await idle();assert.match(await page.locator('#publish-result').textContent(),/合格/);
+  await page.locator('#build-mode').selectOption('final');await page.locator('#build-html').click();await idle();assert.match(await readFile(path.join(root,'manual/index.html'),'utf8'),/Built via button|Current manuscript/);
+  console.log('Publication workflow passed: '+JSON.stringify(invocations)+'; strict failure preserves output; finding -> source fix -> recheck -> final build. MkDocs process uses '+(process.env.MUNIN_REAL_MKDOCS?'real installation':'fixture executable')+'.');
 } finally {
   await browser?.close();
   if(server && server.exitCode===null) {const ended=new Promise(resolve=>server.once('exit',resolve));server.kill();await ended;}

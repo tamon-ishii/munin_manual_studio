@@ -1,0 +1,43 @@
+[
+  {
+    "feature": "P13",
+    "owner": "FlexLayout",
+    "reason": "Library-created panel tabs, tabstrip dragging and maximise button; requires layout workflow coverage independently.",
+    "selectors": [
+      ".flexlayout__tabset_tabbar_outer[draggable=true]",
+      ".flexlayout__tab_button[role=tab][draggable=true]",
+      "button.flexlayout__tab_toolbar_button[aria-label='Maximize tabset']",
+      "button.flexlayout__tab_toolbar_button[aria-label='Restore tabset']"
+    ]
+  },
+  {
+    "feature": "P02",
+    "owner": "fileTree.ts",
+    "reason": "File and folder labels depend on fixture paths, not literal labels.",
+    "selectors": [
+      "#page-list details[data-folder] > summary[role=treeitem]",
+      "#page-list button[data-page][role=treeitem]",
+      "#page-list div[data-file][role=treeitem]",
+      "#document-tabs button[data-document-page][role=tab]",
+      "#document-tabs [role=tab] + button[aria-label$='を閉じる']"
+    ]
+  },
+  {
+    "feature": "P02",
+    "owner": "Milkdown",
+    "reason": "Library-owned heading selector and table action; narrowed by class and label rather than allowing every editor button.",
+    "selectors": [
+      "button.top-bar-heading-button",
+      "button.top-bar-item[aria-label='表']"
+    ]
+  },
+  {
+    "feature": "P06",
+    "owner": "resourceBrowser.ts",
+    "reason": "Resource titles and manuscript usage paths are fixture data; selectors are restricted to resource operation summaries and reference navigation.",
+    "selectors": [
+      ".resource-list-item>.resource-item-menu>summary[aria-label$=\"の操作\"]",
+      ".resource-usages>button.resource-usage-link"
+    ]
+  }
+]
