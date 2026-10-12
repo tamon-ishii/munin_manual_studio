@@ -25,3 +25,37 @@ export function isInsertionCurrent<Document>(context: InsertionContext<Document>
   } else if (now.document !== context.document) return false;
   return !context.checksContent || now.content === context.content;
 }
+
+export interface RecentInsertionTarget {
+  page: string;
+  position: 'cursor' | 'end' | string;
+}
+
+const recentInsertionTargets = new Map<string, RecentInsertionTarget>();
+
+export function getRecentInsertionTarget(root: string): RecentInsertionTarget | undefined {
+  let target = recentInsertionTargets.get(root);
+  if (!target) {
+    try {
+      const stored = localStorage.getItem(`manual-studio-recent-target:${root}`);
+      if (stored) target = JSON.parse(stored) as RecentInsertionTarget;
+    } catch {
+      /* In-memory target fallback */
+    }
+  }
+  return target;
+}
+
+export function setRecentInsertionTarget(root: string, target: RecentInsertionTarget): void {
+  recentInsertionTargets.set(root, target);
+  try {
+    localStorage.setItem(`manual-studio-recent-target:${root}`, JSON.stringify(target));
+  } catch {
+    /* Optional storage */
+  }
+}
+
+export function formatAssetMarkdownReference(assetPath: string, relativePath: string, alt?: string): string {
+  const label = alt || assetPath.split('/').at(-1) || '画像';
+  return `![${label}](<${relativePath}>)`;
+}

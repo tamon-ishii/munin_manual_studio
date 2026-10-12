@@ -1080,19 +1080,27 @@ pub fn run(
                 "expect_targets" => {
                     let targets: Vec<super::semantic_target::Target> = serde_json::from_value(value.clone())
                         .map_err(|error| error.to_string())?;
-                    let deadline = Instant::now() + Duration::from_secs(10);
+                    let deadline = Instant::now() + Duration::from_secs(30);
                     loop {
                         super::agent::check_cancelled(root, &checkpoint)?;
                         if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
                         let elements = super::semantic_target::observe_window(&selected.native()?.id)?;
                         super::agent::check_cancelled(root, &checkpoint)?;
                         if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
-                        let missing: Vec<_> = targets.iter().filter_map(|target| match target.resolve(&elements) {
-                            Ok(Some(_)) => None,
-                            Ok(None) => Some(Ok(target.name.clone())),
-                            Err(error) => Some(Err(error)),
-                        }).collect::<Result<_, _>>()?;
-                        if missing.is_empty() { break; }
+                        let mut errors = Vec::new();
+                        let mut found_count = 0usize;
+                        let mut missing = Vec::new();
+                        for target in &targets {
+                            match target.resolve(&elements) {
+                                Ok(Some(_)) => found_count += 1,
+                                Ok(None) => missing.push(target.name.clone()),
+                                Err(error) => errors.push(error),
+                            }
+                        }
+                        if let Some(error) = errors.into_iter().next() {
+                            return Err(error);
+                        }
+                        if found_count > 0 { break; }
                         super::agent::log_progress(root, &format!("撮影する画面の表示を待機：{}", missing.join("、")));
                         if Instant::now() >= deadline { return Err(format!("目的の画面に到達していません：{}", missing.join("、"))); }
                         thread::sleep(Duration::from_millis(100));

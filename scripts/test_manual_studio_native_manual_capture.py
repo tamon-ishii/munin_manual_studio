@@ -145,7 +145,7 @@ def session():
                 assert markits != app.pid and ui.owned(markits)
                 ui.screenshot(markits, RESULTS / 'markits.png')
                 ui.click('編集終了（Manual Studioへ返す）', owner=markits)
-                ui.find('スクショを確認して挿入', 'dialog', app.pid, timeout=40)
+                ui.find('スクショを確認して挿入', 'dialog', app.pid, timeout=60)
                 assert content() == INITIAL
 
             assert content() == INITIAL

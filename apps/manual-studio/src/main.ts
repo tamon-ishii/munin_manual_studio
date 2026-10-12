@@ -1,6 +1,7 @@
 import {setupScreenshotAi} from './screenshotAi';
 import {askReader,showReaderReport,type ReaderReport,type ReviewCapabilities} from './readerReview';
 import {reviewDraft,type DraftCandidate} from './draftReview';
+import { AiProgressManager } from './aiProgressManager';
 import {imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
 import type {ResourceUsage} from './resourceBrowser';
 import { setupImageAiSettings } from './imageAiSettings';
@@ -112,11 +113,9 @@ let previewScrollWindow: Window | null = null;
 let syncingScroll = false;
 let progressTimer: ReturnType<typeof setInterval> | undefined;
 let progressPollTimer: ReturnType<typeof setInterval> | undefined;
-let progressStartedAt = 0;
-let progressLastEventAt = 0;
 let progressRunning = false;
 let progressDisplayLogs: string[] = [];
-let progressAgentTotal = 0;
+let progressConnection = "AI";
 let manualStudioHiddenForCapture = false;
 let previewTimer: ReturnType<typeof setTimeout>;
 const expandedFolders = new Set<string>();
@@ -212,7 +211,7 @@ function saveAiProgressLogs(): void {
     localStorage.setItem(`manual-studio-ai-logs:${projectRoot}`, JSON.stringify({
       logs: progressDisplayLogs.slice(-200),
       running: progressRunning,
-      stage: progressStage,
+      stage: aiProgress.currentStage,
       timestamp: Date.now(),
     }));
   } catch { /* LocalStorage error */ }
@@ -234,21 +233,21 @@ function loadAiProgressLogs(root: string): void {
     }
   } catch { /* LocalStorage error */ }
 }
+const aiProgress = new AiProgressManager();
 function logProgress(message: string): void {
-  progressDisplayLogs.push(`[${new Date().toLocaleTimeString("ja-JP", { hour12: false })}] ${message}`);
-  progressLastEventAt = Date.now();
+  aiProgress.log(message);
+  progressDisplayLogs = aiProgress.logs;
   element("progress-note").textContent = message;
   renderProgressLog();
   saveAiProgressLogs();
 }
 let progressInFlight: Promise<void> | undefined;
 let progressGeneration = 0;
-let progressFailureMessage = "";
-let progressConnection = "AI";
-let progressStage = "";
 function logAiFailure(error: unknown): void {
-  progressFailureMessage = String(error);
-  logProgress(`失敗: ${progressFailureMessage}`);
+  aiProgress.recordFailure(error);
+  progressDisplayLogs = aiProgress.logs;
+  renderProgressLog();
+  saveAiProgressLogs();
 }
 function pollAgentProgress(): Promise<void> {
   if (progressInFlight) return progressInFlight;
@@ -260,13 +259,11 @@ async function readAgentProgress(generation: number): Promise<void> {
   try {
     const result = JSON.parse(await rpc("agent-progress", {}, activeGenerationRoot || projectRoot)) as { logs: Array<{ time: string; message: string }>; total?: number };
     if (generation !== progressGeneration) return;
-    const total = result.total ?? result.logs.length;
-    if (total > progressAgentTotal) {
-      const newEntries = result.logs.slice(-(total - progressAgentTotal));
-      progressDisplayLogs.push(...newEntries.map((entry) => `[${entry.time}] ${entry.message}`));
-      progressAgentTotal = total;
-      progressLastEventAt = Date.now();
-      if (progressRunning && result.logs.length) {progressStage=result.logs.at(-1)!.message;element("progress-note").textContent = progressStage;}
+    if (aiProgress.recordAgentLogs(result.logs, result.total)) {
+      progressDisplayLogs = aiProgress.logs;
+      if (aiProgress.isRunning && result.logs.length) {
+        element("progress-note").textContent = aiProgress.currentStage;
+      }
       renderProgressLog();
       saveAiProgressLogs();
     }
@@ -298,15 +295,12 @@ function startAiProgress(action: string): void {
     "screenshot-ai-capture": "スクリーンショットを撮影中",
     "screenshot-ai-annotate": "撮影画像の注釈を作成中",
   } as Record<string, string>)[action] || "AI文書の候補を作成中";
+  activeGenerationRoot = projectRoot;
+  aiProgress.start({ connection: progressConnection, operation, root: projectRoot });
   element("progress-label").textContent = `${progressConnection}で${operation}`;
   progressRunning = true;
   element("ai-error-advice").hidden = true;
-  progressDisplayLogs = [];
-  progressFailureMessage = "";
-  progressAgentTotal = 0;
-  progressStartedAt = Date.now();
-  progressStage = '処理を開始しています';
-  progressLastEventAt = progressStartedAt;
+  progressDisplayLogs = aiProgress.logs;
   element("progress-track").classList.remove("progress-failed", "progress-completed");
   element("progress-track").setAttribute("aria-valuetext", "実行中");
   element("operation-progress").hidden = false;
@@ -316,13 +310,14 @@ function startAiProgress(action: string): void {
   logProgress(`${progressConnection}で${operation}。処理を開始しました。`);
   status(`${labels[agent] || agent}で${operation}…`);
   const update = () => {
-    const elapsed = Math.floor((Date.now() - progressStartedAt) / 1000);
-    element("progress-elapsed").textContent = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
-    if (progressRunning && Date.now() - progressLastEventAt >= 15_000) {
-      const waiting=progressStage.includes('応答を待っています')?`${progressConnection}の応答を待っています`:progressStage;
-      element("progress-note").textContent = `${waiting}。経過 ${elapsed}秒（最終ログから${Math.floor((Date.now() - progressLastEventAt) / 1000)}秒）。中断できます。`;
+    const elapsed = aiProgress.computeElapsed();
+    element("progress-elapsed").textContent = elapsed.formatted;
+    if (aiProgress.isRunning && elapsed.isWaitingLong) {
+      element("progress-note").textContent = elapsed.waitingMessage;
     }
-    if(progressRunning){element('progress-open').textContent=`${progressConnection}・${operation}・経過 ${elapsed}秒 — ${element('progress-note').textContent}`;}
+    if (aiProgress.isRunning) {
+      element('progress-open').textContent = `${progressConnection}・${operation}・経過 ${elapsed.seconds}秒 — ${element('progress-note').textContent}`;
+    }
   };
   update();
   if (progressTimer) clearInterval(progressTimer);
@@ -333,21 +328,19 @@ function startAiProgress(action: string): void {
 let activeGenerationRoot: string | null = null;
 let generationCancelRequest: Promise<void> | undefined;
 function cancelAiGeneration():void {
-  if (!activeGenerationRoot) return;
-  if(generationCancelRequest)return;
-
-  const root = activeGenerationRoot;
+  if (!activeGenerationRoot || generationCancelRequest) return;
   element<HTMLButtonElement>("progress-cancel").disabled = true;
   element<HTMLButtonElement>("progress-compact-cancel").disabled = true;
   logProgress("中断を要求しました。実行中の処理を停止します。");
-  generationCancelRequest = rpc("agent-cancel", {}, root).then(() => {}).catch((error) => logProgress(`中断要求の送信に失敗しました: ${String(error)}`));
+  generationCancelRequest = aiProgress.requestCancel(root => rpc("agent-cancel", {}, root).then(() => {}));
 }
 element('progress-cancel').addEventListener('click',cancelAiGeneration);
 element('progress-compact-cancel').addEventListener('click',cancelAiGeneration);
 async function stopAiProgress(succeeded: boolean): Promise<void> {
-  const cancelled = Boolean(generationCancelRequest);
-  await generationCancelRequest;
+  const cancelPromise = generationCancelRequest;
   generationCancelRequest = undefined;
+  if (cancelPromise) await cancelPromise;
+  const outcome = await aiProgress.stop();
   await pollAgentProgress();
   if (progressTimer) clearInterval(progressTimer);
   if (progressPollTimer) clearInterval(progressPollTimer);
@@ -358,7 +351,7 @@ async function stopAiProgress(succeeded: boolean): Promise<void> {
   element("progress-cancel").hidden = true;
   element("progress-compact-cancel").hidden = true;
   element('progress-open').textContent='AI実行ログを表示';
-  if (!succeeded && cancelled) {
+  if (!succeeded && outcome.cancelled) {
     element("progress-label").textContent = "AI処理を中断しました";
     element("progress-track").classList.add("progress-failed");
     element("progress-track").setAttribute("aria-valuetext", "中断");
@@ -367,7 +360,7 @@ async function stopAiProgress(succeeded: boolean): Promise<void> {
     element("progress-label").textContent = "AI処理に失敗しました";
     element("progress-track").classList.add("progress-failed");
     element("progress-track").setAttribute("aria-valuetext", "失敗");
-    logProgress(progressFailureMessage ? `処理に失敗しました: ${progressFailureMessage}` : "AI処理を完了できませんでした。実行ログを確認してください。");
+    logProgress(outcome.failure ? `処理に失敗しました: ${outcome.failure}` : "AI処理を完了できませんでした。実行ログを確認してください。");
   } else {
     element("progress-label").textContent = "AI処理が完了しました";
     element("progress-track").classList.add("progress-completed");
@@ -727,6 +720,7 @@ function renderPages(): void {
   );
 }
 function chooseImageDestination(): Promise<boolean> { return chooseDestination({
+    root: projectRoot,
     pages: [...new Set([...(workspace?.pages || []), ...documentTabs.keys(), ...(workspace?.project_entries.filter(entry=>!entry.directory && /\.md$/i.test(entry.path)).map(entry=>entry.path.startsWith(`${workspace!.config.docs}/`) ? entry.path.slice(workspace!.config.docs.length+1) : entry.path) || [])])],
     current: () => documentState ? {page:documentState.page,content:editor.value} : null,
     read: async page => documentTabs.get(page)?.content ?? (JSON.parse(await rpc('editor-read',{page})) as Document).content,
@@ -2601,14 +2595,41 @@ function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{
     dialog.addEventListener('close',()=>resolve(selected),{once:true});
   });
 }
+const recentScreenshotSelections=new Map<string,string>();
 async function chooseExistingScreenshot(root:string,valid:()=>boolean):Promise<{id:string;revision:string}|undefined>{
   const shots=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;name:string;output:string;adopted:string|null;thumbnail:string|null}>};
   if(root!==projectRoot||!valid()){status('原稿が変更されたため挿入していません。画像はリソース一覧から選び直してください。',true);return;}
   const {dialog,body}=featureDialog('撮影済み画像を選ぶ');dialog.id='editor-screenshot-existing';
   const available=shots.items.filter(shot=>shot.adopted);
+  const selectionKey=`manual-studio-recent-screenshot:${root}`;
+  let recentId=recentScreenshotSelections.get(root);
+  if(!recentId){try{recentId=localStorage.getItem(selectionKey)||undefined;}catch{/* Selection remains available in memory when storage is unavailable. */}}
+  const recentIndex=available.findIndex(shot=>shot.id===recentId);
+  if(recentIndex>=0){
+    const [recent]=available.splice(recentIndex,1);available.unshift(recent);
+    const help=document.createElement('p');help.className='muted';help.textContent='前回選んだ画像を先頭に表示しています。現在の採用版を確認して選べます。';body.append(help);
+  }else if(recentId){
+    recentScreenshotSelections.delete(root);
+    try{localStorage.removeItem(selectionKey);}catch{/* Storage is optional. */}
+    recentId=undefined;
+  }
   if(!available.length){const empty=document.createElement('p');empty.textContent='採用済みの画像がありません。手動撮影・AI撮影、またはリソース一覧のPNG取り込みで画像を用意してください。';body.append(empty);}
   return new Promise(resolve=>{let selected:{id:string;revision:string}|undefined;
-    for(const shot of available){const card=document.createElement('section');card.className='card';const title=document.createElement('h2');title.textContent=shot.name||shot.output;card.append(title);if(shot.thumbnail){const image=document.createElement('img');image.src=shot.thumbnail;image.alt=title.textContent;image.style.maxWidth='100%';image.style.maxHeight='160px';card.append(image);}const button=document.createElement('button');button.type='button';button.textContent='この画像を選ぶ';button.dataset.screenshotId=shot.id;button.onclick=()=>{selected={id:shot.id,revision:shot.adopted!};dialog.close();};card.append(button);body.append(card);}
+    for(const shot of available){
+      const card=document.createElement('section');card.className='card';
+      const title=document.createElement('h2');title.textContent=shot.name||shot.output;card.append(title);
+      if(shot.id===recentId){const label=document.createElement('p');label.className='muted';label.textContent='前回選択した画像';card.append(label);}
+      if(shot.thumbnail){const image=document.createElement('img');image.src=shot.thumbnail;image.alt=title.textContent;image.style.maxWidth='100%';image.style.maxHeight='160px';card.append(image);}
+      const button=document.createElement('button');button.type='button';button.textContent='この画像を選ぶ';button.dataset.screenshotId=shot.id;
+      button.onclick=()=>{
+        if(root!==projectRoot||!valid()){dialog.close();return;}
+        selected={id:shot.id,revision:shot.adopted!};
+        recentScreenshotSelections.set(root,shot.id);
+        try{localStorage.setItem(selectionKey,shot.id);}catch{/* Selection remains available in memory. */}
+        dialog.close();
+      };
+      card.append(button);body.append(card);
+    }
     dialog.addEventListener('close',()=>resolve(selected),{once:true});
   });
 }
