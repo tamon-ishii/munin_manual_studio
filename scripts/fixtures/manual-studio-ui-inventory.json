@@ -1943,11 +1943,11 @@
       "reviewStatus": "reviewed"
     },
     {
-      "id": "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
+      "id": "apps/manual-studio/index.html:html:input:ed4096a4dee319b5:1",
       "file": "apps/manual-studio/index.html",
       "line": 135,
       "kind": "html:input",
-      "expression": "<input id=\"project-root\" aria-label=\"フォルダーのパス\" placeholder=\"フォルダーを選ぶ、またはパスを入力\" />",
+      "expression": "<input type=\"text\" role=\"textbox\" id=\"project-root\" aria-label=\"フォルダーのパス\" placeholder=\"フォルダーを選ぶ、またはパスを入力\" />",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -12196,7 +12196,7 @@
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
-        "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
+        "apps/manual-studio/index.html:html:input:ed4096a4dee319b5:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
@@ -12244,7 +12244,7 @@
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
-        "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
+        "apps/manual-studio/index.html:html:input:ed4096a4dee319b5:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
@@ -12292,7 +12292,7 @@
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
-        "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
+        "apps/manual-studio/index.html:html:input:ed4096a4dee319b5:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
