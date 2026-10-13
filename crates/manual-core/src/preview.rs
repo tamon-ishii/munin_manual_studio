@@ -318,8 +318,7 @@ pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, Str
 
 pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     let config = read_config(root);
-    let templates = project_path(root, &config.docs)?;
-    let generated = root.join("manual").join("ai");
+    project_path(root, &config.docs)?;
     let output = project_path(root, &config.output)?;
     let brief_path = root.join(&config.output).join("brief.md");
     let legacy_brief = root.join("manual").join("brief.md");
@@ -367,9 +366,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     };
 
     let index_html = output.join("index.html");
-    if !index_html.is_file() && templates.is_dir() && !pages.is_empty() {
-        let _ = build(&templates, &generated, &output, true, Some(root));
-    }
+    // Reading workspace state must not build or alter publication output.
 
     let preview_html_content = if index_html.is_file() {
         fs::read_to_string(&index_html)
@@ -429,4 +426,28 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
         "preview_html": preview_html_content,
         "has_html": has_html,
     }))
+}
+
+
+#[cfg(test)]
+mod state_read_tests {
+    use super::*;
+
+    #[test]
+    fn state_reads_do_not_create_publication_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/index.md"), "# Read-only workspace\n").unwrap();
+        fs::write(root.join("manual_setting.json"), r#"{"docs":"docs","output":"published","targets":["docs"]}"#).unwrap();
+        let state = get_state(root).unwrap();
+        assert_eq!(state["has_html"], false);
+        assert!(!root.join("published").exists());
+        assert!(!root.join("mkdocs.yml").exists());
+        assert_eq!(fs::read_to_string(root.join("docs/index.md")).unwrap(), "# Read-only workspace\n");
+        fs::create_dir_all(root.join("published")).unwrap();
+        fs::write(root.join("published/index.html"), "<h1>Previously published</h1>").unwrap();
+        assert_eq!(get_state(root).unwrap()["has_html"], true);
+        assert_eq!(fs::read_to_string(root.join("published/index.html")).unwrap(), "<h1>Previously published</h1>");
+    }
 }
