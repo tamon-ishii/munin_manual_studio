@@ -136,7 +136,7 @@ def session():
             app = subprocess.Popen([str(BIN / 'manual-studio')], cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=open(RESULTS / 'studio.log', 'w'), start_new_session=True)
             ui = NativeUI(app.pid)
             ui.click('開く', owner=app.pid)
-            ui.fill('プロジェクトのフォルダー', str(root))
+            ui.fill('フォルダーのパス', str(root))
             ui.click('開く', owner=app.pid)
             ui.find('プロジェクトを開きました。', 'status bar', app.pid, prefix=True)
             ui.click('Markdownソース', owner=app.pid)

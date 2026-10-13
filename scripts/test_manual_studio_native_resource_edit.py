@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
         wait(lambda: (root / 'target-arguments.json').exists(), 'fixture application launched')
         assert json.loads((root / 'target-arguments.json').read_text()) == [' value with spaces ', '$(literal)']
         ui.click('開く', owner=app.pid)
-        ui.fill('プロジェクトのフォルダー', str(root))
+        ui.fill('フォルダーのパス', str(root))
         ui.click('開く', owner=app.pid)
         ui.find('プロジェクトを開きました。', 'status bar', app.pid, prefix=True)
         registry = json.loads((REPO / 'scripts/fixtures/manual-studio-ui-inventory.json').read_text())
