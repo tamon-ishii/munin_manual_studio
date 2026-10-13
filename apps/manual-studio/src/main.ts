@@ -1391,6 +1391,7 @@ element('save-conflict').addEventListener('click', () => { void work(async () =>
   body.append(note,columns,keep,reload);
 }); });
 editor.addEventListener('select', updateSelectionAction);
+editor.addEventListener('editor-selection-change', updateSelectionAction);
 editor.addEventListener('editor-mode-change', updateSelectionAction);
 document.addEventListener('selectionchange', () => { if (milkdown.host.contains(document.activeElement) || document.activeElement === editor) updateSelectionAction(); });
 element('workspace-name').addEventListener('keydown', event => { if (event.key === 'ArrowDown' && !document.getElementById('workspace-history-dialog')) { event.preventDefault(); element('workspace-name').click(); } });

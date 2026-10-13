@@ -304,6 +304,9 @@ export function setupMilkdownEditor(
           offset = found + text.length;
         });
         source.setSelectionRange(start, Math.max(start, end));
+        // Notify after ProseMirror has committed its selection; the native DOM
+        // selectionchange event may arrive before that transaction.
+        source.dispatchEvent(new Event("editor-selection-change"));
       }
       if (!changed) return;
       requestAnimationFrame(applyImageStyles);
