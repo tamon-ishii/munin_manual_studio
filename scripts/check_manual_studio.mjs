@@ -6,7 +6,7 @@ import { verificationIdentity } from './lib/manual_ui_identity.mjs';
 const registry = JSON.parse(await readFile('scripts/fixtures/manual-studio-ui-inventory.json', 'utf8'));
 const nativeResourceCases = registry.cases.filter(test => (test.existingChecks || []).includes('scripts/test_manual_studio_native_resource_edit.py') || test.script === 'scripts/test_manual_studio_native_resource_edit.py').map(test => test.id);
 const integrityCases = ["P02.integrity-conflict-project-cancel", "P13.integrity-settings-retry", "P15.integrity-legacy-open", "P06.integrity-protected-sharing", "P08.integrity-recapture-partial-retry"];
-const authorSettingsCases = ['P02.editor-autosave', 'P13.toolbar-visibility'];
+const authorSettingsCases = ['P02.brief-persistence', 'P02.editor-autosave', 'P13.toolbar-visibility'];
 const imageControlCases = [
   'P06.control-search', 'P06.control-kind', 'P06.control-usage', 'P06.control-compact-menu',
   'P06.control-refresh', 'P06.control-usage-link', 'P06.control-replace', 'P07.control-restore',

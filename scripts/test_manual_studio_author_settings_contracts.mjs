@@ -93,6 +93,7 @@ try{
  assert.match(await page.locator('#manual-brief').inputValue(),/初心者向け/);
  await page.locator('[data-close-dialog=panel-brief]').click();
  const settingsAfterWorkspace=await readFile(path.join(root,'manual_setting.json'));
+ await record('P02.brief-persistence','P02',['data-tab="brief"','id="manual-brief"','id="save-settings"','data-close-dialog="panel-brief"','element("save-settings").addEventListener'],['open independent writing brief','edit and save brief','read actual manual/brief.md','verify original manuscript is unchanged','close and reload application','reopen and verify stored brief'],{brief:await readFile(path.join(root,'manual/brief.md'),'utf8'),persistence:'manual/brief.md'});
 
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
  const editor=page.locator('#markdown-editor');
@@ -125,5 +126,5 @@ try{
  await record('P13.toolbar-visibility','P13',['data-tab="appearance" data-ui-icon','id="reset-toolbar-customization"','checkbox.onchange=()=>{if(checkbox.checked)hidden.delete'],['open appearance panel','hide bold control','verify toolbar and localStorage','reload and verify preference restores','reset toolbar visibility','verify manuscript unchanged'],{persistence:'browser localStorage',reset:'storage key removed'});
  assert.deepEqual(errors,[]);
  await writeFile(path.join(reportDir,'result.json'),JSON.stringify({...await finishVerification(start),type:'real-backend',scope:'removed workspace settings, P02 source autosave, P13 toolbar preference; browser UI with actual local backend files; remaining actions unverified',notes:'Vite fixture ran on port 5181. Browser RPC Origin was adapted to its development allowlist on port 5174 while requests passed through the actual backend.',results},null,2));
- console.log(`Author/settings contracts passed: ${results.length} entry-specific results across 2 scenarios.`);
+ console.log(`Author/settings contracts passed: ${results.length} entry-specific results across 3 scenarios.`);
 }finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}
