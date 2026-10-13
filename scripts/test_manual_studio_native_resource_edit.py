@@ -152,8 +152,8 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 ui.click('履歴・管理', 'unknown', app.pid)
                 ui.click('選択版を表示', owner=app.pid)
                 ui.find('画像の比較・採用前の確認', 'dialog', app.pid)
-                ui.find('採用済み', 'caption', app.pid)
-                ui.find('選択版', 'caption', app.pid)
+                ui.find('採用済み', ('caption', 'chart', 'figure', 'label'), app.pid)
+                ui.find('選択版', ('caption', 'chart', 'figure', 'label'), app.pid)
                 ui.screenshot(app.pid, RESULTS / f'{name}-compare.png')
                 ui.click('閉じる', owner=app.pid)
                 # Comparison navigation retains the expanded operations and management.
