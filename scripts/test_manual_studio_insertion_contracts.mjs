@@ -194,6 +194,13 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
      const before=document.createRange();before.selectNodeContents(node);before.setEnd(selection.anchorNode,selection.anchorOffset);
      return before.toString()==='';
     }),'rich image gesture starts at the beginning of the After paragraph');
+    // Home updates the browser selection first. Wait for the public source
+    // selection synchronized by ProseMirror before dispatching a synthetic
+    // paste/drop; a physical paste includes an intervening keyboard event.
+    await page.waitForFunction(()=>{
+     const source=document.querySelector('#markdown-editor');
+     return source.selectionStart===source.selectionEnd&&source.selectionStart===source.value.indexOf('After text.');
+    });
     const bounds=await paragraph.boundingBox();
     await page.locator('.ProseMirror').evaluate((node,{data,gesture,x,y})=>{
      const transfer=new DataTransfer();transfer.items.add(new File([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],'gesture.png',{type:'image/png'}));
