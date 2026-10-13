@@ -182,19 +182,31 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
   const entry=`rich image ${gesture}`;
   async function richGesture(){
    await resetSource();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
-   const paragraph=page.locator('.ProseMirror p').filter({hasText:'After text.'});await paragraph.click();await page.keyboard.press('Home');
-   const bounds=await paragraph.boundingBox();
-   return ()=>page.locator('.ProseMirror').evaluate((node,{data,gesture,x,y})=>{
-    const transfer=new DataTransfer();transfer.items.add(new File([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],'gesture.png',{type:'image/png'}));
-    node.dispatchEvent(gesture==='paste'?new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}):new DragEvent('drop',{dataTransfer:transfer,clientX:x,clientY:y,bubbles:true,cancelable:true}));
-   },{data:png.toString('base64'),gesture,x:bounds.x+1,y:bounds.y+bounds.height/2});
+   const paragraph=page.locator('.ProseMirror p').filter({hasText:'After text.'});
+   return async()=>{
+    // Every new user gesture selects the same semantic insertion point. Upload
+    // failure can move the browser caret and relayout the placeholder, so do not
+    // reuse a cursor or screen coordinates captured before that failure.
+    await paragraph.click();await page.keyboard.press('Home');
+    assert.ok(await paragraph.evaluate(node=>{
+     const selection=window.getSelection();
+     if(!selection?.isCollapsed||!selection.anchorNode||!node.contains(selection.anchorNode))return false;
+     const before=document.createRange();before.selectNodeContents(node);before.setEnd(selection.anchorNode,selection.anchorOffset);
+     return before.toString()==='';
+    }),'rich image gesture starts at the beginning of the After paragraph');
+    const bounds=await paragraph.boundingBox();
+    await page.locator('.ProseMirror').evaluate((node,{data,gesture,x,y})=>{
+     const transfer=new DataTransfer();transfer.items.add(new File([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],'gesture.png',{type:'image/png'}));
+     node.dispatchEvent(gesture==='paste'?new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}):new DragEvent('drop',{dataTransfer:transfer,clientX:x,clientY:y,bubbles:true,cancelable:true}));
+    },{data:png.toString('base64'),gesture,x:bounds.x+1,y:bounds.y+bounds.height/2});
+   };
   }
   let fire=await richGesture();failSave=true;await fire();
   await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Fixture asset save unavailable'));
   await page.waitForFunction(()=>!document.querySelector('.ProseMirror').textContent.includes('Upload in progress...'),{},{timeout:3000});
   assert.equal((await editor.inputValue()).trim(),initial.trim());const failedPath=assetRequests.at(-1);await assert.rejects(readFile(path.join(root,failedPath)),{code:'ENOENT'});
   failSave=false;await fire();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'));
-  const value=await editor.inputValue();assert.equal((value.match(/assets\/image-/g)||[]).length,1);assert.ok(value.indexOf('Before text.')<value.indexOf('assets/image-')&&value.indexOf('assets/image-')<value.indexOf('After text.'));
+  const value=await editor.inputValue();assert.equal((value.match(/assets\/image-/g)||[]).length,1);assert.ok(value.indexOf('Before text.')<value.indexOf('assets/image-')&&value.indexOf('assets/image-')<value.indexOf('After text.'),`rich ${gesture} retry must insert between the original paragraphs: ${value}`);
   assert.deepEqual(await readFile(path.join(root,assetRequests.at(-1))),png);
   const savedGesture=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='editor-save'&&response.request().postDataJSON()?.options?.json?.content===value);
   await page.locator('.ProseMirror').press('Control+s');await savedGesture;await idle();assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),value);
