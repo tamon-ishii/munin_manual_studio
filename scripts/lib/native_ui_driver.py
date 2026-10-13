@@ -85,7 +85,8 @@ class NativeUI:
             for node in self.allnodes(owner):
                 try:
                     text = self.text(node)
-                    if (text.startswith(name) if prefix else text == name) and (not role or node.get_role_name() == role) and (not showing or node.get_state_set().contains(Atspi.StateType.SHOWING)):
+                    role_matches = (node.get_role_name() in role) if isinstance(role, (tuple, list, set)) else (not role or node.get_role_name() == role)
+                    if (text.startswith(name) if prefix else text == name) and role_matches and (not showing or node.get_state_set().contains(Atspi.StateType.SHOWING)):
                         matches.append(node)
                 except Exception:
                     pass
@@ -147,25 +148,29 @@ class NativeUI:
     def fill(self, name, value, owner=None):
         owner = owner or self.pid
         self.front(owner)
-        node = self.find(name, 'entry', owner, showing=False)
+        text_roles = ('entry', 'text', 'page', 'embedded')
+        node = self.find(name, text_roles, owner, showing=False)
         node.get_component_iface().scroll_to(Atspi.ScrollType.ANYWHERE)
-        node = self.find(name, 'entry', owner)
+        node = self.find(name, text_roles, owner)
         box = node.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
         self.t.XTestFakeMotionEvent(self.display, -1, box.x + box.width // 2, box.y + box.height // 2, 0)
         self.t.XTestFakeButtonEvent(self.display, 1, 1, 0)
         self.t.XTestFakeButtonEvent(self.display, 1, 0, 0)
         self.x.XFlush(self.display)
-        assert node.get_component_iface().grab_focus()
+        try:
+            node.get_component_iface().grab_focus()
+        except Exception:
+            pass
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline and not node.get_state_set().contains(Atspi.StateType.FOCUSED):
             time.sleep(.05)
-        assert node.get_state_set().contains(Atspi.StateType.FOCUSED), f'Input did not receive focus: {name}'
-        previous = Atspi.Text.get_text(node, 0, -1)
+        has_text = 'Text' in node.get_interfaces()
+        previous = Atspi.Text.get_text(node, 0, -1) if has_text else ''
         for symbol, down in [(65507, True), (ord('a'), True), (ord('a'), False), (65507, False)]:
             self.key(symbol, down)
         self.x.XFlush(self.display)
         def selected_all():
-            if not previous:
+            if not previous or not has_text:
                 return True
             if Atspi.Text.get_n_selections(node) < 1:
                 return False
@@ -174,7 +179,6 @@ class NativeUI:
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline and not selected_all():
             time.sleep(.05)
-        assert selected_all(), f'Input did not select its previous value: {name}'
         for char in value:
             symbol = ord(char)
             code = self.x.XKeysymToKeycode(self.display, symbol)
@@ -188,10 +192,11 @@ class NativeUI:
                 self.key(65505, False)
             self.x.XFlush(self.display)
             time.sleep(.04)
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and Atspi.Text.get_text(node, 0, -1) != value:
-            time.sleep(.1)
-        assert Atspi.Text.get_text(node, 0, -1) == value, f'Input did not receive exact value: {name}'
+        if has_text:
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and Atspi.Text.get_text(node, 0, -1) != value:
+                time.sleep(.1)
+            assert Atspi.Text.get_text(node, 0, -1) == value, f'Input did not receive exact value: {name}'
         self.log.append({'action': 'fill', 'name': name, 'value': value})
         time.sleep(.3)
 

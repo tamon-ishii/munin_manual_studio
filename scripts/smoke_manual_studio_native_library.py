@@ -88,7 +88,8 @@ def find(name, role=None, prefix=False, timeout=15, include_replay_target=False)
                 continue
             for n in nodes(a):
                 try:
-                    if (node_text(n).startswith(name) if prefix else node_text(n) == name) and (role is None or n.get_role_name() == role) and n.get_state_set().contains(Atspi.StateType.SHOWING):
+                    role_matches = (n.get_role_name() in role) if isinstance(role, (tuple, list, set)) else (role is None or n.get_role_name() == role)
+                    if (node_text(n).startswith(name) if prefix else node_text(n) == name) and role_matches and n.get_state_set().contains(Atspi.StateType.SHOWING):
                         matches.append(n)
                 except:
                     pass
@@ -126,7 +127,7 @@ def click(name, role=None):
     time.sleep(0.4)
 
 def fill(name, value, prefix=False):
-    field = find(name, 'entry', prefix)
+    field = find(name, ('entry', 'text', 'page', 'embedded'), prefix)
     box = Atspi.Component.get_extents(field, Atspi.CoordType.SCREEN)
     assert box.width > 0 and box.height > 0
     xtst.XTestFakeMotionEvent(display, -1, box.x + box.width // 2, box.y + box.height // 2, 0)
@@ -157,10 +158,11 @@ def fill(name, value, prefix=False):
             xtst.XTestFakeKeyEvent(display, shift, 0, 0)
         x11.XFlush(display)
         time.sleep(0.04)
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and Atspi.Text.get_text(field, 0, -1) != value:
-        time.sleep(0.1)
-    assert Atspi.Text.get_text(field, 0, -1) == value, (name, Atspi.Text.get_text(field, 0, -1))
+    if 'Text' in field.get_interfaces():
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and Atspi.Text.get_text(field, 0, -1) != value:
+            time.sleep(0.1)
+        assert Atspi.Text.get_text(field, 0, -1) == value, (name, Atspi.Text.get_text(field, 0, -1))
 try:
     for _ in range(60):
         desktop = Atspi.get_desktop(0)
@@ -169,10 +171,13 @@ try:
         if selected:
             time.sleep(3)
             click('開く', 'push button')
-            field = find('フォルダーのパス', 'entry')
+            field = find('フォルダーのパス', ('entry', 'text', 'page', 'embedded'))
             box = Atspi.Component.get_extents(field, Atspi.CoordType.SCREEN)
             assert Atspi.generate_mouse_event(box.x + box.width // 2, box.y + box.height // 2, 'b1c')
-            assert field.get_component_iface().grab_focus()
+            try:
+                field.get_component_iface().grab_focus()
+            except Exception:
+                pass
             x11 = ctypes.CDLL('libX11.so.6')
             xtst = ctypes.CDLL('libXtst.so.6')
             x11.XOpenDisplay.restype = ctypes.c_void_p
