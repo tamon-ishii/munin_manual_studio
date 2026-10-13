@@ -161,11 +161,14 @@ pub fn cancel(root: &Path) -> Result<(), String> {
 pub(crate) fn stop_cli_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{}", child.id())])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        if let Ok(group) = libc::pid_t::try_from(child.id()) {
+            if group > 0 {
+                // cli_command gives this owned child its own process group.
+                // Signal it directly: external kill utility syntax differs on
+                // Unix platforms and killing only the parent leaves pipes open.
+                unsafe { libc::killpg(group, libc::SIGKILL); }
+            }
+        }
     }
     #[cfg(windows)]
     {
