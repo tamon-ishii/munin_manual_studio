@@ -217,10 +217,7 @@ button[data-toggle-approved].is-approved::before,
 .card-approved {
   border-color: var(--accent);
 }
-#new-workspace-dialog{width:min(640px,94vw);max-height:90vh;overflow:auto}#new-workspace-dialog p{line-height:1.7}#new-workspace-dialog .actions{justify-content:flex-end}#wizard-review{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px}#wizard-review dt{font-weight:600}#wizard-review dd{margin:0;overflow-wrap:anywhere}#wizard-error{color:#b33a35}.header-workspace{flex-wrap:wrap}.header-workspace button{padding:7px 9px}
 
-#workspace-settings-dialog{width:min(560px,92vw);max-height:90vh;overflow:auto}#workspace-settings-dialog form{display:block}#workspace-settings-dialog .actions{justify-content:flex-end}#workspace-settings-root{overflow-wrap:anywhere}
-#new-workspace-dialog [hidden]{display:none!important}
 
 #generation-review-dialog{width:min(1100px,94vw);max-height:92vh;overflow:auto}#generation-review-dialog .actions{justify-content:flex-end}.generation-diff{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);max-height:48vh;overflow:auto;border:1px solid var(--border-color);border-radius:6px;margin-bottom:18px}.generation-diff-heading{padding:8px 12px;font-weight:600;background:var(--surface-bg)}#generation-diff-before,#generation-diff-after{min-width:0;overflow-x:auto}.generation-diff-line{display:flex;min-height:24px;font:12px/24px ui-monospace,monospace;white-space:pre}.generation-diff-line code{font:inherit}.diff-line-number{flex:none;width:44px;text-align:right;padding-right:10px;opacity:.65;user-select:none}.diff-remove{background:#fce1de;color:#7c241c}.diff-add{background:#d7f0df;color:#194d2a}.diff-blank{background:var(--app-bg)}#review-ai-update[hidden]{display:none}
 
@@ -843,7 +840,7 @@ dialog.panel-dialog .actions {
 .tree-icon .ui-icon{width:14px;height:14px}
 .formatting-toolbar button:has(.ui-icon),.preview-toolbar-btn{min-width:32px;min-height:32px}
 #milkdown-editor .milkdown-top-bar .top-bar-item svg.ui-icon{width:20px;height:20px;fill:none!important}
-#save-page,#open-workspace-settings{display:inline-flex;align-items:center;gap:6px}
+#save-page{display:inline-flex;align-items:center;gap:6px}
 .preview-toolbar-title{min-width:0;flex:1;max-width:none}
 .preview-status{font-size:11px;color:var(--text-muted);white-space:nowrap}
 .preview-status[data-state=error],#save-state[data-state=error]{color:var(--danger,#b03932)}
@@ -1131,3 +1128,45 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
   .resource-item-summary{padding-right:54px}
   .resource-item-menu>summary{right:8px;padding:5px}
 }
+
+#workspace-dialog .folder-picker{display:flex;align-items:center;gap:8px;margin-top:6px}#workspace-dialog .folder-picker input{flex:1;min-width:0}#workspace-dialog .folder-picker button{flex:none}
+@media(max-width:480px){#workspace-dialog .folder-picker{flex-wrap:wrap}#workspace-dialog .folder-picker input{flex-basis:100%}}
+
+#workspace-name{display:inline-flex;align-items:center;gap:10px;min-width:0}
+#workspace-name-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;font-size:inherit}
+#workspace-name .folder-selector-arrow{flex:none;max-width:none;color:inherit;font-size:12px;padding-left:8px;border-left:1px solid var(--border-color)}
+
+/* Keep document identity, view selection and save status in one compact row. */
+#panel-editor>.panel-header{flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
+#panel-editor>.panel-header>div:first-child{min-width:0;flex:1}
+#panel-editor>.panel-header h1{font-size:16px;margin:0}
+#panel-editor>.panel-header>.editor-display-group{flex:none}
+#panel-editor>.panel-header>.actions{margin-left:auto}
+#panel-editor .editor-display-group button{font-size:12px;min-height:30px;padding:4px 8px;white-space:nowrap}
+#panel-editor>.editor-view-controls{justify-content:flex-end;margin-bottom:6px}
+#panel-editor>.editor-tools .formatting-toolbar{margin-bottom:6px}
+#panel-editor[data-image-open=true]>.panel-header>.editor-display-group{display:none}
+#panel-screenshots>.panel-header{flex-wrap:wrap;align-items:center}
+#panel-screenshots>.panel-header>#open-applications{margin-left:auto;font-size:12px;padding:5px 8px}
+
+.folder-history-dropdown{position:fixed;z-index:1200;width:min(420px,calc(100vw - 16px));overflow:auto;padding:8px;background:var(--surface-bg);border:1px solid var(--border-color);border-radius:8px;box-shadow:0 8px 24px var(--shadow-color)}
+.folder-history-dropdown>strong{display:block;padding:8px;font-size:12px;color:var(--text-muted)}
+.folder-history-dropdown .workspace-history-entry{display:flex;flex-direction:column;width:100%;text-align:left;border:0;background:transparent;padding:10px;gap:4px;min-width:0}
+.folder-history-dropdown .workspace-history-entry span{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)}
+.folder-history-dropdown .workspace-history-entry:focus-visible,.folder-history-dropdown .workspace-history-entry:hover{background:var(--surface-soft);outline:2px solid var(--accent);outline-offset:-2px}
+.document-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;flex:none;min-width:0}
+.document-heading>h1{font-size:16px;margin:0;min-width:0;overflow-wrap:anywhere}
+.document-heading>.document-tabs{flex:1 1 160px;min-width:0;margin:0}
+.document-heading>.editor-display-group{margin-left:auto;flex:none}
+.document-save-status{display:flex;align-items:center;gap:6px;font-size:11px;min-width:0}
+.document-save-status button{font-size:11px;padding:4px 6px}
+#panel-editor[data-image-open=true]>.document-heading>.editor-display-group,#panel-editor[data-image-open=true]>.document-heading>.document-save-status{display:none}
+.editor-empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:12px}
+.editor-empty-state[hidden]{display:none}
+.editor-empty-state h2{font-size:20px;margin:0}.editor-empty-state p{color:var(--text-muted)}
+#panel-editor.editor-is-empty>.editor-workspace,#panel-editor.editor-is-empty>.editor-tools,#panel-editor.editor-is-empty>.editor-view-controls,#panel-editor.editor-is-empty>.workspace-guide,#panel-editor.editor-is-empty>.document-heading{display:none}
+#save-conflict-dialog{width:min(960px,94vw)}#save-conflict-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto}
+#tree-create-menu>summary{font-size:12px;padding:4px 8px}#tree-create-menu .editor-more-menu{left:0;right:auto}
+#panel-brief textarea{min-height:180px}#panel-brief #save-settings{margin-top:12px}
+@media(max-width:640px){.document-heading>.editor-display-group{margin-left:0;max-width:100%;flex-wrap:wrap}.document-save-status{flex-basis:100%}#save-conflict-dialog .selection-diff-columns{grid-template-columns:minmax(0,1fr)}}
+.folder-history-dropdown .workspace-history-entry strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

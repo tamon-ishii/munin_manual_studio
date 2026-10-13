@@ -260,28 +260,11 @@
   ],
   "actions": [
     {
-      "id": "apps/manual-studio/index.html:html:button:647c4376f6094bbe:1",
+      "id": "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
       "file": "apps/manual-studio/index.html",
       "line": 8,
       "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"workspace-name\" aria-haspopup=\"dialog\" title=\"最近開いたワークスペースを選択\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:button:6b69ac647488e2ab:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 8,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"new-workspace\" data-ui-icon=\"newFile\">",
+      "expression": "<button type=\"button\" id=\"workspace-name\" aria-haspopup=\"listbox\" aria-expanded=\"false\" title=\"最近開いたフォルダを選択\">",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -310,42 +293,6 @@
         "P02.integrity-conflict-project-cancel"
       ],
       "reviewStatus": "reviewed"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:summary:ec1a1a4065991223:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 8,
-      "kind": "html:summary",
-      "expression": "<summary data-ui-icon=\"folder\">",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "保存と再読込の本文が一致する",
-      "returnTarget": "開始した原稿と選択位置",
-      "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:button:fa4f5c4263a52b6a:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 8,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"open-workspace-settings\" aria-haspopup=\"dialog\" disabled>",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "取消ではmanual_setting.jsonのバイト列が不変。確定ではmkdocs.site_nameが保存され、再読込で入力欄へ復元される",
-      "returnTarget": "同じワークスペースの原稿と設定ダイアログ",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry",
-        "P01.workspace-settings-save"
-      ],
-      "reviewStatus": "reviewed",
-      "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
     },
     {
       "id": "apps/manual-studio/index.html:html:button:2384509bd6000996:1",
@@ -452,11 +399,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:3d934b894ba6ca4c:1",
+      "id": "apps/manual-studio/index.html:html:button:59e55c6f01a4d511:1",
       "file": "apps/manual-studio/index.html",
-      "line": 15,
+      "line": 14,
       "kind": "html:button",
-      "expression": "<button data-tab=\"publish\" data-ui-icon=\"export\">",
+      "expression": "<button data-tab=\"publish\" data-ui-icon=\"review\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -469,11 +416,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:468647faa6ece326:1",
+      "id": "apps/manual-studio/index.html:html:button:3535252630c5a0e4:1",
       "file": "apps/manual-studio/index.html",
-      "line": 20,
+      "line": 19,
       "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"new-page\" data-ui-icon=\"newFile\" title=\"Markdownページを作る\">",
+      "expression": "<button type=\"button\" id=\"new-page\" data-ui-icon=\"newFile\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -486,11 +433,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:1c2845d3c439a8f4:1",
+      "id": "apps/manual-studio/index.html:html:button:6e48eb2543e4c6b7:1",
       "file": "apps/manual-studio/index.html",
-      "line": 20,
+      "line": 19,
       "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"new-folder\" data-ui-icon=\"newFolder\" title=\"原稿フォルダー内にフォルダーを作る\">",
+      "expression": "<button type=\"button\" id=\"new-folder\" data-ui-icon=\"newFolder\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -1891,11 +1838,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:b0a94eb4ba51bc7a:1",
+      "id": "apps/manual-studio/index.html:html:button:af999fd2fa4ac5b2:1",
       "file": "apps/manual-studio/index.html",
       "line": 123,
       "kind": "html:button",
-      "expression": "<button id=\"build-html\" data-ui-icon=\"export\" class=\"primary\">",
+      "expression": "<button id=\"quality-check\" data-ui-icon=\"review\" class=\"primary\">",
       "feature": "P14",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "Preview/final option reaches backend; final failure preserves output",
@@ -1904,18 +1851,17 @@
         "P14.success",
         "P14.cancel",
         "P14.failure-retry",
-        "P14.preview-and-strict-build",
         "P14.failure-preserves-output-and-recheck"
       ],
-      "reviewStatus": "reviewed",
+      "reviewStatus": "needs-entry-specific-review",
       "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:5a24a297d0cb6d14:1",
+      "id": "apps/manual-studio/index.html:html:button:1c16d0418ea3b8d9:1",
       "file": "apps/manual-studio/index.html",
-      "line": 123,
+      "line": 115,
       "kind": "html:button",
-      "expression": "<button id=\"quality-check\" data-ui-icon=\"review\">",
+      "expression": "<button type=\"button\" data-close-dialog=\"panel-brief\">",
       "feature": "P14",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "Quality findings visible and source jump selects the missing link",
@@ -1928,23 +1874,6 @@
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:button:47d2f753e1168f6e:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 123,
-      "kind": "html:button",
-      "expression": "<button id=\"open-output\" data-ui-icon=\"open\">",
-      "feature": "P14",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "Preview/final option reaches backend; final failure preserves output",
-      "returnTarget": "Publish result and current source manuscript",
-      "cases": [
-        "P14.success",
-        "P14.cancel",
-        "P14.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
     },
     {
       "id": "apps/manual-studio/index.html:html:button:57d91fc13a69246c:1",
@@ -2019,11 +1948,11 @@
       "reviewStatus": "reviewed"
     },
     {
-      "id": "apps/manual-studio/index.html:html:input:01df1b692dfb45c6:1",
+      "id": "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
       "file": "apps/manual-studio/index.html",
       "line": 135,
       "kind": "html:input",
-      "expression": "<input id=\"project-root\" aria-label=\"プロジェクトのフォルダー\" placeholder=\"フォルダーを選ぶ、またはパスを入力\" />",
+      "expression": "<input id=\"project-root\" aria-label=\"フォルダーのパス\" placeholder=\"フォルダーを選ぶ、またはパスを入力\" />",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -2085,112 +2014,6 @@
         "P02.failure-retry"
       ],
       "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:input:96f9f4e4ac943113:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 136,
-      "kind": "html:input",
-      "expression": "<input id=\"docs-path\" value=\"docs\" />",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "保存と再読込の本文が一致する",
-      "returnTarget": "開始した原稿と選択位置",
-      "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:input:6f65aa83e36ab13d:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 136,
-      "kind": "html:input",
-      "expression": "<input id=\"output-path\" value=\"manual\" />",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "保存と再読込の本文が一致する",
-      "returnTarget": "開始した原稿と選択位置",
-      "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:input:328d94238484d7b3:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 136,
-      "kind": "html:input",
-      "expression": "<input id=\"site-name\" value=\"マニュアル\" />",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "保存と再読込の本文が一致する",
-      "returnTarget": "開始した原稿と選択位置",
-      "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:input:427435d6cdd23871:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 136,
-      "kind": "html:input",
-      "expression": "<input id=\"assets-path\" value=\"docs/assets\" placeholder=\"docs/assets\" />",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "保存と再読込の本文が一致する",
-      "returnTarget": "開始した原稿と選択位置",
-      "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:button:ac12712bb287a215:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 136,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"cancel-workspace-settings\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "取消ではmanual_setting.jsonのバイト列が不変。確定ではmkdocs.site_nameが保存され、再読込で入力欄へ復元される",
-      "returnTarget": "同じワークスペースの原稿と設定ダイアログ",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry",
-        "P01.workspace-settings-save"
-      ],
-      "reviewStatus": "reviewed",
-      "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:button:6c7aaf392c9c7b25:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 136,
-      "kind": "html:button",
-      "expression": "<button id=\"save-workspace-settings\" data-ui-icon=\"save\" type=\"submit\" disabled>",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "取消ではmanual_setting.jsonのバイト列が不変。確定ではmkdocs.site_nameが保存され、再読込で入力欄へ復元される",
-      "returnTarget": "同じワークスペースの原稿と設定ダイアログ",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry",
-        "P01.workspace-settings-save"
-      ],
-      "reviewStatus": "reviewed",
-      "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
     },
     {
       "id": "apps/manual-studio/index.html:html:input:034a6e0a326e5f66:1",
@@ -5314,23 +5137,6 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:4f4b9c095cc074d4:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 1271,
-      "kind": "event:click",
-      "expression": "element(\"open-workspace-settings\").addEventListener(\"click\", () => { if (!workspace) return; element<HTMLDetailsElement>(\"project-menu\").open = false; input(\"docs-path\").value = workspace.config.docs; input(\"output-path\").value = workspace.",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
       "id": "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
       "file": "apps/manual-studio/src/main.ts",
       "line": 1281,
@@ -5365,45 +5171,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:d3afc23edca082dc:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:5a6e38fe5e331c9e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1306,
+      "line": 1278,
       "kind": "event:click",
-      "expression": "element(\"cancel-workspace-settings\").addEventListener(\"click\", () => element<HTMLDialogElement>(\"workspace-settings-dialog\").close())",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/main.ts:event:submit:e0b72628736dd050:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 1307,
-      "kind": "event:submit",
-      "expression": "element(\"workspace-settings-form\").addEventListener(\"submit\", event => { event.preventDefault(); void work(async () => { if (!workspace) throw new Error(\"先にワークスペースを開いてください。\"); await savedBeforeOperation(); await saveAiSettings(); const root",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/main.ts:event:click:6b6605c9c6a6f06d:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 1331,
-      "kind": "event:click",
-      "expression": "element(\"workspace-name\").addEventListener(\"click\", () => { void work(async () => { const history = await loadWorkspaceHistory(native); showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root))); }); })",
+      "expression": "element(\"workspace-name\").addEventListener(\"click\", () => { if (document.getElementById(\"workspace-history-dialog\")) return; void work(async () => { const history = await loadWorkspaceHistory(native); showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root))); }); })",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -5535,11 +5307,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:4a9e578d8c9e6539:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1361,
+      "line": 1323,
       "kind": "event:click",
-      "expression": "document.addEventListener(\"click\", event => { const menu = element<HTMLDetailsElement>(\"editor-more\"); if (!menu.contains(event.target as Node)) menu.open = false; const projectMenu = element<HTMLDetailsElement>(\"project-menu\"); if (!projec",
+      "expression": "document.addEventListener(\"click\", event => { const menu = element<HTMLDetailsElement>(\"editor-more\"); if (!menu.contains(event.target as Node)) menu.open = false; })",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -5569,11 +5341,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:keydown:4276c383635d067a:1",
+      "id": "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1373,
+      "line": 1333,
       "kind": "event:keydown",
-      "expression": "document.addEventListener(\"keydown\", event => { if (event.key !== \"Escape\") return; const openMenu = document.querySelector<HTMLDetailsElement>(\"#project-menu[open], .format-insert-menu[open]\"); if (openMenu) { openMenu.open = false; openMe",
+      "expression": "document.addEventListener(\"keydown\", event => { if (event.key !== \"Escape\") return; const openMenu = document.querySelector<HTMLDetailsElement>(\".format-insert-menu[open]\"); if (openMenu) { openMenu.open = false; openMenu.querySelector<HTMLElement>(\"summary\")?.focus(); } })",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -6096,11 +5868,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:3f692df3f0627823:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:67cb39220ae4770c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1646,
+      "line": 1636,
       "kind": "event:click",
-      "expression": "element(\"new-page\").addEventListener(\"click\", (event) => { if (event.isTrusted) contextCreateParent = null; if (!projectRoot) { status(\"先にプロジェクトを開いてください。\", true); return; } if (contextCreateParent !== null) { input('new-page-path').value = ",
+      "expression": "element(\"new-page\").addEventListener(\"click\", (event) => { element<HTMLDetailsElement>(\"tree-create-menu\").open = false; if (event.isTrusted) contextCreateParent = null; if (!projectRoot) { status(\"先にプロジェクトを開いてください。\", true); return; } if (contextCreateParent !== null) { input('new-page-path').value = contextCreateParent ? contextCreateParent + '/' : ''; input('new-page-title').value = ''; } element<HTMLDialogElement>(\"new-page-dialog\").showModal(); input(\"new-page-path\").focus(); })",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -6375,11 +6147,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:a4a5afbf5bb7c9ed:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1728,
+      "line": 1722,
       "kind": "event:click",
-      "expression": "element(\"new-folder\").addEventListener(\"click\", (event) => { if (event.isTrusted) contextCreateParent = null; if (!projectRoot || !workspace) { status(\"先にプロジェクトを開いてください。\", true); return; } element(\"new-folder-parent\").textContent = `作成先: ${",
+      "expression": "element(\"new-folder\").addEventListener(\"click\", (event) => { element<HTMLDetailsElement>(\"tree-create-menu\").open = false; if (event.isTrusted) contextCreateParent = null; if (!projectRoot || !workspace) { status(\"先にプロジェクトを開いてください。\", true); return; } element(\"new-folder-parent\").textContent = `作成先: ${workspace.config.docs}`; input(\"new-folder-path\").value = contextCreateParent ? contextCreateParent + '/' : ''; if (contextCreateParent !== null) element('new-folder-parent').textContent = `作成先: ${contextCreateParent || 'プロジェクト直下'}`; element<HTMLDialogElement>(\"new-folder-dialog\").showModal(); input(\"new-folder-path\").focus(); })",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -6626,11 +6398,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:a8b72aec4a1fb870:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:de248b6339e8c860:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2194,
+      "line": 2226,
       "kind": "event:click",
-      "expression": "element(\"save-settings\").addEventListener(\"click\", () => { void work(async () => { await saveAiSettings(); await runAction(\"save\", { brief: element<HTMLTextAreaElement>(\"manual-brief\").value, mkdocs_settings: workspace!.config.mkdocs, }); }",
+      "expression": "element(\"save-settings\").addEventListener(\"click\", () => { void work(async () => { await saveAiSettings(); if (!workspace) throw new Error(\"フォルダを開いてください。\"); await runAction(\"save\", { brief: element<HTMLTextAreaElement>(\"manual-brief\").value, }); element(\"brief-save-state\").textContent = \"執筆方針を保存しました。\"; }); })",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -6848,11 +6620,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:6b475ebafeeee8b8:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:46b22c57af1d33df:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2242,
+      "line": 2220,
       "kind": "event:click",
-      "expression": "element(\"save-launch-commands\").addEventListener(\"click\", () => { void work(async () => { launchCommands = launchCommands.map((_command, index) => ({ id: _command.id || `app-${crypto.randomUUID()}`, name: document.querySelector<HTMLInputElement>(`[data-launch-name=\"${index}\"]`)!.value.trim(), program: document.querySelector<HTMLInputElement>(`[data-launch-program=\"${index}\"]`)!.value.trim(), args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args=\"${index}\"]`)!.value.split(\"\\n\").filter((value) => value.length > 0), })); await invoke<void>(\"save_launch_commands\", { root: projectRoot, commands: launchCommands }); renderLaunchCommands(); status(\"このプロジェクトの撮影アプリの登録を保存しました。\"); }); })",
+      "expression": "element(\"save-launch-commands\").addEventListener(\"click\", () => { void work(async () => { launchCommands = launchCommands.map((_command, index) => ({ id: _command.id || `app-${crypto.randomUUID()}`, name: document.querySelector<HTMLInputElement>(`[data-launch-name=\"${index}\"]`)!.value.trim(), program: document.querySelector<HTMLInputElement>(`[data-launch-program=\"${index}\"]`)!.value.trim(), args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args=\"${index}\"]`)!.value.split(\"\\n\").filter((value) => value.length > 0), })); await invoke<void>(\"save_launch_commands\", { root: projectRoot, commands: launchCommands }); renderLaunchCommands(); status(\"このプロジェクトの撮影するアプリの登録を保存しました。\"); }); })",
       "feature": "P13",
       "spec": "openspec/specs/application-launch-settings/spec.md",
       "result": "端末/プロジェクト/接続先の所有範囲に保存する",
@@ -6896,28 +6668,10 @@
         "P14.success",
         "P14.cancel",
         "P14.failure-retry",
-        "P14.failure-preserves-output-and-recheck",
-        "P14.preview-and-strict-build"
+        "P14.failure-preserves-output-and-recheck"
       ],
-      "reviewStatus": "reviewed",
+      "reviewStatus": "needs-entry-specific-review",
       "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
-    },
-    {
-      "id": "apps/manual-studio/src/main.ts:event:click:e23adb499d59f444:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 2298,
-      "kind": "event:click",
-      "expression": "element(\"open-output\").addEventListener(\"click\", () => { void work(async () => { if (native) await invoke(\"open_output\", { root: projectRoot }); else status(`出力フォルダー: ${projectRoot}/${workspace?.config.output || \"manual\"}`); }); })",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
     },
     {
       "id": "apps/manual-studio/src/main.ts:html:button:2c1b0288cbe61cd5:1",
@@ -11278,28 +11032,11 @@
       "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
     },
     {
-      "id": "apps/manual-studio/src/workspaceHistory.ts:html:button:91210bfb7546b830:1",
+      "id": "apps/manual-studio/src/workspaceHistory.ts:loop-controls:6128a842f0ac846c:1",
       "file": "apps/manual-studio/src/workspaceHistory.ts",
-      "line": 19,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" data-history-close>",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceHistory.ts:loop-controls:95a694c46fccf556:1",
-      "file": "apps/manual-studio/src/workspaceHistory.ts",
-      "line": 22,
+      "line": 29,
       "kind": "loop-controls",
-      "expression": "for (const root of history) { const button = document.createElement(\"button\"); button.type = \"button\"; button.dataset.workspaceRoot = root; button.className = \"workspace-history-entry\"; const name = document.createElement(\"strong\"); name.te",
+      "expression": "for (const root of history) { const button = document.createElement('button'); button.type = 'button'; button.role = 'option'; button.dataset.workspaceRoot = root; button.className = 'workspace-history-entry'; button.setAttribute('aria-selected', String(root === current)); button.title = root; const name = document.createElement('strong'); name.textContent = `${root === current ? '✓ ' : ''}${root.replace(/[\\\\/]+$/, '').split(/[\\\\/]/).at(-1) || root}`; const path = document.createElement('span'); path.textContent = root; button.append(name, path); button.onclick = () => { close(); trigger.focus(); if (root !== current) void open(root); }; buttons.push(button); list.append(button); }",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -11312,419 +11049,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/workspaceHistory.ts:create:button:55657a0fc3715d3a:1",
+      "id": "apps/manual-studio/src/workspaceHistory.ts:create:button:03eafe20acfdbe2f:1",
       "file": "apps/manual-studio/src/workspaceHistory.ts",
-      "line": 23,
+      "line": 30,
       "kind": "create:button",
-      "expression": "button = document.createElement(\"button\")",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceHistory.ts:event:click:48d06b9798c1c86f:1",
-      "file": "apps/manual-studio/src/workspaceHistory.ts",
-      "line": 32,
-      "kind": "event:click",
-      "expression": "button.addEventListener(\"click\", () => { dialog.close(); dialog.remove(); void open(root); })",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceHistory.ts:event:click:f5447e9a6a4f9acc:1",
-      "file": "apps/manual-studio/src/workspaceHistory.ts",
-      "line": 35,
-      "kind": "event:click",
-      "expression": "dialog.querySelector(\"[data-history-close]\")!.addEventListener(\"click\", () => dialog.close())",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:4548251ae375bbf9:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 11,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-parent\" required placeholder=\"例: /home/user/Documents\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:button:0264e21db9c42ade:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 11,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"wizard-browse\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:30c3875c4dcaa3c8:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 11,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-name\" required value=\"manual-workspace\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:4437ebb8004494b5:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 12,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-title\" required value=\"マニュアル\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:265c4ebf897ff931:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 12,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-docs\" required value=\"docs\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:fd8b9b0b66151000:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 12,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-output\" required value=\"manual\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:f2f90ed66c6adc07:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 12,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-assets\" required value=\"docs/assets\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:select:99b21810ec423c1c:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 13,
-      "kind": "html:select",
-      "expression": "<select id=\"wizard-connection\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:select:6cdd575007f6bfe7:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 13,
-      "kind": "html:select",
-      "expression": "<select id=\"wizard-agent\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:67adedb77c566fc1:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 13,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-endpoint\" placeholder=\"http://localhost:11434/v1\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:input:7c247ae2a777c18d:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 13,
-      "kind": "html:input",
-      "expression": "<input id=\"wizard-model\" />",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:textarea:32793bb3d2ebbbfa:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 14,
-      "kind": "html:textarea",
-      "expression": "<textarea id=\"wizard-brief\" rows=\"5\" placeholder=\"例: 初めて使う人向けに、起動から保存までを説明する\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:button:1f012069764d23e7:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 16,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"wizard-cancel\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:button:a9f2c54c8bc4dae6:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 16,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"wizard-back\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:html:button:b84404b70d55390c:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 16,
-      "kind": "html:button",
-      "expression": "<button type=\"submit\" id=\"wizard-next\" class=\"primary\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:event:click:f1eba0e4d5038bda:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 40,
-      "kind": "event:click",
-      "expression": "document.getElementById('new-workspace')!.addEventListener('click', () => { step = 0; show(); dialog.showModal(); })",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:event:click:a0bec2b84136e5ac:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 41,
-      "kind": "event:click",
-      "expression": "node('wizard-back').addEventListener('click', () => { if (!saving) { step--; show(); } })",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:event:click:2dbcaf6becae9ce2:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 42,
-      "kind": "event:click",
-      "expression": "node('wizard-cancel').addEventListener('click', () => { if (!saving) dialog.close(); })",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:event:cancel:b6902a513e01e1b1:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 43,
-      "kind": "event:cancel",
-      "expression": "dialog.addEventListener('cancel', event => { if (saving) event.preventDefault(); })",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:event:click:62d8c64f7d706cec:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 44,
-      "kind": "event:click",
-      "expression": "node('wizard-browse').addEventListener('click', () => { void actions.chooseParent().then(parent => { if (parent) node<HTMLInputElement>('wizard-parent').value = parent; }).catch(error => { node('wizard-error').textContent = String(error); }",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:event:change:cd555c19494e0ae1:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 45,
-      "kind": "event:change",
-      "expression": "node('wizard-connection').addEventListener('change', () => { const cli = value('wizard-connection') === 'cli'; node('wizard-agent-label').hidden = cli === false; node('wizard-cli-note').hidden = !cli; node('wizard-endpoint-label').hidden = ",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/workspaceWizard.ts:event:submit:c3b6192bb5bb3e97:1",
-      "file": "apps/manual-studio/src/workspaceWizard.ts",
-      "line": 55,
-      "kind": "event:submit",
-      "expression": "form.addEventListener('submit', async event => { event.preventDefault(); if (saving) return; for (const control of dialog.querySelectorAll<HTMLInputElement>(`[data-step=\"${step}\"] input`)) if (!control.reportValidity()) return; node('wizard",
+      "expression": "button = document.createElement('button')",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -11824,11 +11153,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:binding-loop:1b29aa9ac5cda43c:1",
+      "id": "apps/manual-studio/src/main.ts:binding-loop:7062279db7ede4be:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1395,
+      "line": 1335,
       "kind": "binding-loop",
-      "expression": "document.querySelectorAll<HTMLButtonElement>(\".editor-view-controls button[data-editor-view]\").forEach(button => { button.addEventListener(\"click\", () => { preferredEditorView = button.dataset.editorView as EditorView; try { localStorage.se",
+      "expression": "document.querySelectorAll<HTMLButtonElement>(\"#panel-editor button[data-editor-view]\").forEach(button => { button.addEventListener(\"click\", () => { preferredEditorView = button.dataset.editorView as EditorView; try { localStorage.setItem(\"manual-studio-editor-view\", preferredEditorView); } catch { /* Optional persistence. */ } applyEditorView(); }); })",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -12170,45 +11499,6 @@
       "reviewStatus": "reviewed"
     },
     {
-      "id": "apps/manual-studio/index.html:html:select:1a164de2a76a0db3:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 123,
-      "kind": "html:select",
-      "expression": "<select id=\"build-mode\">",
-      "feature": "P14",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "Preview/final option reaches backend; final failure preserves output",
-      "returnTarget": "Publish result and current source manuscript",
-      "cases": [
-        "P14.success",
-        "P14.cancel",
-        "P14.failure-retry",
-        "P14.preview-and-strict-build",
-        "P14.failure-preserves-output-and-recheck"
-      ],
-      "reviewStatus": "reviewed",
-      "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
-    },
-    {
-      "id": "apps/manual-studio/src/main.ts:factory:8edb0090db9e2087:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 2297,
-      "kind": "factory",
-      "expression": "actionButton(\"build-html\", \"build-mkdocs\", () => ({ draft: element<HTMLSelectElement>(\"build-mode\").value === \"preview\" }), \"publish-result\")",
-      "feature": "P14",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "Preview/final option reaches backend; final failure preserves output",
-      "returnTarget": "Publish result and current source manuscript",
-      "cases": [
-        "P14.success",
-        "P14.cancel",
-        "P14.failure-retry",
-        "P14.preview-and-strict-build",
-        "P14.failure-preserves-output-and-recheck"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:4071106645de0d83:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
       "line": 343,
@@ -12427,6 +11717,482 @@
         "P13.failure-retry"
       ],
       "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:041dad40d3069921:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 25,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"save-retry\" hidden>",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:3685ab5ded1b8e20:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 25,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"save-conflict\" hidden>",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:8fad55a1b157df24:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 26,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"empty-open-folder\" class=\"primary\">",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:e314875a67b27913:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 26,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"empty-select-page\" hidden>",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:f29d4283305ed17b:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 26,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"empty-create-page\" hidden>",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:fdcecb10a1f3c42a:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 29,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" data-tab=\"brief\" data-ui-icon=\"file\">",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:4",
+      "file": "apps/manual-studio/index.html",
+      "line": 75,
+      "kind": "html:summary",
+      "expression": "<summary>",
+      "feature": "P04",
+      "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
+      "result": "原本・手順・候補を保存する",
+      "returnTarget": "撮影開始位置と候補確認",
+      "cases": [
+        "P04.success",
+        "P04.cancel",
+        "P04.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:5",
+      "file": "apps/manual-studio/index.html",
+      "line": 104,
+      "kind": "html:summary",
+      "expression": "<summary>",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:d7ec47ab9625e9ab:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1373,
+      "kind": "event:click",
+      "expression": "element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click())",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:7550c77f609c13c2:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1375,
+      "kind": "event:click",
+      "expression": "element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:8c754f6c1569e331:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1375,
+      "kind": "event:click",
+      "expression": "element('empty-select-page').addEventListener('click', () => { layoutManager?.focusPanel('file-tree'); element('tree-search').focus(); })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:602eb24b6af1f0fa:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1376,
+      "kind": "event:click",
+      "expression": "element('save-retry').addEventListener('click', () => { void work(() => saveDocument(false)); })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:54983fbdc6bff440:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1377,
+      "kind": "event:click",
+      "expression": "element('save-conflict').addEventListener('click', () => { void work(async () => { if (!documentState) return; const owner = documentState, root = projectRoot, draft = editor.value; const stored = JSON.parse(await rpc('editor-read', { page: owner.page }, root)) as Document; if (root !== projectRoot || owner !== documentState || draft !== editor.value) return; const {dialog,body} = featureDialog('外部変更を確認'); dialog.id = 'save-conflict-dialog'; const note = document.createElement('p'); note.textContent = '編集中の内容は保持しています。保存先の内容と比較してください。'; const columns = document.createElement('div'); columns.className = 'selection-diff-columns'; for (const [label,content] of [['編集中の内容',draft],['保存先の内容',stored.content]]) { const column = document.createElement('section'), heading = document.createElement('h3'), pre = document.createElement('pre'); heading.textContent = label; pre.textContent = content; column.append(heading,pre); columns.append(column); } const keep = document.createElement('button'); keep.textContent = '編集中の内容を保持して閉じる'; keep.onclick = () => dialog.close(); const reload = document.createElement('button'); reload.textContent = '保存先の内容を読み直す'; reload.onclick = () => { dialog.close(); element('reload-page').click(); }; body.append(note,columns,keep,reload); }); })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:create:button:a4d6802ac22fa31a:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1388,
+      "kind": "create:button",
+      "expression": "keep = document.createElement('button')",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:handler:f08b196413ff3722:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1388,
+      "kind": "handler",
+      "expression": "keep.onclick = () => dialog.close()",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:create:button:bacb625e5ee78415:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1389,
+      "kind": "create:button",
+      "expression": "reload = document.createElement('button')",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:handler:0eb2a5669fa3b10e:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1389,
+      "kind": "handler",
+      "expression": "reload.onclick = () => { dialog.close(); element('reload-page').click(); }",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:select:ed047c85b8ed91ea:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1392,
+      "kind": "event:select",
+      "expression": "editor.addEventListener('select', updateSelectionAction)",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:keydown:60ffb34a49df5aca:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1395,
+      "kind": "event:keydown",
+      "expression": "element('workspace-name').addEventListener('keydown', event => { if (event.key === 'ArrowDown' && !document.getElementById('workspace-history-dialog')) { event.preventDefault(); element('workspace-name').click(); } })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:e9768bd658e053d2:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1398,
+      "kind": "event:click",
+      "expression": "menu.addEventListener('click', event => { if ((event.target as HTMLElement).closest('button')) menu.open = false; })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:keydown:169fbe2b8928152e:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1399,
+      "kind": "event:keydown",
+      "expression": "menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); } })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:b1d458cf43ab76ef:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1400,
+      "kind": "event:click",
+      "expression": "document.addEventListener('click', event => { if (!menu.contains(event.target as Node)) menu.open = false; })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceHistory.ts:handler:a27f5b0f03f2e68c:1",
+      "file": "apps/manual-studio/src/workspaceHistory.ts",
+      "line": 35,
+      "kind": "handler",
+      "expression": "button.onclick = () => { close(); trigger.focus(); if (root !== current) void open(root); }",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceHistory.ts:create:button:6243e6a7808845a5:1",
+      "file": "apps/manual-studio/src/workspaceHistory.ts",
+      "line": 39,
+      "kind": "create:button",
+      "expression": "dismiss = document.createElement('button')",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1",
+      "file": "apps/manual-studio/src/workspaceHistory.ts",
+      "line": 39,
+      "kind": "handler",
+      "expression": "dismiss.onclick = () => { close(); trigger.focus(); }",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceHistory.ts:event:keydown:614ba45728486a5f:1",
+      "file": "apps/manual-studio/src/workspaceHistory.ts",
+      "line": 41,
+      "kind": "event:keydown",
+      "expression": "list.addEventListener('keydown', event => { if (event.key === 'Escape' || event.key === 'Tab') { close(); trigger.focus(); if (event.key === 'Escape') event.preventDefault(); return; } const focusable = [...buttons, dismiss]; const index = focusable.indexOf(document.activeElement as HTMLButtonElement); let next: number | undefined; if (event.key === 'ArrowDown') next = (index + 1) % focusable.length; if (event.key === 'ArrowUp') next = (index - 1 + focusable.length) % focusable.length; if (event.key === 'Home') next = 0; if (event.key === 'End') next = focusable.length - 1; if (next !== undefined) { event.preventDefault(); focusable[next].focus(); } })",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceHistory.ts:event:pointerdown:b4ed8c608e2f7710:1",
+      "file": "apps/manual-studio/src/workspaceHistory.ts",
+      "line": 57,
+      "kind": "event:pointerdown",
+      "expression": "document.addEventListener('pointerdown', outside)",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceHistory.ts:event:click:ba266202963c5e46:1",
+      "file": "apps/manual-studio/src/workspaceHistory.ts",
+      "line": 58,
+      "kind": "event:click",
+      "expression": "trigger.addEventListener('click', close, { once: true })",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
     }
   ],
   "cases": [
@@ -12435,61 +12201,34 @@
       "feature": "P01",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:647c4376f6094bbe:1",
-        "apps/manual-studio/index.html:html:button:6b69ac647488e2ab:1",
+        "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
-        "apps/manual-studio/index.html:html:button:fa4f5c4263a52b6a:1",
-        "apps/manual-studio/index.html:html:input:01df1b692dfb45c6:1",
+        "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
-        "apps/manual-studio/index.html:html:button:ac12712bb287a215:1",
-        "apps/manual-studio/index.html:html:button:6c7aaf392c9c7b25:1",
-        "apps/manual-studio/src/main.ts:event:click:4f4b9c095cc074d4:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
-        "apps/manual-studio/src/main.ts:event:click:d3afc23edca082dc:1",
-        "apps/manual-studio/src/main.ts:event:submit:e0b72628736dd050:1",
-        "apps/manual-studio/src/main.ts:event:click:6b6605c9c6a6f06d:1",
+        "apps/manual-studio/src/main.ts:event:click:5a6e38fe5e331c9e:1",
         "apps/manual-studio/src/main.ts:event:submit:cc7623e78547325e:1",
         "apps/manual-studio/src/main.ts:event:click:f31370c2e0ee2ec0:1",
-        "apps/manual-studio/src/main.ts:event:click:4a9e578d8c9e6539:1",
-        "apps/manual-studio/src/main.ts:event:keydown:4276c383635d067a:1",
+        "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
+        "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
         "apps/manual-studio/src/main.ts:event:click:dc00639c5fd224f9:1",
         "apps/manual-studio/src/main.ts:event:click:f6af51c76747e2e3:1",
         "apps/manual-studio/src/main.ts:event:contextmenu:ca292ac64027600f:1",
         "apps/manual-studio/src/main.ts:event:submit:578d439a2ed32d3e:1",
-        "apps/manual-studio/src/main.ts:event:click:a4a5afbf5bb7c9ed:1",
+        "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
         "apps/manual-studio/src/main.ts:event:submit:38988d9624495922:1",
         "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
-        "apps/manual-studio/src/main.ts:event:click:a8b72aec4a1fb870:1",
+        "apps/manual-studio/src/main.ts:event:click:de248b6339e8c860:1",
         "apps/manual-studio/src/main.ts:event:click:6f635cb30a15afce:1",
-        "apps/manual-studio/src/main.ts:event:click:e23adb499d59f444:1",
-        "apps/manual-studio/src/workspaceHistory.ts:html:button:91210bfb7546b830:1",
-        "apps/manual-studio/src/workspaceHistory.ts:loop-controls:95a694c46fccf556:1",
-        "apps/manual-studio/src/workspaceHistory.ts:create:button:55657a0fc3715d3a:1",
-        "apps/manual-studio/src/workspaceHistory.ts:event:click:48d06b9798c1c86f:1",
-        "apps/manual-studio/src/workspaceHistory.ts:event:click:f5447e9a6a4f9acc:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:4548251ae375bbf9:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:0264e21db9c42ade:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:30c3875c4dcaa3c8:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:4437ebb8004494b5:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:265c4ebf897ff931:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:fd8b9b0b66151000:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:f2f90ed66c6adc07:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:select:99b21810ec423c1c:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:select:6cdd575007f6bfe7:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:67adedb77c566fc1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:7c247ae2a777c18d:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:textarea:32793bb3d2ebbbfa:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:1f012069764d23e7:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:a9f2c54c8bc4dae6:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:b84404b70d55390c:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:f1eba0e4d5038bda:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:a0bec2b84136e5ac:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:2dbcaf6becae9ce2:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:cancel:b6902a513e01e1b1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:62d8c64f7d706cec:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:change:cd555c19494e0ae1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:submit:c3b6192bb5bb3e97:1"
+        "apps/manual-studio/src/workspaceHistory.ts:loop-controls:6128a842f0ac846c:1",
+        "apps/manual-studio/src/workspaceHistory.ts:create:button:03eafe20acfdbe2f:1",
+        "apps/manual-studio/src/workspaceHistory.ts:handler:a27f5b0f03f2e68c:1",
+        "apps/manual-studio/src/workspaceHistory.ts:create:button:6243e6a7808845a5:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:keydown:614ba45728486a5f:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:pointerdown:b4ed8c608e2f7710:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:click:ba266202963c5e46:1",
+        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1"
       ],
       "expected": {
         "visible": "選択したプロジェクトとツリーが表示される",
@@ -12511,61 +12250,34 @@
       "feature": "P01",
       "kind": "cancel",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:647c4376f6094bbe:1",
-        "apps/manual-studio/index.html:html:button:6b69ac647488e2ab:1",
+        "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
-        "apps/manual-studio/index.html:html:button:fa4f5c4263a52b6a:1",
-        "apps/manual-studio/index.html:html:input:01df1b692dfb45c6:1",
+        "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
-        "apps/manual-studio/index.html:html:button:ac12712bb287a215:1",
-        "apps/manual-studio/index.html:html:button:6c7aaf392c9c7b25:1",
-        "apps/manual-studio/src/main.ts:event:click:4f4b9c095cc074d4:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
-        "apps/manual-studio/src/main.ts:event:click:d3afc23edca082dc:1",
-        "apps/manual-studio/src/main.ts:event:submit:e0b72628736dd050:1",
-        "apps/manual-studio/src/main.ts:event:click:6b6605c9c6a6f06d:1",
+        "apps/manual-studio/src/main.ts:event:click:5a6e38fe5e331c9e:1",
         "apps/manual-studio/src/main.ts:event:submit:cc7623e78547325e:1",
         "apps/manual-studio/src/main.ts:event:click:f31370c2e0ee2ec0:1",
-        "apps/manual-studio/src/main.ts:event:click:4a9e578d8c9e6539:1",
-        "apps/manual-studio/src/main.ts:event:keydown:4276c383635d067a:1",
+        "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
+        "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
         "apps/manual-studio/src/main.ts:event:click:dc00639c5fd224f9:1",
         "apps/manual-studio/src/main.ts:event:click:f6af51c76747e2e3:1",
         "apps/manual-studio/src/main.ts:event:contextmenu:ca292ac64027600f:1",
         "apps/manual-studio/src/main.ts:event:submit:578d439a2ed32d3e:1",
-        "apps/manual-studio/src/main.ts:event:click:a4a5afbf5bb7c9ed:1",
+        "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
         "apps/manual-studio/src/main.ts:event:submit:38988d9624495922:1",
         "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
-        "apps/manual-studio/src/main.ts:event:click:a8b72aec4a1fb870:1",
+        "apps/manual-studio/src/main.ts:event:click:de248b6339e8c860:1",
         "apps/manual-studio/src/main.ts:event:click:6f635cb30a15afce:1",
-        "apps/manual-studio/src/main.ts:event:click:e23adb499d59f444:1",
-        "apps/manual-studio/src/workspaceHistory.ts:html:button:91210bfb7546b830:1",
-        "apps/manual-studio/src/workspaceHistory.ts:loop-controls:95a694c46fccf556:1",
-        "apps/manual-studio/src/workspaceHistory.ts:create:button:55657a0fc3715d3a:1",
-        "apps/manual-studio/src/workspaceHistory.ts:event:click:48d06b9798c1c86f:1",
-        "apps/manual-studio/src/workspaceHistory.ts:event:click:f5447e9a6a4f9acc:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:4548251ae375bbf9:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:0264e21db9c42ade:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:30c3875c4dcaa3c8:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:4437ebb8004494b5:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:265c4ebf897ff931:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:fd8b9b0b66151000:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:f2f90ed66c6adc07:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:select:99b21810ec423c1c:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:select:6cdd575007f6bfe7:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:67adedb77c566fc1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:7c247ae2a777c18d:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:textarea:32793bb3d2ebbbfa:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:1f012069764d23e7:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:a9f2c54c8bc4dae6:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:b84404b70d55390c:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:f1eba0e4d5038bda:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:a0bec2b84136e5ac:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:2dbcaf6becae9ce2:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:cancel:b6902a513e01e1b1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:62d8c64f7d706cec:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:change:cd555c19494e0ae1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:submit:c3b6192bb5bb3e97:1"
+        "apps/manual-studio/src/workspaceHistory.ts:loop-controls:6128a842f0ac846c:1",
+        "apps/manual-studio/src/workspaceHistory.ts:create:button:03eafe20acfdbe2f:1",
+        "apps/manual-studio/src/workspaceHistory.ts:handler:a27f5b0f03f2e68c:1",
+        "apps/manual-studio/src/workspaceHistory.ts:create:button:6243e6a7808845a5:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:keydown:614ba45728486a5f:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:pointerdown:b4ed8c608e2f7710:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:click:ba266202963c5e46:1",
+        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1"
       ],
       "expected": {
         "visible": "選択したプロジェクトとツリーが表示される",
@@ -12587,61 +12299,34 @@
       "feature": "P01",
       "kind": "failure-retry",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:647c4376f6094bbe:1",
-        "apps/manual-studio/index.html:html:button:6b69ac647488e2ab:1",
+        "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
-        "apps/manual-studio/index.html:html:button:fa4f5c4263a52b6a:1",
-        "apps/manual-studio/index.html:html:input:01df1b692dfb45c6:1",
+        "apps/manual-studio/index.html:html:input:7717bf99e3add98a:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
-        "apps/manual-studio/index.html:html:button:ac12712bb287a215:1",
-        "apps/manual-studio/index.html:html:button:6c7aaf392c9c7b25:1",
-        "apps/manual-studio/src/main.ts:event:click:4f4b9c095cc074d4:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
-        "apps/manual-studio/src/main.ts:event:click:d3afc23edca082dc:1",
-        "apps/manual-studio/src/main.ts:event:submit:e0b72628736dd050:1",
-        "apps/manual-studio/src/main.ts:event:click:6b6605c9c6a6f06d:1",
+        "apps/manual-studio/src/main.ts:event:click:5a6e38fe5e331c9e:1",
         "apps/manual-studio/src/main.ts:event:submit:cc7623e78547325e:1",
         "apps/manual-studio/src/main.ts:event:click:f31370c2e0ee2ec0:1",
-        "apps/manual-studio/src/main.ts:event:click:4a9e578d8c9e6539:1",
-        "apps/manual-studio/src/main.ts:event:keydown:4276c383635d067a:1",
+        "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
+        "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
         "apps/manual-studio/src/main.ts:event:click:dc00639c5fd224f9:1",
         "apps/manual-studio/src/main.ts:event:click:f6af51c76747e2e3:1",
         "apps/manual-studio/src/main.ts:event:contextmenu:ca292ac64027600f:1",
         "apps/manual-studio/src/main.ts:event:submit:578d439a2ed32d3e:1",
-        "apps/manual-studio/src/main.ts:event:click:a4a5afbf5bb7c9ed:1",
+        "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
         "apps/manual-studio/src/main.ts:event:submit:38988d9624495922:1",
         "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
-        "apps/manual-studio/src/main.ts:event:click:a8b72aec4a1fb870:1",
+        "apps/manual-studio/src/main.ts:event:click:de248b6339e8c860:1",
         "apps/manual-studio/src/main.ts:event:click:6f635cb30a15afce:1",
-        "apps/manual-studio/src/main.ts:event:click:e23adb499d59f444:1",
-        "apps/manual-studio/src/workspaceHistory.ts:html:button:91210bfb7546b830:1",
-        "apps/manual-studio/src/workspaceHistory.ts:loop-controls:95a694c46fccf556:1",
-        "apps/manual-studio/src/workspaceHistory.ts:create:button:55657a0fc3715d3a:1",
-        "apps/manual-studio/src/workspaceHistory.ts:event:click:48d06b9798c1c86f:1",
-        "apps/manual-studio/src/workspaceHistory.ts:event:click:f5447e9a6a4f9acc:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:4548251ae375bbf9:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:0264e21db9c42ade:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:30c3875c4dcaa3c8:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:4437ebb8004494b5:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:265c4ebf897ff931:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:fd8b9b0b66151000:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:f2f90ed66c6adc07:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:select:99b21810ec423c1c:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:select:6cdd575007f6bfe7:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:67adedb77c566fc1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:input:7c247ae2a777c18d:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:textarea:32793bb3d2ebbbfa:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:1f012069764d23e7:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:a9f2c54c8bc4dae6:1",
-        "apps/manual-studio/src/workspaceWizard.ts:html:button:b84404b70d55390c:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:f1eba0e4d5038bda:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:a0bec2b84136e5ac:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:2dbcaf6becae9ce2:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:cancel:b6902a513e01e1b1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:click:62d8c64f7d706cec:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:change:cd555c19494e0ae1:1",
-        "apps/manual-studio/src/workspaceWizard.ts:event:submit:c3b6192bb5bb3e97:1"
+        "apps/manual-studio/src/workspaceHistory.ts:loop-controls:6128a842f0ac846c:1",
+        "apps/manual-studio/src/workspaceHistory.ts:create:button:03eafe20acfdbe2f:1",
+        "apps/manual-studio/src/workspaceHistory.ts:handler:a27f5b0f03f2e68c:1",
+        "apps/manual-studio/src/workspaceHistory.ts:create:button:6243e6a7808845a5:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:keydown:614ba45728486a5f:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:pointerdown:b4ed8c608e2f7710:1",
+        "apps/manual-studio/src/workspaceHistory.ts:event:click:ba266202963c5e46:1",
+        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1"
       ],
       "expected": {
         "visible": "選択したプロジェクトとツリーが表示される",
@@ -12663,18 +12348,23 @@
       "feature": "P02",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:summary:ec1a1a4065991223:1",
         "apps/manual-studio/index.html:html:button:b0ee31ba9c39ddb9:1",
         "apps/manual-studio/index.html:html:button:95ddc1dee598e197:1",
         "apps/manual-studio/index.html:html:button:80234fbccc8bf1d1:1",
         "apps/manual-studio/index.html:html:button:b2ea90ce8e170ba0:1",
-        "apps/manual-studio/index.html:html:button:3d934b894ba6ca4c:1",
-        "apps/manual-studio/index.html:html:button:468647faa6ece326:1",
-        "apps/manual-studio/index.html:html:button:1c2845d3c439a8f4:1",
+        "apps/manual-studio/index.html:html:button:59e55c6f01a4d511:1",
+        "apps/manual-studio/index.html:html:button:3535252630c5a0e4:1",
+        "apps/manual-studio/index.html:html:button:6e48eb2543e4c6b7:1",
         "apps/manual-studio/index.html:html:input:166b3e03cf4f7926:1",
         "apps/manual-studio/index.html:html:select:38ce31075b9aae67:1",
         "apps/manual-studio/index.html:html:button:10ae8faece62f194:1",
+        "apps/manual-studio/index.html:html:button:041dad40d3069921:1",
+        "apps/manual-studio/index.html:html:button:8fad55a1b157df24:1",
+        "apps/manual-studio/index.html:html:button:f29d4283305ed17b:1",
+        "apps/manual-studio/index.html:html:button:e314875a67b27913:1",
+        "apps/manual-studio/index.html:html:button:3685ab5ded1b8e20:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:1",
+        "apps/manual-studio/index.html:html:button:fdcecb10a1f3c42a:1",
         "apps/manual-studio/index.html:html:button:4320737e30c41ff6:1",
         "apps/manual-studio/index.html:html:button:f02eaffaf444927a:1",
         "apps/manual-studio/index.html:html:button:d0ba7d4b0359e194:1",
@@ -12707,15 +12397,12 @@
         "apps/manual-studio/index.html:html:button:8daaa437e6aea7d2:1",
         "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:3",
+        "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:5",
         "apps/manual-studio/index.html:html:button:0c860bdc09a00af9:1",
         "apps/manual-studio/index.html:html:textarea:2b59a9ecf1f739f4:1",
         "apps/manual-studio/index.html:html:button:178ab219bd01d50e:1",
         "apps/manual-studio/index.html:html:button:edc86b01127f1eb0:1",
         "apps/manual-studio/index.html:html:button:1ed8cef9028dffff:1",
-        "apps/manual-studio/index.html:html:input:96f9f4e4ac943113:1",
-        "apps/manual-studio/index.html:html:input:6f65aa83e36ab13d:1",
-        "apps/manual-studio/index.html:html:input:328d94238484d7b3:1",
-        "apps/manual-studio/index.html:html:input:427435d6cdd23871:1",
         "apps/manual-studio/index.html:html:input:034a6e0a326e5f66:1",
         "apps/manual-studio/index.html:html:input:2f318bac060a0607:1",
         "apps/manual-studio/index.html:html:button:5c2b647aec072173:1",
@@ -12753,7 +12440,21 @@
         "apps/manual-studio/src/main.ts:event:click:4ba20a93d5f2eb1f:1",
         "apps/manual-studio/src/main.ts:event:keydown:3442a44184d21f0b:1",
         "apps/manual-studio/src/main.ts:event:click:77bdb125b3203256:1",
+        "apps/manual-studio/src/main.ts:event:click:54983fbdc6bff440:1",
+        "apps/manual-studio/src/main.ts:event:click:d7ec47ab9625e9ab:1",
+        "apps/manual-studio/src/main.ts:event:click:7550c77f609c13c2:1",
+        "apps/manual-studio/src/main.ts:event:click:8c754f6c1569e331:1",
+        "apps/manual-studio/src/main.ts:event:click:602eb24b6af1f0fa:1",
         "apps/manual-studio/src/main.ts:event:click:066dd1ead7fb1c43:1",
+        "apps/manual-studio/src/main.ts:event:click:e9768bd658e053d2:1",
+        "apps/manual-studio/src/main.ts:event:keydown:169fbe2b8928152e:1",
+        "apps/manual-studio/src/main.ts:event:click:b1d458cf43ab76ef:1",
+        "apps/manual-studio/src/main.ts:event:keydown:60ffb34a49df5aca:1",
+        "apps/manual-studio/src/main.ts:create:button:a4d6802ac22fa31a:1",
+        "apps/manual-studio/src/main.ts:create:button:bacb625e5ee78415:1",
+        "apps/manual-studio/src/main.ts:event:select:ed047c85b8ed91ea:1",
+        "apps/manual-studio/src/main.ts:handler:0eb2a5669fa3b10e:1",
+        "apps/manual-studio/src/main.ts:handler:f08b196413ff3722:1",
         "apps/manual-studio/src/main.ts:event:click:5fe19315ad42bc50:1",
         "apps/manual-studio/src/main.ts:event:click:6cab2ff78383e98d:1",
         "apps/manual-studio/src/main.ts:event:click:1ce79ff04bbe32b2:1",
@@ -12777,7 +12478,7 @@
         "apps/manual-studio/src/main.ts:create:button:4bd9192d30ffd8c9:1",
         "apps/manual-studio/src/main.ts:create:button:da893a7f0d79b322:1",
         "apps/manual-studio/src/main.ts:event:click:61267645794f03df:1",
-        "apps/manual-studio/src/main.ts:event:click:3f692df3f0627823:1",
+        "apps/manual-studio/src/main.ts:event:click:67cb39220ae4770c:1",
         "apps/manual-studio/src/main.ts:loop-controls:92c48fae5b32a90d:1",
         "apps/manual-studio/src/main.ts:create:button:03eafe20acfdbe2f:3",
         "apps/manual-studio/src/main.ts:handler:f66726ffb85654f5:1",
@@ -12844,7 +12545,7 @@
         "apps/manual-studio/src/unsavedChangesDialog.ts:event:cancel:7e41f0adedb44aa4:1",
         "apps/manual-studio/src/unsavedChangesDialog.ts:event:click:74a901611d0a9d75:1",
         "apps/manual-studio/src/fileTree.ts:html:div:9b4fee071762627c:1",
-        "apps/manual-studio/src/main.ts:binding-loop:1b29aa9ac5cda43c:1",
+        "apps/manual-studio/src/main.ts:binding-loop:7062279db7ede4be:1",
         "apps/manual-studio/src/main.ts:binding-loop:9d758989c6c8c0cb:1",
         "apps/manual-studio/src/markdownTable.ts:binding-loop:65b39bf2cf95ee25:1",
         "apps/manual-studio/src/markdownTable.ts:binding-loop:0f1698306b7748a8:1",
@@ -12875,18 +12576,23 @@
       "feature": "P02",
       "kind": "cancel",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:summary:ec1a1a4065991223:1",
         "apps/manual-studio/index.html:html:button:b0ee31ba9c39ddb9:1",
         "apps/manual-studio/index.html:html:button:95ddc1dee598e197:1",
         "apps/manual-studio/index.html:html:button:80234fbccc8bf1d1:1",
         "apps/manual-studio/index.html:html:button:b2ea90ce8e170ba0:1",
-        "apps/manual-studio/index.html:html:button:3d934b894ba6ca4c:1",
-        "apps/manual-studio/index.html:html:button:468647faa6ece326:1",
-        "apps/manual-studio/index.html:html:button:1c2845d3c439a8f4:1",
+        "apps/manual-studio/index.html:html:button:59e55c6f01a4d511:1",
+        "apps/manual-studio/index.html:html:button:3535252630c5a0e4:1",
+        "apps/manual-studio/index.html:html:button:6e48eb2543e4c6b7:1",
         "apps/manual-studio/index.html:html:input:166b3e03cf4f7926:1",
         "apps/manual-studio/index.html:html:select:38ce31075b9aae67:1",
         "apps/manual-studio/index.html:html:button:10ae8faece62f194:1",
+        "apps/manual-studio/index.html:html:button:041dad40d3069921:1",
+        "apps/manual-studio/index.html:html:button:8fad55a1b157df24:1",
+        "apps/manual-studio/index.html:html:button:f29d4283305ed17b:1",
+        "apps/manual-studio/index.html:html:button:e314875a67b27913:1",
+        "apps/manual-studio/index.html:html:button:3685ab5ded1b8e20:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:1",
+        "apps/manual-studio/index.html:html:button:fdcecb10a1f3c42a:1",
         "apps/manual-studio/index.html:html:button:4320737e30c41ff6:1",
         "apps/manual-studio/index.html:html:button:f02eaffaf444927a:1",
         "apps/manual-studio/index.html:html:button:d0ba7d4b0359e194:1",
@@ -12919,15 +12625,12 @@
         "apps/manual-studio/index.html:html:button:8daaa437e6aea7d2:1",
         "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:3",
+        "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:5",
         "apps/manual-studio/index.html:html:button:0c860bdc09a00af9:1",
         "apps/manual-studio/index.html:html:textarea:2b59a9ecf1f739f4:1",
         "apps/manual-studio/index.html:html:button:178ab219bd01d50e:1",
         "apps/manual-studio/index.html:html:button:edc86b01127f1eb0:1",
         "apps/manual-studio/index.html:html:button:1ed8cef9028dffff:1",
-        "apps/manual-studio/index.html:html:input:96f9f4e4ac943113:1",
-        "apps/manual-studio/index.html:html:input:6f65aa83e36ab13d:1",
-        "apps/manual-studio/index.html:html:input:328d94238484d7b3:1",
-        "apps/manual-studio/index.html:html:input:427435d6cdd23871:1",
         "apps/manual-studio/index.html:html:input:034a6e0a326e5f66:1",
         "apps/manual-studio/index.html:html:input:2f318bac060a0607:1",
         "apps/manual-studio/index.html:html:button:5c2b647aec072173:1",
@@ -12965,7 +12668,21 @@
         "apps/manual-studio/src/main.ts:event:click:4ba20a93d5f2eb1f:1",
         "apps/manual-studio/src/main.ts:event:keydown:3442a44184d21f0b:1",
         "apps/manual-studio/src/main.ts:event:click:77bdb125b3203256:1",
+        "apps/manual-studio/src/main.ts:event:click:54983fbdc6bff440:1",
+        "apps/manual-studio/src/main.ts:event:click:d7ec47ab9625e9ab:1",
+        "apps/manual-studio/src/main.ts:event:click:7550c77f609c13c2:1",
+        "apps/manual-studio/src/main.ts:event:click:8c754f6c1569e331:1",
+        "apps/manual-studio/src/main.ts:event:click:602eb24b6af1f0fa:1",
         "apps/manual-studio/src/main.ts:event:click:066dd1ead7fb1c43:1",
+        "apps/manual-studio/src/main.ts:event:click:e9768bd658e053d2:1",
+        "apps/manual-studio/src/main.ts:event:keydown:169fbe2b8928152e:1",
+        "apps/manual-studio/src/main.ts:event:click:b1d458cf43ab76ef:1",
+        "apps/manual-studio/src/main.ts:event:keydown:60ffb34a49df5aca:1",
+        "apps/manual-studio/src/main.ts:create:button:a4d6802ac22fa31a:1",
+        "apps/manual-studio/src/main.ts:create:button:bacb625e5ee78415:1",
+        "apps/manual-studio/src/main.ts:event:select:ed047c85b8ed91ea:1",
+        "apps/manual-studio/src/main.ts:handler:0eb2a5669fa3b10e:1",
+        "apps/manual-studio/src/main.ts:handler:f08b196413ff3722:1",
         "apps/manual-studio/src/main.ts:event:click:5fe19315ad42bc50:1",
         "apps/manual-studio/src/main.ts:event:click:6cab2ff78383e98d:1",
         "apps/manual-studio/src/main.ts:event:click:1ce79ff04bbe32b2:1",
@@ -12989,7 +12706,7 @@
         "apps/manual-studio/src/main.ts:create:button:4bd9192d30ffd8c9:1",
         "apps/manual-studio/src/main.ts:create:button:da893a7f0d79b322:1",
         "apps/manual-studio/src/main.ts:event:click:61267645794f03df:1",
-        "apps/manual-studio/src/main.ts:event:click:3f692df3f0627823:1",
+        "apps/manual-studio/src/main.ts:event:click:67cb39220ae4770c:1",
         "apps/manual-studio/src/main.ts:loop-controls:92c48fae5b32a90d:1",
         "apps/manual-studio/src/main.ts:create:button:03eafe20acfdbe2f:3",
         "apps/manual-studio/src/main.ts:handler:f66726ffb85654f5:1",
@@ -13056,7 +12773,7 @@
         "apps/manual-studio/src/unsavedChangesDialog.ts:event:cancel:7e41f0adedb44aa4:1",
         "apps/manual-studio/src/unsavedChangesDialog.ts:event:click:74a901611d0a9d75:1",
         "apps/manual-studio/src/fileTree.ts:html:div:9b4fee071762627c:1",
-        "apps/manual-studio/src/main.ts:binding-loop:1b29aa9ac5cda43c:1",
+        "apps/manual-studio/src/main.ts:binding-loop:7062279db7ede4be:1",
         "apps/manual-studio/src/main.ts:binding-loop:9d758989c6c8c0cb:1",
         "apps/manual-studio/src/markdownTable.ts:binding-loop:65b39bf2cf95ee25:1",
         "apps/manual-studio/src/markdownTable.ts:binding-loop:0f1698306b7748a8:1",
@@ -13087,18 +12804,23 @@
       "feature": "P02",
       "kind": "failure-retry",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:summary:ec1a1a4065991223:1",
         "apps/manual-studio/index.html:html:button:b0ee31ba9c39ddb9:1",
         "apps/manual-studio/index.html:html:button:95ddc1dee598e197:1",
         "apps/manual-studio/index.html:html:button:80234fbccc8bf1d1:1",
         "apps/manual-studio/index.html:html:button:b2ea90ce8e170ba0:1",
-        "apps/manual-studio/index.html:html:button:3d934b894ba6ca4c:1",
-        "apps/manual-studio/index.html:html:button:468647faa6ece326:1",
-        "apps/manual-studio/index.html:html:button:1c2845d3c439a8f4:1",
+        "apps/manual-studio/index.html:html:button:59e55c6f01a4d511:1",
+        "apps/manual-studio/index.html:html:button:3535252630c5a0e4:1",
+        "apps/manual-studio/index.html:html:button:6e48eb2543e4c6b7:1",
         "apps/manual-studio/index.html:html:input:166b3e03cf4f7926:1",
         "apps/manual-studio/index.html:html:select:38ce31075b9aae67:1",
         "apps/manual-studio/index.html:html:button:10ae8faece62f194:1",
+        "apps/manual-studio/index.html:html:button:041dad40d3069921:1",
+        "apps/manual-studio/index.html:html:button:8fad55a1b157df24:1",
+        "apps/manual-studio/index.html:html:button:f29d4283305ed17b:1",
+        "apps/manual-studio/index.html:html:button:e314875a67b27913:1",
+        "apps/manual-studio/index.html:html:button:3685ab5ded1b8e20:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:1",
+        "apps/manual-studio/index.html:html:button:fdcecb10a1f3c42a:1",
         "apps/manual-studio/index.html:html:button:4320737e30c41ff6:1",
         "apps/manual-studio/index.html:html:button:f02eaffaf444927a:1",
         "apps/manual-studio/index.html:html:button:d0ba7d4b0359e194:1",
@@ -13131,15 +12853,12 @@
         "apps/manual-studio/index.html:html:button:8daaa437e6aea7d2:1",
         "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:3",
+        "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:5",
         "apps/manual-studio/index.html:html:button:0c860bdc09a00af9:1",
         "apps/manual-studio/index.html:html:textarea:2b59a9ecf1f739f4:1",
         "apps/manual-studio/index.html:html:button:178ab219bd01d50e:1",
         "apps/manual-studio/index.html:html:button:edc86b01127f1eb0:1",
         "apps/manual-studio/index.html:html:button:1ed8cef9028dffff:1",
-        "apps/manual-studio/index.html:html:input:96f9f4e4ac943113:1",
-        "apps/manual-studio/index.html:html:input:6f65aa83e36ab13d:1",
-        "apps/manual-studio/index.html:html:input:328d94238484d7b3:1",
-        "apps/manual-studio/index.html:html:input:427435d6cdd23871:1",
         "apps/manual-studio/index.html:html:input:034a6e0a326e5f66:1",
         "apps/manual-studio/index.html:html:input:2f318bac060a0607:1",
         "apps/manual-studio/index.html:html:button:5c2b647aec072173:1",
@@ -13177,7 +12896,21 @@
         "apps/manual-studio/src/main.ts:event:click:4ba20a93d5f2eb1f:1",
         "apps/manual-studio/src/main.ts:event:keydown:3442a44184d21f0b:1",
         "apps/manual-studio/src/main.ts:event:click:77bdb125b3203256:1",
+        "apps/manual-studio/src/main.ts:event:click:54983fbdc6bff440:1",
+        "apps/manual-studio/src/main.ts:event:click:d7ec47ab9625e9ab:1",
+        "apps/manual-studio/src/main.ts:event:click:7550c77f609c13c2:1",
+        "apps/manual-studio/src/main.ts:event:click:8c754f6c1569e331:1",
+        "apps/manual-studio/src/main.ts:event:click:602eb24b6af1f0fa:1",
         "apps/manual-studio/src/main.ts:event:click:066dd1ead7fb1c43:1",
+        "apps/manual-studio/src/main.ts:event:click:e9768bd658e053d2:1",
+        "apps/manual-studio/src/main.ts:event:keydown:169fbe2b8928152e:1",
+        "apps/manual-studio/src/main.ts:event:click:b1d458cf43ab76ef:1",
+        "apps/manual-studio/src/main.ts:event:keydown:60ffb34a49df5aca:1",
+        "apps/manual-studio/src/main.ts:create:button:a4d6802ac22fa31a:1",
+        "apps/manual-studio/src/main.ts:create:button:bacb625e5ee78415:1",
+        "apps/manual-studio/src/main.ts:event:select:ed047c85b8ed91ea:1",
+        "apps/manual-studio/src/main.ts:handler:0eb2a5669fa3b10e:1",
+        "apps/manual-studio/src/main.ts:handler:f08b196413ff3722:1",
         "apps/manual-studio/src/main.ts:event:click:5fe19315ad42bc50:1",
         "apps/manual-studio/src/main.ts:event:click:6cab2ff78383e98d:1",
         "apps/manual-studio/src/main.ts:event:click:1ce79ff04bbe32b2:1",
@@ -13201,7 +12934,7 @@
         "apps/manual-studio/src/main.ts:create:button:4bd9192d30ffd8c9:1",
         "apps/manual-studio/src/main.ts:create:button:da893a7f0d79b322:1",
         "apps/manual-studio/src/main.ts:event:click:61267645794f03df:1",
-        "apps/manual-studio/src/main.ts:event:click:3f692df3f0627823:1",
+        "apps/manual-studio/src/main.ts:event:click:67cb39220ae4770c:1",
         "apps/manual-studio/src/main.ts:loop-controls:92c48fae5b32a90d:1",
         "apps/manual-studio/src/main.ts:create:button:03eafe20acfdbe2f:3",
         "apps/manual-studio/src/main.ts:handler:f66726ffb85654f5:1",
@@ -13268,7 +13001,7 @@
         "apps/manual-studio/src/unsavedChangesDialog.ts:event:cancel:7e41f0adedb44aa4:1",
         "apps/manual-studio/src/unsavedChangesDialog.ts:event:click:74a901611d0a9d75:1",
         "apps/manual-studio/src/fileTree.ts:html:div:9b4fee071762627c:1",
-        "apps/manual-studio/src/main.ts:binding-loop:1b29aa9ac5cda43c:1",
+        "apps/manual-studio/src/main.ts:binding-loop:7062279db7ede4be:1",
         "apps/manual-studio/src/main.ts:binding-loop:9d758989c6c8c0cb:1",
         "apps/manual-studio/src/markdownTable.ts:binding-loop:65b39bf2cf95ee25:1",
         "apps/manual-studio/src/markdownTable.ts:binding-loop:0f1698306b7748a8:1",
@@ -13479,6 +13212,7 @@
         "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
         "apps/manual-studio/index.html:html:button:ddf5d8f5d796bcc7:1",
         "apps/manual-studio/index.html:html:button:9d794288308358f9:1",
+        "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:4",
         "apps/manual-studio/index.html:html:input:2026d91a7b3dfbb7:1",
         "apps/manual-studio/index.html:html:button:dffd1c98d825dd05:1",
         "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
@@ -13536,6 +13270,7 @@
         "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
         "apps/manual-studio/index.html:html:button:ddf5d8f5d796bcc7:1",
         "apps/manual-studio/index.html:html:button:9d794288308358f9:1",
+        "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:4",
         "apps/manual-studio/index.html:html:input:2026d91a7b3dfbb7:1",
         "apps/manual-studio/index.html:html:button:dffd1c98d825dd05:1",
         "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
@@ -13593,6 +13328,7 @@
         "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
         "apps/manual-studio/index.html:html:button:ddf5d8f5d796bcc7:1",
         "apps/manual-studio/index.html:html:button:9d794288308358f9:1",
+        "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:4",
         "apps/manual-studio/index.html:html:input:2026d91a7b3dfbb7:1",
         "apps/manual-studio/index.html:html:button:dffd1c98d825dd05:1",
         "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
@@ -14767,7 +14503,7 @@
         "apps/manual-studio/src/main.ts:event:click:403e0ff786631f6e:1",
         "apps/manual-studio/src/main.ts:event:change:0b11014c5c7a081c:1",
         "apps/manual-studio/src/main.ts:event:click:bc0aa5105b28817c:1",
-        "apps/manual-studio/src/main.ts:event:click:6b475ebafeeee8b8:1",
+        "apps/manual-studio/src/main.ts:event:click:46b22c57af1d33df:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointerdown:399737909c31adab:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointerup:8be51500d87572de:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointermove:4cb96403d88e62d6:1",
@@ -14860,7 +14596,7 @@
         "apps/manual-studio/src/main.ts:event:click:403e0ff786631f6e:1",
         "apps/manual-studio/src/main.ts:event:change:0b11014c5c7a081c:1",
         "apps/manual-studio/src/main.ts:event:click:bc0aa5105b28817c:1",
-        "apps/manual-studio/src/main.ts:event:click:6b475ebafeeee8b8:1",
+        "apps/manual-studio/src/main.ts:event:click:46b22c57af1d33df:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointerdown:399737909c31adab:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointerup:8be51500d87572de:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointermove:4cb96403d88e62d6:1",
@@ -14953,7 +14689,7 @@
         "apps/manual-studio/src/main.ts:event:click:403e0ff786631f6e:1",
         "apps/manual-studio/src/main.ts:event:change:0b11014c5c7a081c:1",
         "apps/manual-studio/src/main.ts:event:click:bc0aa5105b28817c:1",
-        "apps/manual-studio/src/main.ts:event:click:6b475ebafeeee8b8:1",
+        "apps/manual-studio/src/main.ts:event:click:46b22c57af1d33df:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointerdown:399737909c31adab:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointerup:8be51500d87572de:1",
         "apps/manual-studio/src/paneResizers.ts:event:pointermove:4cb96403d88e62d6:1",
@@ -15003,11 +14739,8 @@
       "feature": "P14",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:5a24a297d0cb6d14:1",
-        "apps/manual-studio/src/main.ts:factory:8edb0090db9e2087:1",
-        "apps/manual-studio/index.html:html:select:1a164de2a76a0db3:1",
-        "apps/manual-studio/index.html:html:button:b0a94eb4ba51bc7a:1",
-        "apps/manual-studio/index.html:html:button:47d2f753e1168f6e:1",
+        "apps/manual-studio/index.html:html:button:1c16d0418ea3b8d9:1",
+        "apps/manual-studio/index.html:html:button:af999fd2fa4ac5b2:1",
         "apps/manual-studio/src/main.ts:factory:ad7d8ec5435f5c11:1"
       ],
       "expected": {
@@ -15032,11 +14765,8 @@
       "feature": "P14",
       "kind": "cancel",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:5a24a297d0cb6d14:1",
-        "apps/manual-studio/src/main.ts:factory:8edb0090db9e2087:1",
-        "apps/manual-studio/index.html:html:select:1a164de2a76a0db3:1",
-        "apps/manual-studio/index.html:html:button:b0a94eb4ba51bc7a:1",
-        "apps/manual-studio/index.html:html:button:47d2f753e1168f6e:1",
+        "apps/manual-studio/index.html:html:button:1c16d0418ea3b8d9:1",
+        "apps/manual-studio/index.html:html:button:af999fd2fa4ac5b2:1",
         "apps/manual-studio/src/main.ts:factory:ad7d8ec5435f5c11:1"
       ],
       "expected": {
@@ -15061,11 +14791,8 @@
       "feature": "P14",
       "kind": "failure-retry",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:5a24a297d0cb6d14:1",
-        "apps/manual-studio/src/main.ts:factory:8edb0090db9e2087:1",
-        "apps/manual-studio/index.html:html:select:1a164de2a76a0db3:1",
-        "apps/manual-studio/index.html:html:button:b0a94eb4ba51bc7a:1",
-        "apps/manual-studio/index.html:html:button:47d2f753e1168f6e:1",
+        "apps/manual-studio/index.html:html:button:1c16d0418ea3b8d9:1",
+        "apps/manual-studio/index.html:html:button:af999fd2fa4ac5b2:1",
         "apps/manual-studio/src/main.ts:factory:ad7d8ec5435f5c11:1"
       ],
       "expected": {
@@ -16659,30 +16386,6 @@
       "notes": "Actual browser gesture and temporary real manualctl backend files; no real OS claim."
     },
     {
-      "id": "P01.workspace-settings-save",
-      "feature": "P01",
-      "expected": {
-        "visible": "ワークスペース設定を開いて入力値と保存状態を確認でき、取消後は編集画面へ戻る",
-        "stored": "取消ではmanual_setting.jsonのバイト列が不変。確定ではmkdocs.site_nameが保存され、再読込で入力欄へ復元される",
-        "preserved": "原稿docs/index.mdの内容とハッシュは設定操作で変わらない",
-        "returnTarget": "同じワークスペースの原稿と設定ダイアログ"
-      },
-      "requiredEvidence": [
-        "real-backend"
-      ],
-      "kind": "specific-workflow",
-      "entryPoints": [
-        "apps/manual-studio/index.html:html:button:fa4f5c4263a52b6a:1",
-        "apps/manual-studio/index.html:html:button:ac12712bb287a215:1",
-        "apps/manual-studio/index.html:html:button:6c7aaf392c9c7b25:1"
-      ],
-      "existingChecks": [
-        "scripts/test_manual_studio_author_settings_contracts.mjs"
-      ],
-      "status": "not-run",
-      "notes": "Dedicated runner produces same-build evidence; aggregate only after current source/build identity matches."
-    },
-    {
       "id": "P02.editor-autosave",
       "feature": "P02",
       "expected": {
@@ -16729,33 +16432,11 @@
       "notes": "Dedicated runner produces same-build evidence; aggregate only after current source/build identity matches."
     },
     {
-      "id": "P14.preview-and-strict-build",
-      "feature": "P14",
-      "entryPoints": [
-        "apps/manual-studio/index.html:html:button:b0a94eb4ba51bc7a:1",
-        "apps/manual-studio/index.html:html:select:1a164de2a76a0db3:1",
-        "apps/manual-studio/src/main.ts:factory:ad7d8ec5435f5c11:1"
-      ],
-      "requiredEvidence": [
-        "real-backend"
-      ],
-      "expected": {
-        "visible": "Preview and final build results shown",
-        "stored": "Output file generated through both modes; source manuscript unchanged",
-        "preserved": "Mode choice reaches backend draft flag",
-        "returnTarget": "Publish result and manuscript"
-      },
-      "existingChecks": [
-        "scripts/test_manual_studio_misc_control_contracts.mjs"
-      ],
-      "notes": "Fixture MkDocs executable; actual backend and files, browser UI; OS output opener not covered."
-    },
-    {
       "id": "P14.failure-preserves-output-and-recheck",
       "feature": "P14",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:b0a94eb4ba51bc7a:1",
-        "apps/manual-studio/index.html:html:button:5a24a297d0cb6d14:1",
+        "apps/manual-studio/index.html:html:button:af999fd2fa4ac5b2:1",
+        "apps/manual-studio/index.html:html:button:1c16d0418ea3b8d9:1",
         "apps/manual-studio/src/main.ts:factory:ad7d8ec5435f5c11:1"
       ],
       "requiredEvidence": [

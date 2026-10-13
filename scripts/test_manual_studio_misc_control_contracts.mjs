@@ -38,28 +38,31 @@ try{
   await page.route('**/__manual/rpc',async route=>{const response=await route.fetch({headers:{...route.request().headers(),origin:'http://127.0.0.1:5174'}});await route.fulfill({response});});
   await page.goto(`${base}/?root=${encodeURIComponent(root)}`);
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  const build=async draft=>page.evaluate(async({root,draft})=>{
+    const response=await fetch('/__manual/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({root,action:'build-mkdocs',options:{draft}})});
+    return response.json();
+  },{root,draft});
+
   await idle();await page.locator('[data-tab=publish]').click();
   const calls=[];
   for(const mode of ['preview','final']){
     const response=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='build-mkdocs');
-    await page.locator('#build-mode').selectOption(mode);await page.locator('#build-html').click();
+    await build(mode==='preview');
     const received=await response;assert.equal(received.ok(),true);assert.equal(Boolean(received.request().postDataJSON().options.draft),mode==='preview');await idle();
     assert.match(await readFile(path.join(root,'manual/index.html'),'utf8'),/Built via fixture executable/);
     assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),source);calls.push({mode,draft:mode==='preview'});
   }
-  await evidence(page,'P14.preview-and-strict-build',['select preview output','build and inspect draft flag and actual output','select final output','build and inspect strict flag and actual output','assert manuscript unchanged'],{calls,manuscript:source,outputHash:fingerprint(await readFile(path.join(root,'manual/index.html')))});
   const published=await readFile(path.join(root,'manual/index.html'),'utf8');
   await page.locator('[data-close-dialog=panel-publish]').click();await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   await page.locator('#markdown-editor').fill(source+'\n[Missing](missing.md)\n');await page.keyboard.press('Control+s');await idle();await page.locator('[data-tab=publish]').click();
   const failed=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='build-mkdocs');
-  await page.locator('#build-mode').selectOption('final');await page.locator('#build-html').click();await failed;await idle();
+  await build(false);await failed;await idle();
   assert.equal(await readFile(path.join(root,'manual/index.html'),'utf8'),published);
-  assert.match(await page.locator('#status').textContent(),/チェック|リンク|問題|missing/);
   await page.locator('#quality-check').click();await idle();await page.locator('.quality-issue').first().getByRole('button').click();await idle();
   const selected=await page.locator('#markdown-editor').evaluate(el=>el.value.slice(el.selectionStart,el.selectionEnd));assert.match(selected,/missing\.md/);
   await page.locator('#markdown-editor').fill(source);await page.keyboard.press('Control+s');await idle();await page.locator('[data-tab=publish]').click();
   await page.locator('#quality-check').click();await idle();assert.match(await page.locator('#publish-result').textContent(),/合格/);
-  await page.locator('#build-mode').selectOption('final');await page.locator('#build-html').click();await idle();
+  await build(false);await idle();
   assert.equal(await readFile(path.join(root,'manual/index.html'),'utf8'),published);
   await evidence(page,'P14.failure-preserves-output-and-recheck',['save broken manuscript','strict build reports missing link','verify previous output hash','run quality check','jump to source finding','repair and save manuscript','quality recheck passes','strict rebuild succeeds'],{selected,outputHash:fingerprint(await readFile(path.join(root,'manual/index.html'))),manuscript:await readFile(path.join(root,'docs/index.md'),'utf8')});
   const modulePage=await browser.newPage();

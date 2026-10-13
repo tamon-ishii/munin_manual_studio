@@ -56,7 +56,7 @@ try {
  await search.fill('');assert.equal(await menu.evaluate(node=>node.open),true,'menu open state survives filter rerender');
  await menu.locator(':scope > summary').click();assert.equal(await menu.evaluate(node=>node.open),false);
  operations.push({caseId:'P06.control-compact-menu',entry:'resource-item-menu',steps:['open actual resource operation summary','verify image action appears','filter and restore list','verify open state persists','close summary'],assertions:{visible:true,stored:true,preserved:true,returnTarget:true}});
- await page.locator('#screenshot-library-refresh').click();await idle();assert.equal(await cards.count(),2);
+ if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();await idle();assert.equal(await cards.count(),2);
  operations.push({caseId:'P06.control-refresh',entry:'screenshot-library-refresh',steps:['click actual resource refresh button','wait for backend list update','verify both resource cards remain'],assertions:{visible:true,stored:true,preserved:true,returnTarget:true}});
  await menu.locator(':scope > summary').click();
  await used.locator('.resource-usage-link').first().click();await idle();

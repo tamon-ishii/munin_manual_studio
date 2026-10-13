@@ -29,7 +29,6 @@ import { renderFileTree } from "./fileTree";
 import { setupPreviewTheme } from "./themePreview";
 import { setupMarkdownTableEditor } from "./markdownTable";
 import { jumpToSource } from "./editorNavigation";
-import { setupWorkspaceWizard } from "./workspaceWizard";
 import {askSelectionInstruction,reviewSelection,type SelectionDraft} from "./selectionAi";
 import { showUnsavedChangesDialog } from "./unsavedChangesDialog";
 import { loadWorkspaceHistory, recordWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
@@ -290,7 +289,7 @@ function startAiProgress(action: string): void {
     draft: "原稿の下書きを生成中",
     "draft-propose": "原稿の下書き候補を生成中",
     "document-review": "文章をレビュー・校正中",
-    "screenshot-ai-application": "撮影アプリの起動設定を調査中",
+    "screenshot-ai-application": "撮影するアプリの起動設定を調査中",
     "screenshot-ai-plan": "撮影手順を作成中",
     "screenshot-ai-capture": "スクリーンショットを撮影中",
     "screenshot-ai-annotate": "撮影画像の注釈を作成中",
@@ -512,8 +511,7 @@ function tabToComponentId(name: string): string {
 }
 function chooseTab(name: string): void {
   if (name === "applications" && !workspace) return;
-  element<HTMLDetailsElement>("project-menu").open = false;
-  if (name === "publish" || name === "appearance" || name === "settings" || name === "applications") {
+  if (name === "brief" || name === "publish" || name === "appearance" || name === "settings" || name === "applications") {
     if(name==='settings')void imageAiSettings.refresh();
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
     openPanelDialog(`panel-${name}`);
@@ -591,6 +589,7 @@ function renderDocumentTabs(): void {
   strip.hidden = !documentTabs.size && !imageTabs.size;
   element('editor-title').hidden = !strip.hidden;
   saveDocumentTabSession();
+  updateEditorEmptyState();
 }
 async function confirmAllDocumentTabs(): Promise<boolean> {
   retainDocumentTab();
@@ -615,12 +614,16 @@ function updateSaveState(): void {
   }
   renderDocumentTabs();
   const badge = element("save-state");
-  badge.hidden = !!documentState && ownerState?.state !== 'saving' && ownerState?.state !== 'error';
+  badge.hidden = !documentState;
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
   const conflicted = ownerState?.state === 'error' && /変更されています|conflict|revision/i.test(ownerState.message || '');
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
   badge.title = ownerState?.message || (dirty ? '自動保存を待っています。' : '原稿の保存状態');
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
+  element('save-retry').hidden = ownerState?.state !== 'error' || conflicted;
+  element('save-conflict').hidden = !conflicted;
+  updateEditorEmptyState(); updateSelectionAction();
+
 
   updateWorkspaceGuide();
 }
@@ -645,6 +648,7 @@ async function renderPreview(): Promise<void> {
   } catch (error) { if (version === previewVersion) { previewRequestPending = false; previewNavigator.setStatus('error', String(error)); status(`プレビュー: ${String(error)}`, true); } }
 }
 function updateCursor(): void {
+  updateSelectionAction();
   const lines = editor.value.slice(0, editor.selectionStart).split("\n");
   element("cursor-position").textContent = `${lines.length}:${lines.at(-1)!.length + 1}`;
 }
@@ -951,15 +955,7 @@ function updateAiSettingsVisibility(): void {
 function renderSettings(): void {
   if (!workspace) return;
   void imageAiSettings.refresh();
-  input("docs-path").value = workspace.config.docs;
-  input("output-path").value = workspace.config.output;
-  input("site-name").value = workspace.config.mkdocs.site_name;
-  input("assets-path").value = workspace.config.assets || `${workspace.config.docs || "docs"}/assets`;
-  element("workspace-settings-root").textContent = projectRoot;
-  setButtonDisabled(element<HTMLButtonElement>("save-workspace-settings"), false);
-  setButtonDisabled(element<HTMLButtonElement>("open-workspace-settings"), false);
   setButtonDisabled(element<HTMLButtonElement>("open-applications"), false);
-  element("workspace-save-state").textContent = "";
   input("ai-model").value = workspace.config.model;
   element<HTMLTextAreaElement>("manual-brief").value = workspace.brief;
   element("ai-agent").innerHTML = workspace.agents.map((agent) => `<option value="${escape(agent.id)}"${agent.available ? "" : " disabled"}>${escape(agent.label)}${agent.available ? "" : "（CLI未検出）"}</option>`).join("");
@@ -1006,7 +1002,7 @@ function saveAiSettings(): Promise<void> {
   const operation = aiSaveQueue.catch(() => {}).then(async () => {
     if (projectRoot === root && aiEditVersion === version) setAiSaveState("保存中…");
     try {
-      // AI-only options preserve other settings and unfinished form edits.
+      // AI-only options preserve the existing project settings.
       const saved = JSON.parse(await rpc("save", options, root)) as State;
       if (projectRoot === root) {
         workspace!.config = saved.config;
@@ -1110,7 +1106,7 @@ async function openProject(root: string, check = true): Promise<void> {
   input("project-root").value = root;
   localStorage.setItem("manual-studio-project", root);
   try { await recordWorkspaceHistory(native, root); }
-  catch (error) { status(`ワークスペース履歴を保存できません: ${String(error)}`, true); }
+  catch (error) { status(`最近開いたフォルダの履歴を保存できません: ${String(error)}`, true); }
   if (params.get("root") !== root) {
     params.set("root", root);
     params.delete("page");
@@ -1118,7 +1114,7 @@ async function openProject(root: string, check = true): Promise<void> {
     url.search = params.toString();
     history.replaceState(null, "", url);
   }
-  element("workspace-name").textContent = root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
+  element("workspace-name-label").textContent = root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
   element<HTMLDialogElement>("workspace-dialog").close();
   await refreshWorkspace(); renderSettings(); loadAiProgressLogs(root);
   const validPage = (page:unknown): page is string => typeof page === 'string' && (loaded.pages.includes(page) || loaded.project_entries.some(entry => !entry.directory && entry.path === page && /\.md$/i.test(entry.path)));
@@ -1274,67 +1270,14 @@ document.querySelectorAll<HTMLDialogElement>('dialog.panel-dialog[id^="panel-"]'
   });
 });
 
-element("open-workspace-settings").addEventListener("click", () => {
-  if (!workspace) return;
-  element<HTMLDetailsElement>("project-menu").open = false;
-  input("docs-path").value = workspace.config.docs;
-  input("output-path").value = workspace.config.output;
-  input("site-name").value = workspace.config.mkdocs.site_name;
-  input("assets-path").value = workspace.config.assets || `${workspace.config.docs}/assets`;
-  element("workspace-save-state").textContent = "";
-  element<HTMLDialogElement>("workspace-settings-dialog").showModal();
-});
 element("open-existing-workspace").addEventListener("click", () => {
   input("project-root").value = projectRoot;
   element<HTMLDialogElement>("workspace-dialog").showModal();
   input("project-root").focus();
 });
-setupWorkspaceWizard({
-  validate: async (root, options) => { await rpc("validate-workspace", options, root); },
-  chooseParent: async () => {
-    if (!native) throw new Error("ブラウザー版では親フォルダーのパスを入力してください。");
-    return invoke<string | null>("choose_project");
-  },
-  create: async (root, options) => {
-    if (busy) throw new Error("現在の処理が完了してから作成してください。");
-
-    if (!await confirmDiscard()) throw new Error("作成を中止しました。現在の原稿を保存してからやり直してください。");
-    setBusy(true);
-    try {
-      await saveAiSettings();
-      await rpc("create-workspace", options, root);
-      await openProject(root, false);
-      status("ワークスペースを作成しました。最初の原稿から編集を始められます。");
-    } finally { setBusy(false); }
-  },
-});
 element("cancel-open-workspace").addEventListener("click", () => element<HTMLDialogElement>("workspace-dialog").close());
-element("cancel-workspace-settings").addEventListener("click", () => element<HTMLDialogElement>("workspace-settings-dialog").close());
-element("workspace-settings-form").addEventListener("submit", event => {
-  event.preventDefault();
-  void work(async () => {
-    if (!workspace) throw new Error("先にワークスペースを開いてください。");
-    await savedBeforeOperation();
-    await saveAiSettings();
-    const root = projectRoot;
-    element("workspace-save-state").textContent = "保存中…";
-    try {
-      const docs = input("docs-path").value.trim();
-      await rpc("save", {
-        docs, output: input("output-path").value.trim(),
-        assets: input("assets-path").value.trim() || `${docs || "docs"}/assets`,
-        mkdocs_settings: { ...workspace.config.mkdocs, site_name: input("site-name").value.trim() },
-      }, root);
-      await refreshWorkspace();
-      element("workspace-save-state").textContent = "保存済み";
-      status("ワークスペース設定を保存しました。");
-    } catch (error) {
-      element("workspace-save-state").textContent = `保存失敗: ${String(error)}`;
-      throw error;
-    }
-  });
-});
 element("workspace-name").addEventListener("click", () => {
+  if (document.getElementById("workspace-history-dialog")) return;
   void work(async () => {
     const history = await loadWorkspaceHistory(native);
     showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)));
@@ -1367,8 +1310,6 @@ element("editor-more").addEventListener("click", event => {
 document.addEventListener("click", event => {
   const menu = element<HTMLDetailsElement>("editor-more");
   if (!menu.contains(event.target as Node)) menu.open = false;
-  const projectMenu = element<HTMLDetailsElement>("project-menu");
-  if (!projectMenu.contains(event.target as Node)) projectMenu.open = false;
 });
 element("editor-more").addEventListener("keydown", event => {
   if (event.key === "Escape") {
@@ -1378,7 +1319,7 @@ element("editor-more").addEventListener("keydown", event => {
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
-  const openMenu = document.querySelector<HTMLDetailsElement>("#project-menu[open], .format-insert-menu[open]");
+  const openMenu = document.querySelector<HTMLDetailsElement>(".format-insert-menu[open]");
   if (openMenu) { openMenu.open = false; openMenu.querySelector<HTMLElement>("summary")?.focus(); }
 });
 document.querySelector(".format-insert-actions")?.addEventListener("click", event => {
@@ -1394,11 +1335,11 @@ let editorPanelWidth = 0;
 function applyEditorView(): void {
   const view = preferredEditorView || (editorPanelWidth < 850 ? "edit" : "split");
   element("panel-editor").dataset.editorView = view;
-  document.querySelectorAll<HTMLButtonElement>(".editor-view-controls button[data-editor-view]").forEach(button => {
+  document.querySelectorAll<HTMLButtonElement>("#panel-editor button[data-editor-view]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.editorView === view));
   });
 }
-document.querySelectorAll<HTMLButtonElement>(".editor-view-controls button[data-editor-view]").forEach(button => {
+document.querySelectorAll<HTMLButtonElement>("#panel-editor button[data-editor-view]").forEach(button => {
   button.addEventListener("click", () => {
     preferredEditorView = button.dataset.editorView as EditorView;
     try { localStorage.setItem("manual-studio-editor-view", preferredEditorView); } catch { /* Optional persistence. */ }
@@ -1413,6 +1354,52 @@ applyEditorView();
 editor.addEventListener("editor-mode-change", () => {
   if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
 });
+function updateSelectionAction(): void {
+  const selected = milkdown.isRichEditing ? Boolean(milkdown.captureSelectionEdit()?.text) : editor.selectionEnd > editor.selectionStart;
+  const button = element('selection-ai');
+  const label = selected ? '選択範囲をAIで編集' : 'AIで文章を挿入';
+  button.innerHTML = `${uiIcon('sparkle')} ${label}`;
+  button.title = selected ? '選択した文章を確認して変更候補を作成' : 'カーソル位置を確認して挿入候補を作成';
+}
+function updateEditorEmptyState(): void {
+  const empty = !documentState && !activeImageTab;
+  element('editor-empty-state').hidden = !empty;
+  element('editor-empty-title').textContent = workspace ? '原稿を選ぶか、作成してください' : 'フォルダを開いて始める';
+  element('editor-empty-description').textContent = workspace ? '左のファイルツリーから原稿を選択できます。' : '原稿と画像を保存しているフォルダを選択してください。';
+  element('empty-open-folder').hidden = Boolean(workspace);
+  element('empty-select-page').hidden = !workspace || !workspace.pages.length;
+  element('empty-create-page').hidden = !workspace;
+  element('panel-editor').classList.toggle('editor-is-empty', empty);
+}
+element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
+element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
+element('empty-select-page').addEventListener('click', () => { layoutManager?.focusPanel('file-tree'); element('tree-search').focus(); });
+element('save-retry').addEventListener('click', () => { void work(() => saveDocument(false)); });
+element('save-conflict').addEventListener('click', () => { void work(async () => {
+  if (!documentState) return;
+  const owner = documentState, root = projectRoot, draft = editor.value;
+  const stored = JSON.parse(await rpc('editor-read', { page: owner.page }, root)) as Document;
+  if (root !== projectRoot || owner !== documentState || draft !== editor.value) return;
+  const {dialog,body} = featureDialog('外部変更を確認'); dialog.id = 'save-conflict-dialog';
+  const note = document.createElement('p'); note.textContent = '編集中の内容は保持しています。保存先の内容と比較してください。';
+  const columns = document.createElement('div'); columns.className = 'selection-diff-columns';
+  for (const [label,content] of [['編集中の内容',draft],['保存先の内容',stored.content]]) {
+    const column = document.createElement('section'), heading = document.createElement('h3'), pre = document.createElement('pre'); heading.textContent = label; pre.textContent = content; column.append(heading,pre); columns.append(column);
+  }
+  const keep = document.createElement('button'); keep.textContent = '編集中の内容を保持して閉じる'; keep.onclick = () => dialog.close();
+  const reload = document.createElement('button'); reload.textContent = '保存先の内容を読み直す'; reload.onclick = () => { dialog.close(); element('reload-page').click(); };
+  body.append(note,columns,keep,reload);
+}); });
+editor.addEventListener('select', updateSelectionAction);
+editor.addEventListener('editor-mode-change', updateSelectionAction);
+document.addEventListener('selectionchange', () => { if (milkdown.host.contains(document.activeElement) || document.activeElement === editor) updateSelectionAction(); });
+element('workspace-name').addEventListener('keydown', event => { if (event.key === 'ArrowDown' && !document.getElementById('workspace-history-dialog')) { event.preventDefault(); element('workspace-name').click(); } });
+for (const id of ['tree-create-menu','resource-management-menu']) {
+  const menu = element<HTMLDetailsElement>(id);
+  menu.addEventListener('click', event => { if ((event.target as HTMLElement).closest('button')) menu.open = false; });
+  menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); } });
+  document.addEventListener('click', event => { if (!menu.contains(event.target as Node)) menu.open = false; });
+}
 element("reload-page").addEventListener("click", () => { if (documentState) void work(async () => {
   if (!await confirmDiscard() || !documentState) return;
   await openPage(documentState.page, false);
@@ -1564,7 +1551,7 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
   if (key === 'p') {
     const views: EditorView[] = ['edit', 'split', 'preview'];
     const next = views[(views.indexOf(element('panel-editor').dataset.editorView as EditorView) + 1) % views.length];
-    document.querySelector<HTMLButtonElement>(`.editor-view-controls button[data-editor-view="${next}"]`)!.click();
+    document.querySelector<HTMLButtonElement>(`#panel-editor button[data-editor-view="${next}"]`)!.click();
   } else if (key === 'r') { void work(renderPreview); }
   else { void createSelectionDocument(); }
 }
@@ -1575,9 +1562,7 @@ element('workspace-guide').querySelector('[data-guide-dismiss]')!.addEventListen
   try { localStorage.setItem(`manual-studio-guide:${projectRoot}`, 'hidden'); } catch { /* Optional preference. */ }
   element('workspace-guide').hidden = true;
 });
-element('open-workspace-settings').innerHTML = `${uiIcon('settings')} ワークスペース設定`;
-element('open-workspace-settings').title = '原稿・画像の保存先とHTML出力先を設定';
-document.querySelectorAll<HTMLButtonElement>('.editor-view-controls button[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
+document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
 let closingApproved = false;
 let closingPrompt = false;
 window.addEventListener("beforeunload", (event) => { if ((dirty || [...documentTabs.entries()].some(([page,tab]) => page !== documentState?.page && tab.content !== tab.document.content)) && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
@@ -1650,6 +1635,7 @@ element<HTMLImageElement>('image-tab-preview').addEventListener('load',()=>{ con
 element('image-tab-zoom').addEventListener('click',()=>{const canvas=element('image-tab-preview').parentElement!;const actual=canvas.dataset.actual!=='true';canvas.dataset.actual=String(actual);element('image-tab-zoom').textContent=actual?'画面に合わせる':'実寸表示';});
 let contextCreateParent: string | null = null;
 element("new-page").addEventListener("click", (event) => {
+  element<HTMLDetailsElement>("tree-create-menu").open = false;
   if (event.isTrusted) contextCreateParent = null;
   if (!projectRoot) { status("先にプロジェクトを開いてください。", true); return; }
   if (contextCreateParent !== null) { input('new-page-path').value = contextCreateParent ? contextCreateParent + '/' : ''; input('new-page-title').value = ''; }
@@ -1735,6 +1721,7 @@ element("new-page-form").addEventListener("submit", (event) => {
   });
 });
 element("new-folder").addEventListener("click", (event) => {
+  element<HTMLDetailsElement>("tree-create-menu").open = false;
   if (event.isTrusted) contextCreateParent = null;
   if (!projectRoot || !workspace) { status("先にプロジェクトを開いてください。", true); return; }
   element("new-folder-parent").textContent = `作成先: ${workspace.config.docs}`;
@@ -2239,10 +2226,11 @@ function actionButton(id: string, action: string, options: () => Record<string, 
 }
 element("save-settings").addEventListener("click", () => { void work(async () => {
   await saveAiSettings();
+  if (!workspace) throw new Error("フォルダを開いてください。");
   await runAction("save", {
     brief: element<HTMLTextAreaElement>("manual-brief").value,
-    mkdocs_settings: workspace!.config.mkdocs,
   });
+  element("brief-save-state").textContent = "執筆方針を保存しました。";
 }); });
 element("ai-connection-type").addEventListener("change", updateAiSettingsVisibility);
 element("ai-agent").addEventListener("change", () => {
@@ -2293,7 +2281,7 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
     args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args="${index}"]`)!.value.split("\n").filter((value) => value.length > 0),
   }));
   await invoke<void>("save_launch_commands", { root: projectRoot, commands: launchCommands });
-  renderLaunchCommands();  status("このプロジェクトの撮影アプリの登録を保存しました。");
+  renderLaunchCommands();  status("このプロジェクトの撮影するアプリの登録を保存しました。");
 }); });
 function saveDraftCandidate(root: string, candidate: DraftCandidate): void {
   try { localStorage.setItem(`manual-studio-draft-candidate:${root}`, JSON.stringify(candidate)); }
@@ -2339,13 +2327,8 @@ async function createFullDraft():Promise<void>{
 }
 element('generate-draft').addEventListener('click',()=>{void createFullDraft().catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
-// One HTML entry point: "final" is strict (stops on problems, keeps existing output); "preview" tolerates remaining problems.
-actionButton("build-html", "build-mkdocs", () => ({ draft: element<HTMLSelectElement>("build-mode").value === "preview" }), "publish-result");
-element("open-output").addEventListener("click", () => { void work(async () => {
-  if (native) await invoke("open_output", { root: projectRoot });
-  else status(`出力フォルダー: ${projectRoot}/${workspace?.config.output || "manual"}`);
-}); });
 setBusy(false);
+updateSaveState();
 if (recordingControlMode) {
   document.body.classList.add("recording-control-mode");
   const control = document.createElement("main");
@@ -2586,7 +2569,7 @@ async function insertScreenshotHere():Promise<void>{
 element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));});
 
 function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{
-  const {dialog,body}=featureDialog('スクショを挿入');dialog.id='editor-screenshot-method';
+  const {dialog,body}=featureDialog('スクリーンショットを挿入');dialog.id='editor-screenshot-method';
   const help=document.createElement('p');help.textContent='指定した位置に入れるスクショの用意方法を選んでください。';body.append(help);
   return new Promise(resolve=>{let selected:'manual'|'ai'|'existing'|undefined;
     for(const [method,text,icon,description] of [['manual','手動で撮影','camera','アプリを操作して撮影。AI設定は不要です。'],['ai','AIに撮影を指示','sparkle','撮影する画面や番号・注釈を文章で指示します。'],['existing','撮影済み画像を選ぶ','library','リソースに保存した採用済みの画像から選びます。']] as const){

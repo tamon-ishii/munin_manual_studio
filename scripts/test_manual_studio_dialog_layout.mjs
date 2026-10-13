@@ -17,7 +17,8 @@ try {
   });
   await page.goto(`${base}/?root=/tmp/munin-dialog-layout-fixture`);
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  await page.getByRole('button',{name:'撮影アプリの登録',exact:true}).click();
+  await page.locator('[data-tab=screenshots]').click();
+  await page.getByRole('button',{name:'撮影するアプリを登録',exact:true}).click();
   for(let i=0;i<4;i++) await page.locator('#add-launch-command').click();
   await page.locator('[data-launch-program="0"]').fill('/path with spaces/'+ 'very-long-folder/'.repeat(12)+'app');
   const dialogs=await page.locator('dialog[id]').evaluateAll(nodes=>nodes.map(node=>node.id));
@@ -62,7 +63,7 @@ try {
   await page.locator('[data-screenshot-destination]').waitFor();
   assert.equal(await page.getByRole('button',{name:'ここに挿入',exact:true}).isEnabled(),false,'missing destination cannot be inserted');
   await page.locator('[data-screenshot-destination]').getByRole('button',{name:'閉じる',exact:true}).click();
-  await page.locator('#screenshot-library-refresh').click();
+  if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   assert.equal(await page.locator('.resource-item-menu[open]').count(),1,'refresh retains expanded menu');
   await page.locator('.resource-item-menu > summary').first().click();

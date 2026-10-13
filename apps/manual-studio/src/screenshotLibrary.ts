@@ -250,7 +250,7 @@ export function setupScreenshotLibrary(options: Options) {
     if (!native) throw new Error('操作の記録はデスクトップ版で利用できます。');
     if(recording)throw new Error('操作の記録が進行中です。撮影を完了してから開始してください。');
     const root = options.root(); if (!root) throw new Error('プロジェクトを開いてください。');
-    const profiles = options.applications(); if (!profiles.length) throw new Error('「撮影アプリの登録」で撮影するアプリを登録してください。');
+    const profiles = options.applications(); if (!profiles.length) throw new Error('「撮影するアプリを登録」で撮影するアプリを登録してください。');
     const dialog = document.createElement('dialog'); dialog.className = 'capture-application-dialog';
     const heading = document.createElement('h2'); heading.textContent = '撮影するアプリ';
     const field = document.createElement('label'); field.textContent = '登録済みアプリ';

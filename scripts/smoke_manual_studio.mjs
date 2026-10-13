@@ -416,10 +416,7 @@ try {
   await page.locator('[data-tab="settings"]').dispatchEvent('click');
   assert.equal(await page.locator('#panel-publish #docs-path').count(), 0, 'workspace paths are not in AI settings');
   await page.locator('[data-close-dialog="panel-settings"]').click();
-  await page.locator('#project-menu summary').click();
-  await page.locator('#open-workspace-settings').click();
-  await page.locator('#docs-path').fill('unfinished-folder');
-  await page.locator('#cancel-workspace-settings').click();
+  assert.equal(await page.locator('#project-menu,#workspace-settings-dialog').count(),0);
   await page.locator('[data-tab="settings"]').dispatchEvent('click');
   await page.locator('#ai-connection-type').selectOption('local_llm');
   await page.locator('#ai-model').fill('local-test-model');
@@ -451,15 +448,12 @@ try {
   assert.equal(await page.locator('#ai-model').inputValue(), 'retry-test-model');
   assert.equal(await page.locator('#ai-connection-type').inputValue(), 'local_llm');
   assert.equal(await page.locator('#ai-api-key').inputValue(), 'smoke-local-key');
-  await page.locator('#project-menu summary').click();
-  await page.locator('#open-workspace-settings').click();
-  await page.locator('#site-name').fill('Workspace smoke site');
-  await page.locator('#save-workspace-settings').click();
-  await page.waitForFunction(() => document.querySelector('#workspace-save-state').textContent === '保存済み');
-  const savedWorkspace = JSON.parse(await readFile(path.join(root, 'manual_setting.json'), 'utf8'));
-  assert.equal(savedWorkspace.mkdocs.site_name, 'Workspace smoke site');
-  assert.equal(savedWorkspace.model, 'retry-test-model', 'workspace save preserves AI settings');
-  await page.locator('#cancel-workspace-settings').click();
+  await page.getByRole('button',{name:'執筆方針',exact:true}).click();
+  await page.locator('#manual-brief').fill('初めて使う読者向けの操作説明');
+  await page.locator('#save-settings').click();await idle();
+  assert.match(await readFile(path.join(root,'manual/brief.md'),'utf8'),/初めて使う読者/);
+  assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).model,'retry-test-model');
+  await page.locator('[data-close-dialog=panel-brief]').click();
   await page.locator('[data-tab="editor"]').click();
 
   const popupPromise = page.waitForEvent('popup');
@@ -497,6 +491,7 @@ try {
   assert.equal(await page.locator('#editor-title').innerText(), 'Markdownを編集する');
   assert.equal(await page.locator('#markdown-preview').getAttribute('srcdoc'), '');
 
+  await page.locator('#tree-create-menu>summary').click();
   await page.locator('#new-page').click();
   await page.locator('#new-page-path').fill('new.md');
   await page.locator('#new-page-title').fill('New guide');
@@ -620,18 +615,8 @@ try {
   await page.keyboard.press('Control+s');
   await idle();
   await page.locator('[data-tab="publish"]').click();
-  await page.locator('#build-mode').selectOption('preview');await page.locator('#build-html').click();
-  await idle();
-  // HTML output never reports success when MkDocs is absent: either a site was built or the status says HTML was not created.
-  const buildFailed = await page.locator('#status').evaluate(node => node.classList.contains('error'));
-  const buildResult = buildFailed ? await page.locator('#status').innerText() : await page.locator('#publish-result').innerText();
-  if (buildFailed) assert.match(buildResult, /MkDocs|HTML/, buildResult);
-  if (process.env.MANUAL_STUDIO_REQUIRE_HTML === '1') assert.match(buildResult, /Site:/);
-  if (buildResult.includes('Site:')) {
-    assert.match(await readFile(path.join(project, 'manual/new.html'), 'utf8'), /New guide/);
-  } else {
-    assert.match(buildResult, /MkDocs site build skipped|MkDocsが見つかりません/);
-  }
+  assert.equal(await page.locator('#build-html,#build-mode,#open-output').count(),0);
+  await page.locator('#quality-check').click();await idle();
   await writeFile(path.join(project, 'docs/ai-page.md'), '# AI page\n\n<!-- ai:task id=smoke-text kind=text\nExplain the guide\n-->\n');
   await page.locator('#open-existing-workspace').click();
   await page.locator('#project-root').fill(project);
@@ -681,72 +666,7 @@ try {
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'blue');
   assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).getPropertyValue('--app-bg').trim()), '#f5f8fc');
   assert.equal(await page.evaluate(() => localStorage.getItem('manual-studio-theme')), 'blue');
-  await page.locator('#new-workspace').click();
-  await page.locator('#wizard-parent').fill(root);
-  await page.locator('#wizard-name').fill('tutorial-workspace');
-  await page.locator('#wizard-next').click();
-  await page.locator('#wizard-title').fill('Tutorial guide');
-  await page.locator('#wizard-output').fill('docs/html');
-  await page.locator('#wizard-next').click();
-  await page.waitForFunction(() => document.querySelector('#wizard-error').textContent.includes('重ならない'));
-  assert.match(await page.locator('#workspace-step').innerText(), /2 \/ 5/);
-  await page.locator('#wizard-output').fill('manual');
-  await page.locator('#wizard-docs').fill('pages');
-  await page.locator('#wizard-assets').fill('pages/images');
-  await page.locator('#wizard-next').click();
-  await page.locator('#wizard-connection').selectOption('local_llm');
-  await page.locator('#wizard-endpoint').fill('http://localhost:11434/v1');
-  await page.locator('#wizard-next').click();
-  await page.locator('#wizard-brief').fill('初めて使う人向け');
-  await page.locator('#wizard-next').click();
-  assert.match(await page.locator('#wizard-review').innerText(), /Tutorial guide/);
-  await page.locator('#wizard-back').click();
-  assert.equal(await page.locator('#wizard-brief').inputValue(), '初めて使う人向け');
-  await page.locator('#wizard-next').click();
-  await page.locator('#wizard-next').click();
-  await page.locator('#new-workspace-dialog').waitFor({ state: 'hidden' });
-  await idle();
-  assert.match(await page.locator('#markdown-editor').inputValue(), /Tutorial guide/);
-  console.log("Smoke: workspace wizard created workspace");
-  const tutorialRoot = path.join(root, 'tutorial-workspace');
-  const tutorialConfig = JSON.parse(await readFile(path.join(tutorialRoot, 'manual_setting.json'), 'utf8'));
-  assert.equal(tutorialConfig.docs, 'pages');
-  assert.equal(tutorialConfig.connection_type, 'local_llm');
-  await page.locator('#new-workspace').click();
-  await page.locator('#wizard-next').click();
-  await page.waitForFunction(() => document.querySelector('#wizard-error').textContent.includes('既に存在'));
-  assert.match(await page.locator('#workspace-step').innerText(), /1 \/ 5/);
-  await page.locator('#wizard-cancel').click();
-  await page.locator('#open-existing-workspace').click();
-  await page.locator('#project-root').fill(root);
-  await page.locator('#project-form button[type=submit]').click();
-  await idle();
-  await page.locator('#project-menu summary').click();
-  await page.locator('#open-workspace-settings').click();
-  assert.equal(await page.locator('#workspace-settings-dialog #project-root').count(), 0);
-  await page.locator('#cancel-workspace-settings').click();
-  await page.locator('#new-workspace').click();
-  await page.locator('#wizard-name').fill('deferred-ai-workspace');
-  await page.locator('#wizard-next').click();
-  await page.locator('#wizard-next').click();
-  await page.locator('#wizard-connection').selectOption('none');
-  assert.equal(await page.locator('#wizard-agent').isVisible(), false);
-  await page.locator('#wizard-next').click();
-  await page.locator('#wizard-next').click();
-  assert.match(await page.locator('#wizard-review').innerText(), /後で設定する/);
-  await page.locator('#wizard-next').click();
-  await page.locator('#new-workspace-dialog').waitFor({ state: 'hidden' });
-  await idle();
-  const deferredConfig = JSON.parse(await readFile(path.join(root, 'deferred-ai-workspace/manual_setting.json'), 'utf8'));
-  assert.equal(deferredConfig.connection_type, 'none');
-  await page.reload();
-  await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Tutorial guide'));
-  assert.equal(await page.locator('#ai-connection-type').inputValue(), 'none');
-  page.once('dialog', dialog => dialog.accept());
-  await page.locator('#editor-more summary').click();
-  await page.locator('#generate-draft').click();
-  await idle();
-  assert.match(await page.locator('#status').innerText(), /未設定/);
+  assert.equal(await page.locator('#new-workspace, #new-workspace-dialog, #project-menu, #workspace-settings-dialog').count(), 0);
 
   // Verify AI terminal dock and controls
   const closePublishBtn = page.locator('#panel-publish [data-close-dialog]');
@@ -774,7 +694,7 @@ try {
 
 
   assert.deepEqual(errors, []);
-  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, workspace popup, preview, save, detached conflict, project switch, screenshot library, new page, AI terminal, ${buildResult.includes('Site:') ? 'HTML build' : 'missing MkDocs message'}.`);
+  console.log(`Manual Studio smoke passed: edit, bidirectional scroll sync, folder dropdown, preview, save, detached conflict, project switch, screenshot library, new page, AI terminal, manuscript check.`);
 } finally {
   await browser?.close();
   if (server && server.exitCode === null) {

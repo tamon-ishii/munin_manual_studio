@@ -6,14 +6,14 @@ import { verificationIdentity } from './lib/manual_ui_identity.mjs';
 const registry = JSON.parse(await readFile('scripts/fixtures/manual-studio-ui-inventory.json', 'utf8'));
 const nativeResourceCases = registry.cases.filter(test => (test.existingChecks || []).includes('scripts/test_manual_studio_native_resource_edit.py') || test.script === 'scripts/test_manual_studio_native_resource_edit.py').map(test => test.id);
 const integrityCases = ["P02.integrity-conflict-project-cancel", "P13.integrity-settings-retry", "P15.integrity-legacy-open", "P06.integrity-protected-sharing", "P08.integrity-recapture-partial-retry"];
-const authorSettingsCases = ['P01.workspace-settings-save', 'P02.editor-autosave', 'P13.toolbar-visibility'];
+const authorSettingsCases = ['P02.editor-autosave', 'P13.toolbar-visibility'];
 const imageControlCases = [
   'P06.control-search', 'P06.control-kind', 'P06.control-usage', 'P06.control-compact-menu',
   'P06.control-refresh', 'P06.control-usage-link', 'P06.control-replace', 'P07.control-restore',
   'P07.control-zoom', 'P07.control-fit', 'P07.control-adopt-callback', 'P07.control-escape', 'P07.control-close'
 ];
 const miscControlCases = [
-  'P14.preview-and-strict-build', 'P14.failure-preserves-output-and-recheck',
+  'P14.failure-preserves-output-and-recheck',
   'I02.document-tags-pane-preferences', 'I01.batch-page-selection', 'P12.workflow-result-actions',
   'I01.generation-input-contract', 'I01.generation-review-contract', 'I01.generation-history-contract',
   'I01.execution-history-and-expectations'
@@ -64,14 +64,14 @@ steps.push(
   { group: 'ui', name: 'entry-specific author settings evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', authorSettingsCases.join(','), '--report', 'ui-coverage-results/author-settings/result.json', '--require-complete', '--output', 'ui-coverage-results/author-settings-gate.json'], timeoutMs: 60_000 },
   { group: 'ui', name: 'resource filter, compact menu, replacement and comparison contracts', command: process.execPath, args: ['scripts/test_manual_studio_image_control_contracts.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'entry-specific image control evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', imageControlCases.join(','), '--report', 'ui-coverage-results/image-controls/result.json', '--require-complete', '--output', 'ui-coverage-results/image-controls-gate.json'], timeoutMs: 60_000 },
-  { group: 'ui', name: 'publication build, quality jump and legacy generation contracts', command: process.execPath, args: ['scripts/test_manual_studio_misc_control_contracts.mjs'], timeoutMs: 120_000 },
+  { group: 'ui', name: 'manuscript check, external build and legacy generation contracts', command: process.execPath, args: ['scripts/test_manual_studio_misc_control_contracts.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'entry-specific misc control evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', miscControlCases.join(','), '--report', 'ui-coverage-results/misc-controls/result.json', '--require-complete', '--output', 'ui-coverage-results/misc-controls-gate.json'], timeoutMs: 60_000 },
   { group: 'ui', name: 'document tab session restoration', command: process.execPath, args: ['scripts/test_manual_studio_tab_session.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'document tabs and image workflows', command: process.execPath, args: ['scripts/test_manual_studio_document_workflows.mjs'], timeoutMs: 180_000 },
   { group: 'capture', name: 'screenshot library and instruction disclosure checks', command: process.execPath, args: ['scripts/test_manual_studio_capture_ui.mjs'], timeoutMs: 120_000 },
   { prerequisite: true, group: 'build', name: 'manualctl build for browser smoke', command: 'cargo', args: ['build', '-p', 'manual-core', '--bin', 'manualctl', '--offline'], timeoutMs: 300_000 },
   { group: 'ui', name: 'MkDocs build input checks', command: process.execPath, args: ['scripts/test_manual_studio_build.mjs'], timeoutMs: 120_000 },
-  { group: 'ui', name: 'MkDocs build button checks', command: process.execPath, args: ['scripts/test_manual_studio_mkdocs_button.mjs'], timeoutMs: 120_000 },
+  { group: 'ui', name: 'MkDocs backend and manuscript check tests', command: process.execPath, args: ['scripts/test_manual_studio_mkdocs_button.mjs'], timeoutMs: 120_000 },
   { group: 'smoke', name: 'browser smoke checks', command: process.execPath, args: ['scripts/smoke_manual_studio.mjs', '--start-server'], timeoutMs: 240_000 },
   { group: 'native', name: 'Manual Studio Rust checks', command: 'cargo', args: ['test', '--manifest-path', 'apps/manual-studio/src-tauri/Cargo.toml', '--offline'], timeoutMs: 360_000 },
   { group: 'native', name: 'manual-core Rust checks', command: 'cargo', args: ['test', '-p', 'manual-core', '--offline'], timeoutMs: 600_000 },

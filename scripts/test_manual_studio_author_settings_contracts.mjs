@@ -49,21 +49,49 @@ try{
  await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('Original paragraph')).catch(async error=>{throw new Error(`${error.message}; status=${await page.locator('#status').textContent()}; body=${(await page.locator('body').textContent()).slice(0,500)}`)});
  await idle();
  const settingsBefore=await readFile(path.join(root,'manual_setting.json'));
- await page.locator('#project-menu>summary').click();await page.locator('#open-workspace-settings').click();
- await page.locator('#site-name').fill('Contract manual');
- await page.locator('#cancel-workspace-settings').click();
- assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsBefore,'cancel leaves actual configuration file unchanged');
- await page.locator('#project-menu>summary').click();await page.locator('#open-workspace-settings').click();
- await page.locator('#site-name').fill('Contract manual');
- await page.locator('#workspace-settings-form button[type=submit]').click();
- await page.waitForFunction(()=>document.querySelector('#workspace-save-state')?.textContent==='保存済み');
- assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).mkdocs?.site_name,'Contract manual');
+ assert.equal(await page.locator('.workspace-tabs #open-applications').count(),0);
+ assert.equal(await page.locator('#panel-screenshots .panel-header #open-applications').count(),1);
+ assert.equal(await page.locator('#panel-editor > .document-heading .editor-display-group').count(),1);
+ assert.equal(await page.locator('button[data-editor-view=split]').textContent(),'編集＋プレビュー');
+ assert.equal(await page.locator('#editor-screenshot-ai').textContent(),'スクリーンショットを挿入');
+ assert.equal(await page.locator('#resource-generate-image').textContent(),'AI作画');
+ for(const view of ['edit','preview','split']){
+   await page.locator(`#panel-editor button[data-editor-view="${view}"]`).click();
+   assert.equal(await page.locator('#panel-editor').getAttribute('data-editor-view'),view);
+   assert.equal(await page.locator(`#panel-editor button[data-editor-view="${view}"]`).getAttribute('aria-pressed'),'true');
+ }
+
+ await page.screenshot({path:path.join(reportDir,'compact-editor.png')});
+
+ assert.equal(await page.locator('#project-menu, #open-workspace-settings, #workspace-settings-dialog').count(),0,'removed project menu and workspace settings are absent');
+ await page.locator('#open-existing-workspace').click();
+ assert.equal(await page.locator('#workspace-dialog h2').textContent(),'フォルダーを開く');
+ assert.equal(await page.locator('#workspace-dialog .folder-picker #browse-project').count(),1);
+ assert.deepEqual(await page.locator('#workspace-dialog .actions button').allTextContents(),['キャンセル','開く']);
+ await page.locator('#cancel-open-workspace').click();
+ assert.equal(await page.locator('#workspace-dialog').isVisible(),false);
+ assert.equal(await page.locator('#new-workspace, #new-workspace-dialog').count(),0);
+ assert.equal(await page.locator('#open-existing-workspace').isVisible(),true);
+ assert.equal(await page.locator('#workspace-name').isVisible(),true);
+ assert.equal(await page.locator('#workspace-name').getAttribute('title'),'最近開いたフォルダを選択');
+ assert.equal(await page.locator('#workspace-name-label').textContent(),path.basename(root));
+ assert.equal(await page.locator('#workspace-name .folder-selector-arrow').isVisible(),true);
+ await page.locator('#workspace-name .folder-selector-arrow').click();
+ assert.equal(await page.locator('#workspace-history-title').textContent(),'最近開いたフォルダ');
+ assert.equal(await page.locator('#workspace-history-dialog [data-workspace-root]').count(),1);
+ await page.locator('#workspace-history-dialog [data-history-close]').click();
+
+ assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsBefore,'opening a project preserves configuration');
+ await page.getByRole('button',{name:'執筆方針',exact:true}).click();
+ await page.locator('#manual-brief').fill('初心者向けに、起動から保存までを説明する。');
+ await page.locator('#save-settings').click();await idle();
+ assert.match(await readFile(path.join(root,'manual/brief.md'),'utf8'),/初心者向け/);
  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);
+ await page.locator('[data-close-dialog=panel-brief]').click();
  await page.reload();await idle();
- await page.locator('#project-menu>summary').click();await page.locator('#open-workspace-settings').click();
- assert.equal(await page.locator('#site-name').inputValue(),'Contract manual','saved workspace value is restored after reload');
- await page.locator('#cancel-workspace-settings').click();
- await record('P01.workspace-settings-save','P01',['id="open-workspace-settings" aria-haspopup','id="cancel-workspace-settings"','id="save-workspace-settings"'],['open workspace settings','edit site title then cancel and compare actual config bytes','reopen and save title','reload and read stored title','verify manuscript file unchanged'],{siteName:'Contract manual',persistence:'manual_setting.json',cancel:'unchanged bytes'});
+ await page.getByRole('button',{name:'執筆方針',exact:true}).click();
+ assert.match(await page.locator('#manual-brief').inputValue(),/初心者向け/);
+ await page.locator('[data-close-dialog=panel-brief]').click();
  const settingsAfterWorkspace=await readFile(path.join(root,'manual_setting.json'));
 
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
@@ -96,6 +124,6 @@ try{
  assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsAfterWorkspace);
  await record('P13.toolbar-visibility','P13',['data-tab="appearance" data-ui-icon','id="reset-toolbar-customization"','checkbox.onchange=()=>{if(checkbox.checked)hidden.delete'],['open appearance panel','hide bold control','verify toolbar and localStorage','reload and verify preference restores','reset toolbar visibility','verify manuscript unchanged'],{persistence:'browser localStorage',reset:'storage key removed'});
  assert.deepEqual(errors,[]);
- await writeFile(path.join(reportDir,'result.json'),JSON.stringify({...await finishVerification(start),type:'real-backend',scope:'P01 workspace settings, P02 source autosave, P13 toolbar preference; browser UI with actual local backend files; remaining actions unverified',notes:'Vite fixture ran on port 5181. Browser RPC Origin was adapted to its development allowlist on port 5174 while requests passed through the actual backend.',results},null,2));
- console.log(`Author/settings contracts passed: ${results.length} entry-specific results across 3 scenarios.`);
+ await writeFile(path.join(reportDir,'result.json'),JSON.stringify({...await finishVerification(start),type:'real-backend',scope:'removed workspace settings, P02 source autosave, P13 toolbar preference; browser UI with actual local backend files; remaining actions unverified',notes:'Vite fixture ran on port 5181. Browser RPC Origin was adapted to its development allowlist on port 5174 while requests passed through the actual backend.',results},null,2));
+ console.log(`Author/settings contracts passed: ${results.length} entry-specific results across 2 scenarios.`);
 }finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

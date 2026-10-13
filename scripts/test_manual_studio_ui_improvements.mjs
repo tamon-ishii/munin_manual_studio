@@ -14,7 +14,7 @@ const tasks = [
 const content = '# Guide\n\n' + (production ? '```mermaid\ngraph TD\n A[Start] --> B[End]\n```\n\n' : '') + tasks.map(task => `<!-- ai:task id=${task.id} kind=${task.kind} prompt="${task.prompt}" ${task.status === 'approved' ? 'approved-at=2026-10-08T00:00:00Z' : ''} -->\n${task.status === 'missing' ? '' : 'Existing result'}\n<!-- /ai:task -->`).join('\n\n');
 const state = { has_config:true, config:{docs:'docs', output:'manual', agent:'codex', model:'test', connection_type:'local_llm', endpoint_url:'http://localhost:11434/v1', mkdocs:{site_name:'Guide',theme:'material',language:'ja',use_directory_urls:true}}, brief:'', pages:['docs/index.md'], project_entries:[{path:'docs/index.md',directory:false}], tasks, capture_sources:{}, image_assets:{},  agents:[] };
 const inputFor = ids => ({page:'docs/index.md',revision:'r1',existing_content:content,tasks:tasks.filter(task => task.kind !== 'screenshot' && task.status !== 'approved' && (!ids || ids.includes(task.id))),references:[],source_note:'Test',feedback:'',connection_type:'local_llm',agent:'codex',model:'test',requests:[]});
-let browser, server, saveFails=false, saveDelay=0, previewFails=false, previewDelay=0;
+let browser, server, saveFails=false, saveMessage="原稿が変更されています", saveDelay=0, previewFails=false, previewDelay=0;
 const actions=[];
 try {
   server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'), ...(production ? ['preview', '--port', '5175', '--strictPort'] : []), '--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
@@ -36,7 +36,7 @@ try {
     }
     else if(action==='editor-save') {
       if(saveDelay)await new Promise(resolve=>setTimeout(resolve,saveDelay));
-      if(saveFails){await route.fulfill({status:500,json:{error:'原稿が変更されています'}});return;}
+      if(saveFails){await route.fulfill({status:500,json:{error:saveMessage}});return;}
       result={page:options.page,content:options.json.content,revision:'r2'};
     }
     else if(action==='generation-input') result=inputFor(options.json?.ids);
@@ -56,10 +56,10 @@ try {
   const editorPanel=page.locator('#panel-editor');
   assert.equal(await editorPanel.getAttribute('title'),null);
   assert.equal(await editorPanel.getAttribute('aria-pressed'),null);
-  const viewControls=page.locator('.editor-view-controls button[data-editor-view]');
+  const viewControls=page.locator('#panel-editor button[data-editor-view]');
   assert.equal(await viewControls.count(),3);
   for(const mode of ['edit','preview','split']) {
-    const control=page.locator(`.editor-view-controls button[data-editor-view="${mode}"]`);
+    const control=page.locator(`#panel-editor button[data-editor-view="${mode}"]`);
     await control.click();
     assert.equal(await editorPanel.getAttribute('data-editor-view'),mode);
     assert.equal(await editorPanel.getAttribute('title'),null);
@@ -67,6 +67,40 @@ try {
     assert.equal(await control.getAttribute('aria-pressed'),'true');
     assert.ok((await control.getAttribute('title')).length<60);
   }
+
+  assert.equal(await page.locator('.document-heading #document-tabs').count(),1);
+  await page.getByRole('button',{name:'執筆方針',exact:true}).click();
+  assert.equal(await page.locator('#panel-brief #manual-brief').isVisible(),true);
+  await page.locator('[data-close-dialog=panel-brief]').click();
+  await page.locator('.column-label button').click();
+  await page.locator('#markdown-editor').evaluate(el=>{el.focus();el.setSelectionRange(0,7);el.dispatchEvent(new Event('select'));});
+  assert.match(await page.locator('#selection-ai').textContent(),/選択範囲をAIで編集/);
+  await page.locator('#markdown-editor').evaluate(el=>{el.setSelectionRange(7,7);el.dispatchEvent(new Event('select'));});
+  assert.match(await page.locator('#selection-ai').textContent(),/AIで文章を挿入/);
+  await page.locator('.column-label button').click();
+  await page.locator('#milkdown-editor .ProseMirror').focus();
+  await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
+  await page.waitForFunction(()=>document.querySelector('#selection-ai').textContent.includes('選択範囲をAIで編集'));
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(()=>document.querySelector('#selection-ai').textContent.includes('AIで文章を挿入'));
+  await page.evaluate(()=>localStorage.setItem('manual-studio-workspace-history',JSON.stringify(['/tmp/munin-ui-fixture','/tmp/second-folder','/tmp/third-folder'])));
+  await page.locator('#workspace-name').focus();await page.keyboard.press('ArrowDown');
+  assert.equal(await page.locator('#workspace-name').getAttribute('aria-expanded'),'true');
+  assert.equal(await page.locator('#workspace-history-dialog [aria-selected=true]').count(),1);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-workspace-root')),'/tmp/second-folder');
+  await page.keyboard.press('Home');
+  assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-workspace-root')),'/tmp/munin-ui-fixture');
+  await page.keyboard.press('ArrowUp');
+  assert.equal(await page.evaluate(()=>document.activeElement?.hasAttribute('data-history-close')),true);
+
+  assert.equal(await page.locator('#workspace-history-dialog').getAttribute('role'),'listbox');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#workspace-name').getAttribute('aria-expanded'),'false');
+  await page.locator('#tree-create-menu>summary').click();
+  assert.equal(await page.locator('#new-page').isVisible(),true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#tree-create-menu').getAttribute('open'),null);
   // Shared outline icons stay visible and unfilled in the real editor toolbar.
   const iconStyles=await page.locator('.milkdown-top-bar .ui-icon, .preview-toolbar .ui-icon').evaluateAll(nodes=>nodes.map(node=>({fill:getComputedStyle(node.querySelector('path')).fill,width:node.getBoundingClientRect().width,height:node.getBoundingClientRect().height})));
   assert.ok(iconStyles.length>=5);
@@ -84,19 +118,34 @@ try {
   await page.locator('#shortcut-help-dialog [data-close]').click();
   const priorView=await page.locator('#panel-editor').getAttribute('data-editor-view');
   await page.keyboard.press('Control+Shift+P');assert.notEqual(await page.locator('#panel-editor').getAttribute('data-editor-view'),priorView);
-  await page.locator('.editor-view-controls button[data-editor-view=split]').click();
+  await page.locator('#panel-editor button[data-editor-view=split]').click();
   saveDelay=600;saveFails=true;await page.keyboard.press('Control+s');
   await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saving');await idle();
   assert.equal(await page.locator('#save-state').getAttribute('data-state'),'error');
   assert.match(await page.locator('#save-state').getAttribute('title'),/原稿が変更/);
+  assert.equal(await page.locator('#save-conflict').isVisible(),true);
+  const retained=await page.locator('#markdown-editor').inputValue();
+  await page.locator('#save-conflict').click();await idle();
+  assert.equal(await page.locator('#save-conflict-dialog').isVisible(),true);
+  assert.equal(await page.locator('#markdown-editor').inputValue(),retained);
+  await page.getByRole('button',{name:'編集中の内容を保持して閉じる'}).click();
+
   saveFails=false;saveDelay=0;await page.keyboard.press('Control+s');await idle();
   assert.equal(await page.locator('#save-state').getAttribute('data-state'),'saved');
+  saveFails=true;saveMessage='保存先に書き込めません';await page.keyboard.press('Control+s');await idle();
+  assert.equal(await page.locator('#save-retry').isVisible(),true);
+  assert.equal(await page.locator('#save-conflict').isVisible(),false);
+  saveFails=false;await page.locator('#save-retry').click();await idle();
+  assert.equal(await page.locator('#save-state').getAttribute('data-state'),'saved');
+  assert.equal(await page.locator('#save-retry').isVisible(),false);
+
   await page.locator('[data-tab=publish]').click();
-  assert.equal(await page.locator('#build-html').isVisible(),true);assert.equal(await page.locator('#build-mode').isVisible(),true);assert.equal(await page.locator('#generate-draft').isVisible(),false,'AI draft creation is an authoring action, not an output action');
+  assert.equal(await page.locator('#build-html,#build-mode,#open-output').count(),0);assert.equal(await page.locator('#quality-check').isVisible(),true);assert.equal(await page.locator('#generate-draft').isVisible(),false,'AI draft creation is an authoring action, not an output action');
   assert.equal(await page.locator('#ai-connection-type').isVisible(),false);
   await page.locator('[data-close-dialog=panel-publish]').click();
   await page.locator('[data-tab=settings]').click();
   assert.equal(await page.locator('#ai-connection-type').isVisible(),true);
+  assert.equal(await page.locator('#panel-settings #manual-brief').count(),0);
   assert.equal(await page.locator('#save-launch-commands').isVisible(),false);
   const savesBefore=actions.filter(action=>action==='editor-save').length;
   await page.locator('#ai-model').focus();await page.keyboard.press('Control+s');
@@ -112,7 +161,9 @@ try {
   // Capture is an independent panel and AI instructions contain no screenshot operation.
   await page.locator('[data-tab=screenshots]').click();
   assert.equal(await page.locator('#screenshot-library-record').isVisible(),true);
+  await page.locator('#resource-management-menu>summary').click();
   assert.equal(await page.locator('#screenshot-library-recapture-all').isVisible(),true);
+  await page.keyboard.press('Escape');
   await page.locator('[data-tab=editor]').click();
   await page.locator('.column-label button').click();
   await page.locator('.format-insert-menu summary').click();
@@ -133,5 +184,20 @@ try {
   assert.equal(await page.locator('#panel-settings').isVisible(),true);await page.locator('[data-close-dialog=panel-settings]').click();
   await page.locator('[data-guide-dismiss]').click();await page.reload();await idle();
   assert.equal(await page.locator('#workspace-guide').isVisible(),false);
+
+  await page.evaluate(()=>localStorage.removeItem('manual-studio-project'));
+  await page.goto(base);await idle();
+  assert.equal(await page.locator('#editor-empty-state').isVisible(),true);
+  assert.equal(await page.locator('#empty-open-folder').isVisible(),true);
+  assert.equal(await page.locator('#editor-workspace').isVisible(),false);
+  await page.locator('#empty-open-folder').click();
+  assert.equal(await page.locator('#workspace-dialog').isVisible(),true);
+  await page.locator('#cancel-open-workspace').click();
+  state.pages=[];state.project_entries=[];
+  await page.goto(`${base}/?root=${encodeURIComponent('/tmp/munin-empty-fixture')}`);await idle();
+  assert.equal(await page.locator('#empty-create-page').isVisible(),true);
+  await page.locator('#empty-create-page').click();
+  assert.equal(await page.locator('#new-page-dialog').isVisible(),true);
+  await page.locator('#cancel-new-page').click();
   console.log('UI improvements passed: settings separation, AI assistance entry points, rich insert menu, source formatting, capture entry and themes.');
 } finally { await browser?.close();server?.kill(); }

@@ -31,7 +31,7 @@ try {
  const candidate=JSON.parse(await rpc('screenshots-register',{json:{id,source:colors[1],adopt:false}}));
  const published=path.join(root,initial.screenshot.output);const old=await readFile(published);
  assert.deepEqual(await readFile(published),old,'candidate does not replace adopted pixels');
- await page.locator('[data-tab=screenshots]').click();await page.locator('#screenshot-library-refresh').click();
+ await page.locator('[data-tab=screenshots]').click();if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();
  const card=page.locator('.screenshot-library-card');await card.locator('.resource-item-menu>summary').click();await card.locator('.screenshot-management>summary').click();await card.locator('select').selectOption(candidate.revision);await card.getByRole('button',{name:'選択版を採用',exact:true}).click();await page.locator('[data-confirm-accept]').click();
  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');assert.notDeepEqual(await readFile(published),old);
  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original,'adoption does not rewrite prose');assert.equal(JSON.parse(await rpc('screenshots-list')).items[0].usage.length,2);

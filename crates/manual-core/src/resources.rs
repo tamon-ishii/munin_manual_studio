@@ -274,7 +274,8 @@ pub fn replace(root: &Path, options: &Value) -> Result<Value, String> {
     fs::write(&backup, &old).map_err(|e| e.to_string())?;
     let id=backup.file_stem().unwrap().to_string_lossy().to_string();
     let output=output.into_inner();
-    let backup_relative=backup.strip_prefix(root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let backup_relative=backup.strip_prefix(&canonical_root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
     let mut record=json!({"id":id,"path":path,"backup":backup_relative,"before_sha256":hash,
         "after_sha256":format!("{:x}",Sha256::digest(&output)),"status":"pending","created_at":task::utc_now(),
         "order":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64});
@@ -416,6 +417,24 @@ mod tests {
         assert!(preview_thumbnail(root.path(), "docs/assets/日本 画像.png")
             .unwrap()
             .starts_with("data:image/png"));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn replacements_and_restore_accept_a_symlinked_project_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let project = temporary.path().join("project");
+        let alias = temporary.path().join("alias");
+        fs::create_dir_all(project.join("docs/assets")).unwrap();
+        std::os::unix::fs::symlink(&project, &alias).unwrap();
+        let original = png(1);
+        fs::write(project.join("docs/assets/a.png"), &original).unwrap();
+        fs::write(project.join("docs/assets/b.png"), png(9)).unwrap();
+        let result = replace(&alias, &json!({"path":"docs/assets/a.png","replacement":"docs/assets/b.png","expected_sha256":format!("{:x}",Sha256::digest(&original))})).unwrap();
+        assert!(result["backup"].as_str().unwrap().starts_with(".munin/resource-replacements/"));
+        assert_eq!(fs::read(alias.join(result["backup"].as_str().unwrap())).unwrap(), original);
+        let current = detail(&alias, "docs/assets/a.png").unwrap();
+        restore(&alias, &json!({"id":result["id"],"expected_sha256":current["sha256"]})).unwrap();
+        assert_eq!(fs::read(project.join("docs/assets/a.png")).unwrap(), original);
     }
     #[test]
     fn replacements_check_revision_and_keep_backup_and_manuscripts() {

@@ -163,9 +163,10 @@ try {
   assert.equal(await nativePage.locator('#settings-menu [data-tab=applications]').count(),0,'registration is outside global settings');
   await nativePage.goto(`${base}/?root=${encodeURIComponent('/tmp/library-native-fixture')}`);
   await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  assert.equal(await nativePage.locator('.workspace-nav-tools #open-applications').count(),1,'application registration is grouped with screen tools');
+  assert.equal(await nativePage.locator('#panel-screenshots .panel-header #open-applications').count(),1,'application registration is in the resource library');
+  await nativePage.locator('[data-tab=screenshots]').click();
   assert.equal(await nativePage.locator('#open-applications').isVisible(),true);
-  await nativePage.getByRole('button',{name:'撮影アプリの登録',exact:true}).click();await nativePage.locator('#add-launch-command').click();
+  await nativePage.getByRole('button',{name:'撮影するアプリを登録',exact:true}).click();await nativePage.locator('#add-launch-command').click();
   await nativePage.locator('[data-launch-program="0"]').fill('/missing/app');
   await nativePage.getByRole('button',{name:'起動確認',exact:true}).click();
   await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('起動パスが見つかりません'));

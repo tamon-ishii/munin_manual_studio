@@ -52,18 +52,19 @@ try {
  for(let attempt=0;attempt<100&&!pasteStarted;attempt++)await new Promise(resolve=>setTimeout(resolve,50));assert.ok(pasteStarted);
  await snapshot('clipboard-saving');await page.locator('#cancel-image-paste').click();releasePaste();
  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
- for(const name of ['settings','appearance','publish','applications']) {
+ for(const name of ['settings','appearance','publish','brief','applications']) {
+  if(name==='applications')await page.locator('[data-tab=screenshots]').click();
   await page.locator(`[data-tab=${name}]`).click();await snapshot(name);
   await page.locator(`[data-close-dialog=panel-${name}]`).click();
  }
  await page.locator('[data-tab=screenshots]').click();await snapshot('empty-resources');
  shots=[{id:'fixture-shot',name:'Fixture shot',output:'docs/assets/shot.png',adopted:'r1',protected:false,edits:[{id:'r1',created_at:'old',flattened:false},{id:'r2',created_at:'new',flattened:false,requires_review:true}],usage:['docs/index.md'],thumbnail:png,recipe:{steps:[]}}];
  resources=[{path:'docs/assets/shot.png',name:'Fixture shot',kind:'screenshot',screenshot_id:'fixture-shot',usages:[]},{path:'docs/assets/ordinary.png',name:'ordinary.png',kind:'imported',usages:[]},{path:'docs/assets/generated.png',name:'Generated',kind:'generated',generation:{id:'gen',path:'docs/assets/generated.png',prompt:'Fixture drawing',created_at:'now'},usages:[]}];
- await page.locator('#screenshot-library-refresh').click();await page.waitForFunction(()=>document.querySelectorAll('.resource-list-item').length===3);await snapshot('image-kinds-and-candidate');
+ if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();await page.waitForFunction(()=>document.querySelectorAll('.resource-list-item').length===3);await snapshot('image-kinds-and-candidate');
  for(const menu of await page.locator('.resource-item-menu>summary').all())await menu.click();
  for(const menu of await page.locator('.screenshot-management>summary').all())await menu.click();
  await snapshot('expanded-image-operations');
- shots[0].protected=true;await page.locator('#screenshot-library-refresh').click();await page.waitForFunction(()=>document.querySelector('.screenshot-library-card').textContent.includes('保護中'));await snapshot('protected-image');
+ shots[0].protected=true;if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();await page.waitForFunction(()=>document.querySelector('.screenshot-library-card').textContent.includes('保護中'));await snapshot('protected-image');
   await page.locator('[data-tab=editor]').click();
  await page.locator('#editor-screenshot-ai').click();await snapshot('screenshot-methods');
  await page.locator('dialog[open]').getByRole('button',{name:'閉じる',exact:true}).click();
