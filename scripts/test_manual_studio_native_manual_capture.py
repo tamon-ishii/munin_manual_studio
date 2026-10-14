@@ -111,7 +111,8 @@ def session():
             ui.click('開く', owner=app.pid)
             ui.find('プロジェクトを開きました。', 'status bar', app.pid, prefix=True)
             ui.click('Markdownソース', owner=app.pid)
-            editor = ui.find('Markdown原稿', 'entry', app.pid)
+            # WebKit exposes multiline textareas as text on some Linux versions.
+            editor = ui.find('Markdown原稿', ('entry', 'text'), app.pid)
             content = lambda: Atspi.Text.get_text(editor, 0, -1)
 
             def chord(symbol):

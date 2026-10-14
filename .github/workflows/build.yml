@@ -197,6 +197,7 @@ jobs:
             ui-coverage-results/
             native-workflow-results/
             native-clipboard-results/
+            native-manual-capture-results/
           if-no-files-found: warn
       - name: Package applications
         env:
