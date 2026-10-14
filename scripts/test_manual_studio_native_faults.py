@@ -7,11 +7,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shlex
 import shutil
 import subprocess
 import tempfile
 import time
+from lib.cargo_rustc_command import cargo_rustc_command
 
 REPO = Path(__file__).resolve().parents[1]
 RESULTS = REPO / 'native-workflow-results/faults'
@@ -46,10 +46,9 @@ original_source = digest(SOURCE)
 # --print cfg emits a real Cargo rustc invocation without relinking the normal
 # binary. The distinct cfg prevents Cargo from hiding the command as Fresh.
 probe_log = RESULTS / 'compile-command.log'
-code = run(['cargo', 'rustc', '-p', 'manual-studio', '--bin', 'manual-studio', '-vv', '--', '--print', 'cfg', '--cfg', f'munin_fault_probe_{time.time_ns()}'], dict(os.environ), probe_log)
+code = run(['cargo', 'rustc', '-p', 'manual-studio', '--bin', 'manual-studio', '-vv', '--', '--print', 'cfg', '--cfg', f'munin_fault_probe_{time.time_ns()}'], {**os.environ, 'CARGO_TERM_COLOR': 'never'}, probe_log)
 assert code == 0 and digest(BIN) == original_binary, 'Command discovery altered normal binary or failed'
-line = next(line.strip()[9:-1] for line in probe_log.read_text().splitlines() if 'Running `CARGO=' in line and 'rustc --crate-name manual_studio' in line)
-command = shlex.split(line)
+command = cargo_rustc_command(probe_log.read_text(), 'manual_studio')
 env = dict(os.environ)
 while '=' in command[0] and not command[0].startswith('/'):
     key, value = command.pop(0).split('=', 1)
