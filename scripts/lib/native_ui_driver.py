@@ -112,6 +112,15 @@ class NativeUI:
         except Exception:
             return ''
 
+    def source_editor(self, owner=None):
+        # Ubuntu 22.04 WebKit exposes the source textarea as "embedded";
+        # newer WebKit versions expose it as "entry" or "text".
+        node = self.find('Markdown原稿', ('entry', 'text', 'embedded'), owner)
+        assert 'Text' in node.get_interfaces(), 'Source editor must expose text and caret'
+        assert node.get_state_set().contains(Atspi.StateType.EDITABLE), 'Source editor must be editable'
+        self.log.append({'action': 'find source editor', 'role': node.get_role_name(), 'pid': node.get_process_id()})
+        return node
+
     def front(self, pid):
         assert self.owned(pid), 'Cannot foreground unrelated process'
         for line in subprocess.check_output(['wmctrl', '-lp'], text=True).splitlines():
