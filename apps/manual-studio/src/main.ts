@@ -39,6 +39,10 @@ import { setupTerminalPane, type TerminalController } from "./terminalPane";
 import { emit } from "@tauri-apps/api/event";
 import "./style.css";
 import { captureInsertionContext, isInsertionCurrent, STALE_INSERTION_MESSAGE } from "./insertionContext";
+import {setupManuscriptSearch} from './manuscriptSearch';
+import {setupManuscriptOutline} from './manuscriptOutline';
+import {setupManuscriptGit} from './manuscriptGit';
+import {sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions} from './manuscriptTools';
 
 import type { State, Document, RecordingResult, LaunchCommand } from "./types";
 
@@ -101,6 +105,7 @@ if (terminalFontFamilySelect) {
 let projectRoot = "";
 let workspace: State | null = null;
 let documentState: Document | null = null;
+let manuscriptOutline:ReturnType<typeof setupManuscriptOutline>|null=null;
 let dirty = false;
 let documentAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 let documentSavePending: Promise<void> | undefined;
@@ -457,6 +462,7 @@ function setBusy(value: boolean): void {
   editor.disabled = !documentState;
   updateHistoryButtons();
   if (!value && pendingEditorFocus) { pendingEditorFocus = false; milkdown.focus(); }
+  manuscriptOutline?.refresh();
 
 }
 function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
@@ -626,6 +632,7 @@ function updateSaveState(): void {
 
 
   updateWorkspaceGuide();
+  manuscriptOutline?.refresh();
 }
 function updateWorkspaceGuide(): void {
   const guide = element<HTMLElement>('workspace-guide');
@@ -2617,3 +2624,61 @@ async function chooseExistingScreenshot(root:string,valid:()=>boolean):Promise<{
     dialog.addEventListener('close',()=>resolve(selected),{once:true});
   });
 }
+
+function manuscriptPagePath(page:string):string {
+  return workspace?.project_entries.some(entry=>!entry.directory&&entry.path===page)?page:`${(workspace?.config.docs||'docs').replace(/\/$/,'')}/${page}`;
+}
+function manuscriptOwner():ManuscriptOwner|null {
+  return documentState&&!activeImageTab?{...documentState,content:editor.value,root:projectRoot,session:documentRequestVersion}:null;
+}
+const manuscriptToolOptions:ManuscriptToolsOptions={
+  root:()=>projectRoot,current:manuscriptOwner,busy:()=>busy,request:rpc,work,
+  prepare:async pages=>{
+    await savedBeforeOperation();retainDocumentTab();
+    if(!pages)return;
+    const paths=new Set(pages.map(manuscriptPagePath));
+    for(const tab of documentTabs.values())if(paths.has(manuscriptPagePath(tab.document.page))&&tab.content!==tab.document.content)
+      throw new Error(`${tab.document.page} に未保存の編集があります。先に保存してください。`);
+  },
+  navigate:async(page,start,end)=>{
+    const root=projectRoot;await openPage(page);
+    if(root!==projectRoot)return;
+    showDocumentView();chooseTab('editor');
+    if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
+    milkdown.showSource();jumpToSource(editor,start,end);
+  },
+  applyContent:(next,expected)=>{
+    if(!sameOwner(manuscriptOwner(),expected))throw new Error('原稿が変更されています。操作をやり直してください。');
+    showDocumentView();chooseTab('editor');
+    if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
+    milkdown.showSource();
+    changeImageMarkdown(next,expected.content);updateHistoryButtons();
+  },
+  changed:async documents=>{
+    const current=documentState;
+    for(const saved of documents){
+      const path=manuscriptPagePath(saved.page);
+      if(current&&manuscriptPagePath(current.page)===path){
+        showDocumentView();chooseTab('editor');
+        if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
+        milkdown.showSource();
+        const before=editor.value;if(before!==saved.content)changeImageMarkdown(saved.content,before);
+        documentState={...saved,page:current.page};dirty=false;documentSaveState=null;updateSaveState();retainDocumentTab();
+      }
+      for(const [page,tab] of documentTabs){
+        if(manuscriptPagePath(page)!==path||page===documentState?.page)continue;
+        tab.history.record({value:saved.content,start:Math.min(tab.start,saved.content.length),end:Math.min(tab.end,saved.content.length)},{inputType:'insertReplacementText',isTrusted:false});
+        tab.document={...saved,page};tab.content=saved.content;tab.richState=null;
+      }
+    }
+    renderDocumentTabs();renderPages();await renderPreview();
+  },
+  report:status,
+};
+const openManuscriptSearch=setupManuscriptSearch(manuscriptToolOptions);
+element('manuscript-search-open').addEventListener('click',openManuscriptSearch);
+manuscriptOutline=setupManuscriptOutline(manuscriptToolOptions);manuscriptOutline.refresh();
+const openManuscriptGit=setupManuscriptGit(manuscriptToolOptions);
+const manuscriptGitButton=document.createElement('button');manuscriptGitButton.type='button';manuscriptGitButton.id='manuscript-git-open';manuscriptGitButton.textContent='Git履歴・復元';
+manuscriptGitButton.addEventListener('click',openManuscriptGit);
+element('editor-more').querySelector('.editor-more-menu')!.append(manuscriptGitButton);

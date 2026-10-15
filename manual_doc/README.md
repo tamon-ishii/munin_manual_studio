@@ -10,6 +10,7 @@ Munin Manual Studioは、Markdown原稿の編集、AIによるレビューと文
 2. [原稿編集とAI支援](editing-and-ai.md)
 3. [画像とスクリーンショットの管理](images-and-screenshots.md)
 4. [HTML出力と困ったときの対処](publishing-and-troubleshooting.md)
+5. [全文検索・見出し整理・Git履歴](search-outline-and-git.md)
 
 ## 基本の流れ
 

@@ -39,5 +39,26 @@
       ".resource-list-item>.resource-item-menu>summary[aria-label$=\"の操作\"]",
       ".resource-usages>button.resource-usage-link"
     ]
+  },
+  {
+    "feature": "P17",
+    "owner": "manuscriptSearch.ts",
+    "reason": "Search result paths and match coordinates are project data; selectors target only result navigation, replacement checkboxes and case sensitivity.",
+    "selectors": [
+      "dialog[data-manuscript-search] .manuscript-search-result button",
+      "dialog[data-manuscript-search] input[data-search-hit]",
+      "dialog[data-manuscript-search] .manuscript-search-form input[type=checkbox]"
+    ]
+  },
+  {
+    "feature": "P18",
+    "owner": "manuscriptOutline.ts",
+    "reason": "Heading text is manuscript data; these selectors cover only heading rows and their navigation and sibling move buttons.",
+    "selectors": [
+      "#manuscript-outline-list [data-outline-index][draggable=true]",
+      "#manuscript-outline-list .manuscript-outline-jump",
+      "#manuscript-outline-list button[aria-label$=\"を上へ\"]",
+      "#manuscript-outline-list button[aria-label$=\"を下へ\"]"
+    ]
   }
 ]

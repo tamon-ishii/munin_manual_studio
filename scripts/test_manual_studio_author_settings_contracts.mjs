@@ -18,7 +18,10 @@ const registry=JSON.parse(await readFile('scripts/fixtures/manual-studio-ui-inve
 const results=[];
 let server,browser,page;
 function entry(feature,needle){
- const matches=registry.actions.filter(action=>action.feature===feature&&action.expression.includes(needle));
+ const candidates=registry.actions.filter(action=>action.feature===feature&&action.expression.includes(needle));
+ // A loop can contain the same handler text; select the handler itself first.
+ const direct=candidates.filter(action=>action.expression.startsWith(needle));
+ const matches=direct.length?direct:candidates;
  assert.equal(matches.length,1,`ambiguous registry operation: ${feature} ${needle}`);
  return matches[0].id;
 }

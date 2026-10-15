@@ -113,6 +113,16 @@ pub fn save(
     content: &str,
     expected_revision: Option<&str>,
 ) -> Result<Document, String> {
+    let content = crate::legacy_ai::plain_markdown(content, None);
+    save_exact(root, page, &content, expected_revision)
+}
+
+pub(crate) fn save_exact(
+    root: &Path,
+    page: &str,
+    content: &str,
+    expected_revision: Option<&str>,
+) -> Result<Document, String> {
     let path = document_path(root, page)?;
     let existing = match fs::read(&path) {
         Ok(bytes) => Some(bytes),
@@ -122,7 +132,6 @@ pub fn save(
     if existing.as_deref().map(revision).as_deref() != expected_revision {
         return Err("別の画面やツールで原稿が更新されています。編集内容をコピーしてから原稿を読み直してください。".into());
     }
-    let content = crate::legacy_ai::plain_markdown(content, None);
     let parent = path.parent().ok_or("Invalid Markdown path")?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let mut temporary = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;

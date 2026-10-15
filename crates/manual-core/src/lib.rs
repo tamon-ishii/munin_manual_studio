@@ -15,6 +15,8 @@ mod desktop_scenario;
 pub mod semantic_target;
 pub mod visual_target;
 pub mod editor;
+mod manuscript_tools;
+mod manuscript_git;
 pub mod fact;
 mod legacy_ai;
 mod selection_ai;
@@ -149,6 +151,14 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "editor-read",
         "editor-save",
         "editor-preview",
+        "project-search",
+        "editor-batch-save",
+        "editor-outline",
+        "manuscript-git-status",
+        "manuscript-git-init",
+        "manuscript-git-history",
+        "manuscript-git-version",
+        "manuscript-git-commit",
         "create-folder",
         "save-asset",
         "scenario-run",
@@ -362,6 +372,19 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "agent-progress-clear" => {
             agent::clear_progress(root);
             Ok(String::new())
+        }
+        "manuscript-git-status" | "manuscript-git-init" | "manuscript-git-history" | "manuscript-git-version" | "manuscript-git-commit" => {
+            let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
+            serde_json::to_string(&manuscript_git::handle(root,action,&value)?).map_err(|e|e.to_string())
+        }
+        "project-search" | "editor-batch-save" | "editor-outline" => {
+            let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
+            let result = match action {
+                "project-search" => manuscript_tools::search(root, &value)?,
+                "editor-batch-save" => manuscript_tools::batch_save(root, &value)?,
+                _ => manuscript_tools::outline(value["content"].as_str().ok_or("原稿の内容を指定してください。")?),
+            };
+            serde_json::to_string(&result).map_err(|e|e.to_string())
         }
         "editor-read" => serde_json::to_string(&editor::read(
             root,

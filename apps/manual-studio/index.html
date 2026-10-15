@@ -18,6 +18,7 @@
     <aside id="panel-tree" class="sidebar">
       <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><details id="tree-create-menu" class="editor-more"><summary>＋ 作成 ▾</summary><div class="editor-more-menu"><button type="button" id="new-page" data-ui-icon="newFile">原稿を作成</button><button type="button" id="new-folder" data-ui-icon="newFolder">フォルダを作成</button></div></details></div>
       <div class="tree-filters"><input id="tree-search" type="search" aria-label="ファイル名・パスを検索" placeholder="ファイル名・パスを検索" /><select id="tree-filter" aria-label="ファイルの表示範囲"><option value="all">すべて</option><option value="markdown">原稿のみ</option></select></div>
+      <button type="button" id="manuscript-search-open">全文検索・置換</button>
 
       <div id="page-list" class="page-list file-tree" role="tree" aria-label="選択したフォルダーのファイル"><p class="muted">フォルダーを開くとファイルが表示されます。</p></div>
     </aside>
@@ -55,6 +56,7 @@
 </div></details>
         </div>
       </div>
+      <details id="manuscript-outline" class="manuscript-outline"><summary id="manuscript-outline-toggle">見出しアウトライン</summary><p class="muted">見出しを選ぶと本文へ移動します。同じ階層の節はドラッグ、または上下ボタンで並べ替えできます。</p><nav id="manuscript-outline-list" aria-label="原稿の見出し"></nav></details>
       <div id="editor-workspace" class="editor-workspace">
         <div class="editor-split">
           <div class="editor-column"><div class="column-label">MARKDOWN <span id="cursor-position">1:1</span></div><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div>
