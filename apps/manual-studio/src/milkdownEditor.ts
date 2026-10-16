@@ -326,7 +326,27 @@ export function setupMilkdownEditor(
     const configured=Boolean(node.attrs.presentation);dom.dataset.imagePresentation=String(configured);dom.style.width=configured?`${node.attrs.displayWidth}%`:'';
     dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';dom.style.textAlign=configured?node.attrs.alignment:'';
   });});}
+  function fitToolbarMenus() {
+    const bounds = host.getBoundingClientRect();
+    host.querySelectorAll<HTMLElement>('.top-bar-heading-dropdown').forEach(menu => {
+      const selector = menu.parentElement!.getBoundingClientRect();
+      const below = Math.max(0, bounds.bottom - selector.bottom - 4);
+      const above = Math.max(0, selector.top - bounds.top - 4);
+      // The editor clips its scrolling contents. Keep even wrapped toolbar
+      // menus inside it, and let long menus scroll independently.
+      const openAbove = above > below;
+      menu.style.top = openAbove ? 'auto' : '100%';
+      menu.style.bottom = openAbove ? '100%' : 'auto';
+      menu.style.maxHeight = `${openAbove ? above : below}px`;
+      menu.style.maxWidth = `${bounds.width}px`;
+      menu.style.left = `${Math.min(0, bounds.right - selector.left - menu.offsetWidth)}px`;
+    });
+  }
+  const menuResizeObserver = new ResizeObserver(fitToolbarMenus);
+  menuResizeObserver.observe(host);
+  host.addEventListener('scroll', fitToolbarMenus);
   const toolbarObserver = new MutationObserver(() => {
+    fitToolbarMenus();
     applyImageStyles();
     host.querySelectorAll<HTMLButtonElement>('.milkdown-top-bar .top-bar-item').forEach((button, index) => {
       const label = topBarLabels[index];
