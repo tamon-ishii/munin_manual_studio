@@ -448,6 +448,8 @@ try {
   assert.equal(await page.locator('#ai-model').inputValue(), 'retry-test-model');
   assert.equal(await page.locator('#ai-connection-type').inputValue(), 'local_llm');
   assert.equal(await page.locator('#ai-api-key').inputValue(), 'smoke-local-key');
+  if(!await page.locator('#editor-more').evaluate(el=>el.open)) await page.locator('#editor-more > summary').click();
+
   await page.getByRole('button',{name:'執筆方針',exact:true}).click();
   await page.locator('#manual-brief').fill('初めて使う読者向けの操作説明');
   await page.locator('#save-settings').click();await idle();

@@ -1200,3 +1200,11 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 .manuscript-git-status{white-space:pre-wrap;overflow-wrap:anywhere}
 .manuscript-git-status[role=alert]{color:var(--error-color,#b42318)}
 [data-manuscript-git] select,[data-manuscript-git] input{width:100%;min-width:0;max-width:100%;margin:8px 0}
+
+/* Share the document row with manuscript actions to preserve editor height. */
+.document-heading>.editor-view-controls{margin:0;min-width:0;gap:6px;flex:0 1 auto}
+.document-heading>.editor-view-controls .editor-action-group{margin-left:0;gap:4px}
+.document-heading>.editor-view-controls button{white-space:nowrap}
+.document-heading>.editor-display-group{margin-left:0}
+.document-heading>.document-tabs{flex-basis:100px}
+#panel-editor[data-image-open=true]>.document-heading>.editor-view-controls{display:none}

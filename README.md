@@ -14,24 +14,24 @@ Munin Manual StudioはAIとの連携を目指したマークダウンエディ�
 
 ![image-20261005-081514](assets/image-20261005-081514.png)
 
-<!-- ai:task id=task-readme-text-3 kind=text prompt="ここに目次を書いてください" created-at=2026-10-07T21:04:29Z source-sha256=21f0494adbfe2147148a1b6973542858c67adcda07c1350eb3a3d64cbae52f38 -->
+
 
 * [主な機能](#主な機能)
 * [クイックスタート](#クイックスタート)
 
-<!-- /ai:task -->。
+。
 
 ## 主な機能
 
-<!-- ai:task id=task-readme-text-1 kind=text prompt="主な機能を箇条書して" created-at=2026-10-07T21:04:29Z source-sha256=a33680233ab44a4097278be10c87ced00b9a627d4a5c655a67d5a4ec0ec2d7c2 -->
 
-* **Markdown編集とリアルタイムプレビュー**: 左右分割でのプレビュー確認に対応し、Mermaidによる作図やリッチテキスト・書式ツールバーによる編集が可能です。<!-- ai:fact {"claim":"左右分割でのプレビュー表示に対応","file":"apps/manual-studio/index.html","contains":"\u003cdiv class=\"editor-split\"\u003e","ui":null,"symbol":null} --><!-- ai:fact {"claim":"書式ツールバーにMermaid図挿入ボタンがある","file":"apps/manual-studio/index.html","contains":"\u003cbutton type=\"button\" data-format=\"mermaid\" title=\"Mermaidの図を挿入\" aria-label=\"Mermaidの図を挿入\"\u003eMermaid\u003c/button\u003e","ui":null,"symbol":null} -->
+
+* **Markdown編集とリアルタイムプレビュー**: 左右分割でのプレビュー確認に対応し、Mermaidによる作図やリッチテキスト・書式ツールバーによる編集が可能です。
 * **AIタグによる部分的な自動生成**: 文章とMermaidの図を共通のAI生成経路で更新します。名前は任意、IDは自動付与。指示は折りたたみ、生成本文は常に表示します。
 * **スクリーンショット一覧**: AIなしで操作記録・撮影・MarkIts編集を行い、原本を保持して注釈とクロップを再編集できます。個別・全体の再撮影、候補比較、採用、旧版の復元を扱います。
-* **UI Map（画面・操作一覧）の管理**: ソースコードから画面一覧を生成し、画面名・ボタン・入力欄の一覧をAI生成や撮影手順の参照情報として活用できます。<!-- ai:fact {"claim":"コードから画面一覧を作るボタンがある","file":"apps/manual-studio/index.html","contains":"\u003cbutton id=\"map-refresh\" class=\"primary\"\u003eコードから画面一覧を作る\u003c/button\u003e","ui":null,"symbol":null} -->
-* **マニュアルのビルドと出力**: 下書きビルドや完成版ビルドにより、編集した原稿から静的HTMLマニュアルを生成して確認・出力できます。<!-- ai:fact {"claim":"下書きビルドと完成版ビルドのボタンがある","file":"apps/manual-studio/index.html","contains":"\u003cbutton id=\"build-draft\"\u003e下書きビルド\u003c/button\u003e\u003cbutton id=\"build-final\"\u003e完成版ビルド\u003c/button\u003e","ui":null,"symbol":null} -->
+* **UI Map（画面・操作一覧）の管理**: ソースコードから画面一覧を生成し、画面名・ボタン・入力欄の一覧をAI生成や撮影手順の参照情報として活用できます。
+* **マニュアルのビルドと出力**: 下書きビルドや完成版ビルドにより、編集した原稿から静的HTMLマニュアルを生成して確認・出力できます。
 
-<!-- /ai:task -->
+
 
 ## クイックスタート
 
@@ -41,11 +41,11 @@ Munin Manual StudioはAIとの連携を目指したマークダウンエディ�
 python3 start_manual_studio.py
 ```
 
-<!-- ai:fact {"claim":"開発環境からの起動コマンドは python3 start_manual_studio.py","file":"apps/manual-studio/README.md","contains":"python3 start_manual_studio.py"} -->
+
 
 1. ワークスペースとして対象プロジェクトのフォルダーを開きます。
 2. 左側のファイルツリーから原稿ファイルを選択するか、「＋ MD」ボタンで新しいページを作成します。
 3. 原稿を編集して文章とMermaidの図をAI更新します。撮影はスクリーンショット一覧で行い、画像参照を文書へ挿入します。
-4. 必要に応じて「下書きビルド」や「完成版ビルド」を実行してHTMLマニュアルを確認します。<!-- ai:fact {"claim":"下書きビルドと完成版ビルドのボタンがある","file":"apps/manual-studio/index.html","contains":"<button id=\"build-draft\" class=\"primary\">下書きビルド</button><button id=\"build-final\">完成版ビルド</button>"} -->
+4. 必要に応じて「下書きビルド」や「完成版ビルド」を実行してHTMLマニュアルを確認します。
 
 対象アプリの起動パス・引数は「設定 → 対象アプリ」で事前登録できます。AI設定は不要です。画像の保存と移行は [スクリーンショット管理](docs/specs/screenshot-library.md) を参照してください。

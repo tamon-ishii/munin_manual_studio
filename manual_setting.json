@@ -6,7 +6,7 @@
     "README.md"
   ],
   "format": "mkdocs",
-  "agent": "agy",
+  "agent": "codex",
   "model": "",
   "connection_type": "cli",
   "endpoint_url": "",
