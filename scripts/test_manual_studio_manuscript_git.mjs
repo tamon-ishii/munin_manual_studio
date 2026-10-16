@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import {spawn,execFileSync} from 'node:child_process';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {chromium} from 'playwright-core';
+import {beginVerification} from './lib/manual_ui_report.mjs';
+import {recordManuscriptContracts} from './lib/manuscript_tools_report.mjs';
+const verification=await beginVerification();
+const reportDir='ui-coverage-results/manuscript-git';
+await rm(path.join(reportDir,'result.json'),{force:true});
+
+const root=await mkdtemp(path.join(os.tmpdir(),'munin-manuscript-git-'));
+const other=await mkdtemp(path.join(os.tmpdir(),'munin-manuscript-no-git-'));
+const base='http://127.0.0.1:5174';let server,browser;
+const original='# Original 😀\n\nFirst version.\n';const current='# Current 😀\n\nKeep current draft.\n';
+const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+try{
+  for(const project of [root,other]){await mkdir(path.join(project,'docs'),{recursive:true});await writeFile(path.join(project,'manual_setting.json'),JSON.stringify({docs:'docs',connection_type:'none'}));await writeFile(path.join(project,'docs/index.md'),original);}
+  git('init');git('config','user.name','Manuscript Browser Test');git('config','user.email','test@example.invalid');git('config','commit.gpgsign','false');git('config','core.hooksPath','.git/hooks');
+  git('add','--','docs/index.md');git('commit','-m','Original manuscript');const first=git('rev-parse','HEAD');
+  await writeFile(path.join(root,'docs/index.md'),current);await writeFile(path.join(root,'unrelated.txt'),'staged unrelated');git('add','--','unrelated.txt');
+  server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
+  for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
+  browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');const editor=page.locator('#markdown-editor');
+  const openGit=async()=>{await page.locator('#editor-more summary').click();await page.getByRole('button',{name:'Git履歴・復元',exact:true}).click();await idle();return page.locator('dialog[data-manuscript-git]');};
+  await page.goto(`${base}/?root=${encodeURIComponent(root)}`);await idle();await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
+  assert.equal(await editor.inputValue(),current);
+  let dialog=await openGit();await dialog.getByText(/未コミットの変更/).waitFor();
+  await dialog.getByRole('textbox',{name:'コミットの説明'}).fill('Checkpoint newer manuscript');await dialog.getByRole('button',{name:'この原稿をコミット',exact:true}).click();await idle();
+  assert.equal(git('log','-1','--format=%s'),'Checkpoint newer manuscript');
+  assert.equal(git('diff','--cached','--name-only'),'unrelated.txt');
+  assert.ok(!git('ls-tree','-r','--name-only','HEAD').includes('unrelated.txt'));
+  await dialog.getByRole('button',{name:'Gitの状態を更新',exact:true}).click();await idle();
+  assert.equal(await dialog.locator('select option').count(),2);
+  await dialog.getByRole('combobox',{name:'原稿のコミット'}).selectOption(first);await dialog.getByRole('button',{name:'選択した版と比較'}).click();await idle();
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),current,'comparison is read-only');
+  await dialog.getByRole('button',{name:'確認した版を原稿に復元'}).click();await idle();
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);
+  assert.equal(await editor.inputValue(),original);
+  await dialog.getByRole('button',{name:'閉じる',exact:true}).click();await page.getByRole('button',{name:'元に戻す',exact:true}).click();
+  assert.equal(await editor.inputValue(),current,'restore participates in normal editor Undo');
+  await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved');
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),current);
+  dialog=await openGit();await dialog.getByRole('combobox',{name:'原稿のコミット'}).selectOption(first);await dialog.getByRole('button',{name:'選択した版と比較'}).click();await idle();
+  const external='# External edit\n';await writeFile(path.join(root,'docs/index.md'),external);
+  await dialog.getByRole('button',{name:'確認した版を原稿に復元'}).click();await idle();await dialog.getByRole('alert').filter({hasText:'変更されています'}).waitFor();
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),external);assert.equal(await editor.inputValue(),current);
+  await dialog.getByRole('button',{name:'閉じる',exact:true}).click();
+  await page.goto(`${base}/?root=${encodeURIComponent(other)}`);await idle();dialog=await openGit();
+  await dialog.getByRole('button',{name:'Gitで履歴管理を始める'}).waitFor();
+  assert.equal(await readFile(path.join(other,'docs/index.md'),'utf8'),original);
+  await dialog.getByRole('button',{name:'Gitで履歴管理を始める'}).click();
+  await page.locator('dialog[data-confirm-action]').getByRole('button',{name:'Gitを初期化',exact:true}).click();await idle();
+  await dialog.getByText(/まだこの原稿の履歴はありません/).waitFor();
+  assert.equal(execFileSync('git',['rev-parse','--show-toplevel'],{cwd:other,encoding:'utf8'}).trim(),other);
+  assert.deepEqual(errors,[]);
+  await recordManuscriptContracts(verification,page,reportDir,['P19'],['commit only current manuscript and preserve unrelated staged file','refresh history and select old version for read-only comparison','restore reviewed version and return to editor for normal Undo','reject externally changed manuscript without altering draft','open non-Git project, initialize after confirmation and display empty history'],{manuscript:await readFile(path.join(root,'docs/index.md'),'utf8'),staged:git('diff','--cached','--name-only'),newRepository:execFileSync('git',['rev-parse','--show-toplevel'],{cwd:other,encoding:'utf8'}).trim()});
+  console.log('Manuscript Git browser: explicit per-file commit, unrelated staged preservation, read-only comparison, restore/save/Undo, external-conflict protection, non-Git setup and empty history passed.');
+}finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});await rm(other,{recursive:true,force:true});}

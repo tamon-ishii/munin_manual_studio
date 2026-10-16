@@ -11,12 +11,12 @@ try {
   await page.goto(`${base}/progress-fixture`);
   await page.evaluate(async()=>{
     const {setupScreenshotLibrary}=await import('/src/screenshotLibrary.ts');
-    const ids=['list','status','recapture-all','migrate','cancel','history','retry','record','stop','refresh','import','import-button','diagnose'];
-    document.body.innerHTML=ids.map(id=>`<${id==='import'?'input':'div'} id="screenshot-library-${id}"></${id==='import'?'input':'div'}>`).join('')+'<p id="screenshot-recapture-status"></p>';
+    const ids=['list','status','recapture-all','cancel','retry','record','stop','refresh','import','import-button'];
+    document.body.innerHTML=ids.map(id=>`<${id==='import'?'input':'div'} id="screenshot-library-${id}"></${id==='import'?'input':'div'}>`).join('')+'<p id="screenshot-recapture-status"></p><input id="resource-search"><select id="resource-kind"><option value="all">All</option></select><select id="resource-usage"><option value="all">All</option></select><p id="resource-count"></p>';
     window.confirm=()=>true;
     const state=window.progressFixture={root:'first',message:'操作 2/4：記録された待機（120秒）',cancel:false};
-    setupScreenshotLibrary({root:()=>state.root,work:op=>op().catch(error=>{state.error=String(error);}),applications:()=>[],page:()=>undefined,insert(){},chooseDestination:async()=>false,openPage:async()=>{},async request(action){
-      if(action==='screenshots-list')return '{"items":[]}';
+    setupScreenshotLibrary({root:()=>state.root,work:op=>op().catch(error=>{state.error=String(error);}),applications:()=>[],page:()=>undefined,insert(){},chooseDestination:async()=>false,openPage:async()=>{},refreshAssets:async()=>{},async request(action){
+      if(action==='screenshots-list'||action==='resources-list')return '{"items":[]}';
       if(action==='screenshots-recapture-plan')return '{"items":[{"status":"pending"}]}';
       if(action==='agent-progress')return JSON.stringify({logs:[{message:'再撮影 1/1：設定画面 — 操作を再生しています'},{message:state.message}]});
       if(action==='agent-cancel'){state.cancel=true;return '{}';}
@@ -25,7 +25,7 @@ try {
     }});
   });
   const status=page.locator('#screenshot-recapture-status');
-  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');
+  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');await page.locator('[data-confirm-accept]').click();
   await page.waitForFunction(()=>document.querySelector('#screenshot-recapture-status').textContent.includes('120秒'));
   assert.match(await status.textContent(),/設定画面/);
   await page.evaluate(()=>window.progressFixture.message='操作 4/4：画面を撮影');
@@ -33,18 +33,18 @@ try {
   await page.evaluate(()=>window.progressFixture.finish([{status:'succeeded'}]));
   await page.waitForFunction(()=>document.querySelector('#screenshot-recapture-status').textContent.includes('が完了しました'));
   await page.waitForTimeout(900);assert.match(await status.textContent(),/成功 1件/,'completion persists after polling stops');
-  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');
+  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');await page.locator('[data-confirm-accept]').click();
   await page.waitForFunction(()=>document.querySelector('#screenshot-recapture-status').textContent.includes('再撮影中'));
   await page.locator('#screenshot-library-cancel').dispatchEvent('click');
   assert.equal(await page.evaluate(()=>window.progressFixture.cancel),true);
   await page.evaluate(()=>window.progressFixture.finish([{status:'cancelled'},{status:'pending'}]));
   await page.waitForFunction(()=>document.querySelector('#screenshot-recapture-status').textContent.includes('を中断しました'));
   assert.match(await status.textContent(),/未完了 2件/);
-  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');
+  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');await page.locator('[data-confirm-accept]').click();
   await page.waitForFunction(()=>document.querySelector('#screenshot-recapture-status').textContent.includes('再撮影中'));
   await page.evaluate(()=>{window.progressFixture.root='second';document.querySelector('#screenshot-recapture-status').textContent='別プロジェクト';window.progressFixture.finish([{status:'succeeded'}]);});
   await page.waitForTimeout(900);assert.equal(await status.textContent(),'別プロジェクト');
-  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');
+  await page.locator('#screenshot-library-recapture-all').dispatchEvent('click');await page.locator('[data-confirm-accept]').click();
   await page.waitForFunction(()=>document.querySelector('#screenshot-recapture-status').textContent.includes('再撮影中'));
   await page.evaluate(()=>window.progressFixture.fail());
   await page.waitForFunction(()=>document.querySelector('#screenshot-recapture-status').textContent.includes('再撮影に失敗しました'));

@@ -39,7 +39,7 @@ pub(crate) fn save_image_with_uimap(
     )
     .map_err(|error| error.to_string())?;
 
-    // Attempt UI element detection and embed UIMap metadata via MarkIts
+    // Attempt UI element detection and embed image element metadata via MarkIts
     let detected = if let Some(window_id) = target_window_id {
         let decimal_id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16)
             .ok()

@@ -15,7 +15,7 @@ sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 base64 = "0.22"
 markits = { path = "../markits" }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 xa11y = { version = "0.15.2", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 tokio = { version = "1.51", features = ["rt", "time"] }
@@ -23,6 +23,9 @@ percent-encoding = "2"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 ureq = { version = "2.10", features = ["json"] }
 portable-pty = "0.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2.21"

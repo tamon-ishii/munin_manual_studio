@@ -1,4 +1,5 @@
-export interface ComparisonImage { label: string; src: string }
+export interface ComparisonImage { label: string; src: string; /** Annotation count stored in the managed ledger scene, shown when the PNG itself has no metadata. */ sceneCount?: number }
+export interface ComparisonAction { label: string; /** Resolves true when the action completed and the comparison should close; false keeps it open (e.g. user declined confirmation). */ run: () => Promise<boolean>; disabled?: boolean }
 export interface AnnotationInfo { state: 'present' | 'missing' | 'invalid' | 'unavailable'; count: number; value?: string }
 function normalizeMetadata(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizeMetadata);
@@ -36,19 +37,22 @@ export function readAnnotationInfo(src: string): AnnotationInfo {
   } catch { return {state:'invalid',count:0}; }
 }
 
-export function showImageComparison(images: ComparisonImage[], title = '撮影画像を確認'): Promise<void> {
+export function showImageComparison(images: ComparisonImage[], title = '撮影画像を確認', showAnnotations = true, action?: ComparisonAction): Promise<void> {
   const dialog = document.createElement('dialog');
   dialog.className = 'image-comparison-dialog';
   dialog.setAttribute('aria-labelledby', 'image-comparison-title');
-  dialog.innerHTML = '<div class="panel-header"><h2 id="image-comparison-title"></h2><button type="button" data-close>閉じる</button></div><p class="muted">同じ倍率で撮影前後を比較できます。画像をクリックすると実寸表示へ切り替わります。</p><label class="image-zoom-control">表示倍率 <input type="range" min="25" max="200" step="25" value="100" aria-label="画像の表示倍率" /><output>幅に合わせる</output></label><div class="image-comparison-grid"></div>';
+  dialog.innerHTML = '<div class="panel-header"><h2 id="image-comparison-title"></h2><div class="actions"><button type="button" data-adopt class="primary" hidden></button><button type="button" data-close>閉じる</button></div></div><p class="muted">同じ倍率で画像を比較できます。画像をクリックすると実寸表示へ切り替わります。</p><label class="image-zoom-control">表示倍率 <input type="range" min="25" max="200" step="25" value="100" aria-label="画像の表示倍率" /><output>幅に合わせる</output></label><div class="image-comparison-grid"></div>';
   dialog.querySelector('h2')!.textContent = title;
   const grid = dialog.querySelector<HTMLElement>('.image-comparison-grid')!;
   const metadata = images.map(item => readAnnotationInfo(item.src));
-  if (images.length === 2) {
+  if (showAnnotations && images.length === 2) {
     const note = document.createElement('p'); note.className = 'image-annotation-summary'; note.setAttribute('role', 'status');
+    const ledger = images.map(item => item.sceneCount);
     note.textContent = metadata.every(info => info.state === 'present')
       ? metadata[0].value === metadata[1].value ? '撮影前後の注釈データは同一です。' : '撮影前後で注釈データが変わっています。位置と内容を確認してください。'
-      : '注釈の保持状況はメタデータから確認できません。';
+      : ledger.every(count => count !== undefined)
+        ? `PNG内にメタデータがない版があります。管理台帳の注釈は ${images.map((item, index) => `${item.label} ${ledger[index]}件`).join('・')} です。${ledger[0] === ledger[1] ? '件数は一致しています。' : '件数が異なります。位置と内容を確認してください。'}`
+        : '注釈の保持状況はメタデータから確認できません。';
     grid.before(note);
   }
   for (const [index, item] of images.entries()) {
@@ -57,7 +61,7 @@ export function showImageComparison(images: ComparisonImage[], title = '撮影�
     const viewport = document.createElement('div'); viewport.className = 'image-comparison-viewport';
     const details = document.createElement('p'); details.className = 'image-comparison-meta muted';
     const annotation = metadata[index];
-    const annotationText = annotation.state === 'present' ? `注釈${annotation.count}件` : annotation.state === 'missing' ? '注釈メタデータなし' : '注釈データを確認できません';
+    const annotationText = annotation.state === 'present' ? `注釈${annotation.count}件` : annotation.state === 'missing' ? (item.sceneCount !== undefined ? `PNG内メタデータなし・管理台帳の注釈${item.sceneCount}件` : '注釈メタデータなし') : '注釈データを確認できません';
     details.textContent = annotationText;
     const button = document.createElement('button'); button.type = 'button'; button.className = 'image-comparison-image';
     button.setAttribute('aria-label', `${item.label}を実寸表示`);
@@ -84,5 +88,13 @@ export function showImageComparison(images: ComparisonImage[], title = '撮影�
     const finish = () => { dialog.close(); dialog.remove(); resolve(); };
     dialog.querySelector('[data-close]')!.addEventListener('click', finish);
     dialog.addEventListener('cancel', event => { event.preventDefault(); finish(); });
+    const adopt = dialog.querySelector<HTMLButtonElement>('[data-adopt]')!;
+    if (action) {
+      adopt.hidden = false; adopt.textContent = action.label; adopt.disabled = Boolean(action.disabled);
+      adopt.addEventListener('click', () => {
+        adopt.disabled = true;
+        void action.run().then(done => { if (done) finish(); else adopt.disabled = Boolean(action.disabled); }, error => { adopt.disabled = false; const failure = document.createElement('p'); failure.role = 'alert'; failure.className = 'image-comparison-error'; failure.textContent = String(error); dialog.querySelector('.panel-header')!.after(failure); });
+      });
+    }
   });
 }

@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+};
 use tauri::{Emitter, Manager, State};
 
 mod clipboard_paths;
@@ -149,17 +152,24 @@ fn import_launch_commands_from_path(root: String, legacy: &std::path::Path) -> R
     Ok(commands)
 }
 
+#[derive(serde::Serialize)]
+struct LaunchedApplication {
+    pid: u32,
+    host_pid: u32,
+    program: String,
+}
+
 #[tauri::command]
-fn test_launch_application(program: String, args: Vec<String>) -> Result<(), String> {
-    if program.trim().is_empty() {
-        return Err("アプリのパスを指定してください。".into());
-    }
+fn test_launch_application(program: String, args: Vec<String>, root: Option<String>) -> Result<LaunchedApplication, String> {
+    if program.trim().is_empty() { return Err("アプリのパスを指定してください。".into()); }
     let executable = manual_core::platform::application_executable(&program)?;
-    std::process::Command::new(executable)
-        .args(args)
-        .spawn()
-        .map_err(|e| format!("アプリを起動できません: {e}"))?;
-    Ok(())
+    let mut command = std::process::Command::new(&executable);
+    command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    if let Some(root) = root { command.current_dir(root); }
+    let mut child = command.spawn().map_err(|e| format!("アプリを起動できません: {e}"))?;
+    let pid = child.id();
+    std::thread::spawn(move || { let _ = child.wait(); });
+    Ok(LaunchedApplication { pid, host_pid: std::process::id(), program: executable.to_string_lossy().into_owned() })
 }
 
 #[tauri::command]
@@ -877,7 +887,8 @@ fn prepare_library_screenshot(
         if edit["ui"].is_null() {
             None
         } else {
-            Some(serde_json::from_value(edit["ui"].clone()).map_err(|e| e.to_string())?)
+            let elements = edit["ui"].get("elements").unwrap_or(&edit["ui"]);
+            Some(serde_json::from_value(elements.clone()).map_err(|e| format!("画面要素データを読み込めません: {e}"))?)
         };
     let ui = if let Some(crop) = &crop {
         ui.map(|elements| {
@@ -939,7 +950,7 @@ async fn edit_library_screenshot(
         let handoff = prepare_library_screenshot(root, id, revision)?;
         let mut command =
             std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
-        command
+        let mut child = command
             .arg("--manual-studio-annotate")
             .arg("--manual-studio-input")
             .arg(handoff["sourceFile"].as_str().ok_or("Invalid input")?)
@@ -953,7 +964,170 @@ async fn edit_library_screenshot(
             )
             .spawn()
             .map_err(|e| e.to_string())?;
+        let completion = PathBuf::from(handoff["completionFile"].as_str().ok_or("Invalid session")?);
+        std::thread::spawn(move || {
+            let result = child.wait();
+            if !completion.is_file() && !completion.with_extension("exit").is_file() {
+                let _ = fs::write(completion.with_extension("exit"),format!("MarkItsが編集完了前に終了しました ({result:?})。元画像は保持しています。再度編集できます。"));
+            }
+        });
         Ok(handoff)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn edit_document_image(
+    root: String,
+    relative_path: String,
+    page: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root_path = PathBuf::from(&root);
+        let canonical_root = root_path.canonicalize().unwrap_or_else(|_| root_path.clone());
+
+        let full_path = if let Some(ref p) = page {
+            manual_core::preview::resolve_asset_path(&root_path, p, &relative_path)
+                .or_else(|_| manual_core::config::project_path(&root_path, &relative_path))?
+        } else {
+            manual_core::config::project_path(&root_path, &relative_path)?
+        };
+
+        if !full_path.is_file() {
+            return Err(format!("画像ファイルが見つかりません: {relative_path}"));
+        }
+
+        // Managed images must use the original/scene handoff and candidate
+        // adoption flow, even when editing starts in the manuscript.
+        let library = manual_core::screenshots::list(&root_path)?;
+        for shot in library["items"].as_array().into_iter().flatten() {
+            if let Some(output) = shot["output"].as_str() {
+                let managed = manual_core::config::project_path(&root_path, output)?;
+                if managed.canonicalize().ok() == Some(full_path.canonicalize().map_err(|e| e.to_string())?) {
+                    return Ok(serde_json::json!({"managedScreenshotId": shot["id"], "revision": shot["adopted"]}));
+                }
+            }
+        }
+
+        let original_relative = full_path.strip_prefix(&canonical_root)
+            .map_err(|_| "プロジェクト外の画像は編集できません。")?
+            .to_string_lossy().replace('\\', "/");
+        let copied = manual_core::resources::copy(&root_path, &original_relative)?;
+        let copy_relative = copied["path"].as_str().ok_or("編集コピーを作成できませんでした。")?;
+        let target_path = manual_core::config::project_path(&root_path, copy_relative)?;
+        let bytes = fs::read(&full_path).map_err(|e| e.to_string())?;
+        let session_id = manual_core::screenshots::new_id("session");
+        let home = manual_core::config::project_path(
+            &root_path,
+            &format!(".munin/sessions/{session_id}"),
+        )?;
+        fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+        let input = home.join("input.png");
+        let output = home.join("output.png");
+        let completion = home.join("complete.done");
+
+        // MarkIts expects an image input. If source is JPEG/etc, decode and re-encode to PNG so MarkIts loads cleanly.
+        if let Ok(dynamic_image) = image::load_from_memory(&bytes) {
+            dynamic_image
+                .save_with_format(&input, image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
+        } else {
+            fs::write(&input, &bytes).map_err(|e| e.to_string())?;
+        }
+
+        let mut command =
+            std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+        command
+            .arg("--manual-studio-annotate")
+            .arg("--manual-studio-input")
+            .arg(&input)
+            .arg("--manual-studio-output")
+            .arg(&output)
+            .arg("--manual-studio-completion")
+            .arg(&completion);
+        let mut child = command.spawn().map_err(|e| e.to_string())?;
+        let completion_marker = completion.clone();
+        std::thread::spawn(move || {
+            let result = child.wait();
+            let exit_marker = completion_marker.with_extension("exit");
+            if !completion_marker.is_file() && !exit_marker.is_file() {
+                let _ = fs::write(exit_marker, format!("MarkItsが編集完了前に終了しました ({result:?})。元画像は保持しています。再度編集できます。"));
+            }
+        });
+
+        let rel = target_path
+            .strip_prefix(&canonical_root)
+            .unwrap_or(&full_path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        Ok(serde_json::json!({
+            "sourceFile": input.to_string_lossy(),
+            "annotationFile": output.to_string_lossy(),
+            "completionFile": completion.to_string_lossy(),
+            "targetFile": target_path.to_string_lossy(),
+            "relativePath": rel,
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn document_image_edit_ready(
+    completion_file: String,
+    annotation_file: String,
+) -> Result<Option<bool>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let completion = PathBuf::from(&completion_file);
+        let output = PathBuf::from(&annotation_file);
+        if completion.is_file() {
+            if fs::metadata(&output).map(|m| m.len() > 0).unwrap_or(false) {
+                return Ok(Some(true));
+            } else {
+                return Err("MarkItsで画像が保存されませんでした。".into());
+            }
+        }
+        let exit_marker = completion.with_extension("exit");
+        if exit_marker.is_file() {
+            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| "MarkItsが保存前に終了しました。".into()));
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn apply_document_image_edit(
+    target_file: String,
+    annotation_file: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target_path = PathBuf::from(&target_file);
+        let annotation_path = PathBuf::from(&annotation_file);
+        if !annotation_path.is_file() {
+            return Err("編集後の画像ファイルが見つかりません。".into());
+        }
+        let ext = target_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if ext == "jpg" || ext == "jpeg" {
+            let img = image::open(&annotation_path).map_err(|e| e.to_string())?;
+            img.save_with_format(&target_path, image::ImageFormat::Jpeg)
+                .map_err(|e| e.to_string())?;
+        } else if ext == "webp" {
+            let img = image::open(&annotation_path).map_err(|e| e.to_string())?;
+            img.save_with_format(&target_path, image::ImageFormat::WebP)
+                .map_err(|e| e.to_string())?;
+        } else {
+            let output_bytes = fs::read(&annotation_path).map_err(|e| e.to_string())?;
+            fs::write(&target_path, output_bytes).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1051,7 +1225,10 @@ fn main() {
             cleanup_markits_capture,
             clone_operation_scenario_for_task,
             open_editor,
-            open_output
+            open_output,
+            edit_document_image,
+            document_image_edit_ready,
+            apply_document_image_edit
         ])
         .run(context)
         .expect("Failed to start Munin Manual Studio");
@@ -1083,6 +1260,25 @@ mod application_profile_tests {
         assert_eq!(after["screenshot"]["adopted"],before["screenshot"]["adopted"]);
         assert_eq!(after["screenshot"]["edits"].as_array().unwrap().len(),2,"repeated empty-annotation completion saves one candidate");
         assert_eq!(manual_core::screenshots::image(root.path(),&id,None,true).unwrap()["data"],format!("data:image/png;base64,{source}"));
+    }
+    #[test]
+    fn library_handoff_accepts_wrapped_and_array_ui_elements() {
+        use base64::Engine;
+        let root = tempfile::tempdir().unwrap();
+        let image = image::DynamicImage::new_rgba8(20,16);
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut buffer,image::ImageFormat::Png).unwrap();
+        let source = base64::engine::general_purpose::STANDARD.encode(buffer.into_inner());
+        let elements = serde_json::json!([{"role":"button","name":"Save","x":1.0,"y":2.0,"width":8.0,"height":5.0}]);
+        for ui in [elements.clone(),serde_json::json!({"elements":elements})] {
+            let saved = manual_core::screenshots::register(root.path(),&serde_json::json!({"source":source,"ui":ui})).unwrap();
+            let id = saved["screenshot"]["id"].as_str().unwrap().to_string();
+            let handoff = prepare_library_screenshot(root.path().to_string_lossy().into_owned(),id,None).unwrap();
+            let png = fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap();
+            let metadata = markits_desktop_lib::metadata::extract_ui_elements(&png).unwrap().unwrap();
+            assert_eq!(metadata.len(),1);
+            assert_eq!(metadata[0].name.as_deref(),Some("Save"));
+        }
     }
     #[test]
     fn handoff_reconstructs_raw_crop_scene_and_full_original_after_reload() {
@@ -1193,5 +1389,45 @@ mod application_profile_tests {
         let restored: LaunchCommand =
             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
         assert_eq!(restored.id, id);
+    }
+
+    #[test]
+    fn document_image_edit_and_apply_flow() {
+        let root = tempfile::tempdir().unwrap();
+        let docs = root.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        let img_path = docs.join("sample.png");
+        let initial_img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(10, 10, image::Rgba([255, 0, 0, 255])));
+        initial_img.save_with_format(&img_path, image::ImageFormat::Png).unwrap();
+
+        let handoff = tauri::async_runtime::block_on(edit_document_image(
+            root.path().to_string_lossy().into_owned(),
+            "docs/sample.png".into(),
+            None,
+        )).unwrap();
+
+        let annotation_file = handoff["annotationFile"].as_str().unwrap();
+        let completion_file = handoff["completionFile"].as_str().unwrap();
+
+        // Simulate MarkIts saving standard edited PNG without MarkIts metadata
+        let edited_img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(20, 20, image::Rgba([0, 255, 0, 255])));
+        edited_img.save_with_format(annotation_file, image::ImageFormat::Png).unwrap();
+        fs::write(completion_file, "saved").unwrap();
+
+        let ready = tauri::async_runtime::block_on(document_image_edit_ready(
+            completion_file.into(),
+            annotation_file.into(),
+        )).unwrap();
+        assert_eq!(ready, Some(true));
+
+        // Apply edit and verify target_file was updated with new pixels
+        let target_file = handoff["targetFile"].as_str().unwrap();
+        tauri::async_runtime::block_on(apply_document_image_edit(
+            target_file.into(),
+            annotation_file.into(),
+        )).unwrap();
+
+        let updated_img = image::open(target_file).unwrap();
+        assert_eq!((updated_img.width(), updated_img.height()), (20, 20));
     }
 }

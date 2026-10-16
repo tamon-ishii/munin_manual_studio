@@ -120,6 +120,16 @@ fn run_mode(
     serde_json::to_string(&completed).map_err(|error| error.to_string())
 }
 
+/// Validate a library capture independently of retired manuscript task tags.
+pub(crate) fn validate_asset_recipe(root:&Path,recipe:&serde_json::Value,id:&str)->Result<(),String>{
+    let mut normalized=recipe.clone();let steps=normalized["steps"].as_array_mut().ok_or("撮影手順がありません。")?;
+    let mut count=0;
+    for step in steps{if let Some(shot)=step.get_mut("screenshot"){shot["task"]=serde_json::json!(id);count+=1;}}
+    if count!=1{return Err("画像ごとの撮影手順には撮影を1回だけ指定してください。".into());}
+    let selected=[super::task::Task{id:id.into(),name:String::new(),kind:"screenshot".into(),page:String::new(),prompt:String::new(),source_sha256:String::new(),status:"pending".into()}];
+    validate_json_with_tasks(root,&normalized.to_string(),&selected)
+}
+
 /// Replay a stored screenshot recipe without reading or updating AI tags.
 pub fn capture_asset(root: &Path, recipe: &serde_json::Value, id: &str) -> Result<Vec<u8>, String> {
     let mut recipe = recipe.clone();
@@ -307,10 +317,6 @@ pub(crate) fn save_with_tasks(
     let formatted = serde_json::to_string_pretty(&normalized).map_err(|error| error.to_string())?;
     fs::write(&destination, formatted).map_err(|error| error.to_string())?;
     Ok(destination.display().to_string())
-}
-
-pub(crate) fn validate_json(root: &Path, json: &str) -> Result<(), String> {
-    validate_json_with_tasks(root, json, &[])
 }
 
 pub(crate) fn validate_json_with_tasks(

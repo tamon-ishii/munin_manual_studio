@@ -17,7 +17,7 @@ export class CaptureSessionStore {
   }
 
   begin(input: Omit<CaptureSession, "generation">): CaptureSession {
-    if (this.currentSession) throw new Error("撮影AIタグの作成中は、新しい撮影を開始できません。");
+    if (this.currentSession) throw new Error("スクリーンショット処理中は、新しい撮影を開始できません。");
     if (!input.root.trim() || !input.page.trim() || !input.id.trim()) throw new Error("撮影対象のプロジェクト・文書・IDを指定してください。");
     const session = Object.freeze({
       ...input,
@@ -47,7 +47,7 @@ export class CaptureSessionStore {
 
   assertInactive(): void {
     if (this.currentSession) {
-      throw new Error("撮影AIタグの作成中は、完了またはキャンセルしてからプロジェクト・文書を切り替えてください。");
+      throw new Error("スクリーンショット処理中は、完了またはキャンセルしてからプロジェクト・文書を切り替えてください。");
     }
   }
 }

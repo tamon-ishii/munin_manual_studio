@@ -26,7 +26,10 @@ try {
   async function tree(file){await page.locator('#tree-search').fill(file.split('/').at(-1));await page.locator(`[data-page="${file}"],[data-image="${file}"]`).click();await idle();await page.locator('#tree-search').fill('');}
   await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   assert.equal(await page.locator('#save-page').count(),0,'the editor has no save button');
-  assert.equal(await page.locator('#shortcut-help + #generate-page').textContent(),'更新');
+  assert.equal(await page.locator('#generate-page').count(),0,'the retired task update button is not present');
+  await page.locator('#editor-more>summary').click();
+  assert.equal(await page.locator('#shortcut-help').textContent(),'ショートカット');
+  await page.locator('#editor-more>summary').click();
   await page.locator('#markdown-editor').fill(initial+'Autosaved draft.\n');
   await page.waitForFunction(()=>document.querySelector('#document-tabs [data-document-page="index.md"]').textContent==='index.md');
   assert.match(await readFile(path.join(root,'docs/index.md'),'utf8'),/Autosaved draft/,'idle edits are persisted without a save action');
@@ -85,13 +88,13 @@ try {
   await readFile(path.join(root,'docs/index.md'));assert.equal((await rpc('state')).includes('docs/nested/new-folder'),true);
   await page.locator('[data-folder="docs/nested"]>summary').click({button:'right'});await page.getByRole('menuitem',{name:'Markdownを作成',exact:true}).click();await page.locator('#new-page-path').fill('docs/nested/new-page.md');await page.locator('#new-page-title').fill('New page');await page.locator('#new-page-form button[type=submit]').click();await idle();assert.match(await readFile(path.join(root,'docs/nested/new-page.md'),'utf8'),/# New page/);
   await tree('docs/output.md');await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
-  await page.locator('.ai-output-metadata').first().waitFor({state:'attached'});assert.equal(await page.locator('.ai-output-metadata').first().isVisible(),false);assert.match(await page.locator('.milkdown-ai-task-body').textContent(),/Generated body/);assert.match(await page.locator('#markdown-editor').inputValue(),/ai:generated/);
+  assert.equal(await page.locator('.milkdown-ai-task').count(),0);assert.match(await page.locator('.ProseMirror').textContent(),/Generated body/);assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/ai:generated|ai:task/);
   // Preserve rich editor undo state when switching between document tabs.
-  await page.locator('.milkdown-ai-task-body p').last().click();await page.keyboard.press('End');await page.keyboard.type(' rich draft');const richDraft=await page.locator('#markdown-editor').inputValue();
+  await page.locator('.ProseMirror p').filter({hasText:'Generated body'}).click();await page.keyboard.press('End');await page.keyboard.type(' rich draft');const richDraft=await page.locator('#markdown-editor').inputValue();
   await page.locator('[data-document-page="index.md"]').click();await idle();await page.locator('[data-document-page="output.md"]').click();await idle();assert.equal(await page.locator('#markdown-editor').inputValue(),richDraft);
-  await page.locator('.milkdown-ai-task-body p').last().click();await page.keyboard.press('Control+z');assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/rich draft/);
+  await page.locator('.ProseMirror p').filter({hasText:'Generated body'}).click();await page.keyboard.press('Control+z');assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/rich draft/);
   // Display customization persists and can be reset.
-  await page.locator('#settings-menu>summary').click();await page.getByRole('button',{name:'外観設定',exact:true}).click();await page.locator('#toolbar-customization>summary').click();
+  await page.getByRole('button',{name:'外観',exact:true}).click();await page.locator('#toolbar-customization>summary').click();
   const bold=page.locator('#toolbar-customization-list label').filter({hasText:/^太字$/}).locator('input');await bold.uncheck();assert.equal(await page.locator('.milkdown-top-bar button[aria-label="太字"]').isVisible(),false);
   await page.locator('#reset-toolbar-customization').click();assert.equal(await bold.isChecked(),true);await page.locator('[data-close-dialog=panel-appearance]').click();
   // Shared originals and reusable scene/crop templates create independent candidates.
@@ -101,13 +104,42 @@ try {
   const applied=JSON.parse(await rpc('screenshots-change',{id:copy.screenshot.id,json:{apply_template:template.id}}));assert.equal(applied.screenshot.adopted,adopted);assert.equal(applied.screenshot.edits.at(-1).scene.annotations.length,0);
   assert.equal(JSON.parse(await rpc('screenshots-image',{id:copy.screenshot.id,json:{original:true}})).data,`data:image/png;base64,${png.toString('base64')}`);
   const report=JSON.parse(await rpc('screenshots-diagnose'));assert.match(report.items[0].checks.join(' '),/撮影手順なし/);
-  await page.locator('[data-tab=screenshots]').click();await page.locator('#screenshot-library-refresh').evaluate(button=>button.click());await idle();await page.locator('.screenshot-management').first().locator('summary').click();await page.getByRole('button',{name:'共有関係',exact:true}).first().click();await page.getByRole('heading',{name:'共有原本と使用原稿'}).waitFor();assert.match(await page.locator('dialog[open]').textContent(),/派生画像2枚/);await page.locator('dialog[open]').getByRole('button',{name:'閉じる',exact:true}).click();
+  await page.locator('[data-tab=screenshots]').click();await page.locator('#screenshot-library-refresh').evaluate(button=>button.click());await idle();await page.locator('.resource-item-menu>summary').first().click();await page.locator('.screenshot-management').first().locator('summary').click();await page.getByRole('button',{name:'共有関係',exact:true}).first().click();await page.getByRole('heading',{name:'共有原本と使用原稿'}).waitFor();assert.match(await page.locator('dialog[open]').textContent(),/派生画像2枚/);await page.locator('dialog[open]').getByRole('button',{name:'閉じる',exact:true}).click();
   // Generate via a local HTTP fixture and insert only after reviewing the saved image.
   await rpc('image-generation-settings',{json:{save:true,model:'fixture-image-model',endpoint:`http://127.0.0.1:${api.address().port}/images/generations`}});
-  await page.locator('[data-tab=editor]').click();await page.locator('#editor-more>summary').click();await page.locator('#generate-ai-image').click();await idle();const drawing=page.locator('[data-ai-image]');await drawing.getByRole('textbox',{name:'画像の指示'}).fill('A diagram illustration');await drawing.locator('details>summary').click();await drawing.locator('input[type=password]').fill('fixture-key');await drawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();await drawing.locator('img').waitFor();assert.equal(requests,1);
-  const settings=await readFile(path.join(root,'.munin/image-generation.json'),'utf8');assert.doesNotMatch(settings,/fixture-key/);assert.match(await drawing.locator('[role=status]').textContent(),/画像を保存/);
+  await page.locator('[data-tab=editor]').click();await page.locator('#editor-more>summary').click();await page.locator('#generate-ai-image').click();await idle();const drawing=page.locator('[data-ai-image]');assert.equal(await drawing.getByRole('combobox',{name:'生成方法',exact:true}).inputValue(),'agy');await drawing.getByRole('combobox',{name:'生成方法',exact:true}).selectOption('codex');assert.equal(await drawing.locator('input[type=password]').isVisible(),false);await drawing.getByRole('combobox',{name:'生成方法',exact:true}).selectOption('api');await drawing.getByRole('textbox',{name:'画像の指示'}).fill('A diagram illustration');if(!await drawing.locator('input[type=password]').isVisible())await drawing.locator('details>summary').click();await drawing.locator('input[type=password]').fill('fixture-key');await drawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();await drawing.locator('img.generated-image-preview').waitFor();assert.equal(requests,1);assert.equal(await drawing.locator('.generated-stack-item').count(),1);
+  const settings=await readFile(path.join(root,'.munin/image-generation.json'),'utf8');assert.doesNotMatch(settings,/fixture-key/);assert.equal(JSON.parse(settings).provider,'api');assert.match(await drawing.locator('.image-generation-status').textContent(),/画像.*を保存/);
+  await drawing.getByRole('button',{name:'原稿に挿入',exact:true}).click();await page.locator('[data-screenshot-destination]').getByRole('button',{name:'閉じる',exact:true}).click();assert.equal(await drawing.isVisible(),true,'cancel destination retains the drawing dialog');assert.equal(await drawing.getByRole('textbox',{name:'画像の指示'}).inputValue(),'A diagram illustration');assert.equal(await drawing.locator('img.generated-image-preview').isVisible(),true);
   await drawing.getByRole('button',{name:'原稿に挿入',exact:true}).click();await page.getByRole('combobox',{name:'挿入先の原稿',exact:true}).selectOption('index.md');await page.getByRole('combobox',{name:'挿入先の位置',exact:true}).selectOption('end');await page.getByRole('button',{name:'ここに挿入',exact:true}).click();await idle();assert.match(await page.locator('#markdown-editor').inputValue(),/generated\/ai-image-/);
+  // Verify raw generated image is saved without forced scaling.
+  const secondResult = JSON.parse(await rpc('image-generate', {json: {prompt: 'diagram', api_key: 'fixture-key'}}));
+  assert.ok(secondResult.path);
+  const secondBytes = await readFile(path.join(root, secondResult.path));
+  assert.ok(secondBytes.length > 0);
   const beforeFailure=await page.locator('#markdown-editor').inputValue();fail=true;
   await assert.rejects(()=>rpc('image-generate',{json:{prompt:'failed',api_key:'fixture-key',size:'1024x1024'}}),/HTTP 401/);assert.equal(await page.locator('#markdown-editor').inputValue(),beforeFailure);
+  // Provider selection routes explicitly and persists independently of API keys.
+  const routedProviders=[];
+  await page.route('**/__manual/rpc',async route=>{
+    const payload=route.request().postDataJSON();
+    if(payload.action!=='image-generate'){await route.continue();return;}
+    routedProviders.push(payload.options.json.provider);
+    assert.equal(payload.options.json.api_key,'');
+    await route.fulfill({json:{output:JSON.stringify({path:secondResult.path})}});
+  });
+  await page.locator('#generate-ai-image').click();await idle();
+  const providerDrawing=page.locator('[data-ai-image]');
+  const providerSelect=providerDrawing.getByRole('combobox',{name:'生成方法',exact:true});
+  assert.equal(await providerSelect.inputValue(),'api','previous provider is restored');
+  await providerDrawing.getByRole('textbox',{name:'画像の指示'}).fill('Landscape');
+  for(const provider of ['codex','agy']){
+    await providerSelect.selectOption(provider);
+    assert.equal(await providerDrawing.locator('input[type=password]').isVisible(),false);
+    await providerDrawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();
+    assert.equal(JSON.parse(await readFile(path.join(root,'.munin/image-generation.json'),'utf8')).provider,provider);
+    assert.equal(await providerDrawing.getByRole('button',{name:'原稿に挿入',exact:true}).isEnabled(),true);
+  }
+  assert.deepEqual(routedProviders,['codex','agy']);
+  assert.equal(await page.locator('#markdown-editor').inputValue(),beforeFailure,'CLI previews do not insert into manuscript automatically');
   assert.deepEqual(errors,[]);console.log('Document tabs, draft/history retention, image tabs/drop, tree context creation, hidden AI metadata, toolbar customization, screenshot templates/relationships/diagnosis, and image API generation/insertion checks passed.');
 } finally {await browser?.close();server?.kill();await new Promise(resolve=>api?api.close(resolve):resolve());await rm(root,{recursive:true,force:true});}

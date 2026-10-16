@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { captureInsertionContext, isInsertionCurrent } from '../apps/manual-studio/src/insertionContext';
+
+const doc = { page: 'a.md' }, other = { page: 'b.md' };
+const start = { document: doc, root: '/p', content: 'text' };
+const source = captureInsertionContext(start);
+assert.equal(isInsertionCurrent(source, start), true, 'unchanged state is current');
+assert.equal(isInsertionCurrent(source, { ...start, content: 'text!' }), false, 'source entries reject changed text');
+assert.equal(isInsertionCurrent(source, { ...start, document: other }), false, 'another document is rejected');
+assert.equal(isInsertionCurrent(source, { ...start, document: null }), false, 'closed document is rejected');
+assert.equal(isInsertionCurrent(source, { ...start, root: '/q' }), false, 'another project is rejected');
+const rich = captureInsertionContext(start, { checksContent: false });
+assert.equal(isInsertionCurrent(rich, { ...start, content: 'typed meanwhile' }), true, 'rich upload tolerates text edits');
+assert.equal(isInsertionCurrent(rich, { ...start, document: other }), false, 'rich upload still rejects another document');
+assert.equal(isInsertionCurrent(rich, { ...start, root: '/q' }), false, 'rich upload still rejects another project');
+const session = captureInsertionContext({ ...start, documentSession: 7 }, { checksContent: false });
+assert.equal(isInsertionCurrent(session, { ...start, document: { ...doc }, documentSession: 7 }), true, 'autosave metadata refresh keeps the same document session');
+assert.equal(isInsertionCurrent(session, { ...start, documentSession: 8 }), false, 'switching away and reopening the same page invalidates the upload');
+assert.equal(isInsertionCurrent(session, start), false, 'a missing session cannot certify a pending upload');
+assert.equal(isInsertionCurrent(session, { ...start, document: null, documentSession: 7 }), false, 'closing the document invalidates the upload');
+assert.equal(isInsertionCurrent(captureInsertionContext({ ...start, document: null, documentSession: 7 }), { ...start, documentSession: 7 }), false, 'an insertion started without a document is never valid');
+console.log('Insertion context passed: document, project and text identity for source and rich entries.');

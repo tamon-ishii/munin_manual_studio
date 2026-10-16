@@ -1454,7 +1454,8 @@ mod identity_tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
         let saved =
             crate::editor::save(root.path(), "index.md", source, Some(&document.revision)).unwrap();
-        assert!(saved.content.contains(" id="));
+        assert!(!saved.content.contains("ai:task"));
+        assert!(saved.content.contains("本文"));
         assert_eq!(
             normalize_identifiers("index.md", &saved.content).unwrap(),
             saved.content
@@ -1473,10 +1474,9 @@ mod identity_tests {
             .collect();
         assert_ne!(ids[0], ids[1]);
         assert_eq!(saved, normalize_identifiers("index.md", &saved).unwrap());
-        if let PageTag::Task { task, .. } | PageTag::Generated { task, .. } = &tags[0] {
-            assert!(render_task_block(task, "生成した本文", &utc_now(), None)
-                .contains("name=\"同じ名前\""));
-        }
+        let (PageTag::Task { task, .. } | PageTag::Generated { task, .. }) = &tags[0];
+        assert!(render_task_block(task, "生成した本文", &utc_now(), None)
+            .contains("name=\"同じ名前\""));
         let renamed = saved
             .replace("同じ名前", "別名")
             .replace("説明", "新しい説明");

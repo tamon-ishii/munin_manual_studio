@@ -842,9 +842,6 @@ pub fn finish_excluding_control(
         }
     }
     let mut events = read_events(&session.event_file)?;
-    if events.is_empty() {
-        return Err("記録された操作がありません。".into());
-    }
     if let Some((left, top, width, height)) = control_bounds {
         events.retain(|event| {
             !matches!(event, RecordedEvent::Click { x, y, .. }
@@ -1687,25 +1684,12 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn finish_with_no_events_still_stops_recording_and_target_processes() {
+    fn empty_recording_still_produces_a_valid_launch_and_window_recipe() {
         let root = test_dir("empty-recording");
-        let event_file = root.join("events.jsonl");
-        fs::write(&event_file, "\n").unwrap();
-        let recorder = Command::new("sh")
-            .args(["-c", "exec sleep 60"])
-            .spawn()
-            .unwrap();
-        let recorder_pid = recorder.id();
-        let app_child = Command::new("sh")
-            .args(["-c", "exec sleep 60"])
-            .spawn()
-            .unwrap();
-        let app_pid = app_child.id();
-        let state = RecorderState::default();
-        state.0.lock().unwrap().session = Some(Session {
-            recorder: Some(recorder),
-            app_child: Some(app_child),
-            event_file: event_file.clone(),
+        let session = Session {
+            recorder: None,
+            app_child: None,
+            event_file: root.join("events.jsonl"),
             root: root.clone(),
             program: "demo".into(),
             args: vec![],
@@ -1719,18 +1703,10 @@ mod tests {
             },
             task_id: "demo-shot".into(),
             markits_program: "markits-desktop".into(),
-        });
-
-        assert!(finish(&state)
-            .unwrap_err()
-            .contains("記録された操作がありません"));
-        assert!(!Path::new(&format!("/proc/{recorder_pid}")).exists());
-        assert!(!Path::new(&format!("/proc/{app_pid}")).exists());
-        assert!(
-            !event_file.exists(),
-            "failed recordings must remove their event journal"
-        );
-        assert!(state.0.lock().unwrap().session.is_none());
+        };
+        let scenario = build_scenario(&session, &[]);
+        assert_eq!(scenario["steps"].as_array().unwrap().len(), 3);
+        assert_eq!(events_to_text(&[], &session.window), "");
         fs::remove_dir_all(root).unwrap();
     }
 

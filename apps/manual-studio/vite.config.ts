@@ -13,7 +13,32 @@ const cli = path.join(target, "debug", process.platform === "win32" ? "manualctl
 export default defineConfig({
   root, base: "./", clearScreen: false,
   server: { host: "127.0.0.1", port: 5174, strictPort: true },
-  build: { outDir: "dist", target: "es2022", emptyOutDir: true },
+  build: {
+    outDir: "dist", target: "es2022", emptyOutDir: true,
+    // Mermaid distributes a single lazy parser (~670 kB minified) that Rollup
+    // cannot split internally. Keep headroom for this upstream module.
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // Keep optional diagram and language modules separate from the editor.
+        onlyExplicitManualChunks: true,
+        manualChunks(id) {
+          const modulePath = id.replaceAll("\\", "/");
+          if (!modulePath.includes("/node_modules/")) return;
+          const relative = modulePath.split("/node_modules/").at(-1)!;
+          const parts = relative.split("/");
+          const packageName = parts[0].startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+          if (["mermaid", "@mermaid-js/parser", "katex"].includes(packageName)) {
+            const owner = packageName === "katex" && modulePath.includes("/@milkdown/crepe/node_modules/") ? "crepe-" : "";
+            return `${owner}${packageName.replaceAll("/", "-").replace("@", "")}-${path.basename(modulePath).replaceAll(".", "-")}`;
+          }
+          if (["@milkdown/kit", "vue", "robust-predicates", "delaunator"].includes(packageName)
+            || packageName.startsWith("d3-") || packageName.startsWith("micromark-")) return;
+          return `vendor-${packageName.replaceAll("/", "-").replace("@", "")}`;
+        },
+      },
+    },
+  },
   plugins: [{
     name: "manual-studio-local-development",
     configureServer(server) {

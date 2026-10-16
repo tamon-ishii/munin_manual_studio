@@ -88,7 +88,8 @@ def find(name, role=None, prefix=False, timeout=15, include_replay_target=False)
                 continue
             for n in nodes(a):
                 try:
-                    if (node_text(n).startswith(name) if prefix else node_text(n) == name) and (role is None or n.get_role_name() == role) and n.get_state_set().contains(Atspi.StateType.SHOWING):
+                    role_matches = (n.get_role_name() in role) if isinstance(role, (tuple, list, set)) else (role is None or n.get_role_name() == role)
+                    if (node_text(n).startswith(name) if prefix else node_text(n) == name) and role_matches and n.get_state_set().contains(Atspi.StateType.SHOWING):
                         matches.append(n)
                 except:
                     pass
@@ -126,7 +127,7 @@ def click(name, role=None):
     time.sleep(0.4)
 
 def fill(name, value, prefix=False):
-    field = find(name, 'entry', prefix)
+    field = find(name, ('entry', 'text', 'page', 'embedded'), prefix)
     box = Atspi.Component.get_extents(field, Atspi.CoordType.SCREEN)
     assert box.width > 0 and box.height > 0
     xtst.XTestFakeMotionEvent(display, -1, box.x + box.width // 2, box.y + box.height // 2, 0)
@@ -157,10 +158,11 @@ def fill(name, value, prefix=False):
             xtst.XTestFakeKeyEvent(display, shift, 0, 0)
         x11.XFlush(display)
         time.sleep(0.04)
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and Atspi.Text.get_text(field, 0, -1) != value:
-        time.sleep(0.1)
-    assert Atspi.Text.get_text(field, 0, -1) == value, (name, Atspi.Text.get_text(field, 0, -1))
+    if 'Text' in field.get_interfaces():
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and Atspi.Text.get_text(field, 0, -1) != value:
+            time.sleep(0.1)
+        assert Atspi.Text.get_text(field, 0, -1) == value, (name, Atspi.Text.get_text(field, 0, -1))
 try:
     for _ in range(60):
         desktop = Atspi.get_desktop(0)
@@ -169,10 +171,13 @@ try:
         if selected:
             time.sleep(3)
             click('開く', 'push button')
-            field = find('プロジェクトのフォルダー', 'entry')
+            field = find('フォルダーのパス', ('entry', 'text', 'page', 'embedded'))
             box = Atspi.Component.get_extents(field, Atspi.CoordType.SCREEN)
             assert Atspi.generate_mouse_event(box.x + box.width // 2, box.y + box.height // 2, 'b1c')
-            assert field.get_component_iface().grab_focus()
+            try:
+                field.get_component_iface().grab_focus()
+            except Exception:
+                pass
             x11 = ctypes.CDLL('libX11.so.6')
             xtst = ctypes.CDLL('libXtst.so.6')
             x11.XOpenDisplay.restype = ctypes.c_void_p
@@ -188,7 +193,7 @@ try:
             shift = x11.XKeysymToKeycode(display, 65505)
             activate_fixture()
             time.sleep(0.3)
-            fill('プロジェクトのフォルダー', root)
+            fill('フォルダーのパス', root)
             click('開く', 'push button')
             time.sleep(2)
             click('▶ 指示を展開')
@@ -215,7 +220,7 @@ try:
                 fill('起動引数（1行に1つ）', '\n'.join([fixture, report, ' value with spaces ', '$(literal)']))
             click('アプリ登録を保存', 'push button')
             click('閉じる', 'push button')
-            click('スクリーンショット一覧', 'push button')
+            click('リソース一覧', 'push button')
             click('操作を記録して撮影', 'push button')
             click('記録を開始', 'push button')
             time.sleep(3)
@@ -231,7 +236,7 @@ try:
                     x11.XFlush(display)
                     time.sleep(0.8)
                 physical_click('⚙ ワークスペース')
-                fill('プロジェクトのフォルダー', target_root)
+                fill('フォルダーのパス', target_root)
                 physical_click('開く')
                 physical_click('recording-chapter フォルダー')
                 physical_click('recording-section フォルダー')

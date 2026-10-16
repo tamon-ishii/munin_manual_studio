@@ -1,7 +1,7 @@
 {
   "name": "munin-manual-studio",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.9.9",
   "type": "module",
   "scripts": {
     "manual:dev": "vite --config apps/manual-studio/vite.config.ts",
@@ -12,6 +12,9 @@
     "manual:check-ui": "node scripts/check_manual_studio.mjs --group ui",
     "manual:check-generation": "node scripts/check_manual_studio.mjs --group generation",
     "manual:check-capture": "node scripts/check_manual_studio.mjs --group capture",
+    "manual:check-coverage": "node scripts/check_manual_studio_coverage.mjs --require-complete",
+    "manual:build-verification": "node scripts/build_manual_studio_verification.mjs",
+    "manual:check-desktop": "node scripts/check_manual_studio.mjs --group desktop",
     "manual:app": "npm run manual:build-markits && cd apps/manual-studio && tauri dev",
     "manual:bundle": "cd apps/manual-studio && tauri build",
     "manual:smoke": "node scripts/smoke_manual_studio.mjs --start-server",

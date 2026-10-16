@@ -3,7 +3,6 @@ use image::GenericImageView;
 use regex::Regex;
 use serde_json::json;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
@@ -42,6 +41,46 @@ pub fn draft(root: &Path) -> Result<(), String> {
         }
     }
 
+    let validated = draft_pages(root)?;
+
+    fs::create_dir_all(&templates).map_err(|e| e.to_string())?;
+
+    let tmp = tempdir().map_err(|e| e.to_string())?;
+    for (rel_path, content) in &validated {
+        let dest = tmp.path().join(rel_path);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let wrapped = format!("{}\n",crate::legacy_ai::plain_markdown(content,None).trim_end());
+        fs::write(&dest, wrapped).map_err(|e| e.to_string())?;
+    }
+
+    log_progress(
+        root,
+        &format!("検査を通過した{}ページを保存しています", validated.len()),
+    );
+    for (rel_path, _) in &validated {
+        let src = tmp.path().join(rel_path);
+        let dest = templates.join(rel_path);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::copy(&src, &dest).map_err(|e| e.to_string())?;
+    }
+
+    // 自動で下書きサイトをビルド
+    log_progress(root, "下書きサイトをビルドしています");
+    let _ = build(&templates, &generated, &output, true, Some(root));
+
+    // Manual Dependency Graph を自動構築・保存
+    log_progress(root, "依存関係を更新しています");
+    let _ = super::deps::build_manual_dependency_graph(root, &templates);
+
+    Ok(())
+}
+
+pub(crate) fn draft_pages(root: &Path) -> Result<Vec<(String, String)>, String> {
+    let config = read_config(root);
     let brief_path = root.join("manual").join("brief.md");
     if !brief_path.is_file() {
         if let Some(parent) = brief_path.parent() {
@@ -54,26 +93,7 @@ pub fn draft(root: &Path) -> Result<(), String> {
     log_progress(root, "プロジェクトの構造と画面情報を調べています");
     let app_context = super::context::build_application_context(root);
 
-    let draft_prompt = format!(
-        "Read the application context, AST module structure, UI Map, and manual brief below. \
-        Create a comprehensive Japanese MkDocs manual outline as JSON pages for this specific application. \
-        Use Markdown files, with index.md required. \
-        Insert unique paired <!-- ai:task id=... kind=text|screenshot|diagram prompt=\"instruction\" --> followed by an empty body and <!-- /ai:task --> tags for work requiring AI, real screenshots, or Mermaid diagrams.\n\
-        IMPORTANT RULES FOR TASKS & LAYOUT:\n\
-        - You MUST include at least one kind=screenshot ai:task in index.md. Do not omit it or replace it with a static image link. Put it immediately after the short introduction and before navigation.\n\
-        - The screenshot task prompt must describe a real screen of the TARGET application and the controls that should be visible. It appears in ModuleLoom's 「更新対象アセット」 list, where the instruction can be copied for an agent with access to the target application and the resulting PNG can be registered.\n\
-        - kind=screenshot tasks must describe only real screens of the target application. ModuleLoom can capture a selected window on Linux/X11, macOS, and Windows; Wayland uses the system screenshot chooser. A desktop scenario can launch and operate the target application on supported desktops. Do not request a screenshot of ModuleLoom or assume a DOM selector from ModuleLoom refers to the target application.\n\
-        - kind=diagram tasks must ONLY request generating the pure Mermaid dependency graph via ModuleLoom CLI for key modules.\n\
-        - If an explanation, annotation, walkthrough, or caption of a screenshot or diagram is needed, create a separate dedicated kind=text task directly before or after it.\n\
-        - Design chapters directly matching the application's actual modules, UI features, and workflows.\n\
-        - For each page, add an <!-- ai:audience user -->, <!-- ai:audience developer -->, or <!-- ai:audience maintainer --> directive when it serves one reader group; omit the directive for shared pages.\n\
-        - Add <!-- ai:depends task=TASK_ID file=PROJECT_RELATIVE_PATH --> for known source-to-task links. Do not guess file paths.\n\
-        - For workflows suitable for repeatable Web or desktop UI testing, describe the steps in the task prompt. A scenario file can later be linked with <!-- ai:scenario file=manual/scenarios/NAME.json -->.\n\
-        Do not invent non-existent UI labels. Return at most 8 pages.\n\n\
-        {}\n\n\
-        Brief:\n{brief}",
-        app_context.prompt_summary
-    );
+    let draft_prompt = format!("Create a comprehensive Japanese MkDocs manual as JSON pages, with index.md required and at most eight pages. Write actual prose and Mermaid directly as ordinary Markdown. Do not use AI tags, metadata comments or screenshot tasks. Do not invent UI labels or product facts.\nInput JSON: {}",json!({"context":app_context.prompt_summary,"brief":brief}));
 
     let schema = json!({
         "type": "object",
@@ -96,7 +116,7 @@ pub fn draft(root: &Path) -> Result<(), String> {
     });
 
     log_progress(root, "AIに章立てと原稿案を依頼しています");
-    let result = agent_json(root, &draft_prompt, &schema, &config.agent, &config.model)?;
+    let result = super::agent::agent_json_detached(root, &draft_prompt, &schema, &config.agent, &config.model)?;
     log_progress(root, "AIの回答を検査し、原稿ファイルを準備しています");
     let pages = result
         .get("pages")
@@ -131,62 +151,7 @@ pub fn draft(root: &Path) -> Result<(), String> {
         return Err(format!("{} draft must include index.md", config.agent));
     }
 
-    fs::create_dir_all(&templates).map_err(|e| e.to_string())?;
-
-    let tmp = tempdir().map_err(|e| e.to_string())?;
-    let mut hasher = Sha256::new();
-    hasher.update(brief.as_bytes());
-    let digest = format!("{:x}", hasher.finalize());
-    let now = utc_now();
-
-    for (rel_path, content) in &validated {
-        let dest = tmp.path().join(rel_path);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        let wrapped = format!(
-            "<!-- ai:draft created-at={now} agent={} brief-sha256={digest} -->\n{}\n<!-- /ai:draft -->\n",
-            config.agent,
-            content.trim_end()
-        );
-        fs::write(&dest, wrapped).map_err(|e| e.to_string())?;
-    }
-
-    // 書式チェック
-    let generated_tasks = super::task::tasks(tmp.path())?;
-    if !generated_tasks
-        .iter()
-        .any(|task| task.page == "index.md" && task.kind == "screenshot")
-    {
-        return Err(format!(
-            "{} manual draft must include an index.md screenshot ai:task for the 更新対象アセット list",
-            config.agent
-        ));
-    }
-
-    log_progress(
-        root,
-        &format!("検査を通過した{}ページを保存しています", validated.len()),
-    );
-    for (rel_path, _) in &validated {
-        let src = tmp.path().join(rel_path);
-        let dest = templates.join(rel_path);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        fs::copy(&src, &dest).map_err(|e| e.to_string())?;
-    }
-
-    // 自動で下書きサイトをビルド
-    log_progress(root, "下書きサイトをビルドしています");
-    let _ = build(&templates, &generated, &output, true, Some(root));
-
-    // UI Map と Manual Dependency Graph を自動構築・保存
-    log_progress(root, "画面一覧と依存関係を更新しています");
-    let _ = super::uimap::save_ui_map(root, &app_context.ui_map);
-    let _ = super::deps::build_manual_dependency_graph(root, &templates);
-
-    Ok(())
+    Ok(validated)
 }
 
 pub fn generate_task(root: &Path, task_id: &str, cli: &str, feedback: &str) -> Result<(), String> {

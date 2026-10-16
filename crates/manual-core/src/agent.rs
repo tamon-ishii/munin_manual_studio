@@ -158,14 +158,17 @@ pub fn cancel(root: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn stop_cli_tree(child: &mut std::process::Child) {
+pub(crate) fn stop_cli_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{}", child.id())])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        if let Ok(group) = libc::pid_t::try_from(child.id()) {
+            if group > 0 {
+                // cli_command gives this owned child its own process group.
+                // Signal it directly: external kill utility syntax differs on
+                // Unix platforms and killing only the parent leaves pipes open.
+                unsafe { libc::killpg(group, libc::SIGKILL); }
+            }
+        }
     }
     #[cfg(windows)]
     {
@@ -178,7 +181,7 @@ fn stop_cli_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
-fn wait_for_cli(
+pub(crate) fn wait_for_cli(
     child: &mut std::process::Child,
     root: &Path,
     checkpoint: &str,
@@ -206,7 +209,7 @@ fn wait_for_cli(
     }
 }
 
-fn cli_command(binary: &str, args: &[String], root: &Path) -> Command {
+pub(crate) fn cli_command(binary: &str, args: &[String], root: &Path) -> Command {
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -294,13 +297,14 @@ fn run_codex(
     args: &[String],
     root: &Path,
     answer_path: &Path,
+    workdir: &Path,
 ) -> Result<Value, String> {
     let log_path = progress_log_path(root);
     append_progress(&log_path, "Codex CLIを起動しています");
     let started = Instant::now();
 
     let checkpoint = cancellation_checkpoint(root);
-    let mut child = cli_command(binary, args, root)
+    let mut child = cli_command(binary, args, workdir)
         .spawn()
         .map_err(|error| format!("Failed to run {binary}: {error}"))?;
     let stdout = child.stdout.take().ok_or("Failed to read Codex output")?;
@@ -378,6 +382,10 @@ pub fn http_agent_json(
     model: &str,
     api_key: Option<&str>,
 ) -> Result<Value, String> {
+    http_agent_json_images(root,prompt,schema,endpoint_url,model,api_key,&[])
+}
+
+pub(crate) fn http_agent_json_images(root:&Path,prompt:&str,schema:&Value,endpoint_url:&str,model:&str,api_key:Option<&str>,images:&[String])->Result<Value,String>{
     let base_url = if endpoint_url.trim().is_empty() {
         "http://localhost:11434/v1"
     } else {
@@ -400,11 +408,16 @@ pub fn http_agent_json(
     let user_prompt =
         format!("{prompt}\n\nRespond with a valid JSON object matching this schema:\n{schema_str}");
 
+    let user_content = if images.is_empty() { json!(user_prompt) } else {
+        let mut parts=vec![json!({"type":"text","text":user_prompt})];
+        parts.extend(images.iter().map(|url|json!({"type":"image_url","image_url":{"url":url}})));
+        json!(parts)
+    };
     let body = serde_json::json!({
         "model": model_name,
         "messages": [
             { "role": "system", "content": system_prompt },
-            { "role": "user", "content": user_prompt }
+            { "role": "user", "content": user_content }
         ],
         "response_format": { "type": "json_object" },
         "temperature": 0.2
@@ -504,6 +517,17 @@ pub fn agent_json(
     agent: &str,
     model: &str,
 ) -> Result<Value, String> {
+    agent_json_in(root, prompt, schema, agent, model, root)
+}
+
+/// Candidate authoring must not give a CLI agent the manuscript workspace.
+pub(crate) fn agent_json_detached(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str) -> Result<Value, String> {
+    let workdir = tempdir().map_err(|e|e.to_string())?;
+    let prompt = format!("Return the requested JSON only. All necessary context is provided below. Do not create, edit or delete any files, and do not inspect another workspace.\n{prompt}");
+    agent_json_in(root, &prompt, schema, agent, model, workdir.path())
+}
+
+fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str, workdir: &Path) -> Result<Value, String> {
     let config = crate::config::read_config(root);
     if config.connection_type == "none" {
         return Err("AI接続は未設定です。「AI設定・出力」で接続方式を選択してください。".into());
@@ -542,7 +566,7 @@ pub fn agent_json(
                 "-c".into(),
                 "model_reasoning_effort=\"low\"".into(),
                 "--cd".into(),
-                root.to_string_lossy().into_owned(),
+                workdir.to_string_lossy().into_owned(),
                 "--output-schema".into(),
                 schema_path.to_string_lossy().into_owned(),
                 "--json".into(),
@@ -573,7 +597,7 @@ pub fn agent_json(
                 "-p".into(),
                 grok_prompt,
                 "--cwd".into(),
-                root.to_string_lossy().into_owned(),
+                workdir.to_string_lossy().into_owned(),
                 "--output-format".into(),
                 "json".into(),
                 "--tools".into(),
@@ -607,12 +631,15 @@ pub fn agent_json(
         cmd_args.insert(0, model.to_string());
         cmd_args.insert(0, "--model".to_string());
     }
+    if agent == "agy" && workdir != root {
+        cmd_args.extend(["--mode".into(), "plan".into()]);
+    }
 
     let binary =
         which_binary(binary_name).ok_or_else(|| format!("AI CLI is unavailable: {binary_name}"))?;
 
     if agent == "codex" {
-        let payload = run_codex(&binary.to_string_lossy(), &cmd_args, root, &answer_path)?;
+        let payload = run_codex(&binary.to_string_lossy(), &cmd_args, root, &answer_path, workdir)?;
         validate_payload(&payload, schema, "answer")?;
         return Ok(payload);
     }
@@ -621,7 +648,7 @@ pub fn agent_json(
     append_progress(&log_path, &format!("{binary_name} CLIを起動しています"));
     let started = Instant::now();
     let checkpoint = cancellation_checkpoint(root);
-    let mut child = cli_command(&binary.to_string_lossy(), &cmd_args, root)
+    let mut child = cli_command(&binary.to_string_lossy(), &cmd_args, workdir)
         .spawn()
         .map_err(|e| format!("Failed to run {binary_name}: {e}"))?;
     append_progress(&log_path, "AIエージェントの応答を待っています");
@@ -1177,7 +1204,7 @@ printf '%s' '{"markdown":"Final manual text"}' > "$1"
             "fake-codex".to_string(),
             answer_path.to_string_lossy().into_owned(),
         ];
-        let result = run_codex("/bin/sh", &args, root.path(), &answer_path).unwrap();
+        let result = run_codex("/bin/sh", &args, root.path(), &answer_path, root.path()).unwrap();
         assert_eq!(result["markdown"], "Final manual text");
         clear_progress(root.path());
     }

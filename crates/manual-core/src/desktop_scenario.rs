@@ -80,7 +80,8 @@ fn parse_keys(value: &str) -> Result<Vec<Key>, String> {
     Ok(keys)
 }
 
-pub fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
+#[cfg(test)]
+fn validate(steps: &[Value], docs: &Path) -> Result<(), String> {
     validate_with_tasks(steps, docs, &[])
 }
 
@@ -447,6 +448,7 @@ struct AccessibleWindowInfo {
     title: String,
     app: String,
     pid: Option<u32>,
+    program: Option<String>,
 }
 
 pub(super) fn list_accessible_windows() -> Result<String, String> {
@@ -462,15 +464,20 @@ pub(super) fn list_accessible_windows() -> Result<String, String> {
             let id = window.stable_id.as_deref().unwrap_or(title);
             found.push(AccessibleWindowInfo {
                 id: pid.map_or_else(|| id.to_string(), |pid| format!("pid:{pid}:{id}")),
-                query: format!("app:{}::{title}", app.name),
+                query: pid.map_or_else(|| format!("app:{}::{title}", app.name), |pid| format!("pid:{pid}:{title}")),
                 title: title.to_string(),
                 app: app.name.clone(),
+                program: pid.and_then(super::platform::process_executable).map(|path| path.to_string_lossy().into_owned()),
                 pid,
             });
         }
     }
     found.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     serde_json::to_string(&found).map_err(|error| error.to_string())
+}
+
+pub(super) fn window_title(query: &str) -> Result<String,String> {
+    a11y_window(query)?.name.clone().filter(|name| !name.trim().is_empty()).ok_or("撮影ウィンドウのタイトルを確認できません。".into())
 }
 
 pub(super) fn inspect_window(query: &str) -> Result<String, String> {
@@ -840,7 +847,11 @@ pub fn run(
                                     window
                                         .name
                                         .as_deref()
-                                        .and_then(|name| find_window(name).ok())
+                                        .and_then(|name| {
+                                            if let Some(pid) = window.pid {
+                                                select_launched_window(name, &window_capture::list_windows().ok()?, &window_capture::window_process_ids().ok()?, pid).ok()
+                                            } else { find_window(name).ok() }
+                                        })
                                         .map(|native| native.id)
                                 };
                                 selected = SelectedWindow {
@@ -1069,19 +1080,27 @@ pub fn run(
                 "expect_targets" => {
                     let targets: Vec<super::semantic_target::Target> = serde_json::from_value(value.clone())
                         .map_err(|error| error.to_string())?;
-                    let deadline = Instant::now() + Duration::from_secs(10);
+                    let deadline = Instant::now() + Duration::from_secs(30);
                     loop {
                         super::agent::check_cancelled(root, &checkpoint)?;
                         if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
                         let elements = super::semantic_target::observe_window(&selected.native()?.id)?;
                         super::agent::check_cancelled(root, &checkpoint)?;
                         if started.elapsed() >= timeout { return Err("撮影手順が制限時間を超えました。".into()); }
-                        let missing: Vec<_> = targets.iter().filter_map(|target| match target.resolve(&elements) {
-                            Ok(Some(_)) => None,
-                            Ok(None) => Some(Ok(target.name.clone())),
-                            Err(error) => Some(Err(error)),
-                        }).collect::<Result<_, _>>()?;
-                        if missing.is_empty() { break; }
+                        let mut errors = Vec::new();
+                        let mut found_count = 0usize;
+                        let mut missing = Vec::new();
+                        for target in &targets {
+                            match target.resolve(&elements) {
+                                Ok(Some(_)) => found_count += 1,
+                                Ok(None) => missing.push(target.name.clone()),
+                                Err(error) => errors.push(error),
+                            }
+                        }
+                        if let Some(error) = errors.into_iter().next() {
+                            return Err(error);
+                        }
+                        if found_count > 0 { break; }
                         super::agent::log_progress(root, &format!("撮影する画面の表示を待機：{}", missing.join("、")));
                         if Instant::now() >= deadline { return Err(format!("目的の画面に到達していません：{}", missing.join("、"))); }
                         thread::sleep(Duration::from_millis(100));

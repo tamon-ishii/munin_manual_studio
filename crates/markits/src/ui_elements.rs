@@ -447,7 +447,7 @@ mod linux_atspi {
         // Read one property at a time. Some WebKitGTK accessibility bridges
         // abort when many nodes and attributes are queried concurrently.
         while let Some((bus, path, depth)) = queue.pop_front() {
-            if visited >= (if budget.is_some() { 2000 } else { 500 }) || budget.is_some_and(|budget| started.elapsed() >= budget) {
+            if visited >= 2000 || budget.is_some_and(|budget| started.elapsed() >= budget) {
                 // A partial tree cannot prove that a name is unique.
                 if budget.is_some() { return vec![target.clone()]; }
                 break;

@@ -7,7 +7,7 @@ Manage screenshots as independent project assets with immutable full-size origin
 ## Requirements
 
 ### Requirement: Provide an independent screenshot library
-Manual Studio SHALL provide a project screenshot list with thumbnails, optional names, capture or edit state, and document usage. The list SHALL support capture, recording, import, MarkIts editing, document insertion, individual recapture, whole-library recapture, and history without an AI connection or a selected document.
+Manual Studio SHALL provide managed screenshots in the unified project resource library, following `resource-library`, with thumbnails, optional names, capture or edit state, and document usage. The list SHALL support capture, recording, import, MarkIts editing, document insertion, individual recapture, whole-library recapture, and history without an AI connection or a selected document.
 
 #### Scenario: Capture with AI disabled
 - **WHEN** a user with AI disabled selects a registered application and records operations for a screenshot

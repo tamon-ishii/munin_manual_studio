@@ -11,7 +11,7 @@ use super::agent::get_agents;
 use super::builder::build;
 use super::config::{has_config, project_path, read_config, DEFAULT_BRIEF};
 use super::task::{
-    collect_target_markdown_files, parse_page_tags, read_answer, scan_entries, tasks, utc_now,
+    collect_target_markdown_files, parse_page_tags, utc_now,
     PageTag,
 };
 
@@ -36,47 +36,8 @@ pub fn render_page_markdown(
         return Err(format!("Preview page is missing: {}", page_rel.display()));
     }
     let content = fs::read_to_string(&page_path).map_err(|e| e.to_string())?;
-    let task_list = tasks(templates)?;
-    let mut answers = HashMap::new();
-    for task in &task_list {
-        let answer_path = generated.join("answers").join(format!("{}.md", task.id));
-        if answer_path.is_file() {
-            if let Ok(ans) = read_answer(&answer_path, task) {
-                answers.insert(task.id.clone(), ans);
-            }
-        }
-    }
-
-    let built_at = utc_now();
-    let page_rel_str = page_rel.to_string_lossy().replace('\\', "/");
-    let mut ids = std::collections::HashSet::new();
-    let tags = parse_page_tags(&page_rel_str, &content, &mut ids)?;
-
-    let mut result = String::new();
-    let mut last_idx = 0;
-
-    for tag in tags {
-        if let PageTag::Task { range, task } = tag {
-            result.push_str(&content[last_idx..range.start]);
-            let task_id = &task.id;
-            let kind = &task.kind;
-
-            if let Some((created, body, approved)) = answers.get(task_id) {
-                result.push_str(&super::task::render_task_block(
-                    &task,
-                    body,
-                    created,
-                    approved.as_deref(),
-                ));
-            } else {
-                result.push_str(&format!("> **作成待ち:** `{task_id}` ({kind})"));
-            }
-            last_idx = range.end;
-        }
-    }
-    result.push_str(&content[last_idx..]);
-
-    Ok(result.replace("{{BUILD_TIMESTAMP}}", &built_at))
+    Ok(crate::legacy_ai::plain_markdown(&content, Some(generated))
+        .replace("{{BUILD_TIMESTAMP}}", &utc_now()))
 }
 
 pub fn inline_html_assets(output: &Path, html_text: &str) -> String {
@@ -290,13 +251,14 @@ pub fn preview_html(root: &Path, page: &str) -> Result<String, String> {
     Ok(inline_html_assets(&output, &content))
 }
 
-pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, String> {
+pub fn resolve_asset_path(root: &Path, page: &str, asset: &str) -> Result<PathBuf, String> {
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
     let generated = root.join("manual").join("ai");
     let page_path = super::editor::document_path(root, page)?;
 
-    let asset_path = Path::new(asset);
+    let clean_asset = asset.trim_start_matches('<').trim_end_matches('>').trim();
+    let asset_path = Path::new(clean_asset);
     if asset_path.is_absolute() {
         return Err("Preview image must be project-relative".to_string());
     }
@@ -305,27 +267,30 @@ pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, Str
     let candidate_paths = [
         page_path
             .parent()
-            .map(|p| p.join(asset))
+            .map(|p| p.join(clean_asset))
             .unwrap_or_default(),
-        root.join(asset),
+        root.join(clean_asset),
         templates.join("assets").join(asset_name),
-        templates.join(asset),
+        templates.join(clean_asset),
+        templates.join("assets").join(clean_asset),
         generated.join("assets").join(asset_name),
     ];
 
     let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
-    let mut image = None;
     for cand in &candidate_paths {
         let Ok(canonical) = cand.canonicalize() else {
             continue;
         };
         if canonical.starts_with(&canonical_root) && canonical.is_file() {
-            image = Some(canonical);
-            break;
+            return Ok(canonical);
         }
     }
 
-    let img = image.ok_or_else(|| "Preview image is missing".to_string())?;
+    Err(format!("Preview image is missing: {asset}"))
+}
+
+pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, String> {
+    let img = resolve_asset_path(root, page, asset)?;
     let ext = img
         .extension()
         .and_then(|e| e.to_str())
@@ -353,8 +318,7 @@ pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, Str
 
 pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     let config = read_config(root);
-    let templates = project_path(root, &config.docs)?;
-    let generated = root.join("manual").join("ai");
+    project_path(root, &config.docs)?;
     let output = project_path(root, &config.output)?;
     let brief_path = root.join(&config.output).join("brief.md");
     let legacy_brief = root.join("manual").join("brief.md");
@@ -402,9 +366,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     };
 
     let index_html = output.join("index.html");
-    if !index_html.is_file() && templates.is_dir() && !pages.is_empty() {
-        let _ = build(&templates, &generated, &output, true, Some(root));
-    }
+    // Reading workspace state must not build or alter publication output.
 
     let preview_html_content = if index_html.is_file() {
         fs::read_to_string(&index_html)
@@ -423,7 +385,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     };
 
     let has_cfg = has_config(root);
-    let tasks = scan_entries(&templates, &generated);
+
     let image_link = Regex::new(r"!\[[^\]]*\]\((?P<path>[^)]+)\)").unwrap();
     let mut image_assets = HashMap::new();
     for (page, path) in collect_target_markdown_files(root, &config) {
@@ -453,16 +415,39 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
         "config": config,
         "agents": get_agents(),
         "brief": brief,
-        "execution_results": crate::workflow::latest_results(root)?,
-        "update_reasons": crate::workflow::update_reasons(root, &tasks)?,
-        "tasks": tasks,
+
+
+
         "image_assets": image_assets,
         "capture_sources": super::capture_source::read(root)?,
-        "ui_map": fs::read_to_string(project_path(root, "manual/ui_map.json")?).ok().and_then(|raw| serde_json::from_str::<super::uimap::UIMap>(&raw).ok()),
         "pages": pages,
         "project_entries": project_entries,
         "preview": preview,
         "preview_html": preview_html_content,
         "has_html": has_html,
     }))
+}
+
+
+#[cfg(test)]
+mod state_read_tests {
+    use super::*;
+
+    #[test]
+    fn state_reads_do_not_create_publication_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/index.md"), "# Read-only workspace\n").unwrap();
+        fs::write(root.join("manual_setting.json"), r#"{"docs":"docs","output":"published","targets":["docs"]}"#).unwrap();
+        let state = get_state(root).unwrap();
+        assert_eq!(state["has_html"], false);
+        assert!(!root.join("published").exists());
+        assert!(!root.join("mkdocs.yml").exists());
+        assert_eq!(fs::read_to_string(root.join("docs/index.md")).unwrap(), "# Read-only workspace\n");
+        fs::create_dir_all(root.join("published")).unwrap();
+        fs::write(root.join("published/index.html"), "<h1>Previously published</h1>").unwrap();
+        assert_eq!(get_state(root).unwrap()["has_html"], true);
+        assert_eq!(fs::read_to_string(root.join("published/index.html")).unwrap(), "<h1>Previously published</h1>");
+    }
 }

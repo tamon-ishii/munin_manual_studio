@@ -203,9 +203,10 @@ fn usages(root: &Path, shot: &Screenshot) -> Result<Vec<String>, String> {
             {
                 crate::quality::local_path(root, &path, &dest_url).ok()
                     == project_path(root, &shot.output).ok()
-            } else {
-                false
-            }
+            } else if let pulldown_cmark::Event::Html(html)|pulldown_cmark::Event::InlineHtml(html)=event {
+                regex::Regex::new(r#"(?is)<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#).unwrap().captures_iter(&html).any(|cap|
+                    crate::quality::local_path(root,&path,&crate::quality::decode_html_attr(&cap[1])).ok()==project_path(root,&shot.output).ok())
+            } else {false}
         });
         if image_reference
             || pattern
@@ -282,6 +283,9 @@ fn register_locked(root: &Path, options: &Value) -> Result<Value, String> {
         if shot.adopted.as_deref() != Some(expected) {
             return Err("画像の採用版が更新されています。開き直してください。".into());
         }
+    }
+    if let Some(expected)=options["expected_edit"].as_str(){
+        if shot.edits.last().map(|edit|edit.id.as_str())!=Some(expected){return Err("撮影画像の編集版が更新されています。実行し直してください。".into());}
     }
     let source = decode(
         options["source"]
@@ -453,7 +457,7 @@ pub fn diagnose(root: &Path) -> Result<Value, String> {
         let shot: Screenshot = serde_json::from_value(value.clone()).map_err(|e|e.to_string())?;
         let mut checks = Vec::<String>::new();
         if let Some(reason) = eligibility(root, &shot) { checks.push(reason); }
-        else if let Err(error) = crate::scenario::validate_json(root, &shot.recipe.to_string()) { checks.push(format!("撮影手順: {error}")); }
+        else if let Err(error) = crate::scenario::validate_asset_recipe(root, &shot.recipe, &shot.id) { checks.push(format!("撮影手順: {error}")); }
         let revision = shot.adopted.as_deref().or_else(||shot.edits.last().map(|edit|edit.id.as_str()));
         if let Err(error) = image(root,&shot.id,revision,true) { checks.push(format!("原本: {error}")); }
         if let Err(error) = image(root,&shot.id,revision,false) { checks.push(format!("編集画像: {error}")); }
@@ -1043,7 +1047,7 @@ pub fn migration_plan(root: &Path) -> Result<Value, String> {
     let mut pages = Vec::new();
     for (page, path) in task::collect_target_markdown_files(root, &crate::config::read_config(root))
     {
-        let document = editor::read(root, &page)?;
+        let document = editor::read_raw(root, &page)?;
         let tags = task::parse_page_tags(&page, &document.content, &mut Default::default())?;
         let mut candidates = Vec::new();
         for tag in tags {
@@ -1075,7 +1079,7 @@ pub fn migration_plan(root: &Path) -> Result<Value, String> {
 }
 pub fn migrate_page(root: &Path, page: &str, options: &Value) -> Result<Value, String> {
     let _lock = workflow::page_lock(root, page)?;
-    let document = editor::read(root, page)?;
+    let document = editor::read_raw(root, page)?;
     if options["revision"].as_str() != Some(&document.revision) {
         return Err("移行候補の確認後に原稿が変更されています。候補を更新してください。".into());
     }

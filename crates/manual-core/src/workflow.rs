@@ -90,7 +90,7 @@ fn relative(root: &Path, path: &Path) -> Result<String, String> {
         .to_string_lossy()
         .replace('\\', "/"))
 }
-pub(crate) fn resource_lock(root: &Path, name: &str) -> Result<fs::File, String> {
+fn resource_lock_file(root: &Path, name: &str) -> Result<fs::File, String> {
     let directory = project_path(root, ".munin/resource-locks")?;
     fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let canonical = project_path(root, name)?;
@@ -104,10 +104,27 @@ pub(crate) fn resource_lock(root: &Path, name: &str) -> Result<fs::File, String>
             digest(canonical.to_string_lossy().as_bytes())
         )))
         .map_err(|e| e.to_string())?;
-    lock.lock().map_err(|e| e.to_string())?;
     Ok(lock)
 }
-pub(crate) fn page_lock(root: &Path, page: &str) -> Result<fs::File, String> {
+pub(crate) struct ResourceLock(fs::File);
+
+impl Drop for ResourceLock {
+    fn drop(&mut self) {
+        // A concurrent fork can retain the open file description on Unix.
+        // Explicitly unlock so that its inherited descriptor cannot prolong it.
+        let _ = self.0.unlock();
+    }
+}
+
+pub(crate) fn resource_lock(root: &Path, name: &str) -> Result<ResourceLock, String> {
+    let lock=resource_lock_file(root,name)?;
+    lock.lock().map_err(|e|e.to_string())?; Ok(ResourceLock(lock))
+}
+pub(crate) fn try_resource_lock(root: &Path, name: &str) -> Result<Option<ResourceLock>, String> {
+    let lock=resource_lock_file(root,name)?;
+    match lock.try_lock() { Ok(())=>Ok(Some(ResourceLock(lock))), Err(std::fs::TryLockError::WouldBlock)=>Ok(None), Err(error)=>Err(error.to_string()) }
+}
+pub(crate) fn page_lock(root: &Path, page: &str) -> Result<ResourceLock, String> {
     resource_lock(root, &relative(root, &editor::document_path(root, page)?)?)
 }
 fn read_file(root: &Path, name: &str) -> Result<Option<String>, String> {
@@ -193,7 +210,7 @@ fn reference_fingerprints(
     page: &str,
     id: &str,
 ) -> Result<BTreeMap<String, String>, String> {
-    let content = editor::read(root, page)?.content;
+    let content = editor::read_raw(root, page)?.content;
     let mut paths = BTreeSet::new();
     for tag in task::parse_page_tags(page, &content, &mut Default::default())? {
         if let PageTag::Generated { task, body, .. } = tag {
@@ -578,6 +595,37 @@ pub fn latest_results(root: &Path) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn resource_lock_releases_even_when_a_descriptor_is_retained() {
+        let root = tempfile::tempdir().unwrap();
+        let name = ".munin/image-jobs/active";
+
+        // A duplicated descriptor shares the same lock as one inherited by fork.
+        let file = resource_lock_file(root.path(), name).unwrap();
+        file.lock().unwrap();
+        let retained = file.try_clone().unwrap();
+        drop(file);
+        assert!(try_resource_lock(root.path(), name).unwrap().is_none());
+        retained.unlock().unwrap();
+        drop(retained);
+
+        let lock = resource_lock(root.path(), name).unwrap();
+        let retained = lock.0.try_clone().unwrap();
+        assert!(try_resource_lock(root.path(), name).unwrap().is_none());
+        drop(lock);
+        let recovered = try_resource_lock(root.path(), name).unwrap();
+        assert!(recovered.is_some(), "retained descriptor must not keep the lock");
+        drop(recovered);
+        drop(retained);
+
+        let lock = try_resource_lock(root.path(), name).unwrap().unwrap();
+        let retained = lock.0.try_clone().unwrap();
+        drop(lock);
+        assert!(resource_lock_file(root.path(), name).unwrap().try_lock().is_ok());
+        drop(retained);
+    }
     fn fixture() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
         fs::create_dir_all(root.path().join("docs/assets")).unwrap();

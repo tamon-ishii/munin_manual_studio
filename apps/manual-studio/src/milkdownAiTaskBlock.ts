@@ -1,6 +1,7 @@
 import type { Node as MarkdownNode } from '@milkdown/kit/transformer';
 import { $node, $remark, $view, $prose } from '@milkdown/kit/utils';
 import { closeHistory, redo, undo } from '@milkdown/kit/prose/history';
+import { htmlSchema, htmlAttr } from '@milkdown/kit/preset/commonmark';
 
 import { Plugin } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
@@ -293,17 +294,55 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
     destroy: () => { observer.disconnect(); window.removeEventListener('manual-studio-editor-font-size-change', resize); },
   };
 });
+const metadataComment = /<!--\s*\/?ai:(?:task|generated|output)\b[\s\S]*?-->/g;
+const metadataView = $view(htmlSchema.node, ctx => (initialNode) => {
+  let node = initialNode;
+  const dom = document.createElement('span');
+  const refresh = () => {
+    for (const [key, value] of Object.entries(ctx.get(htmlAttr.key)(node))) dom.setAttribute(key, value);
+    const value = String(node.attrs.value);
+    dom.dataset.type = 'html';
+    dom.dataset.value = value;
+    dom.textContent = value.replace(metadataComment, '');
+    dom.classList.toggle('ai-output-metadata', !dom.textContent.trim() && value !== dom.textContent);
+  };
+  refresh();
+  return { dom, update(next) {
+    if (next.type !== node.type) return false;
+    node = next; refresh(); return true;
+  }, ignoreMutation: mutation => mutation.type !== 'selection' };
+});
 const hideGeneratedMetadata = $prose(() => new Plugin({
   props: { decorations(state) {
     const hidden: Decoration[] = [];
     state.doc.descendants((node, pos) => {
-      if (node.type.name !== 'html' || !/^<!--\s*\/?ai:(?:generated|output)\b[\s\S]*-->\s*$/.test(String(node.attrs.value).trim())) return;
-      const position = state.doc.resolve(pos);
-      for (let depth = position.depth; depth > 0; depth--) if (position.node(depth).type.name === 'manual_ai_task') {
-        hidden.push(Decoration.node(pos, pos + node.nodeSize, {class:'ai-output-metadata'})); break;
+      if (node.type.spec.code) return false;
+      if (node.type.name === 'paragraph' && node.childCount > 0) {
+        let onlyMetadata = true;
+        let hasMetadata = false;
+        node.forEach(child => {
+          const value = child.type.name === 'html' ? String(child.attrs.value) : child.isText ? child.text! : null;
+          if (value === null || child.marks.some(mark => mark.type.spec.code)) { onlyMetadata = false; return; }
+          const prose = value.replace(metadataComment, '');
+          hasMetadata ||= prose !== value;
+          if (prose.trim()) onlyMetadata = false;
+        });
+        if (onlyMetadata && hasMetadata) {
+          hidden.push(Decoration.node(pos, pos + node.nodeSize, {class:'ai-output-metadata'}));
+          return false;
+        }
       }
+      if (node.isText && !node.marks.some(mark => mark.type.spec.code)) {
+        for (const match of node.text!.matchAll(metadataComment))
+          hidden.push(Decoration.inline(pos + match.index!, pos + match.index! + match[0].length, {class:'ai-output-metadata'}));
+        return;
+      }
+      if (node.type.name !== 'html') return;
+      const value = String(node.attrs.value);
+      if (value !== value.replace(metadataComment, '') && !value.replace(metadataComment, '').trim())
+        hidden.push(Decoration.node(pos, pos + node.nodeSize, {class:'ai-output-metadata'}));
     });
     return DecorationSet.create(state.doc, hidden);
   } },
 }));
-export const aiTaskBlockPlugins = [...remarkAiTask, aiTaskNode, aiTaskView, hideGeneratedMetadata];
+export const aiTaskBlockPlugins = [...remarkAiTask, aiTaskNode, aiTaskView, metadataView, hideGeneratedMetadata];

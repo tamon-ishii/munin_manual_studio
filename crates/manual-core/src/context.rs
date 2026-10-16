@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-use super::uimap::{extract_ui_map, UIMap};
 use crate::analyze_directory;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +15,6 @@ pub struct ApplicationContext {
     pub key_modules: Vec<String>,
     pub key_classes: Vec<String>,
     pub key_functions: Vec<String>,
-    pub ui_map: UIMap,
     pub prompt_summary: String,
 }
 
@@ -88,10 +86,6 @@ pub fn build_application_context(root: &Path) -> ApplicationContext {
         }
     }
 
-    // 4. Extract UI Map
-    let ui_map = extract_ui_map(root);
-
-    // 5. Build Formatted Prompt Summary
     let mut p = String::new();
     p.push_str("# アプリケーション仕様と構成情報\n");
     p.push_str(&format!("- プロジェクト名: {name} (v{version})\n"));
@@ -127,28 +121,6 @@ pub fn build_application_context(root: &Path) -> ApplicationContext {
         p.push('\n');
     }
 
-    if !ui_map.views.is_empty() {
-        p.push_str("## 検出された UI 画面・要素 (UI Map)\n");
-        for v in &ui_map.views {
-            let evidence = v
-                .observed_from
-                .as_deref()
-                .map(|source| format!("実画面観測: {source}"))
-                .unwrap_or_else(|| "静的解析".to_string());
-            p.push_str(&format!(
-                "### 画面: {} (`#{}`; {})\n",
-                v.name, v.id, evidence
-            ));
-            for el in v.elements.iter().take(10) {
-                p.push_str(&format!(
-                    "- [{}] {} (`{}`)\n",
-                    el.role, el.name, el.selector
-                ));
-            }
-        }
-        p.push('\n');
-    }
-
     ApplicationContext {
         name,
         version,
@@ -159,7 +131,6 @@ pub fn build_application_context(root: &Path) -> ApplicationContext {
         key_modules,
         key_classes,
         key_functions,
-        ui_map,
         prompt_summary: p,
     }
 }

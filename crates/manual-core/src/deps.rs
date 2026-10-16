@@ -10,7 +10,6 @@ use super::task::{
     collect_target_markdown_files, get_code_block_ranges, is_inside_ranges, parse_page_tags,
     utc_now, PageTag,
 };
-use super::uimap::extract_ui_map;
 use crate::analyze_directory;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -201,15 +200,7 @@ pub fn build_manual_dependency_graph(
         }
     }
 
-    // 2. Collect known UI elements from UI Map
-    let ui_map = extract_ui_map(root);
-    let mut known_ui_ids = HashMap::new(); // selector -> element name
-    for v in &ui_map.views {
-        for el in &v.elements {
-            known_ui_ids.insert(el.selector.clone(), el.name.clone());
-            known_ui_ids.insert(format!("#{}", el.id), el.name.clone());
-        }
-    }
+    let known_ui_ids = super::fact::source_selectors(root);
 
     let title_re = Regex::new(r#"(?m)^#\s+(.+)$"#).unwrap();
     let asset_re = Regex::new(r#"!\[[^\]]*\]\(([^)]+)\)"#).unwrap();
@@ -274,8 +265,8 @@ pub fn build_manual_dependency_graph(
         }
 
         // UI in page content
-        for (sel, name) in &known_ui_ids {
-            if content.contains(sel) || (name.len() >= 3 && content.contains(name)) {
+        for sel in &known_ui_ids {
+            if content.contains(sel) {
                 page_ui.insert(sel.clone());
                 evidence.push(DependencyEvidence {
                     reference: format!("ui:{sel}"),
@@ -436,7 +427,7 @@ pub fn build_manual_dependency_graph(
 pub fn analyze_git_impact(root: &Path, git_ref_opt: Option<&str>) -> Result<ImpactReport, String> {
     let cfg = read_config(root);
     let docs_path = project_path(root, &cfg.docs)?;
-    // The saved graph is a report, not a cache: source, docs and the UI map
+    // The saved graph is a report, not a cache: source and docs
     // may all have changed since it was written.
     let graph = build_manual_dependency_graph(root, &docs_path)?;
 
