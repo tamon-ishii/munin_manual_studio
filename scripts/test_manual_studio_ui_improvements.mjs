@@ -69,6 +69,8 @@ try {
   }
 
   assert.equal(await page.locator('.document-heading #document-tabs').count(),1);
+  if(!await page.locator('#editor-more').evaluate(el=>el.open)) await page.locator('#editor-more > summary').click();
+
   await page.getByRole('button',{name:'執筆方針',exact:true}).click();
   assert.equal(await page.locator('#panel-brief #manual-brief').isVisible(),true);
   await page.locator('[data-close-dialog=panel-brief]').click();

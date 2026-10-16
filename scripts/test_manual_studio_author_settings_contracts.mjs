@@ -55,8 +55,13 @@ try{
  assert.equal(await page.locator('.workspace-tabs #open-applications').count(),0);
  assert.equal(await page.locator('#panel-screenshots .panel-header #open-applications').count(),1);
  assert.equal(await page.locator('#panel-editor > .document-heading .editor-display-group').count(),1);
- assert.equal(await page.locator('button[data-editor-view=split]').textContent(),'編集＋プレビュー');
- assert.equal(await page.locator('#editor-screenshot-ai').textContent(),'スクリーンショットを挿入');
+ for(const view of ['edit','split','preview']){
+   const button=page.locator(`button[data-editor-view=${view}]`);
+   assert.equal(await button.textContent(),'');
+   assert.ok(await button.getAttribute('aria-label'));
+   assert.equal(await button.getAttribute('title'),await button.getAttribute('aria-label'));
+ }
+ assert.equal(await page.locator('#editor-screenshot-ai').textContent(),'スクリーンショット');
  assert.equal(await page.locator('#resource-generate-image').textContent(),'AI作画');
  for(const view of ['edit','preview','split']){
    await page.locator(`#panel-editor button[data-editor-view="${view}"]`).click();
@@ -85,6 +90,8 @@ try{
  await page.locator('#workspace-history-dialog [data-history-close]').click();
 
  assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsBefore,'opening a project preserves configuration');
+ if(!await page.locator('#editor-more').evaluate(el=>el.open)) await page.locator('#editor-more > summary').click();
+
  await page.getByRole('button',{name:'執筆方針',exact:true}).click();
  await page.locator('#manual-brief').fill('初心者向けに、起動から保存までを説明する。');
  await page.locator('#save-settings').click();await idle();
@@ -92,6 +99,8 @@ try{
  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);
  await page.locator('[data-close-dialog=panel-brief]').click();
  await page.reload();await idle();
+ if(!await page.locator('#editor-more').evaluate(el=>el.open)) await page.locator('#editor-more > summary').click();
+
  await page.getByRole('button',{name:'執筆方針',exact:true}).click();
  assert.match(await page.locator('#manual-brief').inputValue(),/初心者向け/);
  await page.locator('[data-close-dialog=panel-brief]').click();
