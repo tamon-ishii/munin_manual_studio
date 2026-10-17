@@ -207,10 +207,10 @@ export function setupMilkdownEditor(
     if (activeImg) updateOverlayPosition();
   }, { passive: true });
 
-  function refresh() {
+  function refresh(force = false) {
     hideOverlay();
     ++imageRefreshVersion;
-    if (!ready || !instance || syncing) return;
+    if (!ready || !instance || syncing || (sourceMode && !force)) return;
     syncing = true;
     try { instance.action(replaceAll(sourceValue(), true)); } finally { syncing = false; }
   }
@@ -261,7 +261,7 @@ export function setupMilkdownEditor(
   }
   toggle.addEventListener('click', () => {
     if (!sourceMode) { showSource(); source.focus(); }
-    else { refresh(); if (sourceToolbar) sourceToolbar.hidden = true; if (sourceAiToolbar) sourceAiToolbar.hidden = true; sourceMode = false; host.hidden = false; source.hidden = true; toggle.textContent = 'Markdownソース'; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); }
+    else { refresh(true); if (sourceToolbar) sourceToolbar.hidden = true; if (sourceAiToolbar) sourceAiToolbar.hidden = true; sourceMode = false; host.hidden = false; source.hidden = true; toggle.textContent = 'Markdownソース'; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); }
   });
   source.addEventListener('input', () => { if (!syncing) refresh(); });
   function updateReadonly() {
@@ -279,7 +279,8 @@ export function setupMilkdownEditor(
   observer.observe(source, { attributes: true, attributeFilter: ['disabled', 'readonly'] });
   const bridge = $prose(ctx => new Plugin({
     view: () => ({ update(view, previous) {
-      if (syncing) return;
+      // Async rich-editor transactions must not overwrite newer source edits.
+      if (syncing || sourceMode) return;
       const changed = !view.state.doc.eq(previous.doc);
       if (changed) {
         const doc = view.state.doc;
@@ -466,7 +467,7 @@ export function setupMilkdownEditor(
     selectedImageSourceRange:()=>{if(!ready||!instance||sourceMode)return;let image:HTMLImageElement|undefined;instance.action(ctx=>{const view=ctx.get(editorViewCtx);const dom=view.nodeDOM(view.state.selection.from);image=dom instanceof HTMLImageElement?dom:dom instanceof HTMLElement?dom.querySelector<HTMLImageElement>('img')||undefined:undefined;});return image?imageSourceRange(image):undefined;},
     replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(replaceAll(markdown));return true;},
     focus: () => { if (sourceMode) source.focus(); else instance?.action(ctx=>ctx.get(editorViewCtx).focus()); },
-    captureState: () => ready && instance ? instance.action(ctx => {
+    captureState: () => ready && instance && !sourceMode ? instance.action(ctx => {
       let state = ctx.get(editorViewCtx).state;
       const key = uploadPlugin.key();
       const decorations = key?.getState(state);

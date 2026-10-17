@@ -42,7 +42,6 @@ import { emit } from "@tauri-apps/api/event";
 import "./style.css";
 import { captureInsertionContext, isInsertionCurrent, STALE_INSERTION_MESSAGE } from "./insertionContext";
 import {setupManuscriptSearch} from './manuscriptSearch';
-import {setupManuscriptOutline} from './manuscriptOutline';
 import {setupManuscriptGit} from './manuscriptGit';
 import {sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions} from './manuscriptTools';
 
@@ -108,7 +107,6 @@ if (terminalFontFamilySelect) {
 let projectRoot = "";
 let workspace: State | null = null;
 let documentState: Document | null = null;
-let manuscriptOutline:ReturnType<typeof setupManuscriptOutline>|null=null;
 let dirty = false;
 let documentAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 let documentSavePending: Promise<void> | undefined;
@@ -465,7 +463,6 @@ function setBusy(value: boolean): void {
   editor.disabled = !documentState;
   updateHistoryButtons();
   if (!value && pendingEditorFocus) { pendingEditorFocus = false; milkdown.focus(); }
-  manuscriptOutline?.refresh();
   refreshEditorContextMenu();
 
 }
@@ -571,7 +568,13 @@ function retainDocumentTab(): void {
   if (!documentState) return;
   documentTabs.set(documentState.page, { document: documentState, content: editor.value, start: editor.selectionStart, end: editor.selectionEnd, scroll: editor.scrollTop, richScroll: milkdown.host.scrollTop, history: editHistory, richState: milkdown.captureState() });
 }
+let documentTabsSignature = '';
 function renderDocumentTabs(): void {
+  const signature = JSON.stringify([projectRoot, activeImageTab, documentState?.page,
+    [...documentTabs].map(([page, tab]) => [page, documentState?.page === page ? dirty : tab.content !== tab.document.content]),
+    [...imageTabs]]);
+  if (signature === documentTabsSignature) { updateEditorEmptyState(); return; }
+  documentTabsSignature = signature;
   const strip = element('document-tabs'); strip.replaceChildren();
   for (const [page, tab] of documentTabs) {
     const active = !activeImageTab && documentState?.page === page;
@@ -640,7 +643,6 @@ function updateSaveState(): void {
 
 
   updateWorkspaceGuide();
-  manuscriptOutline?.refresh();
 }
 function updateWorkspaceGuide(): void {
   const guide = element<HTMLElement>('workspace-guide');
@@ -2748,7 +2750,6 @@ const manuscriptToolOptions:ManuscriptToolsOptions={
 };
 const openManuscriptSearch=setupManuscriptSearch(manuscriptToolOptions);
 element('manuscript-search-open').addEventListener('click',openManuscriptSearch);
-manuscriptOutline=setupManuscriptOutline(manuscriptToolOptions);manuscriptOutline.refresh();
 const openManuscriptGit=setupManuscriptGit(manuscriptToolOptions);
 const manuscriptGitButton=document.createElement('button');manuscriptGitButton.type='button';manuscriptGitButton.id='manuscript-git-open';manuscriptGitButton.textContent='Git履歴・復元';
 manuscriptGitButton.addEventListener('click',openManuscriptGit);

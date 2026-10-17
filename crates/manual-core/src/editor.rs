@@ -216,9 +216,12 @@ pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, Str
     html::push_html(&mut body, parser);
     // srcdoc resolves ordinary hrefs against the app URL. Keep links inert until
     // the parent installs its navigation handler (iframe load can be delayed).
-    let anchor_tags = regex::Regex::new(r#"(?i)<a\b[^>]*>"#).map_err(|error| error.to_string())?;
-    let href_attr = regex::Regex::new(r#"(?i)\s+href\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#)
-        .map_err(|error| error.to_string())?;
+    static ANCHOR_TAGS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(||
+        regex::Regex::new(r#"(?i)<a\b[^>]*>"#).unwrap());
+    let anchor_tags = &*ANCHOR_TAGS;
+    static HREF_ATTR: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(||
+        regex::Regex::new(r#"(?i)\s+href\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#).unwrap());
+    let href_attr = &*HREF_ATTR;
     body = anchor_tags
         .replace_all(&body, |anchor: &regex::Captures| {
             href_attr
@@ -231,8 +234,9 @@ pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, Str
         .into_owned();
     // Markdown images and literal HTML <img> tags both reach this HTML output.
     // Embed local project images because the iframe intentionally permits data: images only.
-    let image_tags = regex::Regex::new(r#"(?i)<img\b[^>]*\bsrc=["'](?P<src>[^"']+)["'][^>]*>"#)
-        .map_err(|error| error.to_string())?;
+    static IMAGE_TAGS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(||
+        regex::Regex::new(r#"(?i)<img\b[^>]*\bsrc=["'](?P<src>[^"']+)["'][^>]*>"#).unwrap());
+    let image_tags = &*IMAGE_TAGS;
     let mut inlined_body = String::with_capacity(body.len());
     let mut last_end = 0;
     for captures in image_tags.captures_iter(&body) {

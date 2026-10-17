@@ -289,6 +289,36 @@ pub fn resolve_asset_path(root: &Path, page: &str, asset: &str) -> Result<PathBu
     Err(format!("Preview image is missing: {asset}"))
 }
 
+#[derive(PartialEq)]
+struct AssetRevision {
+    len: u64,
+    modified: std::time::SystemTime,
+    #[cfg(unix)]
+    changed: (i64, i64),
+}
+
+fn asset_revision(meta: &fs::Metadata) -> Option<AssetRevision> {
+    Some(AssetRevision {
+        len: meta.len(),
+        modified: meta.modified().ok()?,
+        #[cfg(unix)]
+        changed: {
+            use std::os::unix::fs::MetadataExt;
+            (meta.ctime(), meta.ctime_nsec())
+        },
+    })
+}
+
+struct CachedAsset {
+    path: PathBuf,
+    revision: AssetRevision,
+    data: String,
+}
+
+// Bound retained encoded images across workspaces. Never hold this lock during I/O.
+static ASSET_CACHE: std::sync::Mutex<Vec<CachedAsset>> = std::sync::Mutex::new(Vec::new());
+const ASSET_CACHE_BYTES: usize = 32 * 1024 * 1024;
+
 pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, String> {
     let img = resolve_asset_path(root, page, asset)?;
     let ext = img
@@ -311,9 +341,29 @@ pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, Str
         return Err("Unsupported preview image".to_string());
     }
 
+    let revision = asset_revision(&meta);
+    if let (Some(revision), Ok(cache)) = (&revision, ASSET_CACHE.lock()) {
+        if let Some(entry) = cache.iter().find(|entry| entry.path == img && &entry.revision == revision) {
+            return Ok(entry.data.clone());
+        }
+    }
     let bytes = fs::read(&img).map_err(|e| e.to_string())?;
     let b64 = BASE64.encode(bytes);
-    Ok(format!("data:{mime};base64,{b64}"))
+    let data = format!("data:{mime};base64,{b64}");
+    // Do not cache a read that overlapped an external image update.
+    if let Some(revision) = revision {
+        if fs::metadata(&img).ok().and_then(|meta| asset_revision(&meta)).as_ref() == Some(&revision) {
+            if let Ok(mut cache) = ASSET_CACHE.lock() {
+                cache.retain(|entry| entry.path != img);
+                let mut retained: usize = cache.iter().map(|entry| entry.data.len()).sum();
+                while retained + data.len() > ASSET_CACHE_BYTES && !cache.is_empty() {
+                    retained -= cache.remove(0).data.len();
+                }
+                cache.push(CachedAsset { path: img, revision, data: data.clone() });
+            }
+        }
+    }
+    Ok(data)
 }
 
 pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
@@ -440,6 +490,28 @@ fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Val
 #[cfg(test)]
 mod state_read_tests {
     use super::*;
+
+    #[test]
+    fn cached_images_refresh_after_replacement_and_reject_deleted_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/index.md"), "# Images").unwrap();
+        let image = root.join("docs/image.svg");
+        fs::write(&image, "<svg>A</svg>").unwrap();
+        let first = preview_asset(root, "index.md", "image.svg").unwrap();
+        assert_eq!(preview_asset(root, "index.md", "image.svg").unwrap(), first);
+        // Restoring mtime must not hide a changed file length.
+        let modified = fs::metadata(&image).unwrap().modified().unwrap();
+        fs::write(&image, "<svg>Replacement</svg>").unwrap();
+        fs::File::options().write(true).open(&image).unwrap().set_modified(modified).unwrap();
+        let updated = preview_asset(root, "index.md", "image.svg").unwrap();
+        assert_ne!(updated, first);
+        assert_eq!(updated, format!("data:image/svg+xml;base64,{}", BASE64.encode("<svg>Replacement</svg>")));
+        fs::remove_file(&image).unwrap();
+        assert!(preview_asset(root, "index.md", "image.svg").is_err());
+    }
+
 
     #[test]
     fn editor_state_keeps_workspace_metadata_without_generating_previews() {
