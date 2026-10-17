@@ -317,6 +317,14 @@ pub fn preview_asset(root: &Path, page: &str, asset: &str) -> Result<String, Str
 }
 
 pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
+    workspace_state(root, true)
+}
+
+pub(crate) fn get_editor_state(root: &Path) -> Result<serde_json::Value, String> {
+    workspace_state(root, false)
+}
+
+fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Value, String> {
     let config = read_config(root);
     project_path(root, &config.docs)?;
     let output = project_path(root, &config.output)?;
@@ -359,7 +367,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     } else {
         pages.first().map(|s| s.as_str()).unwrap_or("")
     };
-    let preview = if !first_page.is_empty() {
+    let preview = if legacy_previews && !first_page.is_empty() {
         preview_page(root, first_page).unwrap_or_default()
     } else {
         String::new()
@@ -368,7 +376,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
     let index_html = output.join("index.html");
     // Reading workspace state must not build or alter publication output.
 
-    let preview_html_content = if index_html.is_file() {
+    let preview_html_content = if legacy_previews && index_html.is_file() {
         fs::read_to_string(&index_html)
             .map(|c| inline_html_assets(&output, &c))
             .unwrap_or_default()
@@ -388,7 +396,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
 
     let image_link = Regex::new(r"!\[[^\]]*\]\((?P<path>[^)]+)\)").unwrap();
     let mut image_assets = HashMap::new();
-    for (page, path) in collect_target_markdown_files(root, &config) {
+    for (page, path) in if legacy_previews { collect_target_markdown_files(root, &config) } else { Vec::new() } {
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
@@ -408,7 +416,7 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
             }
         }
     }
-    let has_html = !preview_html_content.is_empty();
+    let has_html = if legacy_previews { !preview_html_content.is_empty() } else { index_html.is_file() };
 
     Ok(json!({
         "has_config": has_cfg,
@@ -433,6 +441,25 @@ pub fn get_state(root: &Path) -> Result<serde_json::Value, String> {
 mod state_read_tests {
     use super::*;
 
+    #[test]
+    fn editor_state_keeps_workspace_metadata_without_generating_previews() {
+        let directory=tempfile::tempdir().unwrap();
+        let root=directory.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::create_dir_all(root.join("published")).unwrap();
+        fs::write(root.join("docs/index.md"),"# Workspace\n").unwrap();
+        fs::write(root.join("manual_setting.json"),r#"{"docs":"docs","output":"published","targets":["docs"]}"#).unwrap();
+        fs::write(root.join("published/index.html"),"<h1>Publication</h1>").unwrap();
+        let full=get_state(root).unwrap();
+        let editor=get_editor_state(root).unwrap();
+        for key in ["config","brief","pages","project_entries","capture_sources","agents","has_config","has_html"] {
+            assert_eq!(editor[key],full[key],"{key}");
+        }
+        assert_eq!(editor["preview"],"");
+        assert_eq!(editor["preview_html"],"");
+        assert!(full["preview_html"].as_str().unwrap().contains("Publication"));
+        assert_eq!(fs::read_to_string(root.join("docs/index.md")).unwrap(),"# Workspace\n");
+    }
     #[test]
     fn state_reads_do_not_create_publication_output() {
         let directory = tempfile::tempdir().unwrap();

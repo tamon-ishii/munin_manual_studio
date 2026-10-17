@@ -39,6 +39,7 @@ const steps = [
 steps.push({ group: 'unit', name: 'shared insertion context checks', command: npx, args: ['tsx','scripts/test_manual_studio_insertion_context.ts'], timeoutMs: 60_000 });
 steps.push({ group: 'unit', name: 'selective Diff checks', command: npx, args: ['tsx','scripts/test_manual_studio_selectable_diff.ts'], timeoutMs: 60_000 });
 steps.push({group:'unit',name:'manuscript replacement and section move checks',command:npx,args:['tsx','scripts/test_manuscript_tools.ts'],timeoutMs:60_000});
+steps.push({group:'unit',name:'review correction apply and batch checks',command:process.execPath,args:['scripts/test_manual_studio_review_corrections.mjs'],timeoutMs:60_000});
 const unitStepCount = steps.length;
 
 steps.push(
@@ -83,6 +84,7 @@ steps.push(
   { group: 'desktop', name: 'entry-specific real resource edit evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', nativeResourceCases.join(','), '--report', 'native-workflow-results/result.json', '--require-complete', '--output', 'ui-coverage-results/native-gate.json'], timeoutMs: 60_000 },
   { group: 'desktop', name: 'Editor manual screenshot capture through GTK and MarkIts', command: '/usr/bin/python3', args: ['scripts/test_manual_studio_native_manual_capture.py'], timeoutMs: 240_000 },
   { group: 'desktop', name: 'Entry-specific real manual capture evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', 'P04.editor-manual', '--report', 'native-manual-capture-results/result.json', '--require-complete', '--output', 'ui-coverage-results/manual-capture-gate.json'], timeoutMs: 60_000 },
+  { group: 'desktop', name: 'Native editor menu preserves clipboard actions and opens AI correction', command: '/usr/bin/python3', args: ['scripts/test_manual_studio_native_context_menu.py'], timeoutMs: 180_000 },
   { group: 'desktop', name: 'Actual OS bitmap clipboard save, failure, retry and Undo', command: '/usr/bin/python3', args: ['scripts/test_manual_studio_native_clipboard.py'], timeoutMs: 180_000 },
   { group: 'desktop', name: 'Entry-specific real clipboard evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', 'P03.desktop-bitmap-paste', '--report', 'native-clipboard-results/result.json', '--require-complete', '--output', 'ui-coverage-results/clipboard-gate.json'], timeoutMs: 60_000 },
   { group: 'desktop', name: 'Isolated native conversion and return fault rejection', command: '/usr/bin/python3', args: ['scripts/test_manual_studio_native_faults.py'], timeoutMs: 600_000 },

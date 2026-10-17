@@ -6,7 +6,7 @@ import path from 'node:path';
 import {chromium} from 'playwright-core';
 const root=await mkdtemp(path.join(os.tmpdir(),'munin-tab-session-'));
 const other=await mkdtemp(path.join(os.tmpdir(),'munin-tab-other-'));
-const base='http://127.0.0.1:5174';let server,browser;
+const base='http://127.0.0.1:5174';let server,browser,releaseResources;
 try {
   for(const project of [root,other]){
     await mkdir(path.join(project,'docs'),{recursive:true});
@@ -26,8 +26,24 @@ try {
   await page.locator('[data-document-page="guide.md"]').click();await idle();
   const expected=await tabs();
   await page.close();page=await context.newPage();watch();
+  const requests=[];
+  const resourcesReady=new Promise(resolve=>releaseResources=resolve);
+  let blockResources=true;
+  await page.route('**/__manual/rpc',async route=>{
+    const request=route.request().postDataJSON();requests.push(request);
+    if(blockResources&&['screenshots-list','resources-list'].includes(request.action))await resourcesReady;
+    await route.continue();
+  });
+
   await page.goto(`${base}/?root=${encodeURIComponent(root)}`);await idle();
   assert.deepEqual(await tabs(),expected,'reopening restores tab order');
+  assert.equal(requests.filter(request=>request.action==='state').length,1,'startup reads workspace state once');
+  assert.deepEqual(requests.find(request=>request.action==='state').options.json,{editor:true},'editor skips unused publication previews');
+  assert.equal(requests.filter(request=>request.action==='editor-read'&&request.options.page==='guide.md').length,1,'active tab content is reused');
+  assert.ok(requests.some(request=>request.action==='screenshots-list'),'resource loading started in the background');
+  assert.equal(await page.locator('#markdown-editor').evaluate(editor=>editor.readOnly),false,'editor is ready while resource scans are blocked');
+  blockResources=false;releaseResources();
+
   await page.frameLocator('#markdown-preview').getByRole('heading',{name:'guide.md',exact:true}).waitFor();
   assert.equal(await page.locator('[data-document-page="guide.md"]').getAttribute('aria-selected'),'true','active tab restored');
   await page.getByRole('button',{name:'index.mdを閉じる',exact:true}).click();await idle();
@@ -39,4 +55,4 @@ try {
   await page.evaluate(root=>localStorage.setItem(`manual-studio-document-tabs:${root}`,'{invalid'),root);
   await page.reload();await idle();assert.ok((await tabs()).length===1,'invalid saved state falls back to the initial manuscript');
   assert.deepEqual(errors,[]);console.log('Document tab sessions: reopen, order, active tab, closed/deleted pages, project isolation, empty and invalid state passed.');
-} finally {await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});await rm(other,{recursive:true,force:true});}
+} finally {releaseResources?.();await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});await rm(other,{recursive:true,force:true});}

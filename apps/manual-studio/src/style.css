@@ -1209,4 +1209,4 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 .document-heading>.document-tabs{flex-basis:100px}
 #panel-editor[data-image-open=true]>.document-heading>.editor-view-controls{display:none}
 
-.review-replacement{white-space:pre-wrap;overflow-wrap:anywhere;max-height:32vh;overflow:auto;padding:10px;background:var(--surface-soft);border:1px solid var(--border-color);border-radius:6px}
+.review-replacement{width:100%;resize:vertical;white-space:pre-wrap;overflow-wrap:anywhere;max-height:32vh;overflow:auto;padding:10px;background:var(--surface-soft);border:1px solid var(--border-color);border-radius:6px}

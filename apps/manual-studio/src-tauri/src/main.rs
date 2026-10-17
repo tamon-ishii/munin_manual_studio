@@ -9,6 +9,7 @@ use std::{
 use tauri::{Emitter, Manager, State};
 
 mod clipboard_paths;
+mod editor_context_menu;
 mod native_worker;
 mod recorder;
 
@@ -1193,9 +1194,11 @@ fn main() {
     };
     tauri::Builder::default()
         .manage(recorder::RecorderState::default())
+        .manage(editor_context_menu::EditorContextMenus::default())
         .manage(HiddenStudioWindows::default())
         .invoke_handler(tauri::generate_handler![
             manual_request,
+            editor_context_menu::set_editor_context_menu_state,
             load_launch_commands,
             import_launch_commands,
             load_workspace_history,

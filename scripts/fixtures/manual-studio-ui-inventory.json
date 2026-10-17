@@ -7889,11 +7889,11 @@
       "reviewStatus": "reviewed"
     },
     {
-      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
+      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:3203a7a341911cd9:1",
       "file": "apps/manual-studio/src/readerReview.ts",
-      "line": 28,
+      "line": 34,
       "kind": "loop-controls",
-      "expression": "for(const finding of report.issues){ const card=document.createElement('section');card.className='card review-finding';card.dataset.reviewCategory=finding.category; const heading=document.createElement('h3');heading.textContent=finding.message; const badges=document.createElement('div');badges.className='review-badges';for(const text of [labels[finding.category],finding.severity==='problem'?'要修正':'改善提案']){const badge=document.createElement('span');badge.textContent=text;badges.append(badge);} const quote=document.createElement('blockquote');quote.textContent=finding.quote; const suggestion=document.createElement('p');suggestion.textContent=finding.suggestion;const image=document.createElement('small');image.textContent=finding.category==='image'?`対象画像：${finding.image}`:''; const example=document.createElement('pre');example.className='review-replacement'; const hasReplacement=typeof finding.replacement==='string'&&finding.replacement!==finding.quote; example.textContent=hasReplacement?finding.replacement!:'この指摘には追加の確認が必要です。修正の提案を参考に手動で編集してください。'; const exampleLabel=document.createElement('strong');exampleLabel.textContent='修正案'; const actions=document.createElement('div');actions.className='actions'; for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を確認',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon='eye';button.disabled=text==='修正案を確認'&&!hasReplacement;button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);} const ignore=document.createElement('button');ignore.type='button';ignore.textContent='見送り';ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();};actions.append(ignore); card.append(badges,heading,quote,suggestion,image,exampleLabel,example,actions);list.append(card); }",
+      "expression": "for(const finding of report.issues){ const card=document.createElement('section');card.className='card review-finding';card.dataset.reviewCategory=finding.category; const heading=document.createElement('h3');heading.textContent=finding.message; const badges=document.createElement('div');badges.className='review-badges';for(const text of [labels[finding.category],finding.severity==='problem'?'要修正':'改善提案']){const badge=document.createElement('span');badge.textContent=text;badges.append(badge);} const quote=document.createElement('blockquote');quote.textContent=finding.quote; const suggestion=document.createElement('p');suggestion.textContent=finding.suggestion;const image=document.createElement('small');image.textContent=finding.category==='image'?`対象画像：${finding.image}`:''; const example=document.createElement('textarea');example.className='review-replacement';example.rows=4;example.setAttribute('aria-label',`修正案：${finding.message}`);example.placeholder='原稿に反映する修正文を入力してください'; const hasReplacement=hasReviewReplacement(finding); example.value=typeof finding.replacement==='string'?finding.replacement:''; const unavailable=document.createElement('p');unavailable.className='muted'; const updateUnavailable=()=>{unavailable.hidden=hasReviewReplacement(finding);unavailable.textContent=finding.replacement===finding.quote?'元の文章と同じため適用する変更がありません。修正案を編集してください。':'AIから置換用の修正文が返っていません。上の提案を参考に修正文を入力すると適用できます。';}; updateUnavailable(); const exampleLabel=document.createElement('strong');exampleLabel.textContent='修正案'; const actions=document.createElement('div');actions.className='actions'; for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を確認',()=>{fix(finding);}],['この修正案を適用',()=>{apply([finding]);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon='eye';button.disabled=text!=='該当箇所へ'&&!hasReplacement;if(text==='この修正案を適用'){button.className='primary';button.dataset.uiIcon='check';}button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);} example.oninput=()=>{ finding.replacement=example.value; actions.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{if(button.textContent==='この修正案を適用'||button.textContent==='修正案を確認')button.disabled=!hasReviewReplacement(finding);}); updateApplyAll();updateUnavailable(); }; const ignore=document.createElement('button');ignore.type='button';ignore.textContent='見送り';ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();updateApplyAll();};actions.append(ignore); card.append(badges,heading,quote,suggestion,image,exampleLabel,example,unavailable,actions);list.append(card); }",
       "feature": "P09",
       "spec": "openspec/specs/document-ai-assistance/spec.md",
       "result": "レビューだけで本文を変更しない",
@@ -7907,11 +7907,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
+      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:7bab7c66b527af5d:1",
       "file": "apps/manual-studio/src/readerReview.ts",
-      "line": 39,
+      "line": 45,
       "kind": "loop-controls",
-      "expression": "for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を確認',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon='eye';button.disabled=text==='修正案を確認'&&!hasReplacement;button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}",
+      "expression": "for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を確認',()=>{fix(finding);}],['この修正案を適用',()=>{apply([finding]);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon='eye';button.disabled=text!=='該当箇所へ'&&!hasReplacement;if(text==='この修正案を適用'){button.className='primary';button.dataset.uiIcon='check';}button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}",
       "feature": "P09",
       "spec": "openspec/specs/document-ai-assistance/spec.md",
       "result": "レビューだけで本文を変更しない",
@@ -7977,11 +7977,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/readerReview.ts:handler:7762ed6fab1e8ebc:1",
+      "id": "apps/manual-studio/src/readerReview.ts:handler:fc6b2eb04fbdcd63:1",
       "file": "apps/manual-studio/src/readerReview.ts",
-      "line": 36,
+      "line": 46,
       "kind": "handler",
-      "expression": "ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();}",
+      "expression": "ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();updateApplyAll();}",
       "feature": "P09",
       "spec": "openspec/specs/document-ai-assistance/spec.md",
       "result": "レビューだけで本文を変更しない",
@@ -12943,6 +12943,78 @@
       ],
       "reviewStatus": "needs-entry-specific-review",
       "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
+    },
+    {
+      "id": "apps/manual-studio/src/readerReview.ts:create:button:fa4b818478d57454:1",
+      "file": "apps/manual-studio/src/readerReview.ts",
+      "line": 27,
+      "kind": "create:button",
+      "expression": "applyAll=document.createElement('button')",
+      "feature": "P09",
+      "spec": "openspec/specs/document-ai-assistance/spec.md",
+      "result": "修正案を個別または一括で適用し、追加AI起動なしに保存する。古い原稿と重複範囲の一括適用は拒否する。",
+      "returnTarget": "指摘一覧と該当原稿",
+      "cases": [
+        "P09.success",
+        "P09.cancel",
+        "P09.failure-retry",
+        "P09.selection-review-filter-rerun-jump"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/readerReview.ts:handler:906f6f57b9b549ad:1",
+      "file": "apps/manual-studio/src/readerReview.ts",
+      "line": 30,
+      "kind": "handler",
+      "expression": "applyAll.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}apply(report.issues.filter(hasReviewReplacement));}",
+      "feature": "P09",
+      "spec": "openspec/specs/document-ai-assistance/spec.md",
+      "result": "修正案を個別または一括で適用し、追加AI起動なしに保存する。古い原稿と重複範囲の一括適用は拒否する。",
+      "returnTarget": "指摘一覧と該当原稿",
+      "cases": [
+        "P09.success",
+        "P09.cancel",
+        "P09.failure-retry",
+        "P09.selection-review-filter-rerun-jump"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/readerReview.ts:create:textarea:d1ab1cdbf0bff6a0:1",
+      "file": "apps/manual-studio/src/readerReview.ts",
+      "line": 40,
+      "kind": "create:textarea",
+      "expression": "example=document.createElement('textarea')",
+      "feature": "P09",
+      "spec": "openspec/specs/document-ai-assistance/spec.md",
+      "result": "修正案を編集すると個別・一括適用の可否が更新される。修正文がない理由を表示する。",
+      "returnTarget": "指摘一覧と該当原稿",
+      "cases": [
+        "P09.success",
+        "P09.cancel",
+        "P09.failure-retry",
+        "P09.selection-review-filter-rerun-jump"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/readerReview.ts:handler:1920701a30561c81:1",
+      "file": "apps/manual-studio/src/readerReview.ts",
+      "line": 49,
+      "kind": "handler",
+      "expression": "example.oninput=()=>{ finding.replacement=example.value; actions.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{if(button.textContent==='この修正案を適用'||button.textContent==='修正案を確認')button.disabled=!hasReviewReplacement(finding);}); updateApplyAll();updateUnavailable(); }",
+      "feature": "P09",
+      "spec": "openspec/specs/document-ai-assistance/spec.md",
+      "result": "修正案を編集すると個別・一括適用の可否が更新される。修正文がない理由を表示する。",
+      "returnTarget": "指摘一覧と該当原稿",
+      "cases": [
+        "P09.success",
+        "P09.cancel",
+        "P09.failure-retry",
+        "P09.selection-review-filter-rerun-jump"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
     }
   ],
   "cases": [
@@ -14635,13 +14707,17 @@
         "apps/manual-studio/src/readerReview.ts:handler:d30efa4cb9c606b2:1",
         "apps/manual-studio/src/readerReview.ts:handler:b26d0183c9b2de2c:1",
         "apps/manual-studio/src/readerReview.ts:create:select:d252f45f994c5e44:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:3203a7a341911cd9:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:7bab7c66b527af5d:1",
         "apps/manual-studio/src/readerReview.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/readerReview.ts:handler:02dafd330b9301e4:1",
         "apps/manual-studio/src/readerReview.ts:create:button:5d6be312df6b19d8:1",
-        "apps/manual-studio/src/readerReview.ts:handler:7762ed6fab1e8ebc:1",
-        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1"
+        "apps/manual-studio/src/readerReview.ts:handler:fc6b2eb04fbdcd63:1",
+        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1",
+        "apps/manual-studio/src/readerReview.ts:create:button:fa4b818478d57454:1",
+        "apps/manual-studio/src/readerReview.ts:handler:906f6f57b9b549ad:1",
+        "apps/manual-studio/src/readerReview.ts:create:textarea:d1ab1cdbf0bff6a0:1",
+        "apps/manual-studio/src/readerReview.ts:handler:1920701a30561c81:1"
       ],
       "expected": {
         "visible": "指摘・引用と画像の確認状態が分かる",
@@ -14673,13 +14749,17 @@
         "apps/manual-studio/src/readerReview.ts:handler:d30efa4cb9c606b2:1",
         "apps/manual-studio/src/readerReview.ts:handler:b26d0183c9b2de2c:1",
         "apps/manual-studio/src/readerReview.ts:create:select:d252f45f994c5e44:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:3203a7a341911cd9:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:7bab7c66b527af5d:1",
         "apps/manual-studio/src/readerReview.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/readerReview.ts:handler:02dafd330b9301e4:1",
         "apps/manual-studio/src/readerReview.ts:create:button:5d6be312df6b19d8:1",
-        "apps/manual-studio/src/readerReview.ts:handler:7762ed6fab1e8ebc:1",
-        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1"
+        "apps/manual-studio/src/readerReview.ts:handler:fc6b2eb04fbdcd63:1",
+        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1",
+        "apps/manual-studio/src/readerReview.ts:create:button:fa4b818478d57454:1",
+        "apps/manual-studio/src/readerReview.ts:handler:906f6f57b9b549ad:1",
+        "apps/manual-studio/src/readerReview.ts:create:textarea:d1ab1cdbf0bff6a0:1",
+        "apps/manual-studio/src/readerReview.ts:handler:1920701a30561c81:1"
       ],
       "expected": {
         "visible": "指摘・引用と画像の確認状態が分かる",
@@ -14711,13 +14791,17 @@
         "apps/manual-studio/src/readerReview.ts:handler:d30efa4cb9c606b2:1",
         "apps/manual-studio/src/readerReview.ts:handler:b26d0183c9b2de2c:1",
         "apps/manual-studio/src/readerReview.ts:create:select:d252f45f994c5e44:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:3203a7a341911cd9:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:7bab7c66b527af5d:1",
         "apps/manual-studio/src/readerReview.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/readerReview.ts:handler:02dafd330b9301e4:1",
         "apps/manual-studio/src/readerReview.ts:create:button:5d6be312df6b19d8:1",
-        "apps/manual-studio/src/readerReview.ts:handler:7762ed6fab1e8ebc:1",
-        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1"
+        "apps/manual-studio/src/readerReview.ts:handler:fc6b2eb04fbdcd63:1",
+        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1",
+        "apps/manual-studio/src/readerReview.ts:create:button:fa4b818478d57454:1",
+        "apps/manual-studio/src/readerReview.ts:handler:906f6f57b9b549ad:1",
+        "apps/manual-studio/src/readerReview.ts:create:textarea:d1ab1cdbf0bff6a0:1",
+        "apps/manual-studio/src/readerReview.ts:handler:1920701a30561c81:1"
       ],
       "expected": {
         "visible": "指摘・引用と画像の確認状態が分かる",
@@ -16687,7 +16771,11 @@
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c6655c346435203d:1",
         "apps/manual-studio/src/readerReview.ts:create:select:d252f45f994c5e44:1",
-        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1"
+        "apps/manual-studio/src/readerReview.ts:handler:80f2d2dd9cb9b321:1",
+        "apps/manual-studio/src/readerReview.ts:create:button:fa4b818478d57454:1",
+        "apps/manual-studio/src/readerReview.ts:handler:906f6f57b9b549ad:1",
+        "apps/manual-studio/src/readerReview.ts:create:textarea:d1ab1cdbf0bff6a0:1",
+        "apps/manual-studio/src/readerReview.ts:handler:1920701a30561c81:1"
       ],
       "requiredEvidence": [
         "browser-mock"

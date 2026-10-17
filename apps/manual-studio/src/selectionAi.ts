@@ -2,8 +2,8 @@ import {featureDialog} from './screenshotWorkflow';
 import {diffParts,acceptDiff} from './selectableDiff';
 export interface SelectionDraft { text:string; apply:(content:string)=>void; }
 export function askSelectionInstruction(selected:string,initial="",failure=""):Promise<string|null>{
-  const {dialog,body}=featureDialog(selected?'指定範囲へAI文書作成':'カーソル位置へAI文書を挿入');
-  const help=document.createElement('p');help.textContent=selected?'選択した範囲の文章を作成・修正します。候補を確認してから置き換えます。':'カーソル位置に挿入する新しい文章を作成します。候補を確認してから挿入します。';
+  const {dialog,body}=featureDialog(selected?'選択範囲をAIで修正':'カーソル位置へAI文書を挿入');
+  const help=document.createElement('p');help.textContent=selected?'選択した文章だけを、下の指示に沿って修正します。差分を確認し、採用した変更だけを反映します。選択範囲外の文章は変更しません。':'カーソル位置に挿入する新しい文章を作成します。候補を確認してから挿入します。';
   const preview=document.createElement('pre');preview.textContent=selected||"挿入位置（選択範囲なし）";preview.style.maxHeight='160px';preview.style.overflow='auto';
   const label=document.createElement('label');label.textContent='AIへの指示';const instruction=document.createElement('textarea');instruction.rows=4;instruction.value=initial;instruction.setAttribute("aria-label","AIへの指示");instruction.placeholder='例：初めて使う人向けの操作手順に書き直す';label.append(instruction);
   const presets=document.createElement('div');presets.className='actions';for(const text of ['簡潔にする','初心者向けに説明する','操作手順にする','誤字脱字・文法を校正する']){const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=()=>{instruction.value=text;instruction.focus();};presets.append(button);}

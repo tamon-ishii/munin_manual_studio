@@ -33,7 +33,7 @@ async function workflowEvidence(page,caseId,details={},stage='final'){
  for(const entryPoint of testCase.entryPoints)workflowResults.push({caseId,entryPoint,type:'browser-mock',status:'passed',steps:workflowSteps[caseId],assertions,artifacts:allArtifacts});
 }
 
-let browser,vite,denyImages=false,delayReview=false,reviewStarted,releaseReview,expandedCorrection=false;
+let browser,vite,denyImages=false,delayReview=false,reviewStarted,releaseReview,expandedCorrection=false,omitReviewReplacements=false;
 const calls=[];
 function chunk(type,data){const name=Buffer.from(type),payload=Buffer.concat([name,data]);let crc=0xffffffff;for(const byte of payload){crc^=byte;for(let i=0;i<8;i++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}const header=Buffer.alloc(4),tail=Buffer.alloc(4);header.writeUInt32BE(data.length);tail.writeUInt32BE((crc^0xffffffff)>>>0);return Buffer.concat([header,payload,tail]);}
 const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(100,0);ihdr.writeUInt32BE(60,4);ihdr[8]=8;ihdr[9]=6;
@@ -53,8 +53,10 @@ const ai=createServer(async(req,res)=>{try{
     if(input.document.includes('old B'))issues.push({category:'reader',severity:'suggestion',quote:'old B',occurrence:1,message:'説明が曖昧',suggestion:'説明を明確にします。',replacement:'new B',image:''});
     const images=Array.isArray(user)?input.images.filter(i=>i.status==='submitted').map(i=>i.path):[];
     if(images.length&&input.document.includes('画面'))issues.push({category:'image',severity:'problem',quote:'画面',occurrence:1,message:'ボタン説明が画像と異なる',suggestion:'画像を確認して説明を修正',replacement:null,image:images[0]});
+    if(omitReviewReplacements)for(const issue of issues)issue.replacement=null;
     result={issues,checked_images:images};
-  }else if(prompt.startsWith('Create a comprehensive'))result={pages:[{path:'index.md',content:original.replace('old A','new A').replace('old B','new B')},{path:'other.md',content:'# Other changed\n\nCandidate\n'},{path:'new.md',content:'# New candidate\n'}]};
+  }else if(prompt.startsWith('Write concrete Markdown replacements'))result={replacements:input.findings.map(finding=>({id:finding.id,replacement:finding.quote==='old A'?'new A with extra explanation':'new B'}))};
+  else if(prompt.startsWith('Create a comprehensive'))result={pages:[{path:'index.md',content:original.replace('old A','new A').replace('old B','new B')},{path:'other.md',content:'# Other changed\n\nCandidate\n'},{path:'new.md',content:'# New candidate\n'}]};
   else if(prompt.startsWith('Create or revise'))result={content:input.mode==='insert new text'?'新しい文章です。':input.selected.replaceAll('old A',expandedCorrection?'new A with extra explanation':'new A').replaceAll('old B','new B')};
   else if(prompt.startsWith('Choose the target')){assert.ok(input.launch_context.some(file=>file.path==='README.md'&&file.content.includes('--workspace')));assert.ok(input.executable_candidates.some(candidate=>candidate.name==='fixture-app'));result={name:'Fixture app',program:input.selected_application?.program||'/usr/bin/true',args:['--workspace','demo project','--mode','docs']};}
   else if(prompt.startsWith('Select actual screenshot'))result={marks:[{element:1,type:'badge',step:1,text:''}]};
@@ -71,6 +73,13 @@ try{
   await mkdir(path.join(root,'docs/assets'),{recursive:true});await writeFile(path.join(root,'docs/index.md'),original);await writeFile(path.join(root,'docs/other.md'),'# Other\n\nOther text\n');await writeFile(path.join(root,'docs/assets/sample.png'),png);
   await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',output:'manual',agent:'codex',model:'fixture',connection_type:'api',endpoint_url:endpoint,assets:'docs/assets'}));
   const doc=await rpc('editor-read',{page:'docs/index.md'});
+  omitReviewReplacements=true;
+  const repaired=await rpc('document-review',{page:doc.page,json:{revision:doc.revision,reader:'初心者'}});
+  assert.equal(repaired.issues[0].replacement,'new A with extra explanation','review completes missing concrete corrections before returning');
+  assert.equal(repaired.issues[1].replacement,'new B');
+  assert.equal(repaired.issues[2].replacement,null,'image findings needing verification are preserved');
+  assert.equal(calls.at(-1).input.findings.length,2,'missing corrections are completed in one batch');
+  omitReviewReplacements=false;
   const report=await rpc('document-review',{page:doc.page,json:{revision:doc.revision,reader:'初心者'}});
   assert.equal(report.images.length,1);assert.equal(report.images[0].status,'checked');assert.equal(report.issues.length,3);assert.ok(Array.isArray(calls.at(-1).user));assert.equal(calls.at(-1).key,'Bearer fixture-key');
   const start=original.indexOf('old B'),end=start+5;
@@ -104,14 +113,14 @@ print(json.dumps({'status':'SUCCESS','structured_output':{'pages':[{'path':'inde
   await page.goto(`http://127.0.0.1:5174/?root=${encodeURIComponent(root)}&page=docs/index.md`);try{await page.waitForFunction(()=>/^(docs\/)?index\.md$/.test(document.querySelector('#editor-title').textContent));}catch(e){console.log(await page.locator('#status').textContent());throw e;}
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await idle();await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   const editor=page.locator('#markdown-editor');const select=async(left,right)=>editor.evaluate((e,[a,b])=>{e.focus();e.setSelectionRange(a,b);},[left,right]);
-  let progressClears=0,failCandidate=false,failReview=false,failPreflight=false,releaseDraft,blockDraft=true;
+  let progressClears=0,failCandidate=false,failReview=false,failPreflight=false,blockFailedReview=false,releaseFailedReview,releaseDraft,blockDraft=true;
   await page.route('**/__manual/rpc',async route=>{
     const {action}=route.request().postDataJSON();
     if(action==='agent-progress-clear'){progressClears++;await route.fulfill({json:{output:'{}'}});return;}
     if(action==='agent-progress'){await route.fulfill({json:{output:JSON.stringify({total:1,logs:[{time:'11:55:56',message:progressClears?'AIエージェントの応答を待っています':'Historical operation'}]})}});return;}
     if(action==='draft-propose'&&blockDraft){await new Promise(resolve=>releaseDraft=resolve);releaseDraft=undefined;await route.fulfill({json:{error:'AI生成を中断しました。'}});return;}
     if(action==='agent-cancel'&&releaseDraft){releaseDraft();await route.fulfill({json:{output:'{}'}});return;}
-    if(action==='document-review'&&failReview){await route.fulfill({json:{error:'レビュー接続のテスト失敗'}});return;}
+    if(action==='document-review'&&failReview){if(blockFailedReview)await new Promise(resolve=>releaseFailedReview=resolve);await route.fulfill({json:{error:'レビュー接続のテスト失敗'}});return;}
     if(action==='document-review-capabilities'&&failPreflight){await route.fulfill({json:{error:'画像対応のテスト失敗'}});return;}
     if(action==='selection-generate'&&failCandidate){await route.fulfill({status:500,json:{error:'agy failed: invalid structured output'}});return;}
     await route.continue();
@@ -125,6 +134,8 @@ print(json.dumps({'status':'SUCCESS','structured_output':{'pages':[{'path':'inde
   await draft();await page.locator('#draft-diff-dialog').getByRole('button',{name:'すべて見送り',exact:true}).click();assert.equal(await page.locator('#draft-diff-dialog').getByRole('button',{name:'選んだ変更を反映',exact:true}).isDisabled(),true);await page.locator('#draft-diff-dialog').getByRole('button',{name:'すべて採用',exact:true}).click();await page.locator('[data-draft-enabled="other.md"]').uncheck();await page.locator('[data-draft-enabled="new.md"]').uncheck();await page.locator('[data-draft-page="index.md"] [data-draft-part]').last().uncheck();await page.locator('#draft-diff-dialog').getByRole('button',{name:'選んだ変更を反映',exact:true}).click();await idle();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('new A'));assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original.replace('old A','new A'));assert.equal(await readFile(path.join(root,'docs/other.md'),'utf8'),'# Other\n\nOther text\n');await assert.rejects(readFile(path.join(root,'docs/new.md'),'utf8'));
   await workflowEvidence(page,'P12.full-draft-selective-page-part-adoption');
   expandedCorrection=false;await editor.fill(original);await editor.press('Control+s');await idle();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('保存しました'));
+  await page.evaluate(({root,original})=>localStorage.setItem(`manual-studio-reader-review:${root}:docs/index.md`,JSON.stringify({expected:original,report:{issues:[{category:'proofreading',severity:'problem',quote:'old A',start:original.indexOf('old A'),end:original.indexOf('old A')+5,message:'Legacy finding',suggestion:'Revise wording',image:''}],images:[],warnings:[]}})),{root,original});
+  await page.reload();await idle();await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   failPreflight=true;await select(0,0);await page.locator('#reader-review').click();await page.getByRole('button',{name:'対応状況を再確認',exact:true}).waitFor();await page.getByRole('textbox',{name:'想定する読者・目的'}).fill('Retained reader purpose');assert.equal(await page.getByRole('button',{name:'レビューを実行',exact:true}).isDisabled(),true);failPreflight=false;await page.getByRole('button',{name:'対応状況を再確認',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#reader-review-options .primary').disabled);assert.equal(await page.getByRole('textbox',{name:'想定する読者・目的'}).inputValue(),'Retained reader purpose');await workflowEvidence(page,'P09.review-preflight-retry',{},'retried');await page.locator('#reader-review-options').getByRole('button',{name:'閉じる',exact:true}).click();
   assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);await workflowEvidence(page,'P09.review-preflight-retry');
   await select(original.indexOf('old A'),original.indexOf('old B')+5);await page.locator('#reader-review').click();assert.equal(await page.getByRole('combobox',{name:'レビュー対象'}).inputValue(),'selection');await page.getByRole('button',{name:'レビューを実行',exact:true}).click();await page.locator('#reader-review-results').waitFor();assert.equal(await page.locator('[data-review-category]').count(),2);
@@ -134,7 +145,7 @@ print(json.dumps({'status':'SUCCESS','structured_output':{'pages':[{'path':'inde
   await page.locator('[data-review-category=proofreading]').getByRole('button',{name:'該当箇所へ',exact:true}).click();assert.equal(await editor.evaluate(e=>e.value.slice(e.selectionStart,e.selectionEnd)),'old A');assert.equal(await page.locator('#reader-review-results').isVisible(),true,'jump retains the review panel');assert.equal(await page.getByRole('combobox',{name:'指摘の分類'}).inputValue(),'proofreading');assert.equal(await page.locator('[data-review-category]').count(),2);await page.locator('[data-review-category=proofreading]').getByRole('button',{name:'該当箇所へ',exact:true}).click();assert.equal(await page.locator('#reader-review-results').isVisible(),true);
   assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);await workflowEvidence(page,'P09.selection-review-filter-rerun-jump');
   assert.equal(await page.locator('#reader-review-reopen').count(),0,'no extra review results button');
-  assert.equal(await page.locator('[data-review-category=proofreading] .review-replacement').textContent(),'new A with extra explanation','review includes the concrete replacement');
+  assert.equal(await page.locator('[data-review-category=proofreading] .review-replacement').inputValue(),'new A with extra explanation','review includes the concrete replacement');
   const callsBeforeCorrection=calls.length;
   await page.locator('[data-review-category=proofreading]').getByRole('button',{name:'修正案を確認',exact:true}).click();
   await page.locator('#selection-diff-dialog').waitFor();
@@ -162,7 +173,10 @@ print(json.dumps({'status':'SUCCESS','structured_output':{'pages':[{'path':'inde
   assert.equal(await page.locator('#reader-review-reopen').count(),0,'no extra results button after reload');
   const callsBeforeReopen=calls.length;
   await page.locator('#reader-review').click();
-  assert.equal(calls.length,callsBeforeReopen,'existing AI review entry reopens cached results without AI');
+  await page.locator('#reader-review-options').waitFor();
+  assert.equal(await page.getByRole('button',{name:'レビューを実行',exact:true}).isVisible(),true,'review after reload offers a fresh run');
+  await page.getByRole('button',{name:'前回の結果を見る',exact:true}).click();
+  assert.equal(calls.length,callsBeforeReopen,'previous results reopen only when explicitly requested');
   await page.locator('#reader-review-results').waitFor();
   assert.equal(await page.locator('[data-review-category]').count(),1,'persisted review report reopens with findings');
   assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),corrected);await workflowEvidence(page,'P09.report-reopen-after-reload');
@@ -172,6 +186,49 @@ print(json.dumps({'status':'SUCCESS','structured_output':{'pages':[{'path':'inde
   assert.match(await page.locator('#progress-log').textContent(),/レビュー|処理/);await workflowEvidence(page,'P12.progress-log-reopen-after-review',{},'opened');
   await page.locator('#progress-dismiss').click();
   assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),corrected);await workflowEvidence(page,'P12.progress-log-reopen-after-review');
+  await page.locator('#reader-review').click();await page.getByRole('button',{name:'前回の結果を見る',exact:true}).click();await page.locator('#reader-review-results').waitFor();
+  const callsBeforeDirect=calls.length;
+  await page.locator('[data-review-category=reader]').getByRole('button',{name:'この修正案を適用',exact:true}).click();await idle();
+  await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('new B'));
+  assert.equal(await editor.inputValue(),corrected.replace('old B','new B'));
+  assert.equal(calls.length,callsBeforeDirect,'individual application needs no AI');
+  await editor.press('Control+z');await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('old B'));
+  assert.equal(await editor.inputValue(),corrected,'individual application supports Undo');
+  await page.locator('#reader-review-results').getByRole('button',{name:'閉じる',exact:true}).click();
+  await editor.fill(original);await editor.press('Control+s');await idle();
+  await select(0,0);await page.locator('#reader-review').click();await page.getByRole('button',{name:'レビューを実行',exact:true}).click();
+  await page.locator('#reader-review-results').waitFor();
+  assert.equal(await page.locator('[data-review-category=image]').getByRole('button',{name:'この修正案を適用',exact:true}).isDisabled(),true,'findings requiring confirmation have no applicable replacement');
+  const callsBeforeBatch=calls.length;
+  await page.getByRole('combobox',{name:'指摘の分類'}).selectOption('proofreading');
+  await editor.fill(original+'manual change');
+  await page.getByRole('button',{name:'すべて適用',exact:true}).click();
+  assert.match(await page.locator('#reader-review-results [role=alert]').textContent(),/原稿が変更/);
+  assert.equal(await editor.inputValue(),original+'manual change','stale batch never writes');
+  await editor.press('Control+z');assert.equal(await editor.inputValue(),original);
+  await page.getByRole('button',{name:'すべて適用',exact:true}).click();await idle();
+  const batchCorrected=original.replace('old A','new A with extra explanation').replace('old B','new B');
+  assert.equal(await editor.inputValue(),batchCorrected,'apply all includes findings outside the active category filter');
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),batchCorrected);
+  assert.equal(calls.length,callsBeforeBatch,'batch application needs no AI');
+  assert.equal(await page.getByRole('button',{name:'すべて適用',exact:true}).isDisabled(),true);
+  await page.getByRole('combobox',{name:'指摘の分類'}).selectOption('image');
+  assert.match(await page.locator('[data-review-category=image] .muted').textContent(),/修正文が返っていません/);
+  // Editing an existing report during a failed rerun must survive busy-state restoration.
+  failReview=true;blockFailedReview=true;
+  await page.locator('#reader-review').click();
+  await page.getByRole('button',{name:'レビューを実行',exact:true}).click();
+  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='true');
+  await page.locator('[data-review-category=image] .review-replacement').fill('画像で確認した画面');
+  assert.equal(await page.locator('[data-review-category=image]').getByRole('button',{name:'この修正案を適用',exact:true}).isDisabled(),true,'application stays blocked during processing');
+  while(!releaseFailedReview)await new Promise(resolve=>setTimeout(resolve,10));
+  releaseFailedReview();await idle();failReview=false;blockFailedReview=false;
+
+  assert.equal(await page.locator('[data-review-category=image]').getByRole('button',{name:'この修正案を適用',exact:true}).isEnabled(),true);
+  assert.equal(await page.getByRole('button',{name:'すべて適用',exact:true}).isEnabled(),true);
+  await editor.press('Control+z');await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('old A'));
+  assert.equal(await editor.inputValue(),original,'one Undo reverses the whole batch');
+  await page.locator('#reader-review-results').getByRole('button',{name:'閉じる',exact:true}).click();
   await editor.fill(original);await editor.press('Control+s');await idle();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('保存しました'));
   await select(original.indexOf('old A'),original.indexOf('old B')+5);await page.locator('#selection-ai').click();await page.getByRole('textbox',{name:'AIへの指示',exact:true}).fill('校正');await page.getByRole('button',{name:'候補を作成',exact:true}).click();await page.locator('#selection-diff-dialog').waitFor();assert.equal(await page.locator('[data-diff-part]').count(),2);assert.equal(await page.locator('.diff-controls [role=status]').textContent(),'2 / 2件の変更を採用');assert.equal(await page.locator('.diff-same .selection-diff-columns').count(),0);await page.locator('.diff-context summary').first().click();assert.equal(await page.locator('.diff-context').first().getAttribute('open'),'');await page.locator('[data-diff-part]').last().uncheck();assert.equal(await page.locator('.diff-controls [role=status]').textContent(),'1 / 2件の変更を採用');await page.setViewportSize({width:540,height:760});assert.ok(await page.locator('#selection-diff-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));await page.setViewportSize({width:1440,height:960});failCandidate=true;await page.locator('#selection-diff-dialog textarea').fill('Retry without losing partial choices');await page.locator('[data-diff-action=retry]').click();await page.waitForFunction(()=>document.querySelector('#selection-diff-dialog [role=alert]')?.textContent.includes('前の候補と採用の選択を保持'));assert.equal(await page.locator('.diff-controls [role=status]').textContent(),'1 / 2件の変更を採用');assert.equal(await page.locator('[data-diff-part]').last().isChecked(),false);assert.equal(await page.locator('#selection-diff-dialog textarea').inputValue(),'Retry without losing partial choices');await workflowEvidence(page,'P10.selection-diff-partial-retry-undo-redo',{},'retry-failed');failCandidate=false;await page.locator('[data-diff-action=adopt]').click();await idle();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('new A'));
   const partial=original.replace('old A','new A');assert.equal(await editor.inputValue(),partial);await editor.press('Control+z');assert.equal(await editor.inputValue(),original);await editor.press('Control+Shift+z');assert.equal(await editor.inputValue(),partial);

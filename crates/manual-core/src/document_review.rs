@@ -72,7 +72,7 @@ pub(crate) fn review(root: &Path, page: &str, options: &str) -> Result<String, S
     let schema = json!({"type":"object","properties":{"issues":{"type":"array","items":{"type":"object","properties":{"category":{"type":"string","enum":["reader","proofreading","image"]},"severity":{"type":"string","enum":["problem","suggestion"]},"quote":{"type":"string"},"occurrence":{"type":"integer"},"message":{"type":"string"},"suggestion":{"type":"string"},"replacement":{"type":["string","null"]},"image":{"type":"string"}},"required":["category","severity","quote","occurrence","message","suggestion","replacement","image"],"additionalProperties":false}},"checked_images":{"type":"array","items":{"type":"string"}}},"required":["issues","checked_images"],"additionalProperties":false});
     let checkpoint = crate::agent::cancellation_checkpoint(root);
     let result = if image_data.is_empty() {
-        crate::agent::agent_json(root, &prompt, &schema, &config.agent, &config.model)?
+        crate::agent::agent_json_candidate(root, &prompt, &schema, &config.agent, &config.model)?
     } else {
         match crate::agent::http_agent_json_images(
             root,
@@ -93,12 +93,26 @@ pub(crate) fn review(root: &Path, page: &str, options: &str) -> Result<String, S
                     image["status"] = json!("unverified");
                 }
                 let fallback=format!("{prompt}\nImage attachments are unavailable. Do not report image findings. Return checked_images as an empty array.");
-                crate::agent::agent_json(root, &fallback, &schema, &config.agent, &config.model)?
+                crate::agent::agent_json_candidate(root, &fallback, &schema, &config.agent, &config.model)?
             }
         }
     };
     crate::agent::check_cancelled(root, &checkpoint)?;
     let mut issues = validate_findings(reviewed, &result, &images)?;
+    let pending = replacement_requests(&issues);
+    if !pending.is_empty() {
+        let prompt = format!("Write concrete Markdown replacements for these manuscript review findings. The review is not complete until actionable corrections are provided. Use the document and inspect relevant project files read-only to confirm prerequisites, paths, commands and procedures. A suggestion explaining what to change is NOT a replacement: write the actual revised passage replacing exactly quote. Preserve surrounding content and meaning. Do not invent facts. Return null only if an essential fact cannot be verified from the document or project; keep confirmed parts actionable where possible. Return each requested id exactly once. Do not change any project files.\nInput JSON: {}", json!({"page":page,"document":reviewed,"findings":pending}));
+        let schema = json!({"type":"object","properties":{"replacements":{"type":"array","items":{"type":"object","properties":{"id":{"type":"integer"},"replacement":{"type":["string","null"]}},"required":["id","replacement"],"additionalProperties":false}}},"required":["replacements"],"additionalProperties":false});
+        match crate::agent::agent_json_candidate(root, &prompt, &schema, &config.agent, &config.model)
+            .and_then(|answer| merge_replacements(&mut issues, &pending, &answer)) {
+            Ok(()) => {},
+            Err(error) => {
+                crate::agent::check_cancelled(root, &checkpoint)?;
+                warnings.push(format!("指摘の修正文を作成できませんでした。指摘は保持しています: {error}"));
+            }
+        }
+        crate::agent::check_cancelled(root, &checkpoint)?;
+    }
     for issue in &mut issues {
         for key in ["start", "end"] {
             issue[key] = json!(issue[key].as_u64().unwrap() + base as u64);
@@ -118,6 +132,30 @@ pub(crate) fn review(root: &Path, page: &str, options: &str) -> Result<String, S
     }
     Ok(json!({"page":page,"revision":document.revision,"issues":issues,"images":images,"warnings":warnings}).to_string())
 }
+fn replacement_requests(issues: &[Value]) -> Vec<Value> {
+    issues.iter().enumerate().filter(|(_, issue)| {
+        issue["category"] != "image"
+            && (issue["replacement"].as_str().is_none() || issue["replacement"] == issue["quote"])
+    }).map(|(id, issue)| json!({"id":id,"quote":issue["quote"],"message":issue["message"],"suggestion":issue["suggestion"]})).collect()
+}
+
+fn merge_replacements(issues: &mut [Value], requested: &[Value], answer: &Value) -> Result<(), String> {
+    let replacements = answer["replacements"].as_array().ok_or("修正文の形式が不正です。")?;
+    let mut seen = std::collections::HashSet::new();
+    for replacement in replacements {
+        let id = replacement["id"].as_u64().ok_or("修正文の対象が不正です。")? as usize;
+        if !requested.iter().any(|item| item["id"] == id) || !seen.insert(id)
+            || (!replacement["replacement"].is_null() && !replacement["replacement"].is_string()) {
+            return Err("修正文の対象または形式が不正です。".into());
+        }
+    }
+    if seen.len() != requested.len() { return Err("一部の指摘の修正文がありません。".into()); }
+    for replacement in replacements {
+        issues[replacement["id"].as_u64().unwrap() as usize]["replacement"] = replacement["replacement"].clone();
+    }
+    Ok(())
+}
+
 fn review_range<'a>(content: &'a str, range: &Value) -> Result<(&'a str, usize), String> {
     if range.is_null() {
         return Ok((content, 0));
@@ -222,6 +260,27 @@ fn validate_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn completes_only_missing_text_corrections_and_merges_atomically() {
+        let mut issues = vec![
+            json!({"category":"reader","quote":"before","replacement":null}),
+            json!({"category":"proofreading","quote":"same","replacement":"same"}),
+            json!({"category":"proofreading","quote":"old","replacement":"correct"}),
+            json!({"category":"image","quote":"image","replacement":null}),
+        ];
+        let pending = replacement_requests(&issues);
+        assert_eq!(pending.len(), 2);
+        let original = issues.clone();
+        assert!(merge_replacements(&mut issues, &pending, &json!({"replacements":[{"id":0,"replacement":"after"},{"id":2,"replacement":"wrong"}]})).is_err());
+        assert_eq!(issues, original);
+        assert!(merge_replacements(&mut issues, &pending, &json!({"replacements":[{"id":0,"replacement":"after"}]})).is_err());
+        assert_eq!(issues, original);
+        merge_replacements(&mut issues, &pending, &json!({"replacements":[{"id":1,"replacement":""},{"id":0,"replacement":"after"}]})).unwrap();
+        assert_eq!(issues[0]["replacement"], "after");
+        assert_eq!(issues[1]["replacement"], "");
+        assert_eq!(issues[2]["replacement"], "correct");
+        assert!(issues[3]["replacement"].is_null());
+    }
     #[test]
     fn selection_uses_utf16_boundaries() {
         assert_eq!(

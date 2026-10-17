@@ -456,7 +456,9 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         }
         "e2e" => scenario::test_manual(root),
         "state" => {
-            let state_val = get_state(root)?;
+            let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}"))
+                .map_err(|error| error.to_string())?;
+            let state_val = if options["editor"] == true { preview::get_editor_state(root)? } else { get_state(root)? };
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
         "models" => {
