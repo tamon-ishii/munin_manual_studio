@@ -470,6 +470,7 @@ function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
   else button.disabled = disabled;
 }
 async function savedBeforeOperation(): Promise<void> {
+  await saveBriefSettings();
   while (documentSavePending) await documentSavePending;
   if (dirty) await saveDocument(false);
   if (dirty) throw new Error("原稿の保存が完了しませんでした。編集内容を確認して再試行してください。");
@@ -803,7 +804,7 @@ const screenshotLibrary = setupScreenshotLibrary({
 });
 setupToolbarCustomization();
 const imageAiSettings=setupImageAiSettings({root:()=>projectRoot,request:rpc,prepare:saveAiSettings});
-const imageGeneration=setupImageGeneration({prepare:saveAiSettings,imageKey:(root,url)=>imageAiSettings.key(root,url),sharedKey:root=>root===projectRoot?readAiCredential(root,workspace?.config.endpoint_url||''):'',root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
+const imageGeneration=setupImageGeneration({prepare:async()=>{await saveAiSettings();await imageAiSettings.flush();},imageKey:(root,url)=>imageAiSettings.key(root,url),sharedKey:root=>root===projectRoot?readAiCredential(root,workspace?.config.endpoint_url||''):'',root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
 
 let documentImageEditing = false;
 let retryDocumentImageEdit: (() => Promise<void>) | null = null;
@@ -964,7 +965,10 @@ function renderSettings(): void {
   void imageAiSettings.refresh();
   setButtonDisabled(element<HTMLButtonElement>("open-applications"), false);
   input("ai-model").value = workspace.config.model;
-  element<HTMLTextAreaElement>("manual-brief").value = workspace.brief;
+  if (!briefDirty && !briefSaving) {
+    element<HTMLTextAreaElement>("manual-brief").value = workspace.brief;
+    setBriefSaveState("保存済み");
+  }
   element("ai-agent").innerHTML = workspace.agents.map((agent) => `<option value="${escape(agent.id)}"${agent.available ? "" : " disabled"}>${escape(agent.label)}${agent.available ? "" : "（CLI未検出）"}</option>`).join("");
   const preferred = workspace.has_config ? workspace.config.agent : workspace.agents.find((agent) => agent.available)?.id || workspace.config.agent;
   element<HTMLSelectElement>("ai-agent").value = preferred;
@@ -978,6 +982,47 @@ function renderSettings(): void {
   updateAiSettingsVisibility();
   updateAiAvailability();
   setAiSaveState(workspace.has_config ? "保存済み" : "AI設定を変更すると自動保存します");
+}
+let briefSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let briefSaveQueue: Promise<void> = Promise.resolve();
+let briefDirty = false;
+let briefSaving = 0;
+let briefEditVersion = 0;
+function setBriefSaveState(message: string, failed = false): void {
+  element("brief-save-state").textContent = message;
+  element("brief-save-retry").hidden = !failed;
+}
+function saveBriefSettings(): Promise<void> {
+  clearTimeout(briefSaveTimer);
+  if (!workspace || !briefDirty) return briefSaveQueue;
+  const root = projectRoot, version = briefEditVersion;
+  const brief = element<HTMLTextAreaElement>("manual-brief").value;
+  briefDirty = false; briefSaving++;
+  const operation = Promise.all([briefSaveQueue.catch(() => {}), aiSaveQueue.catch(() => {})]).then(async () => {
+    if (projectRoot === root && briefEditVersion === version) setBriefSaveState("保存中…");
+    try {
+      await rpc("save", { brief }, root);
+      if (projectRoot === root && briefEditVersion === version) {
+        workspace!.brief = brief;
+        setBriefSaveState("保存済み");
+      }
+    } catch (error) {
+      if (projectRoot === root && briefEditVersion === version) {
+        briefDirty = true;
+        setBriefSaveState(`保存失敗: ${String(error)}`, true);
+      }
+      throw error;
+    } finally { briefSaving--; }
+  });
+  briefSaveQueue = operation;
+  return operation;
+}
+function scheduleBriefSave(): void {
+  if (!workspace) return;
+  briefDirty = true; briefEditVersion++;
+  setBriefSaveState("未保存（自動保存待ち）");
+  clearTimeout(briefSaveTimer);
+  briefSaveTimer = setTimeout(() => { void saveBriefSettings().catch(() => {}); }, 400);
 }
 let aiSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let aiSaveQueue: Promise<void> = Promise.resolve();
@@ -1006,7 +1051,7 @@ function saveAiSettings(): Promise<void> {
   };
   saveAiCredential(root, options.endpoint_url, input("ai-api-key").value);
   aiSavePending = false;
-  const operation = aiSaveQueue.catch(() => {}).then(async () => {
+  const operation = Promise.all([aiSaveQueue.catch(() => {}), briefSaveQueue.catch(() => {})]).then(async () => {
     if (projectRoot === root && aiEditVersion === version) setAiSaveState("保存中…");
     try {
       // AI-only options preserve the existing project settings.
@@ -1039,6 +1084,7 @@ function scheduleAiSave(): void {
 async function ensureAiSettings(): Promise<void> {
   if (!workspace) throw new Error("先にプロジェクトを開いてください。");
   await saveAiSettings();
+  await saveBriefSettings();
   const connectionType = element<HTMLSelectElement>("ai-connection-type").value;
   const agentId = element<HTMLSelectElement>("ai-agent").value;
   const model = input("ai-model").value.trim();
@@ -1086,6 +1132,7 @@ async function openProject(root: string, check = true): Promise<void> {
 
   if (check && !await confirmAllDocumentTabs()) return;
   await saveAiSettings();
+  await saveBriefSettings();
   status("プロジェクトを開いています…");
   const version = ++projectRequestVersion;
   const loaded = JSON.parse(await rpc("state", {}, root)) as State;
@@ -1113,7 +1160,7 @@ async function openProject(root: string, check = true): Promise<void> {
   input("project-root").value = root;
   localStorage.setItem("manual-studio-project", root);
   try { await recordWorkspaceHistory(native, root); }
-  catch (error) { status(`最近開いたフォルダの履歴を保存できません: ${String(error)}`, true); }
+  catch (error) { status(`最近開いたフォルダーの履歴を保存できません: ${String(error)}`, true); }
   if (params.get("root") !== root) {
     params.set("root", root);
     params.delete("page");
@@ -1145,7 +1192,7 @@ async function openProject(root: string, check = true): Promise<void> {
     if (page && saved?.pages.includes(page) && !documentTabs.has(page)) page = [...documentTabs.keys()].at(-1);
     if (!page && !saved) page = loaded.pages[0] || loaded.project_entries.find(entry => !entry.directory && /\.md$/i.test(entry.path))?.path;
     if (page) await openPage(page, false);
-    else if (!documentTabs.size) { editor.value = ""; updateSaveState(); status("一覧から原稿を開くか、「＋」でMarkdownページを作成してください。"); }
+    else if (!documentTabs.size) { editor.value = ""; updateSaveState(); status("一覧から原稿を開くか、「＋」で原稿を作成してください。"); }
   } finally {
     if (version === projectRequestVersion) { restoringDocumentTabs = false; saveDocumentTabSession(); }
   }
@@ -1371,8 +1418,8 @@ function updateSelectionAction(): void {
 function updateEditorEmptyState(): void {
   const empty = !documentState && !activeImageTab;
   element('editor-empty-state').hidden = !empty;
-  element('editor-empty-title').textContent = workspace ? '原稿を選ぶか、作成してください' : 'フォルダを開いて始める';
-  element('editor-empty-description').textContent = workspace ? '左のファイルツリーから原稿を選択できます。' : '原稿と画像を保存しているフォルダを選択してください。';
+  element('editor-empty-title').textContent = workspace ? '原稿を選ぶか、作成してください' : 'フォルダーを開いて始める';
+  element('editor-empty-description').textContent = workspace ? '左のファイルツリーから原稿を選択できます。' : '原稿と画像を保存しているフォルダーを選択してください。';
   element('empty-open-folder').hidden = Boolean(workspace);
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
@@ -1570,10 +1617,10 @@ element('workspace-guide').querySelector('[data-guide-dismiss]')!.addEventListen
   try { localStorage.setItem(`manual-studio-guide:${projectRoot}`, 'hidden'); } catch { /* Optional preference. */ }
   element('workspace-guide').hidden = true;
 });
-document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button => { button.title = `${button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
+document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button => { button.title = `${button.getAttribute("aria-label") || button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
 let closingApproved = false;
 let closingPrompt = false;
-window.addEventListener("beforeunload", (event) => { if ((dirty || [...documentTabs.entries()].some(([page,tab]) => page !== documentState?.page && tab.content !== tab.document.content)) && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
+window.addEventListener("beforeunload", (event) => { if ((briefDirty || briefSaving > 0 || dirty || [...documentTabs.entries()].some(([page,tab]) => page !== documentState?.page && tab.content !== tab.document.content)) && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
 window.addEventListener("pagehide", () => terminalController?.disconnectOnUnload());
 if (native) void getCurrentWindow().onCloseRequested(event => {
   if (closingApproved) return;
@@ -1584,6 +1631,7 @@ if (native) void getCurrentWindow().onCloseRequested(event => {
   void (async () => {
     try {
       const activeAtClose = documentState?.page || null;
+      await saveBriefSettings();
       if (!await confirmAllDocumentTabs()) return;
       saveDocumentTabSession(activeAtClose);
       await terminalController?.kill();
@@ -2232,14 +2280,9 @@ if (editorColumn) {
 function actionButton(id: string, action: string, options: () => Record<string, unknown> = () => ({}), result?: string): void {
   element(id).addEventListener("click", () => { void work(() => runAction(action, options(), result)); });
 }
-element("save-settings").addEventListener("click", () => { void work(async () => {
-  await saveAiSettings();
-  if (!workspace) throw new Error("フォルダを開いてください。");
-  await runAction("save", {
-    brief: element<HTMLTextAreaElement>("manual-brief").value,
-  });
-  element("brief-save-state").textContent = "執筆方針を保存しました。";
-}); });
+element("manual-brief").addEventListener("input", scheduleBriefSave);
+element("brief-save-retry").addEventListener("click", () => { void saveBriefSettings().catch(() => {}); });
+element("panel-brief").addEventListener("close", () => { void saveBriefSettings().catch(() => {}); });
 element("ai-connection-type").addEventListener("change", updateAiSettingsVisibility);
 element("ai-agent").addEventListener("change", () => {
   input("ai-model").value = "";
@@ -2434,54 +2477,54 @@ function saveReaderReviewSession(root: string, page: string, expected: string, r
   catch { /* LocalStorage error */ }
 }
 function loadReaderReviewSession(root: string, page: string): void {
+  reopenReaderReview = undefined;
   try {
     const raw = localStorage.getItem(`manual-studio-reader-review:${root}:${page}`);
-    if (!raw) {
-      element('reader-review-reopen').hidden = true;
-      reopenReaderReview = undefined;
-      return;
-    }
+    if (!raw) return;
     const data = JSON.parse(raw) as { expected: string; report: ReaderReport };
-    if (!data.report || typeof data.expected !== 'string') return;
-    let expected = data.expected;
-    const result = data.report;
-    const valid = () => root === projectRoot && documentState?.page === page && editor.value === expected;
-    reopenReaderReview = () => {
-      if (!valid()) {
-        status("原稿が変更されました。レビューを実行し直してください。", true);
-        return;
-      }
-      showReaderReport(result, valid, finding => {
-        if (preferredEditorView === 'preview') { preferredEditorView = 'edit'; applyEditorView(); }
-        milkdown.showSource(); jumpToSource(editor, finding.start, finding.end); updateCursor();
-      }, finding => {
-        milkdown.showSource(); jumpToSource(editor, finding.start, finding.end);
-        const beforeCorrection = expected;
-        const previousFilter = document.querySelector<HTMLSelectElement>('#reader-review-results select')?.value || 'all';
-        void createSelectionDocument(`次の指摘を反映してください。根拠のない製品仕様は追加せず、確認が必要な点は明示してください。\n指摘：${finding.message}\n修正の提案：${finding.suggestion}`).then(adopted => {
-          if (!adopted) return;
-          const after = editor.value;
-          if (root !== projectRoot || documentState?.page !== page || after === beforeCorrection) return;
-          if (!after.startsWith(beforeCorrection.slice(0, finding.start)) || !after.endsWith(beforeCorrection.slice(finding.end))) return;
-          const delta = after.length - beforeCorrection.length;
-          result.issues = result.issues.filter(issue => issue.end <= finding.start || issue.start >= finding.end);
-          for (const issue of result.issues) if (issue.start >= finding.end) { issue.start += delta; issue.end += delta; }
-          expected = after;
-          saveReaderReviewSession(root, page, expected, result);
-          document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();
-          reopenReaderReview?.();
-          const filter = document.querySelector<HTMLSelectElement>('#reader-review-results select');
-          if (filter) { filter.value = previousFilter; filter.dispatchEvent(new Event('change')); }
-        }).catch(error => status(String(error), true));
-      });
-    };
-    element('reader-review-reopen').hidden = false;
+    if (typeof data.expected === 'string' && Array.isArray(data.report?.issues)) {
+      installReaderReport(root, page, data.expected, data.report);
+    }
   } catch { /* LocalStorage error */ }
 }
-let reopenReaderReview:(()=>void)|undefined;
-element("reader-review-reopen").onclick=()=>reopenReaderReview?.();
+let reopenReaderReview:(()=>boolean)|undefined;
+function installReaderReport(root:string,page:string,expected:string,result:ReaderReport):void {
+  const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===expected;
+  reopenReaderReview=()=>{
+    if(!valid())return false;
+    showReaderReport(result,valid,finding=>{
+      if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
+      milkdown.showSource();jumpToSource(editor,finding.start,finding.end);updateCursor();
+    },finding=>{
+      if(typeof finding.replacement!=='string'||finding.replacement===finding.quote)return;
+      const before=expected,previousFilter=document.querySelector<HTMLSelectElement>('#reader-review-results select')?.value||'all';
+      void(async()=>{
+        const decision=await reviewSelection(page,finding.quote,finding.replacement!,undefined,'',false);
+        if(decision.action!=='adopt'||decision.content===finding.quote)return;
+        if(!valid()||expected!==before||before.slice(finding.start,finding.end)!==finding.quote){
+          status('原稿が変更されました。レビューを実行し直してください。',true);return;
+        }
+        if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
+        milkdown.showSource();
+        replaceMarkdown(finding.start,finding.end,decision.content,0,decision.content.length);
+        updateHistoryButtons();
+        const after=editor.value,delta=after.length-before.length;
+        result.issues=result.issues.filter(issue=>issue.end<=finding.start||issue.start>=finding.end);
+        for(const issue of result.issues)if(issue.start>=finding.end){issue.start+=delta;issue.end+=delta;}
+        expected=after;saveReaderReviewSession(root,page,expected,result);
+        document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();
+        reopenReaderReview?.();
+        const filter=document.querySelector<HTMLSelectElement>('#reader-review-results select');
+        if(filter){filter.value=previousFilter;filter.dispatchEvent(new Event('change'));}
+        await saveDocument(false);status('レビューの修正案を反映しました。');
+      })().catch(error=>status(String(error),true));
+    });
+    return true;
+  };
+}
 async function reviewCurrentDocument():Promise<void>{
   if(busy||!documentState||activeImageTab)return;
+  if(!document.querySelector<HTMLDialogElement>('#reader-review-results')?.open&&reopenReaderReview?.())return;
   const root=projectRoot,page=documentState.page,captured=editor.value;
   const start=editor.selectionStart,end=editor.selectionEnd;
   await savedBeforeOperation();await saveAiSettings();
@@ -2498,31 +2541,12 @@ async function reviewCurrentDocument():Promise<void>{
   });
   const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===expected;
   if(!valid()){status('原稿が変更されました。レビューを実行し直してください。',true);return;}
-  if(report){document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();const result=report;reopenReaderReview=()=>{if(!valid()){status("原稿が変更されました。レビューを実行し直してください。",true);return;}showReaderReport(result,valid,finding=>{
-    if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
-    milkdown.showSource();jumpToSource(editor,finding.start,finding.end);updateCursor();
-  },finding=>{
-    milkdown.showSource();jumpToSource(editor,finding.start,finding.end);
-    const beforeCorrection=expected;
-    const previousFilter=document.querySelector<HTMLSelectElement>('#reader-review-results select')?.value||'all';
-    void createSelectionDocument(`次の指摘を反映してください。根拠のない製品仕様は追加せず、確認が必要な点は明示してください。\n指摘：${finding.message}\n修正の提案：${finding.suggestion}`).then(adopted=>{
-      if(!adopted)return;
-      const after=editor.value;
-      if(root!==projectRoot||documentState?.page!==page||after===beforeCorrection)return;
-      // Only the correction's captured range may move the remaining anchors.
-      // Unrelated edits retain the stale-result rejection.
-      if(!after.startsWith(beforeCorrection.slice(0,finding.start))||!after.endsWith(beforeCorrection.slice(finding.end)))return;
-      const delta=after.length-beforeCorrection.length;
-      result.issues=result.issues.filter(issue=>issue.end<=finding.start||issue.start>=finding.end);
-      for(const issue of result.issues)if(issue.start>=finding.end){issue.start+=delta;issue.end+=delta;}
-      expected=after;
-      saveReaderReviewSession(root, page, expected, result);
-      document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();
-      reopenReaderReview?.();
-      const filter=document.querySelector<HTMLSelectElement>('#reader-review-results select');
-      if(filter){filter.value=previousFilter;filter.dispatchEvent(new Event('change'));}
-    }).catch(error=>status(String(error),true));
-  });};saveReaderReviewSession(root, page, expected, result);element('reader-review-reopen').hidden=false;reopenReaderReview();status(`レビュー完了：指摘 ${result.issues.length}件。`);}
+  if(report){
+    document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();
+    installReaderReport(root,page,expected,report);
+    saveReaderReviewSession(root,page,expected,report);
+    reopenReaderReview?.();status(`レビュー完了：指摘 ${report.issues.length}件。`);
+  }
 }
 element('reader-review').addEventListener('click',()=>{void reviewCurrentDocument().catch(error=>status(String(error),true));});
 

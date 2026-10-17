@@ -116,7 +116,7 @@ pub(crate) fn draft_pages(root: &Path) -> Result<Vec<(String, String)>, String> 
     });
 
     log_progress(root, "AIに章立てと原稿案を依頼しています");
-    let result = super::agent::agent_json_detached(root, &draft_prompt, &schema, &config.agent, &config.model)?;
+    let result = super::agent::agent_json_candidate(root, &draft_prompt, &schema, &config.agent, &config.model)?;
     log_progress(root, "AIの回答を検査し、原稿ファイルを準備しています");
     let pages = result
         .get("pages")

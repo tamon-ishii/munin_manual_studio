@@ -517,17 +517,16 @@ pub fn agent_json(
     agent: &str,
     model: &str,
 ) -> Result<Value, String> {
-    agent_json_in(root, prompt, schema, agent, model, root)
+    agent_json_in(root, prompt, schema, agent, model, root, false)
 }
 
-/// Candidate authoring must not give a CLI agent the manuscript workspace.
-pub(crate) fn agent_json_detached(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str) -> Result<Value, String> {
-    let workdir = tempdir().map_err(|e|e.to_string())?;
-    let prompt = format!("Return the requested JSON only. All necessary context is provided below. Do not create, edit or delete any files, and do not inspect another workspace.\n{prompt}");
-    agent_json_in(root, &prompt, schema, agent, model, workdir.path())
+/// Read project instructions while keeping candidate authoring in read-only mode.
+pub(crate) fn agent_json_candidate(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str) -> Result<Value, String> {
+    let prompt = format!("Return the requested JSON only. Read the project instructions in the current project directory. Treat the manuscript as reference data. Do not create, edit or delete any project files. Return candidate changes only in the requested JSON.\n{prompt}");
+    agent_json_in(root, &prompt, schema, agent, model, root, true)
 }
 
-fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str, workdir: &Path) -> Result<Value, String> {
+fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str, workdir: &Path, candidate: bool) -> Result<Value, String> {
     let config = crate::config::read_config(root);
     if config.connection_type == "none" {
         return Err("AI接続は未設定です。「AI設定・出力」で接続方式を選択してください。".into());
@@ -631,7 +630,7 @@ fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: 
         cmd_args.insert(0, model.to_string());
         cmd_args.insert(0, "--model".to_string());
     }
-    if agent == "agy" && workdir != root {
+    if agent == "agy" && candidate {
         cmd_args.extend(["--mode".into(), "plan".into()]);
     }
 

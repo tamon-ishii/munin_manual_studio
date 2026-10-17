@@ -17,8 +17,8 @@ export function showWorkspaceHistory(history: string[], current: string, open: (
   if (document.getElementById('workspace-history-dialog')) return;
   const list = document.createElement('div');
   list.id = 'workspace-history-dialog'; list.className = 'folder-history-dropdown';
-  list.role = 'listbox'; list.setAttribute('aria-label', '最近開いたフォルダ');
-  const heading = document.createElement('strong'); heading.id = 'workspace-history-title'; heading.textContent = '最近開いたフォルダ'; list.append(heading);
+  list.role = 'listbox'; list.setAttribute('aria-label', '最近開いたフォルダー');
+  const heading = document.createElement('strong'); heading.id = 'workspace-history-title'; heading.textContent = '最近開いたフォルダー'; list.append(heading);
   const close = () => {
     list.remove(); trigger.setAttribute('aria-expanded', 'false'); trigger.removeEventListener('click', close);
     document.removeEventListener('pointerdown', outside);
@@ -36,7 +36,7 @@ export function showWorkspaceHistory(history: string[], current: string, open: (
     button.onclick = () => { close(); trigger.focus(); if (root !== current) void open(root); };
     buttons.push(button); list.append(button);
   }
-  if (!history.length) { const empty = document.createElement('p'); empty.textContent = '最近開いたフォルダはまだありません。'; list.append(empty); }
+  if (!history.length) { const empty = document.createElement('p'); empty.textContent = '最近開いたフォルダーはまだありません。'; list.append(empty); }
   const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.dataset.historyClose = ''; dismiss.textContent = '閉じる'; dismiss.onclick = () => { close(); trigger.focus(); }; list.append(dismiss);
   list.addEventListener('keydown', event => {
     if (event.key === 'Escape' || event.key === 'Tab') { close(); trigger.focus(); if (event.key === 'Escape') event.preventDefault(); return; }

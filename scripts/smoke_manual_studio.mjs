@@ -452,7 +452,7 @@ try {
 
   await page.getByRole('button',{name:'執筆方針',exact:true}).click();
   await page.locator('#manual-brief').fill('初めて使う読者向けの操作説明');
-  await page.locator('#save-settings').click();await idle();
+  await page.waitForFunction(()=>document.querySelector('#brief-save-state').textContent==='保存済み');await idle();
   assert.match(await readFile(path.join(root,'manual/brief.md'),'utf8'),/初めて使う読者/);
   assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).model,'retry-test-model');
   await page.locator('[data-close-dialog=panel-brief]').click();

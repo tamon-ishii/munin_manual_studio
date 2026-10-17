@@ -79,7 +79,7 @@ export function setupImageGeneration(options:Options) {
       function updateProvider(){
         const shared=provider.value==='shared',effective=shared?settings.shared_provider:provider.value;
         details.hidden=effective!=='api';endpoint.wrapper.hidden=key.wrapper.hidden=shared;
-        providerHint.textContent=shared?settings.shared_error||`文章・図と同じ接続を使います：${settings.shared_provider}${settings.shared_endpoint?` ／ ${settings.shared_endpoint}`:''}`:provider.value==='codex'?'Codexの組み込み画像生成を使います。':provider.value==='agy'?'Agyの画像生成を使います。':'画像APIに直接接続します。';
+        providerHint.textContent=shared?settings.shared_error||`文章・図と同じ接続を使います：${settings.shared_provider}${settings.shared_endpoint?` ／ ${settings.shared_endpoint}`:''}`:provider.value==='codex'?'Codexの組み込みAI作画を使います。':provider.value==='agy'?'AgyのAI作画を使います。':'画像APIに直接接続します。';
         connectionStatus.textContent=shared&&settings.shared_error?settings.shared_error:capabilities.find(item=>item.provider===effective)?.message||'接続状態は未確認です。';
       }
       async function checkConnection(){

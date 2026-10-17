@@ -13,7 +13,7 @@ export function askSelectionInstruction(selected:string,initial="",failure=""):P
   return new Promise(resolve=>{let answer:string|null=null;run.onclick=()=>{if(!instruction.value.trim())return;answer=instruction.value.trim();dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
 }
 export interface SelectionReviewState {accepted:number[];feedback:string;}
-export function reviewSelection(page:string,before:string,after:string,previous?:SelectionReviewState,failure=''):Promise<{action:'restore'|'retry'|'adopt';feedback:string;content:string;accepted:number[]}>{
+export function reviewSelection(page:string,before:string,after:string,previous?:SelectionReviewState,failure='',allowRetry=true):Promise<{action:'restore'|'retry'|'adopt';feedback:string;content:string;accepted:number[]}>{
   const {dialog,body}=featureDialog('AI文章の変更を確認');dialog.id='selection-diff-dialog';
   const help=document.createElement('p');help.textContent=`${page}：採用する変更を選択してください。チェックを外した箇所は元の文章を残します。`;
   const parts=diffParts(before,after),accepted=new Set<number>();
@@ -32,6 +32,7 @@ export function reviewSelection(page:string,before:string,after:string,previous?
   });
   controls.append(count);updateCount();
   const label=document.createElement('label');label.textContent='再作成への指示（任意）';const feedback=document.createElement('textarea');feedback.rows=2;feedback.value=previous?.feedback||'';label.append(feedback);
+  label.hidden=!allowRetry;
   const error=document.createElement('p');error.role='alert';error.textContent=failure;
   const actions=document.createElement('div');actions.className='actions diff-footer';
   body.append(help,controls,list,label,error,actions);
@@ -42,7 +43,7 @@ export function reviewSelection(page:string,before:string,after:string,previous?
       if(action==='adopt'){try{for(const code of content.matchAll(/```mermaid\s*\n([\s\S]*?)\n```/g))await(await import('mermaid')).default.parse(code[1]);}catch(e){error.textContent=`図の構文を確認してください: ${String(e)}`;return;}}
       result={action,feedback:feedback.value.trim(),content,accepted:[...accepted]};dialog.close();
     })();};
-    for(const [text,action] of [['破棄','restore'],['再作成','retry'],['選んだ変更を反映','adopt']] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.diffAction=action;button.dataset.uiIcon=action==='adopt'?'check':action==='retry'?'refresh':'close';if(action==='adopt')button.className='primary';button.onclick=()=>finish(action);actions.append(button);}
+    for(const [text,action] of [['破棄','restore'],['再作成','retry'],['選んだ変更を反映','adopt']] as const){if(action==='retry'&&!allowRetry)continue;const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.diffAction=action;button.dataset.uiIcon=action==='adopt'?'check':action==='retry'?'refresh':'close';if(action==='adopt')button.className='primary';button.onclick=()=>finish(action);actions.append(button);}
     dialog.addEventListener('close',()=>{resolve(result);dialog.remove();},{once:true});
   });
 }

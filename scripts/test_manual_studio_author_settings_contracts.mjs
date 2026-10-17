@@ -59,7 +59,7 @@ try{
    const button=page.locator(`button[data-editor-view=${view}]`);
    assert.equal(await button.textContent(),'');
    assert.ok(await button.getAttribute('aria-label'));
-   assert.equal(await button.getAttribute('title'),await button.getAttribute('aria-label'));
+   assert.equal(await button.getAttribute('title'),`${await button.getAttribute('aria-label')} (Ctrl/Cmd+Shift+Pで順に切替)`);
  }
  assert.equal(await page.locator('#editor-screenshot-ai').textContent(),'スクリーンショット');
  assert.equal(await page.locator('#resource-generate-image').textContent(),'AI作画');
@@ -81,11 +81,11 @@ try{
  assert.equal(await page.locator('#new-workspace, #new-workspace-dialog').count(),0);
  assert.equal(await page.locator('#open-existing-workspace').isVisible(),true);
  assert.equal(await page.locator('#workspace-name').isVisible(),true);
- assert.equal(await page.locator('#workspace-name').getAttribute('title'),'最近開いたフォルダを選択');
+ assert.equal(await page.locator('#workspace-name').getAttribute('title'),'最近開いたフォルダーを選択');
  assert.equal(await page.locator('#workspace-name-label').textContent(),path.basename(root));
  assert.equal(await page.locator('#workspace-name .folder-selector-arrow').isVisible(),true);
  await page.locator('#workspace-name .folder-selector-arrow').click();
- assert.equal(await page.locator('#workspace-history-title').textContent(),'最近開いたフォルダ');
+ assert.equal(await page.locator('#workspace-history-title').textContent(),'最近開いたフォルダー');
  assert.equal(await page.locator('#workspace-history-dialog [data-workspace-root]').count(),1);
  await page.locator('#workspace-history-dialog [data-history-close]').click();
 
@@ -94,7 +94,26 @@ try{
 
  await page.getByRole('button',{name:'執筆方針',exact:true}).click();
  await page.locator('#manual-brief').fill('初心者向けに、起動から保存までを説明する。');
- await page.locator('#save-settings').click();await idle();
+ await page.waitForFunction(()=>document.querySelector('#brief-save-state').textContent==='保存済み');await idle();
+ const storedSettings=JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8'));
+ for(const [key,value] of Object.entries(JSON.parse(settingsBefore)))assert.deepEqual(storedSettings[key],value,`brief autosave preserves ${key}`);
+ assert.equal(await page.locator('#save-settings').count(),0,'writing brief uses autosave');
+ let failBriefSave=true;
+ const briefRoute=async route=>{
+   const request=route.request().postDataJSON();
+   if(failBriefSave&&request.action==='save'&&Object.hasOwn(request.options||{},'brief')){
+     failBriefSave=false;await route.fulfill({status:500,json:{error:'fixture brief save failure'}});
+   }else await route.fallback();
+ };
+ await page.route('**/__manual/rpc',briefRoute);
+ await page.locator('#manual-brief').fill('初心者向けに、起動から保存・復元までを説明する。');
+ await page.waitForFunction(()=>document.querySelector('#brief-save-state').textContent.includes('保存失敗'));
+ await page.locator('#brief-save-retry').click();
+ await page.waitForFunction(()=>document.querySelector('#brief-save-state').textContent==='保存済み');
+ await page.unroute('**/__manual/rpc',briefRoute);
+ assert.equal(await page.locator('#brief-save-retry').isVisible(),false);
+ assert.match(await readFile(path.join(root,'manual/brief.md'),'utf8'),/保存・復元/);
+ assert.deepEqual(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')),storedSettings,'brief retry preserves AI and project settings');
  assert.match(await readFile(path.join(root,'manual/brief.md'),'utf8'),/初心者向け/);
  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);
  await page.locator('[data-close-dialog=panel-brief]').click();
@@ -105,7 +124,7 @@ try{
  assert.match(await page.locator('#manual-brief').inputValue(),/初心者向け/);
  await page.locator('[data-close-dialog=panel-brief]').click();
  const settingsAfterWorkspace=await readFile(path.join(root,'manual_setting.json'));
- await record('P02.brief-persistence','P02',['data-tab="brief"','id="manual-brief"','id="save-settings"','data-close-dialog="panel-brief"','element("save-settings").addEventListener'],['open independent writing brief','edit and save brief','read actual manual/brief.md','verify original manuscript is unchanged','close and reload application','reopen and verify stored brief'],{brief:await readFile(path.join(root,'manual/brief.md'),'utf8'),persistence:'manual/brief.md'});
+ await record('P02.brief-persistence','P02',['data-tab="brief"','id="manual-brief"','id="brief-save-retry"','data-close-dialog="panel-brief"','element("manual-brief").addEventListener'],['open independent writing brief','edit brief and wait for autosave','read actual manual/brief.md','verify original manuscript is unchanged','close and reload application','reopen and verify stored brief'],{brief:await readFile(path.join(root,'manual/brief.md'),'utf8'),persistence:'manual/brief.md'});
 
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
  const editor=page.locator('#markdown-editor');

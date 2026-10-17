@@ -305,23 +305,6 @@
   ],
   "actions": [
     {
-      "id": "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 8,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"workspace-name\" aria-haspopup=\"listbox\" aria-expanded=\"false\" title=\"最近開いたフォルダを選択\">",
-      "feature": "P01",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "設定は選択したプロジェクトに保存される",
-      "returnTarget": "開始したプロジェクトの原稿",
-      "cases": [
-        "P01.success",
-        "P01.cancel",
-        "P01.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
       "id": "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
       "file": "apps/manual-studio/index.html",
       "line": 8,
@@ -597,11 +580,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:f02eaffaf444927a:1",
+      "id": "apps/manual-studio/index.html:html:button:4f66ae72db59054c:1",
       "file": "apps/manual-studio/index.html",
       "line": 26,
       "kind": "html:button",
-      "expression": "<button type=\"button\" data-editor-view=\"edit\" data-ui-icon=\"file\">",
+      "expression": "<button type=\"button\" data-editor-view=\"edit\" data-ui-icon=\"file\" aria-label=\"編集のみ\" title=\"編集のみ\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -614,11 +597,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:d0ba7d4b0359e194:1",
+      "id": "apps/manual-studio/index.html:html:button:11df19b93e0c6d78:1",
       "file": "apps/manual-studio/index.html",
       "line": 26,
       "kind": "html:button",
-      "expression": "<button type=\"button\" data-editor-view=\"split\" data-ui-icon=\"library\">",
+      "expression": "<button type=\"button\" data-editor-view=\"split\" data-ui-icon=\"library\" aria-label=\"編集＋プレビュー\" title=\"編集＋プレビュー\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -631,11 +614,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:943b755eca2d2af2:1",
+      "id": "apps/manual-studio/index.html:html:button:d80a2d87015730cb:1",
       "file": "apps/manual-studio/index.html",
       "line": 26,
       "kind": "html:button",
-      "expression": "<button type=\"button\" data-editor-view=\"preview\" data-ui-icon=\"eye\">",
+      "expression": "<button type=\"button\" data-editor-view=\"preview\" data-ui-icon=\"eye\" aria-label=\"プレビューのみ\" title=\"プレビューのみ\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -662,24 +645,6 @@
         "P09.cancel",
         "P09.failure-retry",
         "P09.selection-review-filter-rerun-jump"
-      ],
-      "reviewStatus": "reviewed"
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:button:d5877ae3be56c04f:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 30,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"reader-review-reopen\" data-ui-icon=\"history\" hidden>",
-      "feature": "P09",
-      "spec": "openspec/specs/document-ai-assistance/spec.md",
-      "result": "採用済み修正本文が実ファイルと一致する",
-      "returnTarget": "同じ原稿のレビューへ戻る",
-      "cases": [
-        "P09.success",
-        "P09.cancel",
-        "P09.failure-retry",
-        "P09.report-reopen-after-reload"
       ],
       "reviewStatus": "reviewed"
     },
@@ -1837,22 +1802,6 @@
       "line": 117,
       "kind": "html:textarea",
       "expression": "<textarea id=\"manual-brief\" rows=\"5\">",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "執筆方針を保存し、再起動後に復元する。原稿本文は保持する。",
-      "returnTarget": "原稿編集",
-      "cases": [
-        "P02.brief-persistence"
-      ],
-      "reviewStatus": "reviewed",
-      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
-    },
-    {
-      "id": "apps/manual-studio/index.html:html:button:fa498277753a33cb:1",
-      "file": "apps/manual-studio/index.html",
-      "line": 117,
-      "kind": "html:button",
-      "expression": "<button id=\"save-settings\" data-ui-icon=\"save\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "執筆方針を保存し、再起動後に復元する。原稿本文は保持する。",
@@ -3856,91 +3805,6 @@
       "line": 10,
       "kind": "html:input",
       "expression": "<input id=\"image-ai-key\" type=\"password\" autocomplete=\"off\" />",
-      "feature": "P13",
-      "spec": "openspec/specs/application-launch-settings/spec.md",
-      "result": "端末/プロジェクト/接続先の所有範囲に保存する",
-      "returnTarget": "設定した画面と元の作業",
-      "cases": [
-        "P13.success",
-        "P13.cancel",
-        "P13.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/imageAiSettings.ts:html:button:31b6fa2362dea6c9:1",
-      "file": "apps/manual-studio/src/imageAiSettings.ts",
-      "line": 10,
-      "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"image-ai-save\">",
-      "feature": "P13",
-      "spec": "openspec/specs/application-launch-settings/spec.md",
-      "result": "端末/プロジェクト/接続先の所有範囲に保存する",
-      "returnTarget": "設定した画面と元の作業",
-      "cases": [
-        "P13.success",
-        "P13.cancel",
-        "P13.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:08072fabacee7987:1",
-      "file": "apps/manual-studio/src/imageAiSettings.ts",
-      "line": 29,
-      "kind": "handler",
-      "expression": "provider.onchange=()=>{visibility();status.textContent='未保存';if(retry)retry.hidden=true;}",
-      "feature": "P13",
-      "spec": "openspec/specs/application-launch-settings/spec.md",
-      "result": "端末/プロジェクト/接続先の所有範囲に保存する",
-      "returnTarget": "設定した画面と元の作業",
-      "cases": [
-        "P13.success",
-        "P13.cancel",
-        "P13.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:57064fe0afac0cbe:1",
-      "file": "apps/manual-studio/src/imageAiSettings.ts",
-      "line": 30,
-      "kind": "handler",
-      "expression": "endpoint.oninput=()=>{key.value=keys.get(keyId(loadedRoot,endpoint.value))||'';status.textContent='未保存';if(retry)retry.hidden=true;}",
-      "feature": "P13",
-      "spec": "openspec/specs/application-launch-settings/spec.md",
-      "result": "端末/プロジェクト/接続先の所有範囲に保存する",
-      "returnTarget": "設定した画面と元の作業",
-      "cases": [
-        "P13.success",
-        "P13.cancel",
-        "P13.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:ed466337918cabb0:1",
-      "file": "apps/manual-studio/src/imageAiSettings.ts",
-      "line": 31,
-      "kind": "handler",
-      "expression": "model.oninput=key.oninput=()=>{status.textContent='未保存';if(retry)retry.hidden=true;}",
-      "feature": "P13",
-      "spec": "openspec/specs/application-launch-settings/spec.md",
-      "result": "端末/プロジェクト/接続先の所有範囲に保存する",
-      "returnTarget": "設定した画面と元の作業",
-      "cases": [
-        "P13.success",
-        "P13.cancel",
-        "P13.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:c9745e6ae05c6ef3:1",
-      "file": "apps/manual-studio/src/imageAiSettings.ts",
-      "line": 31,
-      "kind": "handler",
-      "expression": "key.oninput=()=>{status.textContent='未保存';if(retry)retry.hidden=true;}",
       "feature": "P13",
       "spec": "openspec/specs/application-launch-settings/spec.md",
       "result": "端末/プロジェクト/接続先の所有範囲に保存する",
@@ -6438,22 +6302,6 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:de248b6339e8c860:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 2235,
-      "kind": "event:click",
-      "expression": "element(\"save-settings\").addEventListener(\"click\", () => { void work(async () => { await saveAiSettings(); if (!workspace) throw new Error(\"フォルダを開いてください。\"); await runAction(\"save\", { brief: element<HTMLTextAreaElement>(\"manual-brief\").value, }); element(\"brief-save-state\").textContent = \"執筆方針を保存しました。\"; }); })",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "執筆方針を保存し、再起動後に復元する。原稿本文は保持する。",
-      "returnTarget": "原稿編集",
-      "cases": [
-        "P02.brief-persistence"
-      ],
-      "reviewStatus": "reviewed",
-      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
-    },
-    {
       "id": "apps/manual-studio/src/main.ts:event:change:10927f37b5167fa8:1",
       "file": "apps/manual-studio/src/main.ts",
       "line": 2243,
@@ -6817,24 +6665,6 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:handler:d7df87bd09233c87:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 2482,
-      "kind": "handler",
-      "expression": "element(\"reader-review-reopen\").onclick=()=>reopenReaderReview?.()",
-      "feature": "P09",
-      "spec": "openspec/specs/document-ai-assistance/spec.md",
-      "result": "採用済み修正本文が実ファイルと一致する",
-      "returnTarget": "同じ原稿のレビューへ戻る",
-      "cases": [
-        "P09.success",
-        "P09.cancel",
-        "P09.failure-retry",
-        "P09.report-reopen-after-reload"
-      ],
-      "reviewStatus": "reviewed"
-    },
-    {
       "id": "apps/manual-studio/src/main.ts:event:click:ffad7c8c0ad14189:1",
       "file": "apps/manual-studio/src/main.ts",
       "line": 2527,
@@ -6847,7 +6677,8 @@
       "cases": [
         "P09.success",
         "P09.cancel",
-        "P09.failure-retry"
+        "P09.failure-retry",
+        "P09.report-reopen-after-reload"
       ],
       "reviewStatus": "needs-entry-specific-review"
     },
@@ -8058,11 +7889,11 @@
       "reviewStatus": "reviewed"
     },
     {
-      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:bad665fc2e79158f:1",
+      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
       "file": "apps/manual-studio/src/readerReview.ts",
       "line": 28,
       "kind": "loop-controls",
-      "expression": "for(const finding of report.issues){ const card=document.createElement('section');card.className='card review-finding';card.dataset.reviewCategory=finding.category; const heading=document.createElement('h3');heading.textContent=finding.message; const badges=document.createElement('div');badges.className='review-badges';for(const text of [labels[finding.category],finding.severity==='problem'?'要修正':'改善提案']){const badge=document.createElement('span');badge.textContent=text;badges.append(badge);} const quote=document.createElement('blockquote');quote.textContent=finding.quote; const suggestion=document.createElement('p');suggestion.textContent=finding.suggestion;const image=document.createElement('small');image.textContent=finding.category==='image'?`対象画像：${finding.image}`:''; const actions=document.createElement('div');actions.className='actions'; for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を作成',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon=text==='該当箇所へ'?'eye':'sparkle';button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);} const ignore=document.createElement('button');ignore.type='button';ignore.textContent='見送り';ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();};actions.append(ignore); card.append(badges,heading,quote,suggestion,image,actions);list.append(card); }",
+      "expression": "for(const finding of report.issues){ const card=document.createElement('section');card.className='card review-finding';card.dataset.reviewCategory=finding.category; const heading=document.createElement('h3');heading.textContent=finding.message; const badges=document.createElement('div');badges.className='review-badges';for(const text of [labels[finding.category],finding.severity==='problem'?'要修正':'改善提案']){const badge=document.createElement('span');badge.textContent=text;badges.append(badge);} const quote=document.createElement('blockquote');quote.textContent=finding.quote; const suggestion=document.createElement('p');suggestion.textContent=finding.suggestion;const image=document.createElement('small');image.textContent=finding.category==='image'?`対象画像：${finding.image}`:''; const example=document.createElement('pre');example.className='review-replacement'; const hasReplacement=typeof finding.replacement==='string'&&finding.replacement!==finding.quote; example.textContent=hasReplacement?finding.replacement!:'この指摘には追加の確認が必要です。修正の提案を参考に手動で編集してください。'; const exampleLabel=document.createElement('strong');exampleLabel.textContent='修正案'; const actions=document.createElement('div');actions.className='actions'; for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を確認',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon='eye';button.disabled=text==='修正案を確認'&&!hasReplacement;button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);} const ignore=document.createElement('button');ignore.type='button';ignore.textContent='見送り';ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();};actions.append(ignore); card.append(badges,heading,quote,suggestion,image,exampleLabel,example,actions);list.append(card); }",
       "feature": "P09",
       "spec": "openspec/specs/document-ai-assistance/spec.md",
       "result": "レビューだけで本文を変更しない",
@@ -8076,11 +7907,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:e0cde7fffd82c027:1",
+      "id": "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
       "file": "apps/manual-studio/src/readerReview.ts",
-      "line": 35,
+      "line": 39,
       "kind": "loop-controls",
-      "expression": "for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を作成',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon=text==='該当箇所へ'?'eye':'sparkle';button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}",
+      "expression": "for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を確認',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon='eye';button.disabled=text==='修正案を確認'&&!hasReplacement;button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}",
       "feature": "P09",
       "spec": "openspec/specs/document-ai-assistance/spec.md",
       "result": "レビューだけで本文を変更しない",
@@ -10246,11 +10077,11 @@
       "reviewStatus": "reviewed"
     },
     {
-      "id": "apps/manual-studio/src/selectionAi.ts:loop-controls:4892f0f6fa8ba5c3:1",
+      "id": "apps/manual-studio/src/selectionAi.ts:loop-controls:e4e32713c84c1fda:1",
       "file": "apps/manual-studio/src/selectionAi.ts",
       "line": 45,
       "kind": "loop-controls",
-      "expression": "for(const [text,action] of [['破棄','restore'],['再作成','retry'],['選んだ変更を反映','adopt']] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.diffAction=action;button.dataset.uiIcon=action==='adopt'?'check':action==='retry'?'refresh':'close';if(action==='adopt')button.className='primary';button.onclick=()=>finish(action);actions.append(button);}",
+      "expression": "for(const [text,action] of [['破棄','restore'],['再作成','retry'],['選んだ変更を反映','adopt']] as const){if(action==='retry'&&!allowRetry)continue;const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.diffAction=action;button.dataset.uiIcon=action==='adopt'?'check':action==='retry'?'refresh':'close';if(action==='adopt')button.className='primary';button.onclick=()=>finish(action);actions.append(button);}",
       "feature": "P10",
       "spec": "openspec/specs/document-ai-assistance/spec.md",
       "result": "採用部分だけを保存しUndoまたはバックアップで戻せる",
@@ -11724,40 +11555,6 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:d6b89063765cc96c:1",
-      "file": "apps/manual-studio/src/imageAiSettings.ts",
-      "line": 62,
-      "kind": "handler",
-      "expression": "save.onclick=()=>{void performSave();}",
-      "feature": "P13",
-      "spec": "openspec/specs/application-launch-settings/spec.md",
-      "result": "端末/プロジェクト/接続先の所有範囲に保存する",
-      "returnTarget": "設定した画面と元の作業",
-      "cases": [
-        "P13.success",
-        "P13.cancel",
-        "P13.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:59c86bd558fae68b:1",
-      "file": "apps/manual-studio/src/imageAiSettings.ts",
-      "line": 63,
-      "kind": "handler",
-      "expression": "retry.onclick=()=>{void performSave();}",
-      "feature": "P13",
-      "spec": "openspec/specs/application-launch-settings/spec.md",
-      "result": "端末/プロジェクト/接続先の所有範囲に保存する",
-      "returnTarget": "設定した画面と元の作業",
-      "cases": [
-        "P13.success",
-        "P13.cancel",
-        "P13.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
       "id": "apps/manual-studio/index.html:html:button:041dad40d3069921:1",
       "file": "apps/manual-studio/index.html",
       "line": 26,
@@ -12996,6 +12793,156 @@
         "P17.contracts"
       ],
       "reviewStatus": "reviewed"
+    },
+    {
+      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:04e533aba983021f:1",
+      "file": "apps/manual-studio/src/imageAiSettings.ts",
+      "line": 33,
+      "kind": "handler",
+      "expression": "provider.onchange=()=>{visibility();scheduleSave();}",
+      "feature": "P13",
+      "spec": "openspec/specs/application-launch-settings/spec.md",
+      "result": "変更を自動保存し、失敗時は再試行できる。画像APIキーは起動中のみ接続先ごとに保持する",
+      "returnTarget": "設定した画面と元の作業",
+      "cases": [
+        "P13.success",
+        "P13.cancel",
+        "P13.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:9a4fa390a2363974:1",
+      "file": "apps/manual-studio/src/imageAiSettings.ts",
+      "line": 34,
+      "kind": "handler",
+      "expression": "endpoint.oninput=()=>{key.value=keys.get(keyId(loadedRoot,endpoint.value))||'';scheduleSave();}",
+      "feature": "P13",
+      "spec": "openspec/specs/application-launch-settings/spec.md",
+      "result": "変更を自動保存し、失敗時は再試行できる。画像APIキーは起動中のみ接続先ごとに保持する",
+      "returnTarget": "設定した画面と元の作業",
+      "cases": [
+        "P13.success",
+        "P13.cancel",
+        "P13.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:30fdd6bfe6e25d1b:1",
+      "file": "apps/manual-studio/src/imageAiSettings.ts",
+      "line": 35,
+      "kind": "handler",
+      "expression": "model.oninput=key.oninput=()=>{scheduleSave();}",
+      "feature": "P13",
+      "spec": "openspec/specs/application-launch-settings/spec.md",
+      "result": "変更を自動保存し、失敗時は再試行できる。画像APIキーは起動中のみ接続先ごとに保持する",
+      "returnTarget": "設定した画面と元の作業",
+      "cases": [
+        "P13.success",
+        "P13.cancel",
+        "P13.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:28f8fb46dfee56ae:1",
+      "file": "apps/manual-studio/src/imageAiSettings.ts",
+      "line": 35,
+      "kind": "handler",
+      "expression": "key.oninput=()=>{scheduleSave();}",
+      "feature": "P13",
+      "spec": "openspec/specs/application-launch-settings/spec.md",
+      "result": "変更を自動保存し、失敗時は再試行できる。画像APIキーは起動中のみ接続先ごとに保持する",
+      "returnTarget": "設定した画面と元の作業",
+      "cases": [
+        "P13.success",
+        "P13.cancel",
+        "P13.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/imageAiSettings.ts:handler:e58d3f1adb940984:1",
+      "file": "apps/manual-studio/src/imageAiSettings.ts",
+      "line": 80,
+      "kind": "handler",
+      "expression": "retry.onclick=()=>{scheduleSave();flushSave();}",
+      "feature": "P13",
+      "spec": "openspec/specs/application-launch-settings/spec.md",
+      "result": "変更を自動保存し、失敗時は再試行できる。画像APIキーは起動中のみ接続先ごとに保持する",
+      "returnTarget": "設定した画面と元の作業",
+      "cases": [
+        "P13.success",
+        "P13.cancel",
+        "P13.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:90d82e652c720773:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 8,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"workspace-name\" aria-haspopup=\"listbox\" aria-expanded=\"false\" title=\"最近開いたフォルダーを選択\">",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:10cbcc4df0030b82:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 116,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"brief-save-retry\" hidden>",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "執筆方針を自動保存し、保存状態を表示する。失敗時は入力を保持して再試行できる。",
+      "returnTarget": "原稿編集",
+      "cases": [
+        "P02.brief-persistence"
+      ],
+      "reviewStatus": "needs-entry-specific-review",
+      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:input:3282bb0b36f96da1:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 2282,
+      "kind": "event:input",
+      "expression": "element(\"manual-brief\").addEventListener(\"input\", scheduleBriefSave)",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "執筆方針を自動保存し、保存状態を表示する。失敗時は入力を保持して再試行できる。",
+      "returnTarget": "原稿編集",
+      "cases": [
+        "P02.brief-persistence"
+      ],
+      "reviewStatus": "needs-entry-specific-review",
+      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:a1564a94d7244d86:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 2283,
+      "kind": "event:click",
+      "expression": "element(\"brief-save-retry\").addEventListener(\"click\", () => { void saveBriefSettings().catch(() => {}); })",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "執筆方針を自動保存し、保存状態を表示する。失敗時は入力を保持して再試行できる。",
+      "returnTarget": "原稿編集",
+      "cases": [
+        "P02.brief-persistence"
+      ],
+      "reviewStatus": "needs-entry-specific-review",
+      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
     }
   ],
   "cases": [
@@ -13004,7 +12951,6 @@
       "feature": "P01",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
         "apps/manual-studio/index.html:html:input:ed4096a4dee319b5:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
@@ -13030,7 +12976,8 @@
         "apps/manual-studio/src/workspaceHistory.ts:event:keydown:614ba45728486a5f:1",
         "apps/manual-studio/src/workspaceHistory.ts:event:pointerdown:b4ed8c608e2f7710:1",
         "apps/manual-studio/src/workspaceHistory.ts:event:click:ba266202963c5e46:1",
-        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1"
+        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1",
+        "apps/manual-studio/index.html:html:button:90d82e652c720773:1"
       ],
       "expected": {
         "visible": "選択したプロジェクトとツリーが表示される",
@@ -13052,7 +12999,6 @@
       "feature": "P01",
       "kind": "cancel",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
         "apps/manual-studio/index.html:html:input:ed4096a4dee319b5:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
@@ -13078,7 +13024,8 @@
         "apps/manual-studio/src/workspaceHistory.ts:event:keydown:614ba45728486a5f:1",
         "apps/manual-studio/src/workspaceHistory.ts:event:pointerdown:b4ed8c608e2f7710:1",
         "apps/manual-studio/src/workspaceHistory.ts:event:click:ba266202963c5e46:1",
-        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1"
+        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1",
+        "apps/manual-studio/index.html:html:button:90d82e652c720773:1"
       ],
       "expected": {
         "visible": "選択したプロジェクトとツリーが表示される",
@@ -13100,7 +13047,6 @@
       "feature": "P01",
       "kind": "failure-retry",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:4892cd0d4f54fad6:1",
         "apps/manual-studio/index.html:html:button:c2f0cce554e1c027:1",
         "apps/manual-studio/index.html:html:input:ed4096a4dee319b5:1",
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
@@ -13126,7 +13072,8 @@
         "apps/manual-studio/src/workspaceHistory.ts:event:keydown:614ba45728486a5f:1",
         "apps/manual-studio/src/workspaceHistory.ts:event:pointerdown:b4ed8c608e2f7710:1",
         "apps/manual-studio/src/workspaceHistory.ts:event:click:ba266202963c5e46:1",
-        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1"
+        "apps/manual-studio/src/workspaceHistory.ts:handler:c261d6a2403aa3e4:1",
+        "apps/manual-studio/index.html:html:button:90d82e652c720773:1"
       ],
       "expected": {
         "visible": "選択したプロジェクトとツリーが表示される",
@@ -13165,9 +13112,9 @@
         "apps/manual-studio/index.html:html:button:3685ab5ded1b8e20:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:1",
         "apps/manual-studio/index.html:html:button:4320737e30c41ff6:1",
-        "apps/manual-studio/index.html:html:button:f02eaffaf444927a:1",
-        "apps/manual-studio/index.html:html:button:d0ba7d4b0359e194:1",
-        "apps/manual-studio/index.html:html:button:943b755eca2d2af2:1",
+        "apps/manual-studio/index.html:html:button:4f66ae72db59054c:1",
+        "apps/manual-studio/index.html:html:button:11df19b93e0c6d78:1",
+        "apps/manual-studio/index.html:html:button:d80a2d87015730cb:1",
         "apps/manual-studio/index.html:html:summary:4f2e577197725b30:1",
         "apps/manual-studio/index.html:html:button:6ca95cf299cbade8:1",
         "apps/manual-studio/index.html:html:button:de904ba62b9cec61:1",
@@ -13391,9 +13338,9 @@
         "apps/manual-studio/index.html:html:button:3685ab5ded1b8e20:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:1",
         "apps/manual-studio/index.html:html:button:4320737e30c41ff6:1",
-        "apps/manual-studio/index.html:html:button:f02eaffaf444927a:1",
-        "apps/manual-studio/index.html:html:button:d0ba7d4b0359e194:1",
-        "apps/manual-studio/index.html:html:button:943b755eca2d2af2:1",
+        "apps/manual-studio/index.html:html:button:4f66ae72db59054c:1",
+        "apps/manual-studio/index.html:html:button:11df19b93e0c6d78:1",
+        "apps/manual-studio/index.html:html:button:d80a2d87015730cb:1",
         "apps/manual-studio/index.html:html:summary:4f2e577197725b30:1",
         "apps/manual-studio/index.html:html:button:6ca95cf299cbade8:1",
         "apps/manual-studio/index.html:html:button:de904ba62b9cec61:1",
@@ -13617,9 +13564,9 @@
         "apps/manual-studio/index.html:html:button:3685ab5ded1b8e20:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:1",
         "apps/manual-studio/index.html:html:button:4320737e30c41ff6:1",
-        "apps/manual-studio/index.html:html:button:f02eaffaf444927a:1",
-        "apps/manual-studio/index.html:html:button:d0ba7d4b0359e194:1",
-        "apps/manual-studio/index.html:html:button:943b755eca2d2af2:1",
+        "apps/manual-studio/index.html:html:button:4f66ae72db59054c:1",
+        "apps/manual-studio/index.html:html:button:11df19b93e0c6d78:1",
+        "apps/manual-studio/index.html:html:button:d80a2d87015730cb:1",
         "apps/manual-studio/index.html:html:summary:4f2e577197725b30:1",
         "apps/manual-studio/index.html:html:button:6ca95cf299cbade8:1",
         "apps/manual-studio/index.html:html:button:de904ba62b9cec61:1",
@@ -14679,8 +14626,6 @@
       "kind": "success",
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c6655c346435203d:1",
-        "apps/manual-studio/index.html:html:button:d5877ae3be56c04f:1",
-        "apps/manual-studio/src/main.ts:handler:d7df87bd09233c87:1",
         "apps/manual-studio/src/main.ts:event:click:ffad7c8c0ad14189:1",
         "apps/manual-studio/src/readerReview.ts:create:select:867e3d3c97f4d0bd:1",
         "apps/manual-studio/src/readerReview.ts:create:textarea:5a8dd0e04aa56d20:1",
@@ -14690,8 +14635,8 @@
         "apps/manual-studio/src/readerReview.ts:handler:d30efa4cb9c606b2:1",
         "apps/manual-studio/src/readerReview.ts:handler:b26d0183c9b2de2c:1",
         "apps/manual-studio/src/readerReview.ts:create:select:d252f45f994c5e44:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:bad665fc2e79158f:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:e0cde7fffd82c027:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
         "apps/manual-studio/src/readerReview.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/readerReview.ts:handler:02dafd330b9301e4:1",
         "apps/manual-studio/src/readerReview.ts:create:button:5d6be312df6b19d8:1",
@@ -14719,8 +14664,6 @@
       "kind": "cancel",
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c6655c346435203d:1",
-        "apps/manual-studio/index.html:html:button:d5877ae3be56c04f:1",
-        "apps/manual-studio/src/main.ts:handler:d7df87bd09233c87:1",
         "apps/manual-studio/src/main.ts:event:click:ffad7c8c0ad14189:1",
         "apps/manual-studio/src/readerReview.ts:create:select:867e3d3c97f4d0bd:1",
         "apps/manual-studio/src/readerReview.ts:create:textarea:5a8dd0e04aa56d20:1",
@@ -14730,8 +14673,8 @@
         "apps/manual-studio/src/readerReview.ts:handler:d30efa4cb9c606b2:1",
         "apps/manual-studio/src/readerReview.ts:handler:b26d0183c9b2de2c:1",
         "apps/manual-studio/src/readerReview.ts:create:select:d252f45f994c5e44:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:bad665fc2e79158f:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:e0cde7fffd82c027:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
         "apps/manual-studio/src/readerReview.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/readerReview.ts:handler:02dafd330b9301e4:1",
         "apps/manual-studio/src/readerReview.ts:create:button:5d6be312df6b19d8:1",
@@ -14759,8 +14702,6 @@
       "kind": "failure-retry",
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c6655c346435203d:1",
-        "apps/manual-studio/index.html:html:button:d5877ae3be56c04f:1",
-        "apps/manual-studio/src/main.ts:handler:d7df87bd09233c87:1",
         "apps/manual-studio/src/main.ts:event:click:ffad7c8c0ad14189:1",
         "apps/manual-studio/src/readerReview.ts:create:select:867e3d3c97f4d0bd:1",
         "apps/manual-studio/src/readerReview.ts:create:textarea:5a8dd0e04aa56d20:1",
@@ -14770,8 +14711,8 @@
         "apps/manual-studio/src/readerReview.ts:handler:d30efa4cb9c606b2:1",
         "apps/manual-studio/src/readerReview.ts:handler:b26d0183c9b2de2c:1",
         "apps/manual-studio/src/readerReview.ts:create:select:d252f45f994c5e44:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:bad665fc2e79158f:1",
-        "apps/manual-studio/src/readerReview.ts:loop-controls:e0cde7fffd82c027:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:74f809d20fe1f97a:1",
+        "apps/manual-studio/src/readerReview.ts:loop-controls:b1735dca0afc5df2:1",
         "apps/manual-studio/src/readerReview.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/readerReview.ts:handler:02dafd330b9301e4:1",
         "apps/manual-studio/src/readerReview.ts:create:button:5d6be312df6b19d8:1",
@@ -14830,7 +14771,7 @@
         "apps/manual-studio/src/selectionAi.ts:create:input:72b9472120221427:1",
         "apps/manual-studio/src/selectionAi.ts:handler:da5a2e99e9504ad7:1",
         "apps/manual-studio/src/selectionAi.ts:create:textarea:aceac1861b63d614:1",
-        "apps/manual-studio/src/selectionAi.ts:loop-controls:4892f0f6fa8ba5c3:1",
+        "apps/manual-studio/src/selectionAi.ts:loop-controls:e4e32713c84c1fda:1",
         "apps/manual-studio/src/selectionAi.ts:create:button:0cd3653d8136ca98:3",
         "apps/manual-studio/src/selectionAi.ts:handler:ebb551726c517e92:1"
       ],
@@ -14888,7 +14829,7 @@
         "apps/manual-studio/src/selectionAi.ts:create:input:72b9472120221427:1",
         "apps/manual-studio/src/selectionAi.ts:handler:da5a2e99e9504ad7:1",
         "apps/manual-studio/src/selectionAi.ts:create:textarea:aceac1861b63d614:1",
-        "apps/manual-studio/src/selectionAi.ts:loop-controls:4892f0f6fa8ba5c3:1",
+        "apps/manual-studio/src/selectionAi.ts:loop-controls:e4e32713c84c1fda:1",
         "apps/manual-studio/src/selectionAi.ts:create:button:0cd3653d8136ca98:3",
         "apps/manual-studio/src/selectionAi.ts:handler:ebb551726c517e92:1"
       ],
@@ -14946,7 +14887,7 @@
         "apps/manual-studio/src/selectionAi.ts:create:input:72b9472120221427:1",
         "apps/manual-studio/src/selectionAi.ts:handler:da5a2e99e9504ad7:1",
         "apps/manual-studio/src/selectionAi.ts:create:textarea:aceac1861b63d614:1",
-        "apps/manual-studio/src/selectionAi.ts:loop-controls:4892f0f6fa8ba5c3:1",
+        "apps/manual-studio/src/selectionAi.ts:loop-controls:e4e32713c84c1fda:1",
         "apps/manual-studio/src/selectionAi.ts:create:button:0cd3653d8136ca98:3",
         "apps/manual-studio/src/selectionAi.ts:handler:ebb551726c517e92:1"
       ],
@@ -15279,11 +15220,6 @@
         "apps/manual-studio/src/imageAiSettings.ts:html:input:eafb83dd3a47a260:1",
         "apps/manual-studio/src/imageAiSettings.ts:html:input:5e03fad73a018e80:1",
         "apps/manual-studio/src/imageAiSettings.ts:html:input:5094b61785409b0c:1",
-        "apps/manual-studio/src/imageAiSettings.ts:html:button:31b6fa2362dea6c9:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:08072fabacee7987:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:57064fe0afac0cbe:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:ed466337918cabb0:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:c9745e6ae05c6ef3:1",
         "apps/manual-studio/src/main.ts:event:click:4073c69258f0bcc7:1",
         "apps/manual-studio/src/main.ts:event:click:2599600f20709639:1",
         "apps/manual-studio/src/main.ts:event:click:5e9bf31bd94f95e4:1",
@@ -15322,8 +15258,11 @@
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:d6b89063765cc96c:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:59c86bd558fae68b:1"
+        "apps/manual-studio/src/imageAiSettings.ts:handler:04e533aba983021f:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:9a4fa390a2363974:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:30fdd6bfe6e25d1b:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:28f8fb46dfee56ae:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:e58d3f1adb940984:1"
       ],
       "expected": {
         "visible": "同種項目の配置と保存状態が分かる",
@@ -15371,11 +15310,6 @@
         "apps/manual-studio/src/imageAiSettings.ts:html:input:eafb83dd3a47a260:1",
         "apps/manual-studio/src/imageAiSettings.ts:html:input:5e03fad73a018e80:1",
         "apps/manual-studio/src/imageAiSettings.ts:html:input:5094b61785409b0c:1",
-        "apps/manual-studio/src/imageAiSettings.ts:html:button:31b6fa2362dea6c9:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:08072fabacee7987:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:57064fe0afac0cbe:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:ed466337918cabb0:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:c9745e6ae05c6ef3:1",
         "apps/manual-studio/src/main.ts:event:click:4073c69258f0bcc7:1",
         "apps/manual-studio/src/main.ts:event:click:2599600f20709639:1",
         "apps/manual-studio/src/main.ts:event:click:5e9bf31bd94f95e4:1",
@@ -15414,8 +15348,11 @@
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:d6b89063765cc96c:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:59c86bd558fae68b:1"
+        "apps/manual-studio/src/imageAiSettings.ts:handler:04e533aba983021f:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:9a4fa390a2363974:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:30fdd6bfe6e25d1b:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:28f8fb46dfee56ae:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:e58d3f1adb940984:1"
       ],
       "expected": {
         "visible": "同種項目の配置と保存状態が分かる",
@@ -15463,11 +15400,6 @@
         "apps/manual-studio/src/imageAiSettings.ts:html:input:eafb83dd3a47a260:1",
         "apps/manual-studio/src/imageAiSettings.ts:html:input:5e03fad73a018e80:1",
         "apps/manual-studio/src/imageAiSettings.ts:html:input:5094b61785409b0c:1",
-        "apps/manual-studio/src/imageAiSettings.ts:html:button:31b6fa2362dea6c9:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:08072fabacee7987:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:57064fe0afac0cbe:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:ed466337918cabb0:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:c9745e6ae05c6ef3:1",
         "apps/manual-studio/src/main.ts:event:click:4073c69258f0bcc7:1",
         "apps/manual-studio/src/main.ts:event:click:2599600f20709639:1",
         "apps/manual-studio/src/main.ts:event:click:5e9bf31bd94f95e4:1",
@@ -15506,8 +15438,11 @@
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:d6b89063765cc96c:1",
-        "apps/manual-studio/src/imageAiSettings.ts:handler:59c86bd558fae68b:1"
+        "apps/manual-studio/src/imageAiSettings.ts:handler:04e533aba983021f:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:9a4fa390a2363974:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:30fdd6bfe6e25d1b:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:28f8fb46dfee56ae:1",
+        "apps/manual-studio/src/imageAiSettings.ts:handler:e58d3f1adb940984:1"
       ],
       "expected": {
         "visible": "同種項目の配置と保存状態が分かる",
@@ -16792,8 +16727,7 @@
       "id": "P09.report-reopen-after-reload",
       "feature": "P09",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:d5877ae3be56c04f:1",
-        "apps/manual-studio/src/main.ts:handler:d7df87bd09233c87:1"
+        "apps/manual-studio/src/main.ts:event:click:ffad7c8c0ad14189:1"
       ],
       "requiredEvidence": [
         "browser-mock"
@@ -17472,10 +17406,11 @@
       "kind": "specific-workflow",
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:1c16d0418ea3b8d9:1",
-        "apps/manual-studio/index.html:html:button:fa498277753a33cb:1",
         "apps/manual-studio/index.html:html:button:fdcecb10a1f3c42a:1",
         "apps/manual-studio/index.html:html:textarea:2b59a9ecf1f739f4:1",
-        "apps/manual-studio/src/main.ts:event:click:de248b6339e8c860:1"
+        "apps/manual-studio/index.html:html:button:10cbcc4df0030b82:1",
+        "apps/manual-studio/src/main.ts:event:input:3282bb0b36f96da1:1",
+        "apps/manual-studio/src/main.ts:event:click:a1564a94d7244d86:1"
       ],
       "existingChecks": [
         "scripts/test_manual_studio_author_settings_contracts.mjs"

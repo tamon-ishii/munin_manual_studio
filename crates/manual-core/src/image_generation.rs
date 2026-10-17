@@ -180,9 +180,15 @@ pub fn extract_image_path(text: &str) -> Option<String> {
 fn cli_arguments(provider: &str, prompt: &str) -> Vec<String> {
     cli_image_arguments(provider, prompt, false)
 }
+#[cfg(test)]
 fn cli_image_arguments(provider: &str, prompt: &str, reference: bool) -> Vec<String> {
+    cli_image_arguments_at(provider, prompt, reference, Path::new(""))
+}
+fn cli_image_arguments_at(provider: &str, prompt: &str, reference: bool, output_dir: &Path) -> Vec<String> {
+    let reference_path = output_dir.join("reference.png").to_string_lossy().into_owned();
+    let output_path = output_dir.join("generated.png").to_string_lossy().into_owned();
     let instruction = if reference {
-        "Edit the attached reference.png image according to the instruction. Preserve all details not explicitly requested to change."
+        "Edit the attached reference image according to the instruction. Preserve all details not explicitly requested to change."
     } else {
         "Generate one image according to the description."
     };
@@ -199,14 +205,14 @@ fn cli_image_arguments(provider: &str, prompt: &str, reference: bool) -> Vec<Str
             "never".into(),
         ];
         if reference {
-            args.extend(["--image".into(), "reference.png".into()]);
+            args.extend(["--image".into(), reference_path.clone()]);
             // --image accepts multiple files; terminate it before the prompt.
             args.push("--".into());
         }
-        args.push(format!("$imagegen {instruction} Use the built-in image generation tool. After generation, copy the selected image into the current directory as generated.png in PNG format. Do not use an API fallback or draw a substitute with code. If image generation is unavailable, report the error. Do not modify any other files. Instruction:\n{prompt}"));
+        args.push(format!("$imagegen {instruction} Use the built-in image generation tool. After generation, copy the selected image to {output_path:?} in PNG format. Read the current project instructions, and only write to the specified output directory. Do not use an API fallback or draw a substitute with code. If image generation is unavailable, report the error. Do not modify any other files. Instruction:\n{prompt}"));
         args
     } else {
-        vec!["-p".into(),format!("{instruction} Read reference.png from the current directory when editing. Report the absolute path of the generated image. Instruction:\n{prompt}"),"--effort".into(),"low".into(),"--print-timeout".into(),"300s".into()]
+        vec!["-p".into(),format!("{instruction} Read {reference_path:?} when editing. Read the current project instructions. Save the generated image to {output_path:?} and report its absolute path. Do not modify any other project files. Instruction:\n{prompt}"),"--effort".into(),"low".into(),"--print-timeout".into(),"300s".into()]
     }
 }
 fn png_bytes(bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -259,7 +265,9 @@ fn run_image_cli(
     options: &Value,
 ) -> Result<Value, String> {
     let label = if provider == "codex" { "Codex" } else { "Agy" };
-    let scratch = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let artifact_dir = root.join(".munin");
+    fs::create_dir_all(&artifact_dir).map_err(|e| e.to_string())?;
+    let scratch = tempfile::Builder::new().prefix("image-cli-").tempdir_in(artifact_dir).map_err(|e| e.to_string())?;
     let reference = options["reference"].as_str().filter(|s| !s.is_empty());
     if let Some(path) = reference {
         fs::write(
@@ -272,10 +280,11 @@ fn run_image_cli(
     let stderr_path = scratch.path().join("stderr.log");
     let mut command = crate::agent::cli_command(
         &binary.to_string_lossy(),
-        &cli_image_arguments(provider, prompt, reference.is_some()),
-        scratch.path(),
+        &cli_image_arguments_at(provider, prompt, reference.is_some(), scratch.path()),
+        root,
     );
     command
+        .env("MUNIN_IMAGE_OUTPUT", scratch.path().join("generated.png"))
         .stdout(fs::File::create(&stdout_path).map_err(|e| e.to_string())?)
         .stderr(fs::File::create(&stderr_path).map_err(|e| e.to_string())?);
     let checkpoint = crate::agent::cancellation_checkpoint(root);
@@ -674,13 +683,14 @@ mod tests {
         fs::create_dir_all(root.path().join("docs")).unwrap();
         let manuscript = root.path().join("docs/index.md");
         fs::write(&manuscript, "# Original").unwrap();
+        fs::write(root.path().join("AGENTS.md"), "Image project instruction fixture").unwrap();
         let source = root.path().join("fixture.png");
         image::RgbaImage::new(3, 2).save(&source).unwrap();
         let binary = root.path().join("fake-cli");
         for provider in ["codex", "agy"] {
             let script = if provider == "codex" {
                 format!(
-                    "#!/bin/sh\n[ \"$1\" = exec ] || exit 2\ncp '{}' generated.png\n",
+                    "#!/bin/sh\n[ \"$1\" = exec ] || exit 2\ncp '{}' \"$MUNIN_IMAGE_OUTPUT\"\n",
                     source.display()
                 )
             } else {
@@ -689,6 +699,7 @@ mod tests {
                     source.display()
                 )
             };
+            let script = script.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n[ \"$PWD\" = '{}' ] || exit 3\n[ -f AGENTS.md ] || exit 4\n", root.path().display()), 1);
             fs::write(&binary, script).unwrap();
             fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
             let result =
@@ -702,7 +713,7 @@ mod tests {
         fs::write(
             &binary,
             format!(
-                "#!/bin/sh\ncp '{}' generated.png\nexit 1\n",
+                "#!/bin/sh\ncp '{}' \"$MUNIN_IMAGE_OUTPUT\"\nexit 1\n",
                 source.display()
             ),
         )
@@ -712,7 +723,7 @@ mod tests {
                 .unwrap_err()
                 .contains("失敗")
         );
-        fs::write(&binary, "#!/bin/sh\necho invalid > generated.png\n").unwrap();
+        fs::write(&binary, "#!/bin/sh\necho invalid > \"$MUNIN_IMAGE_OUTPUT\"\n").unwrap();
         assert!(
             generate_via_cli_with_binary(root.path(), "test", "codex", &binary)
                 .unwrap_err()

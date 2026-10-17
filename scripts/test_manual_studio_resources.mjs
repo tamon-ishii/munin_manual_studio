@@ -177,7 +177,24 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await imageSettings.locator('#image-ai-provider').selectOption('api');
   await imageSettings.locator('#image-ai-model').fill('separate-image-model');
   await imageSettings.locator('#image-ai-key').fill('fixture-key');
-  await imageSettings.getByRole('button',{name:'画像生成AIを保存',exact:true}).click();
+
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
+  assert.equal(await imageSettings.locator('#image-ai-save').count(),0,'image AI settings use autosave');
+  let failSettingsSave=true;
+  const settingsRoute=async route=>{
+    const request=route.request().postDataJSON();
+    if(failSettingsSave&&request.action==='image-generation-settings'&&request.options?.json?.save){
+      failSettingsSave=false;await route.fulfill({status:500,json:{error:'fixture settings save failure'}});
+    }else await route.fallback();
+  };
+  await page.route('**/__manual/rpc',settingsRoute);
+  await imageSettings.locator('#image-ai-model').fill('retry-image-model');
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent.includes('保存失敗'));
+  await imageSettings.locator('#image-ai-save-retry').click();
+  await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
+  assert.equal(JSON.parse(await rpc('image-generation-settings')).model,'retry-image-model');
+  await page.unroute('**/__manual/rpc',settingsRoute);
+  await imageSettings.locator('#image-ai-model').fill('separate-image-model');
   await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
   assert.deepEqual(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')),manuscriptBefore,'image settings never overwrite manuscript settings');
   assert.doesNotMatch(await readFile(path.join(root,'.munin/image-generation.json'),'utf8'),/fixture-key/);
@@ -191,7 +208,7 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await page.waitForFunction(()=>document.querySelector('#ai-save-state').textContent==='保存済み');
   await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
   await imageSettings.locator('#image-ai-provider').selectOption('shared');
-  await imageSettings.getByRole('button',{name:'画像生成AIを保存',exact:true}).click();
+
   await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
   assert.equal(await imageSettings.locator('#image-ai-endpoint').isVisible(),false);
   assert.equal(await imageSettings.locator('#image-ai-key').isVisible(),false);
@@ -206,7 +223,7 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await drawing.locator('.panel-header button').click();await page.locator('[data-tab=settings]').click();
   await page.locator('#ai-connection-type').selectOption('none');await page.waitForFunction(()=>document.querySelector('#ai-save-state').textContent==='保存済み');
   await page.waitForFunction(()=>document.querySelector('#image-ai-connection').textContent.includes('未設定'));
-  await imageSettings.locator('#image-ai-provider').selectOption('agy');await imageSettings.getByRole('button',{name:'画像生成AIを保存',exact:true}).click();
+  await imageSettings.locator('#image-ai-provider').selectOption('agy');
   await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
   assert.equal(JSON.parse(await rpc('image-generation-settings')).provider,'agy','independent image AI remains selectable with manuscript AI unset');
   assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).connection_type,'none');

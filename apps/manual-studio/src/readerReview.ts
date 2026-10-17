@@ -1,11 +1,11 @@
 import {featureDialog} from './screenshotWorkflow';
-export interface ReviewFinding {category:'reader'|'proofreading'|'image';severity:string;quote:string;message:string;suggestion:string;image:string;start:number;end:number;}
+export interface ReviewFinding {category:'reader'|'proofreading'|'image';severity:string;quote:string;message:string;suggestion:string;replacement?:string|null;image:string;start:number;end:number;}
 export interface ReaderReport {issues:ReviewFinding[];images:Array<{path:string;status:string;reason?:string}>;warnings:string[];}
 export interface ReviewCapabilities {supports_images:boolean;images:number;connection:string;agent:string;note:string;}
 export function askReader(defaultReader:string,hasSelection=false,preflight?:(scope:"document"|"selection")=>Promise<ReviewCapabilities>):Promise<{reader:string;scope:"document"|"selection"}|null>{
   const {dialog,body}=featureDialog('読者目線のレビュー・校正');dialog.id='reader-review-options';
   const scope=document.createElement('select');scope.setAttribute('aria-label','レビュー対象');scope.add(new Option('文書全体','document'));if(hasSelection)scope.add(new Option('選択範囲','selection'));scope.value=hasSelection?'selection':'document';
-  const help=document.createElement('p');help.textContent='説明不足・操作手順・用語・誤字脱字・表記揺れと、画像と説明の整合性を確認します。原稿は変更しません。';
+  const help=document.createElement('p');help.textContent='説明不足・操作手順・用語・誤字脱字・表記揺れと、画像と説明の整合性を確認します。指摘と具体的な修正案をまとめて作成します。採用するまで原稿は変更しません。';
   const label=document.createElement('label');label.textContent='想定する読者・目的';const input=document.createElement('textarea');input.rows=3;input.value=defaultReader||'初めてこのアプリを使う人。操作を迷わず完了できるか確認する。';label.append(input);
   const note=document.createElement('p');note.textContent='画像を確認するため、文書内の対応画像も文章生成AIへ送信します。画像入力を利用できない接続では未確認と表示します。';note.className='muted';
   const run=document.createElement('button');run.type='button';run.className='primary';run.textContent='レビューを実行';run.dataset.uiIcon="review";const scopeLabel=document.createElement('label');scopeLabel.textContent='レビュー対象';scopeLabel.append(scope);body.append(help,scopeLabel,label,note,run);
@@ -31,10 +31,14 @@ export function showReaderReport(report:ReaderReport,valid:()=>boolean,jump:(fin
     const badges=document.createElement('div');badges.className='review-badges';for(const text of [labels[finding.category],finding.severity==='problem'?'要修正':'改善提案']){const badge=document.createElement('span');badge.textContent=text;badges.append(badge);}
     const quote=document.createElement('blockquote');quote.textContent=finding.quote;
     const suggestion=document.createElement('p');suggestion.textContent=finding.suggestion;const image=document.createElement('small');image.textContent=finding.category==='image'?`対象画像：${finding.image}`:'';
+    const example=document.createElement('pre');example.className='review-replacement';
+    const hasReplacement=typeof finding.replacement==='string'&&finding.replacement!==finding.quote;
+    example.textContent=hasReplacement?finding.replacement!:'この指摘には追加の確認が必要です。修正の提案を参考に手動で編集してください。';
+    const exampleLabel=document.createElement('strong');exampleLabel.textContent='修正案';
     const actions=document.createElement('div');actions.className='actions';
-    for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を作成',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon=text==='該当箇所へ'?'eye':'sparkle';button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}
+    for(const [text,callback] of [['該当箇所へ',()=>{jump(finding);}] ,['修正案を確認',()=>{fix(finding);}]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.uiIcon='eye';button.disabled=text==='修正案を確認'&&!hasReplacement;button.onclick=()=>{if(!valid()){stale.textContent='原稿が変更されました。レビューを実行し直してください。';return;}callback();};actions.append(button);}
     const ignore=document.createElement('button');ignore.type='button';ignore.textContent='見送り';ignore.onclick=()=>{card.remove();report.issues=report.issues.filter(issue=>issue!==finding);summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;updateEmpty();};actions.append(ignore);
-    card.append(badges,heading,quote,suggestion,image,actions);list.append(card);
+    card.append(badges,heading,quote,suggestion,image,exampleLabel,example,actions);list.append(card);
   }
   filter.onchange=()=>{list.querySelectorAll<HTMLElement>('[data-review-category]').forEach(card=>{card.hidden=filter.value!=='all'&&card.dataset.reviewCategory!==filter.value;});updateEmpty();};
   body.append(summary,stale,filter,list,empty);updateEmpty();
