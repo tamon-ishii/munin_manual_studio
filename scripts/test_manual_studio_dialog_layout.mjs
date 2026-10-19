@@ -46,6 +46,12 @@ try {
   await page.locator('[data-tab=screenshots]').click();
   await page.locator('.screenshot-library-card').first().waitFor();
   await page.setViewportSize({width:1440,height:960});
+  // Docking layout handles the viewport resize asynchronously. Wait for its desktop geometry.
+  await page.waitForFunction(()=>{
+    const library=document.querySelector('#panel-screenshots').getBoundingClientRect();
+    const editor=document.querySelector('#panel-editor').getBoundingClientRect();
+    return library.width>150&&library.right<=editor.x+4;
+  });
   const libraryBox=await page.locator('#panel-screenshots').boundingBox();const editorBox=await page.locator('#panel-editor').boundingBox();
   assert.ok(libraryBox.width>150&&libraryBox.x+libraryBox.width<=editorBox.x+4,'resource library opens alongside the editor for drag/drop');
   assert.equal(await page.locator('.screenshot-primary-actions button').count(),15,'five primary actions per image, including AI editing');
