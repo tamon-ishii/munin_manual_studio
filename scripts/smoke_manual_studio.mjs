@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -499,8 +499,10 @@ try {
   await page.locator('#new-page-title').fill('New guide');
   await page.locator('#new-page-form button[type=submit]').click();
   await idle();
-  assert.match(await readFile(path.join(root, 'empty/docs/new.md'), 'utf8'), /# New guide/);
+  assert.match(await readFile(path.join(root, 'empty/new.md'), 'utf8'), /# New guide/);
   const project = path.join(root, 'empty');
+  await assert.rejects(access(path.join(project,'docs')),{code:'ENOENT'});
+  await assert.rejects(access(path.join(project,'manual')),{code:'ENOENT'});
 
   const generatedPrompt = '画面を開いてからボタンを押す';
   const generatedPromptB64 = Buffer.from(generatedPrompt, 'utf8').toString('base64');
@@ -522,7 +524,7 @@ try {
   assert.equal(await page.locator('#undo-edit').isEnabled(), true, 'saving must preserve undo history');
   await page.unroute('**/__manual/rpc');
 
-  let generatedOnlyMarkdown = await readFile(path.join(project, 'docs/new.md'), 'utf8');
+  let generatedOnlyMarkdown = await readFile(path.join(project, 'new.md'), 'utf8');
   assert.doesNotMatch(generatedOnlyMarkdown, /ai:generated/);
   assert.doesNotMatch(generatedOnlyMarkdown, /ai:task/);
   assert.match(generatedOnlyMarkdown, /Generated text/);
@@ -541,7 +543,7 @@ try {
   await page.getByRole("button", { name: "Markdownソース", exact: true }).click();
   await page.keyboard.press('Control+s');
   await idle();
-  let unifiedMarkdown = await readFile(path.join(project, 'docs/new.md'), 'utf8');
+  let unifiedMarkdown = await readFile(path.join(project, 'new.md'), 'utf8');
   assert.doesNotMatch(unifiedMarkdown, /ai:task/);
   assert.doesNotMatch(unifiedMarkdown, /ai:generated/);
   assert.match(unifiedMarkdown, /Generated unified body/);
@@ -563,7 +565,7 @@ try {
   await page.locator('#confirm-image-save').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Toolbar image\]\(assets\/toolbar-shot\.png\)/);
-  const toolbarFile = await readFile(path.join(project, 'docs/assets/toolbar-shot.png'));
+  const toolbarFile = await readFile(path.join(project, 'assets/toolbar-shot.png'));
   assert.equal(toolbarFile.subarray(1, 4).toString(), 'PNG');
   await page.frameLocator('#markdown-preview').locator('img[alt="Toolbar image"]').waitFor();
 
@@ -586,7 +588,7 @@ try {
   const pastedMatch = editorVal.match(/!\[(image-\d{8}-\d{6}[^\]]*)\]\((assets\/(image-\d{8}-\d{6}[^)]*\.png))\)/);
   assert.ok(pastedMatch, `pasted image markdown must match auto-generated pattern: ${editorVal}`);
   const pastedRelPath = pastedMatch[2];
-  const pastedFile = await readFile(path.join(project, 'docs', pastedRelPath));
+  const pastedFile = await readFile(path.join(project, pastedRelPath));
   assert.equal(pastedFile.subarray(1, 4).toString(), 'PNG');
   await page.frameLocator('#markdown-preview').locator(`img[alt="${pastedMatch[1]}"]`).waitFor();
 
@@ -607,7 +609,7 @@ try {
   await page.locator('#confirm-image-save').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /!\[dropped-shot\]\(assets\/dropped-shot\.png\)/);
-  const droppedFile = await readFile(path.join(project, 'docs/assets/dropped-shot.png'));
+  const droppedFile = await readFile(path.join(project, 'assets/dropped-shot.png'));
   assert.equal(droppedFile.subarray(1, 4).toString(), 'PNG');
   await page.frameLocator('#markdown-preview').locator('img[alt="dropped-shot"]').waitFor();
 
@@ -619,7 +621,7 @@ try {
   await page.locator('[data-tab="publish"]').click();
   assert.equal(await page.locator('#build-html,#build-mode,#open-output').count(),0);
   await page.locator('#quality-check').click();await idle();
-  await writeFile(path.join(project, 'docs/ai-page.md'), '# AI page\n\n<!-- ai:task id=smoke-text kind=text\nExplain the guide\n-->\n');
+  await writeFile(path.join(project, 'ai-page.md'), '# AI page\n\n<!-- ai:task id=smoke-text kind=text\nExplain the guide\n-->\n');
   await page.locator('#open-existing-workspace').click();
   await page.locator('#project-root').fill(project);
   await page.locator('#project-form button[type=submit]').click();
@@ -632,7 +634,7 @@ try {
   await page.locator('#ai-endpoint-url').fill('http://127.0.0.1:11434/v1');
   await page.waitForFunction(() => document.querySelector('#ai-save-state').textContent === '保存済み');
   await page.locator('[data-close-dialog="panel-settings"]').click();
-  await page.locator('[data-tab="appearance"]').dispatchEvent('click');
+  await page.locator('[data-tab="appearance"]').click();
   assert.equal(await page.locator('#panel-appearance').isVisible(), true);
   assert.equal(await page.locator('#panel-publish #ui-theme').count(), 0);
   const themePicker = page.locator('#ui-theme');
@@ -660,10 +662,11 @@ try {
   };
   await assertPreviewTheme();
   await page.reload();
+  await idle();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'midnight' && document.querySelector('#ui-theme')?.value === 'midnight');
   assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).colorScheme), 'dark');
   await assertPreviewTheme();
-  await page.locator('[data-tab="appearance"]').dispatchEvent('click');
+  await page.locator('[data-tab="appearance"]').click();
   await page.locator('#ui-theme').selectOption('blue');
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'blue');
   assert.equal(await page.locator('html').evaluate(node => getComputedStyle(node).getPropertyValue('--app-bg').trim()), '#f5f8fc');
