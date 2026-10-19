@@ -6710,7 +6710,8 @@
         "P09.failure-retry",
         "P09.report-reopen-after-reload"
       ],
-      "reviewStatus": "needs-entry-specific-review"
+      "reviewStatus": "reviewed",
+      "reviewNote": "Reviewed against test_manual_studio_ai_assistance.mjs: explicit review entry/reopen, stale batch rejection, no-AI batch application, editable replacement enablement and processing-time disablement."
     },
     {
       "id": "apps/manual-studio/src/main.ts:create:button:a54f3517d8599595:1",
@@ -12975,7 +12976,8 @@
         "P09.failure-retry",
         "P09.selection-review-filter-rerun-jump"
       ],
-      "reviewStatus": "needs-entry-specific-review"
+      "reviewStatus": "reviewed",
+      "reviewNote": "Reviewed against test_manual_studio_ai_assistance.mjs: explicit review entry/reopen, stale batch rejection, no-AI batch application, editable replacement enablement and processing-time disablement."
     },
     {
       "id": "apps/manual-studio/src/readerReview.ts:handler:906f6f57b9b549ad:1",
@@ -12993,7 +12995,8 @@
         "P09.failure-retry",
         "P09.selection-review-filter-rerun-jump"
       ],
-      "reviewStatus": "needs-entry-specific-review"
+      "reviewStatus": "reviewed",
+      "reviewNote": "Reviewed against test_manual_studio_ai_assistance.mjs: explicit review entry/reopen, stale batch rejection, no-AI batch application, editable replacement enablement and processing-time disablement."
     },
     {
       "id": "apps/manual-studio/src/readerReview.ts:create:textarea:d1ab1cdbf0bff6a0:1",
@@ -13011,7 +13014,8 @@
         "P09.failure-retry",
         "P09.selection-review-filter-rerun-jump"
       ],
-      "reviewStatus": "needs-entry-specific-review"
+      "reviewStatus": "reviewed",
+      "reviewNote": "Reviewed against test_manual_studio_ai_assistance.mjs: explicit review entry/reopen, stale batch rejection, no-AI batch application, editable replacement enablement and processing-time disablement."
     },
     {
       "id": "apps/manual-studio/src/readerReview.ts:handler:5d72ca84f61e922c:1",
@@ -13029,7 +13033,8 @@
         "P09.failure-retry",
         "P09.selection-review-filter-rerun-jump"
       ],
-      "reviewStatus": "needs-entry-specific-review"
+      "reviewStatus": "reviewed",
+      "reviewNote": "Reviewed against test_manual_studio_ai_assistance.mjs: explicit review entry/reopen, stale batch rejection, no-AI batch application, editable replacement enablement and processing-time disablement."
     },
     {
       "id": "apps/manual-studio/src/editorContextMenu.ts:event:contextmenu:f1a99861a0ea67d1:1",

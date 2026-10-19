@@ -80,11 +80,12 @@ try {
   await page.locator('#markdown-editor').evaluate(el=>{el.setSelectionRange(7,7);el.dispatchEvent(new Event('select'));});
   assert.match(await page.locator('#selection-ai').textContent(),/AIで修正・挿入/);
   await page.locator('.column-label button').click();
-  await page.locator('#milkdown-editor .ProseMirror').focus();
+  const richEditor=page.locator('#milkdown-editor .ProseMirror');
+  await richEditor.focus();
   for(let attempt=0;attempt<5;attempt++){
-    await page.keyboard.press('Control+Home');await page.keyboard.press('Shift+End');
+    await richEditor.press('Control+Home');await richEditor.press('Shift+End');
     await page.waitForFunction(()=>document.querySelector('#selection-ai').textContent.includes('選択範囲をAIで修正'));
-    await page.keyboard.press('ArrowRight');
+    await richEditor.press('ArrowRight');
     await page.waitForFunction(()=>document.querySelector('#selection-ai').textContent.includes('AIで修正・挿入'));
   }
   await page.evaluate(()=>localStorage.setItem('manual-studio-workspace-history',JSON.stringify(['/tmp/munin-ui-fixture','/tmp/second-folder','/tmp/third-folder'])));
