@@ -370,11 +370,17 @@ async fn manual_request(
 }
 
 #[tauri::command]
-async fn choose_project() -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        rfd::FileDialog::new()
-            .set_title("マニュアルを管理するプロジェクトを選択")
-            .pick_folder()
+async fn choose_project(initial_directory: Option<String>) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("マニュアルを管理するプロジェクトを選択");
+        if let Some(directory) = initial_directory.filter(|directory| !directory.trim().is_empty()) {
+            let path = PathBuf::from(directory);
+            if path.is_dir() {
+                dialog = dialog.set_directory(path);
+            }
+        }
+        dialog.pick_folder()
             .map(|path| path.to_string_lossy().into_owned())
     })
     .await
@@ -803,13 +809,21 @@ async fn import_library_capture(
     tauri::async_runtime::spawn_blocking(move || {
         use base64::Engine;
         let root = PathBuf::from(root);
+        let mut timings = Vec::new();
+        let started = std::time::Instant::now();
         let source = manual_core::screenshots::image(&root,&id,revision.as_deref(),true)?;
         let bytes = fs::read(image_file).map_err(|e|e.to_string())?;
+        timings.push(serde_json::json!({"stage":"source-read","duration_ms":started.elapsed().as_secs_f64()*1000.0}));
+        let started = std::time::Instant::now();
         let loaded = markits_desktop_lib::metadata::load_image_with_metadata(&bytes).map_err(|e|e.to_string())?;
         let mut ui = loaded.ui_elements.clone();
         if let Some(crop) = &loaded.crop_info { if let Some(elements) = &mut ui { for element in elements { element.x += crop.offset_x; element.y += crop.offset_y; } } }
         let scene = loaded.annotations_json.as_deref().map(serde_json::from_str::<serde_json::Value>).transpose().map_err(|e|e.to_string())?;
-        let result = manual_core::screenshots::register(&root,&serde_json::json!({"id":id,"source":source["data"],"render":base64::engine::general_purpose::STANDARD.encode(&bytes),"scene":scene,"crop":loaded.crop_info,"ui":ui,"adopt":source["screenshot"]["adopted"].is_null()}))?;
+        timings.push(serde_json::json!({"stage":"metadata","duration_ms":started.elapsed().as_secs_f64()*1000.0}));
+        let started = std::time::Instant::now();
+        let mut result = manual_core::screenshots::register(&root,&serde_json::json!({"id":id,"source":source["data"],"render":base64::engine::general_purpose::STANDARD.encode(&bytes),"scene":scene,"crop":loaded.crop_info,"ui":ui,"adopt":source["screenshot"]["adopted"].is_null()}))?;
+        timings.push(serde_json::json!({"stage":"register","duration_ms":started.elapsed().as_secs_f64()*1000.0}));
+        result["timings"] = serde_json::json!(timings);
         Ok(result.to_string())
     }).await.map_err(|e|e.to_string())?
 }

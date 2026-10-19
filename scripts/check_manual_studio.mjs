@@ -22,6 +22,7 @@ const miscControlCases = [
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const steps = [
+  { group: 'unit', name: 'operation timing ownership and lifecycle', command: npx, args: ['tsx','scripts/test_manual_studio_operation_timings.ts'], timeoutMs: 60_000 },
   { group: 'unit', name: 'execution report provenance and failure checks', command: process.execPath, args: ['scripts/test_manual_studio_execution_reports.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'UI coverage contract and fault checks', command: process.execPath, args: ['scripts/test_manual_studio_coverage.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'UI source operation registration (not behavior proof)', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs'], timeoutMs: 60_000 },
@@ -53,6 +54,7 @@ steps.push(
   { group: 'ui', name: 'UI improvements browser checks', command: process.execPath, args: ['scripts/test_manual_studio_ui_improvements.mjs'], timeoutMs: 120_000 },
   { group: 'build', name: 'Manual Studio frontend build', command: npm, args: ['run', 'manual:build'], timeoutMs: 240_000 },
   { group: 'ui', name: 'preview link browser checks', command: process.execPath, args: ['scripts/test_manual_studio_preview_navigation.mjs'], timeoutMs: 120_000 },
+  { group: 'ui', name: 'workspace path settings and timing history', command: process.execPath, args: ['scripts/test_manual_studio_priority_improvements.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'Milkdown and Mermaid browser checks', command: process.execPath, args: ['scripts/test_manual_studio_milkdown.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'screenshot recapture task progress checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_progress.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'recapture display refresh checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_display.mjs'], timeoutMs: 120_000 },

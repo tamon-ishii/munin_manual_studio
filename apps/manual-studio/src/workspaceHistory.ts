@@ -12,12 +12,13 @@ export async function recordWorkspaceHistory(native: boolean, root: string): Pro
   const history = await loadWorkspaceHistory(false);
   localStorage.setItem(storageKey, JSON.stringify([root, ...history.filter(entry => entry !== root)].slice(0, 20)));
 }
-export function showWorkspaceHistory(history: string[], current: string, open: (root: string) => Promise<void>): void {
+export function showWorkspaceHistory(history: string[], current: string, open: (root: string) => Promise<void>, actions: Array<{label:string;run:()=>void}> = []): void {
   const trigger = document.getElementById('workspace-name')!;
   if (document.getElementById('workspace-history-dialog')) return;
   const list = document.createElement('div');
   list.id = 'workspace-history-dialog'; list.className = 'folder-history-dropdown';
-  list.role = 'listbox'; list.setAttribute('aria-label', '最近開いたフォルダー');
+  list.role = 'dialog'; list.setAttribute('aria-label', 'フォルダーの操作');
+  const recent=document.createElement('div');recent.role='listbox';recent.setAttribute('aria-label','最近開いたフォルダー');
   const heading = document.createElement('strong'); heading.id = 'workspace-history-title'; heading.textContent = '最近開いたフォルダー'; list.append(heading);
   const close = () => {
     list.remove(); trigger.setAttribute('aria-expanded', 'false'); trigger.removeEventListener('click', close);
@@ -34,9 +35,12 @@ export function showWorkspaceHistory(history: string[], current: string, open: (
     const name = document.createElement('strong'); name.textContent = `${root === current ? '✓ ' : ''}${root.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || root}`;
     const path = document.createElement('span'); path.textContent = root; button.append(name, path);
     button.onclick = () => { close(); trigger.focus(); if (root !== current) void open(root); };
-    buttons.push(button); list.append(button);
+    buttons.push(button); recent.append(button);
   }
   if (!history.length) { const empty = document.createElement('p'); empty.textContent = '最近開いたフォルダーはまだありません。'; list.append(empty); }
+  list.append(recent);
+  for(const action of actions){const button=document.createElement('button');button.type='button';button.className='workspace-history-entry';button.textContent=action.label;
+    button.onclick=()=>{close();trigger.focus();action.run();};buttons.push(button);list.append(button);}
   const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.dataset.historyClose = ''; dismiss.textContent = '閉じる'; dismiss.onclick = () => { close(); trigger.focus(); }; list.append(dismiss);
   list.addEventListener('keydown', event => {
     if (event.key === 'Escape' || event.key === 'Tab') { close(); trigger.focus(); if (event.key === 'Escape') event.preventDefault(); return; }

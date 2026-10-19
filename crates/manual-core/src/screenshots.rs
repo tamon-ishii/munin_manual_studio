@@ -72,6 +72,26 @@ fn decode(data: &str) -> Result<Vec<u8>, String> {
     image::load_from_memory(&bytes).map_err(|e| format!("画像を読めません: {e}"))?;
     Ok(bytes)
 }
+/// Retain PNG pixel chunks verbatim; private text/base-image chunks are omitted.
+/// Call only after decoding has validated the image.
+fn public_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let mut output = bytes[..8].to_vec();
+    let mut offset = 8;
+    while offset < bytes.len() {
+        let header = bytes.get(offset..offset + 8).ok_or("Invalid PNG chunk")?;
+        let length = u32::from_be_bytes(header[..4].try_into().unwrap()) as usize;
+        let end = offset.checked_add(12).and_then(|n| n.checked_add(length)).ok_or("Invalid PNG chunk")?;
+        let chunk = bytes.get(offset..end).ok_or("Invalid PNG chunk")?;
+        let kind = &header[4..8];
+        if matches!(kind, b"IHDR" | b"PLTE" | b"tRNS" | b"IDAT" | b"IEND") {
+            output.extend_from_slice(chunk);
+        }
+        if kind == b"IEND" { return Ok(output); }
+        offset = end;
+    }
+    Err("PNG end chunk is missing".into())
+}
+
 fn data(bytes: &[u8]) -> String {
     format!("data:image/png;base64,{}", STANDARD.encode(bytes))
 }
@@ -325,12 +345,7 @@ fn register_locked(root: &Path, options: &Value) -> Result<Value, String> {
         options["crop"].clone()
     };
     // Public renders contain pixels only; source pixels and editing metadata stay private.
-    let mut rendered_pixels = std::io::Cursor::new(Vec::new());
-    image::load_from_memory(&rendered)
-        .map_err(|e| e.to_string())?
-        .write_to(&mut rendered_pixels, image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?;
-    let rendered = rendered_pixels.into_inner();
+    let rendered = public_png(&rendered)?;
     let revision_hash = hash(
         &serde_json::to_vec(&json!([
             original_hash,
@@ -407,6 +422,12 @@ fn register_locked(root: &Path, options: &Value) -> Result<Value, String> {
     }
     Ok(json!({"screenshot":shot,"revision":revision}))
 }
+pub fn latest_image(root: &Path, id: &str) -> Result<Value, String> {
+    let shot = load(root, id)?;
+    let revision = shot.edits.last().ok_or("画像の版を選択してください。")?;
+    image(root, id, Some(&revision.id), false)
+}
+
 pub fn image(
     root: &Path,
     id: &str,
@@ -666,6 +687,30 @@ mod tests {
     }
 
     #[test]
+    fn document_folder_capture_does_not_create_nested_docs_or_manual() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("README.md"), "# Guide\n").unwrap();
+        let saved = register(root.path(), &json!({"source":png(1), "adopt":true})).unwrap();
+        let id = saved["screenshot"]["id"].as_str().unwrap();
+        let output = format!("assets/screenshots/{id}.png");
+        assert_eq!(saved["screenshot"]["output"], output);
+        assert!(root.path().join(&output).is_file());
+        assert!(reference(root.path(), id, "README.md").unwrap().contains(&output));
+        fs::write(root.path().join("README.md"), "# Guide\n<!-- ai:task id=shot kind=screenshot prompt=\"Capture\" -->\n<!-- /ai:task -->\n").unwrap();
+        let scenario = ".munin/scenarios/capture.json";
+        crate::scenario::save(root.path(), scenario, r#"{"version":1,"platform":"desktop","window":"Settings","steps":[{"screenshot":{"task":"shot"}}]}"#).unwrap();
+        assert!(crate::scenario::load(root.path(), scenario).is_ok());
+        let config = crate::config::read_config(root.path());
+        assert_eq!(config.docs, ".");
+        let config = crate::config::save_settings(root.path(), &config.docs, &config.output,
+            "Instructions", "codex", "", "mkdocs", "{}", None, Some("none"), None, Some(&config.assets)).unwrap();
+        assert_eq!(crate::config::read_config(root.path()).docs, config.docs);
+        assert!(root.path().join(".munin/brief.md").is_file());
+        assert!(!root.path().join("docs").exists());
+        assert!(!root.path().join("manual").exists());
+    }
+
+    #[test]
     fn originals_revisions_and_conflicts_are_independent() {
         let root = tempfile::tempdir().unwrap();
         let first = register(root.path(), &json!({"source":png(1)})).unwrap();
@@ -677,6 +722,8 @@ mod tests {
             original["data"]
         );
         assert_ne!(revised["revision"], first["revision"]);
+        assert_eq!(latest_image(root.path(), id).unwrap()["edit"]["id"], revised["revision"]);
+        assert_eq!(image(root.path(), id, None, false).unwrap()["edit"]["id"], first["revision"]);
         assert_eq!(register(root.path(),&json!({"id":id,"source":png(1),"render":png(5),"scene":{"annotations":[{"x":1}]},"adopt":false})).unwrap()["screenshot"]["edits"].as_array().unwrap().len(),2);
         change(root.path(), id, &json!({"adopt":revised["revision"]})).unwrap();
         assert_eq!(
@@ -1521,5 +1568,8 @@ mod lifecycle_tests {
         let shot = load(root.path(), result["screenshot"]["id"].as_str().unwrap()).unwrap();
         let public = fs::read(project_path(root.path(), &shot.output).unwrap()).unwrap();
         assert!(markits::raster::extract_png_text_chunk(&public, "markits:source_image").is_none());
+        assert_eq!(public, bytes, "strip metadata without recompressing image chunks");
+        assert_eq!(image::load_from_memory(&public).unwrap().to_rgba8(),
+            image::load_from_memory(&private).unwrap().to_rgba8());
     }
 }

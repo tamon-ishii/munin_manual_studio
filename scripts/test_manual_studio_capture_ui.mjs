@@ -163,9 +163,9 @@ try {
   assert.equal(await nativePage.locator('#settings-menu [data-tab=applications]').count(),0,'registration is outside global settings');
   await nativePage.goto(`${base}/?root=${encodeURIComponent('/tmp/library-native-fixture')}`);
   await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  assert.equal(await nativePage.locator('#panel-screenshots .panel-header #open-applications').count(),1,'application registration is in the resource library');
-  await nativePage.locator('[data-tab=screenshots]').click();
-  assert.equal(await nativePage.locator('#open-applications').isVisible(),true);
+  assert.equal(await nativePage.locator('.workspace-tabs #open-applications').count(),1,'application registration is beside the resource library');
+  assert.equal(await nativePage.locator('#panel-editor').isVisible(),true);
+  assert.equal(await nativePage.locator('#open-applications').isVisible(),true,'registration is accessible while editing');
   await nativePage.getByRole('button',{name:'撮影するアプリを登録',exact:true}).click();await nativePage.locator('#add-launch-command').click();
   await nativePage.locator('[data-launch-program="0"]').fill('/missing/app');
   await nativePage.getByRole('button',{name:'起動確認',exact:true}).click();
@@ -214,7 +214,22 @@ try {
   await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'キャンセル',exact:true}).click();assert.equal(await nativeEditor.inputValue(),manuscript);
   await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await nativePage.evaluate(()=>{__libraryMock.failFinish=true;});await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();await nativePage.waitForFunction(()=>!document.querySelector('#editor-screenshot-recording')&&document.querySelector('#screenshot-library-record').hidden===false);assert.equal(await nativeEditor.inputValue(),manuscript);assert.equal(await nativeEditor.evaluate(el=>el.selectionStart),10);
-  await nativePage.evaluate(()=>{__libraryMock.failFinish=false;});await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();await nativePage.locator('#editor-screenshot-preview').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'この位置に挿入',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('指定位置にスクショを挿入しました。')&&document.body.getAttribute('aria-busy')==='false');
+  await nativePage.evaluate(()=>{__libraryMock.failFinish=false;__libraryMock.holdImports=true;delete __libraryMock.release;});await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();
+  await nativePage.waitForFunction(()=>typeof __libraryMock.release==='function');
+  await nativePage.locator('[data-capture-stage]').getByText('編集結果を保存中',{exact:true}).waitFor();
+  assert.equal(await nativePage.locator('#capture-operation-progress').getAttribute('data-stage'),'import');
+  await nativePage.evaluate(()=>{__libraryMock.holdImports=false;__libraryMock.release();});
+  await nativePage.locator('#editor-screenshot-preview').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'この位置に挿入',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('指定位置にスクショを挿入しました。')&&document.body.getAttribute('aria-busy')==='false');
+  const previewCalls=await nativePage.evaluate(()=>{
+    const calls=__libraryMock.calls;
+    const imported=calls.findLastIndex(call=>call.command==='import_library_capture');
+    const preview=calls.findIndex((call,index)=>index>imported&&call.command==='manual_request'&&call.args.request.action==='screenshots-image');
+    return calls.slice(imported+1,preview+1);
+  });
+  assert.ok(previewCalls.some(call=>call.args?.request?.action==='screenshots-image'&&call.args.request.options.json.latest===true));
+  assert.equal(previewCalls.some(call=>['screenshots-list','resources-list','editor-preview'].includes(call.args?.request?.action)),false,'insertion preview does not wait for library scans or editor refresh');
+  await nativePage.waitForFunction(()=>__libraryMock.calls.some(call=>call.args?.request?.action==='operation-timings-record'&&call.args.request.options.json.operation==='screenshot-insert'&&call.args.request.options.json.outcome==='success'));
+  assert.equal(await nativePage.locator('#capture-operation-progress').count(),0);
   const inserted=await nativeEditor.inputValue();assert.ok(inserted.startsWith(manuscript.slice(0,10)));assert.ok(inserted.endsWith(manuscript.slice(10)));assert.match(inserted,/assets\/screenshots\//);await nativeEditor.press('Control+z');assert.equal(await nativeEditor.inputValue(),manuscript);
   assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.some(call=>call.command==='manual_request'&&call.args.request.action.startsWith('screenshot-ai-'))),false,'manual insertion needs no AI requests');
   // Native clipboard invocation is mocked: check UI/session guards without

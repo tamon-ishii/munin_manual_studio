@@ -434,7 +434,10 @@ fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Val
         String::new()
     };
 
-    let brief = if brief_path.is_file() {
+    let internal_brief = root.join(".munin/brief.md");
+    let brief = if config.docs == "." && internal_brief.is_file() {
+        fs::read_to_string(&internal_brief).unwrap_or_else(|_| DEFAULT_BRIEF.to_string())
+    } else if brief_path.is_file() {
         fs::read_to_string(&brief_path).unwrap_or_else(|_| DEFAULT_BRIEF.to_string())
     } else if legacy_brief.is_file() {
         fs::read_to_string(&legacy_brief).unwrap_or_else(|_| DEFAULT_BRIEF.to_string())

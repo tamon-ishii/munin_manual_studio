@@ -9,6 +9,7 @@ mod capture_lifecycle;
 pub mod capture_source;
 pub mod capture_validation;
 pub mod config;
+mod operation_settings;
 pub mod context;
 pub mod deps;
 mod desktop_scenario;
@@ -351,6 +352,9 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "screenshots-image" => {
             let value: serde_json::Value =
                 serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e| e.to_string())?;
+            if value["latest"] == true && value["revision"].as_str().is_none() && value["original"] != true {
+                return Ok(screenshots::latest_image(root, id_opt.ok_or("画像を選択してください。")?)?.to_string());
+            }
             Ok(screenshots::image(
                 root,
                 id_opt.ok_or("画像を選択してください。")?,
@@ -819,6 +823,13 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
     };
     if let Some(result) = workflow_result {
         return result.map(|v| v.to_string());
+    }
+    match action {
+        "workspace-paths-read" => return Ok(operation_settings::paths(project).to_string()),
+        "workspace-paths-save" => return operation_settings::save_paths(project, &options["json"]).map(|v|v.to_string()),
+        "operation-timings-read" => return operation_settings::history(project).map(|v|v.to_string()),
+        "operation-timings-record" => return operation_settings::record(project, &options["json"]).map(|v|v.to_string()),
+        _ => {}
     }
     if action == "create-workspace" {
         return workspace::create(Path::new(root), &request["options"]);

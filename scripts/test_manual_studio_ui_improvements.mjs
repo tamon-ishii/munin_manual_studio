@@ -98,7 +98,7 @@ try {
   await page.keyboard.press('ArrowUp');
   assert.equal(await page.evaluate(()=>document.activeElement?.hasAttribute('data-history-close')),true);
 
-  assert.equal(await page.locator('#workspace-history-dialog').getAttribute('role'),'listbox');
+  assert.equal(await page.locator('#workspace-history-dialog').getAttribute('role'),'dialog');
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#workspace-name').getAttribute('aria-expanded'),'false');
   await page.locator('#tree-create-menu>summary').click();

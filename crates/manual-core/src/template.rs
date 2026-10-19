@@ -59,7 +59,9 @@ fn init_template_inner(
     model_opt: Option<&str>,
     response: Option<Result<serde_json::Value, String>>,
 ) -> Result<(), String> {
-    let existing_cfg = read_config(root);
+    let existing_cfg = if !config_path(root).is_file() && read_config(root).docs == "." {
+        ManualConfig::default()
+    } else { read_config(root) };
     let project_name = root
         .file_name()
         .and_then(|s| s.to_str())

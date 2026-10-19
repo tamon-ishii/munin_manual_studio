@@ -345,6 +345,9 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
             let is_docs_dir = trimmed == config.docs || target_path == templates;
             for entry in WalkDir::new(&target_path)
                 .into_iter()
+                .filter_entry(|entry| config.docs != "." || entry.depth() == 0 || !entry.file_type().is_dir()
+                    || (!entry.file_name().to_string_lossy().starts_with('.')
+                        && !matches!(entry.file_name().to_str(), Some("node_modules" | "target" | "dist" | "__pycache__"))))
                 .filter_map(|e| e.ok())
             {
                 if entry.file_type().is_file()

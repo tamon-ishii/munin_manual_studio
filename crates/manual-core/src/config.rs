@@ -87,7 +87,20 @@ pub fn read_config(root: &Path) -> ManualConfig {
     } else if legacy_json.is_file() {
         legacy_json
     } else {
-        return ManualConfig::default();
+        // Preserve an existing source tree, but treat a folder containing its own
+        // manuscripts (or an empty document folder) as the document root.
+        let has_root_markdown = fs::read_dir(root).ok().is_some_and(|entries| entries.flatten().any(|entry|
+            entry.path().is_file() && entry.path().extension().is_some_and(|ext| ext == "md")));
+        if root.join("docs").is_dir() && !has_root_markdown {
+            return ManualConfig::default();
+        }
+        return ManualConfig {
+            docs: ".".into(),
+            output: ".munin/site".into(),
+            targets: vec![".".into()],
+            assets: "assets".into(),
+            ..ManualConfig::default()
+        };
     };
 
     let content = match fs::read_to_string(&path) {
@@ -282,12 +295,14 @@ pub fn save_settings(
 
     if docs_path == output_path
         || docs_path.starts_with(&output_path)
-        || output_path.starts_with(&docs_path)
+        || (output_path.starts_with(&docs_path)
+            && !(docs.trim() == "." && output_path.starts_with(project_path(root, ".munin")?)))
     {
         return Err("Template and output directories must be separate".to_string());
     }
     let final_brief = if brief.trim().is_empty() {
-        let existing = root.join("manual").join("brief.md");
+        let internal = root.join(".munin/brief.md");
+        let existing = if docs.trim() == "." && internal.is_file() { internal } else { root.join("manual/brief.md") };
         if existing.is_file() {
             fs::read_to_string(&existing).unwrap_or_else(|_| DEFAULT_BRIEF.to_string())
         } else {
@@ -333,6 +348,7 @@ pub fn save_settings(
         .unwrap_or(&docs_path)
         .to_string_lossy()
         .into_owned();
+    let rel_docs = if rel_docs.is_empty() { ".".to_string() } else { rel_docs };
     let rel_output = output_path
         .strip_prefix(&abs_root)
         .unwrap_or(&output_path)
@@ -385,7 +401,7 @@ pub fn save_settings(
     let json_bytes = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(&dest, format!("{json_bytes}\n")).map_err(|e| e.to_string())?;
 
-    let brief_path = root.join("manual").join("brief.md");
+    let brief_path = if config.docs == "." { root.join(".munin/brief.md") } else { root.join("manual/brief.md") };
     if let Some(parent) = brief_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

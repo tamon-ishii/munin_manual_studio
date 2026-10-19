@@ -78,7 +78,7 @@ pub fn create_folder_at(root: &Path, folder: &str, project_relative: bool) -> Re
         .trim_start_matches("./")
         .trim_end_matches('/')
         .to_string();
-    let project_relative = if project_relative { clean } else { format!("{docs}/{clean}") };
+    let project_relative = if project_relative || docs.is_empty() { clean } else { format!("{docs}/{clean}") };
     let path = project_path(root, &project_relative)?;
     if path.exists() {
         return Err("同じ名前のファイルまたはフォルダーが既にあります。".into());
@@ -278,7 +278,7 @@ mod tests {
         .unwrap();
         assert!(!updated.content.contains("ai:task"));
         assert!(updated.content.contains("Updated"));
-        fs::write(root.path().join("docs/guide.md"), "External edit").unwrap();
+        fs::write(root.path().join("guide.md"), "External edit").unwrap();
         assert!(save(
             root.path(),
             "guide.md",
@@ -287,7 +287,7 @@ mod tests {
         )
         .is_err());
         assert_eq!(
-            fs::read_to_string(root.path().join("docs/guide.md")).unwrap(),
+            fs::read_to_string(root.path().join("guide.md")).unwrap(),
             "External edit"
         );
         assert!(save(root.path(), "guide.md", "Overwrite", None).is_err());

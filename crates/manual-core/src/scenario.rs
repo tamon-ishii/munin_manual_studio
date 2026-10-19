@@ -301,8 +301,8 @@ pub(crate) fn save_with_tasks(
     json: &str,
     selected: &[super::task::Task],
 ) -> Result<String, String> {
-    if !input.starts_with("manual/scenarios/") || !input.ends_with(".json") {
-        return Err("Scenario files must be under manual/scenarios/ with a .json extension".into());
+    if !(input.starts_with(".munin/scenarios/") || input.starts_with("manual/scenarios/")) || !input.ends_with(".json") {
+        return Err("Scenario files must be under .munin/scenarios/ or manual/scenarios/ with a .json extension".into());
     }
     let destination = project_path(root, input)?;
     let scenario: Scenario =
@@ -331,8 +331,8 @@ pub(crate) fn validate_json_with_tasks(
 }
 
 pub fn load(root: &Path, input: &str) -> Result<String, String> {
-    if !input.starts_with("manual/scenarios/") || !input.ends_with(".json") {
-        return Err("Scenario files must be under manual/scenarios/ with a .json extension".into());
+    if !(input.starts_with(".munin/scenarios/") || input.starts_with("manual/scenarios/")) || !input.ends_with(".json") {
+        return Err("Scenario files must be under .munin/scenarios/ or manual/scenarios/ with a .json extension".into());
     }
     let path = project_path(root, input)?;
     fs::read_to_string(&path)
@@ -366,8 +366,8 @@ pub(crate) fn validate_capture_task_with_tasks(
 }
 
 pub fn link(root: &Path, input: &str, page: &str) -> Result<String, String> {
-    if !input.starts_with("manual/scenarios/") || !input.ends_with(".json") {
-        return Err("Scenario files must be under manual/scenarios/ with a .json extension".into());
+    if !(input.starts_with(".munin/scenarios/") || input.starts_with("manual/scenarios/")) || !input.ends_with(".json") {
+        return Err("Scenario files must be under .munin/scenarios/ or manual/scenarios/ with a .json extension".into());
     }
     let scenario = project_path(root, input)?;
     if !scenario.is_file() {

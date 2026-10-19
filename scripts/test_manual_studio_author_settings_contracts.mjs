@@ -52,8 +52,8 @@ try{
  await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('Original paragraph')).catch(async error=>{throw new Error(`${error.message}; status=${await page.locator('#status').textContent()}; body=${(await page.locator('body').textContent()).slice(0,500)}`)});
  await idle();
  const settingsBefore=await readFile(path.join(root,'manual_setting.json'));
- assert.equal(await page.locator('.workspace-tabs #open-applications').count(),0);
- assert.equal(await page.locator('#panel-screenshots .panel-header #open-applications').count(),1);
+ assert.equal(await page.locator('.workspace-tabs #open-applications').count(),1);
+ assert.equal(await page.locator('.app-header #open-applications').count(),0);
  assert.equal(await page.locator('#panel-editor > .document-heading .editor-display-group').count(),1);
  for(const view of ['edit','split','preview']){
    const button=page.locator(`button[data-editor-view=${view}]`);

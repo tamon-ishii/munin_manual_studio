@@ -1,5 +1,7 @@
 # 原稿操作API
 
+現行の画面は [全文検索・置換とGit履歴](specs/manuscript-search-and-git.md) に従う。見出し解析APIは保持しているが、見出しアウトラインのバーは画面に表示しない。
+
 既存の `manualctl --request` およびStudio RPCで利用する。`root` は対象プロジェクト、各操作の引数は `options.json` に指定する。
 
 - `project-search`: `query`（空でない文字列）、`case_sensitive`（既定true）。プロジェクトのMarkdownを検索し、`documents`（本文とrevision）、`matches`（page/start/end/text/line/column/excerpt）、`skipped`、`truncated` を返す。位置はUTF-16。隠し保存領域・依存・ビルド出力・シンボリックリンクは対象外。最大2000ファイル・1000結果・一致文書本文合計3MBを超える場合は明示する。

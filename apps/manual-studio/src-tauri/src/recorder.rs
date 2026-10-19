@@ -862,7 +862,7 @@ pub fn finish_excluding_control(
         steps.insert(steps.len() - 1, json!({"expect_targets": headings}));
     }
     let operation_text = events_to_text(&events, &session.window);
-    let scenario_dir = session.root.join("manual/scenarios");
+    let scenario_dir = session.root.join(".munin/scenarios");
     fs::create_dir_all(&scenario_dir).map_err(|e| e.to_string())?;
     let file_name = format!("recorded-{}.json", session.task_id);
     let scenario_path = scenario_dir.join(&file_name);
@@ -920,7 +920,7 @@ pub fn finish_excluding_control(
     };
     Ok(RecordingResult {
         screenshot_id,
-        scenario_file: format!("manual/scenarios/{file_name}"),
+        scenario_file: format!(".munin/scenarios/{file_name}"),
         operation_text,
         source_file: screenshot_path.to_string_lossy().into_owned(),
         annotation_file: annotation_path.to_string_lossy().into_owned(),
@@ -1064,13 +1064,13 @@ pub fn clone_scenario_for_task(
         return Err("撮影指示IDが不正です。".into());
     }
     let relative = Path::new(&input);
-    if !input.starts_with("manual/scenarios/")
+    if !(input.starts_with(".munin/scenarios/") || input.starts_with("manual/scenarios/"))
         || !input.ends_with(".json")
         || relative
             .components()
             .any(|part| !matches!(part, std::path::Component::Normal(_)))
     {
-        return Err("シナリオは manual/scenarios/ 内の JSON を指定してください。".into());
+        return Err("シナリオは .munin/scenarios/ または manual/scenarios/ 内の JSON を指定してください。".into());
     }
     let root = PathBuf::from(root);
     let mut scenario: Value =
@@ -1088,7 +1088,7 @@ pub fn clone_scenario_for_task(
         .find_map(|step| step.get_mut("screenshot"))
         .ok_or("シナリオに撮影手順がありません。")?;
     screenshot["task"] = Value::String(task_id.clone());
-    let destination = root.join("manual/scenarios");
+    let destination = root.join(".munin/scenarios");
     fs::create_dir_all(&destination).map_err(|e| e.to_string())?;
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1100,7 +1100,7 @@ pub fn clone_scenario_for_task(
         serde_json::to_vec_pretty(&scenario).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    Ok(format!("manual/scenarios/{file_name}"))
+    Ok(format!(".munin/scenarios/{file_name}"))
 }
 
 pub fn import_annotation_spec() -> Result<Option<String>, String> {

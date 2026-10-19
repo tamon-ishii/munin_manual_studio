@@ -5,12 +5,12 @@
   <header class="app-header">
     <div class="brand"><span class="brand-icon">M</span><div><strong>Munin Manual Studio</strong><small>原稿・画面画像・公開まで</small></div></div>
     <div class="header-workspace">
-      <div class="header-group header-project" role="group" aria-label="プロジェクト操作"><button type="button" id="workspace-name" aria-haspopup="listbox" aria-expanded="false" title="最近開いたフォルダーを選択"><span id="workspace-name-label">フォルダー未選択</span><span class="folder-selector-arrow" aria-hidden="true">▾</span></button><button type="button" id="open-existing-workspace" data-ui-icon="open">開く</button></div>
+      <div class="header-group header-project" role="group" aria-label="プロジェクト操作"><button type="button" id="workspace-name" aria-haspopup="dialog" aria-expanded="false" title="最近開いたフォルダーを選択"><span id="workspace-name-label">フォルダー未選択</span><span class="folder-selector-arrow" aria-hidden="true">▾</span></button><button type="button" id="open-existing-workspace" data-ui-icon="open">開く</button></div>
       <div class="header-group header-preferences" role="group" aria-label="設定と表示"><button type="button" data-tab="settings" class="ai-settings-button" title="AI接続・モデル・生成設定を開く"><svg class="ui-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>AI設定</button><button type="button" data-tab="appearance" data-ui-icon="settings" title="外観設定を開く">外観</button><div class="view-menu-container"><button type="button" id="view-menu-button" data-ui-icon="eye" aria-haspopup="true" aria-expanded="false" title="パネルの表示・非表示とレイアウト初期化">表示 ▾</button><div id="view-menu-dropdown" class="view-menu-dropdown" hidden></div></div></div>
     </div>
   </header>
   <nav class="workspace-tabs" aria-label="作業">
-    <div class="workspace-nav-group" role="group" aria-label="編集と素材"><button data-tab="editor" data-ui-icon="file" class="active">原稿を編集</button><button data-tab="screenshots" data-ui-icon="library">リソース一覧</button></div>
+    <div class="workspace-nav-group" role="group" aria-label="編集と素材"><button data-tab="editor" data-ui-icon="file" class="active">原稿を編集</button><button data-tab="screenshots" data-ui-icon="library">リソース一覧</button><button type="button" id="open-applications" data-ui-icon="application" data-tab="applications" disabled>撮影するアプリを登録</button></div>
     <div class="workspace-nav-group workspace-nav-output" role="group" aria-label="出力"><button data-tab="publish" data-ui-icon="review">原稿チェック</button></div>
   </nav>
   <div class="app-layout" id="app-layout"></div>
@@ -68,7 +68,7 @@
       </div>
     </section>
     <section id="panel-screenshots" class="panel">
-      <div class="panel-header"><h1>リソース一覧</h1><button type="button" id="open-applications" data-ui-icon="application" data-tab="applications" disabled>撮影するアプリを登録</button></div>
+      <div class="panel-header"><h1>リソース一覧</h1></div>
       <div class="actions screenshot-library-toolbar">
         <button type="button" id="screenshot-ai-create" data-ui-icon="sparkle">AI撮影</button><button type="button" id="screenshot-library-record" data-ui-icon="camera" class="primary">撮影</button>
         <button type="button" id="screenshot-library-import-button" data-ui-icon="open">読み込み</button><button type="button" id="resource-generate-image" data-ui-icon="sparkle">AI作画</button><input id="screenshot-library-import" type="file" accept="image/png" hidden />

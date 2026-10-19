@@ -342,7 +342,7 @@ fn apply_auto_assignments(
                 let definition = json!({ "version": 1, "platform": "desktop", "window": window.title, "steps": steps }).to_string();
                 match scenario::validate_json_with_tasks(root, &definition, tasks) {
                     Ok(()) => {
-                        let path = format!("manual/scenarios/ai-{task_id}-{}-{}.json", chrono::Utc::now().timestamp_millis(), std::process::id());
+                        let path = format!(".munin/scenarios/ai-{task_id}-{}-{}.json", chrono::Utc::now().timestamp_millis(), std::process::id());
                         if project_path(root, &path)?.exists() {
                             return Err(format!("撮影シナリオの保存先が既に存在します: {path}"));
                         }

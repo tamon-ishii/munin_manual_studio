@@ -14,7 +14,7 @@ Manual Studio SHALL NOT expose a screen-list or UI Map panel, generate a project
 - **AND** legacy user data is preserved while current source provides evidence for documentation checks.
 
 ### Requirement: Configure Manual Workspace
-The application SHALL let users configure project-relative manuscript, published asset, and output directories and an optional drafting brief independently from application launch settings and AI connection settings.
+The application SHALL preserve project-relative manuscript, published asset, and output directory configuration and an optional drafting brief independently from application launch settings and AI connection settings. The desktop UI SHALL provide optional manuscript, asset and HTML output path settings in the folder-name menu while preserving existing files and independent AI settings.
 
 #### Scenario: Save manual settings
 - **WHEN** a user saves valid project-relative paths and a drafting brief
@@ -115,16 +115,15 @@ The project SHALL provide a documented check command for Manual Studio workflow 
 - **THEN** the documentation states that mocked native calls do not verify actual MarkIts Desktop editing or complete native GUI integration.
 
 ### Requirement: Separate Application and Project Settings
-The application SHALL provide application settings with distinct target-application, appearance, and AI-connection sections, and a separate project settings entry for source, asset, and output directories.
+The application SHALL keep AI connection settings, appearance settings, project-owned application registration, and the manuscript drafting brief independent. Directory configuration SHALL be available through the folder-name menu and existing configuration/backend operations.
 
 #### Scenario: Configure an application without AI
-- **WHEN** a user opens application settings and selects target applications
-- **THEN** the application offers executable-path and argument registration without requiring AI fields.
+- **WHEN** a project is open and the user opens registration beside the resource-library entry
+- **THEN** executable-path and argument registration is available without requiring AI fields.
 
-#### Scenario: Manage project directories
-- **WHEN** a user opens project settings
-- **THEN** the application displays manuscript, published asset, and output directory fields
-- **AND** saving them does not modify application registrations or unfinished AI settings.
+#### Scenario: Save AI settings
+- **WHEN** a user saves AI connection settings
+- **THEN** project directory configuration and application registrations are preserved.
 
 ### Requirement: Keep dialogs and secondary operations contained
 Manual Studio SHALL constrain dialog width and height to the current viewport, allow vertical scrolling, and avoid horizontal overflow in forms. Primary screenshot operations SHALL remain visible while history and management operations are grouped in a collapsible section. Explanations SHALL be concise and avoid duplicated headings or obsolete AI capture guidance.
@@ -235,3 +234,36 @@ The editor SHALL provide one screenshot insertion entry with manual capture, AI 
 #### Scenario: Cancel screenshot insertion
 - **WHEN** the user cancels method selection, recording selection or candidate preview
 - **THEN** the manuscript remains unchanged and previously captured resources remain available.
+
+### Requirement: Open existing document folders without redundant nesting
+An unconfigured folder containing root-level Markdown manuscripts, or lacking an existing docs directory, SHALL use the selected folder itself as the manuscript root and assets as its asset directory. An unconfigured folder with an existing docs directory and no root-level Markdown SHALL retain the legacy docs layout. Explicit configuration and existing data SHALL be preserved. New capture scenarios SHALL use .munin/scenarios while legacy manual/scenarios files remain readable.
+
+#### Scenario: Capture from a document folder
+- **WHEN** the user captures an image in an unconfigured folder containing README.md
+- **THEN** the adopted image is saved under assets/screenshots and the recording under .munin/scenarios
+- **AND** capture does not create nested docs or manual directories.
+
+### Requirement: Start folder selection at the specified directory
+The native folder picker SHALL start at the existing directory in the folder-path field, falling back to the current project when that field is empty. Invalid directories SHALL use the operating system default.
+
+#### Scenario: Browse after entering a directory
+- **WHEN** the user enters an existing directory and selects the folder-picker button
+- **THEN** the native picker starts at that directory.
+
+### Requirement: Preserve editor space without a heading outline bar
+The editor SHALL omit the heading outline bar and empty formatting bars while retaining heading formatting and manuscript search and Git tools.
+
+#### Scenario: Edit in rich text mode
+- **WHEN** a manuscript is open in the rich editor
+- **THEN** no heading outline bar or empty source-formatting bar consumes space above the editor.
+
+### Requirement: Review and safely update project storage paths
+The folder-name menu SHALL show manuscript, asset and output paths and allow relative project-owned changes without moving existing files. Saving SHALL protect unsaved manuscripts, reject escaping or overlapping paths and stale settings, preserve AI/application settings, and reload the manuscript list.
+
+#### Scenario: Change the image destination
+- **WHEN** a user saves a valid new image destination
+- **THEN** future images use that destination and existing manuscripts and images remain unchanged.
+
+#### Scenario: Settings change during review
+- **WHEN** another operation changes the storage paths before saving
+- **THEN** saving is rejected without overwriting those changes.

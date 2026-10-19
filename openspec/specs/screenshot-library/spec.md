@@ -220,3 +220,30 @@ Users SHALL be able to save, select and delete project-owned annotation template
 - **WHEN** a saved template includes MarkIts crop offsets and an editable scene
 - **THEN** the candidate uses the crop offsets and scene dimensions to render from the full original
 - **AND** MarkIts can later reopen its full source and saved editable scene.
+
+### Requirement: Return from MarkIts without full-library work before insertion preview
+After MarkIts completion is detected and the edit is durably saved, an editor capture SHALL fetch only the latest revision of that screenshot for insertion preview. It SHALL NOT wait for full screenshot/resource listings or editor-preview refresh before showing that preview. Existing screenshot selection SHALL retain the explicitly selected adopted revision.
+
+#### Scenario: Finish a manual capture for insertion
+- **WHEN** MarkIts saves a manual capture started from the manuscript editor
+- **THEN** the latest saved candidate is previewed without a full-library scan
+- **AND** document ownership checks, cancellation, retry, and explicit insertion remain available.
+
+### Requirement: Preserve PNG pixels without recompressing public renders
+Saving an edited PNG SHALL retain its pixel chunks without recompression while removing private annotation and embedded-source metadata. The immutable original and editable scene SHALL remain separately available.
+
+#### Scenario: Export an annotated image
+- **WHEN** a PNG containing private source-image metadata is registered
+- **THEN** the public render has identical decoded pixels and excludes private metadata
+- **AND** the retained original is unchanged.
+
+### Requirement: Show capture progress and retain bounded timing records
+Editor capture SHALL show its current stage and elapsed stage time through recording, MarkIts return, import, insertion preparation and save. Completed, cancelled and failed operations SHALL retain up to fifty project-owned timing records, with user interaction waits distinguished from processing. Records SHALL omit document contents, images, prompts and credentials. Users SHALL inspect them through the folder-name menu.
+
+#### Scenario: Wait for an edited image to import
+- **WHEN** MarkIts completes and image import is still running
+- **THEN** Studio is restored and shows that the edit is being saved rather than leaving the user without progress.
+
+#### Scenario: Timing persistence fails
+- **WHEN** a saved screenshot cannot write its timing record
+- **THEN** the screenshot and insertion remain available and timing failure does not undo the saved edit.

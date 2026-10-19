@@ -1,3 +1,5 @@
+import {OperationTiming,stageLabels,operationProgress} from './operationTimings';
+import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
 import {setupEditorContextMenu} from './editorContextMenu';
 import {applyReviewCorrections} from './reviewCorrections';
 import {setupScreenshotAi} from './screenshotAi';
@@ -1358,13 +1360,20 @@ element("workspace-name").addEventListener("click", () => {
   if (document.getElementById("workspace-history-dialog")) return;
   void work(async () => {
     const history = await loadWorkspaceHistory(native);
-    showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)));
+    const request=rpc;
+    showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)), projectRoot ? [
+      {label:'原稿・画像の保存先',run:()=>{void showWorkspacePaths({root:()=>projectRoot,request,
+        prepare:async()=>{if(busy)throw new Error('処理が終わってから変更してください。');await savedBeforeOperation();return confirmAllDocumentTabs();},
+        changed:async root=>{if(root===projectRoot)await work(()=>openProject(root,false));},
+      }).catch(error=>status(String(error),true));}},
+      {label:'撮影・挿入の処理時間',run:()=>{void showOperationTimings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}},
+    ] : []);
   });
 });
 element("project-form").addEventListener("submit", (event) => { event.preventDefault(); void work(() => openProject(input("project-root").value.trim())); });
 element("browse-project").addEventListener("click", () => { void work(async () => {
   if (!native) { status("ブラウザーでの開発表示では、プロジェクトのパスを入力して「開く」を押してください。"); input("project-root").focus(); return; }
-  const path = await invoke<string | null>("choose_project");
+  const path = await invoke<string | null>("choose_project", { initialDirectory: input("project-root").value.trim() || projectRoot });
   if (path) { input("project-root").value = path; await openProject(path); }
 }); });
 element("page-list").addEventListener("click", (event) => {
@@ -1744,7 +1753,7 @@ element('page-list').addEventListener('dragstart', event => {
 });
 function relativeProjectAsset(asset: string, page: string): string {
   const docs = workspace?.config.docs.replace(/\\/g,'/').replace(/\/$/,'') || 'docs';
-  const projectPage = workspace?.project_entries.some(entry=>entry.path===page) ? page : `${docs}/${page}`;
+  const projectPage = docs === '.' || workspace?.project_entries.some(entry=>entry.path===page) ? page : `${docs}/${page}`;
   const from = projectPage.split('/').slice(0,-1), to = asset.split('/');
   while (from.length && to.length && from[0]===to[0]) { from.shift(); to.shift(); }
   return '../'.repeat(from.length)+to.join('/');
@@ -1888,9 +1897,9 @@ async function uploadMilkdownImage(file: File): Promise<string> {
 }
 
 function computeRelativeMarkdownPath(pagePath: string, assetPath: string, docsFolder = "docs"): string {
-  const pageRelative = pagePath.startsWith(docsFolder + "/") ? pagePath : `${docsFolder}/${pagePath}`;
+  const pageRelative = docsFolder === "." || pagePath.startsWith(docsFolder + "/") ? pagePath : `${docsFolder}/${pagePath}`;
   const pageDir = pageRelative.split("/").slice(0, -1);
-  const targetParts = assetPath.replace(/\\/g, "/").split("/");
+  const targetParts = assetPath.replace(/\\/g, "/").split("/").filter(part => part && part !== ".");
   let common = 0;
   while (common < pageDir.length && common < targetParts.length && pageDir[common] === targetParts[common]) {
     common++;
@@ -2610,43 +2619,61 @@ const screenshotAi=setupScreenshotAi({root:()=>projectRoot,applications:()=>laun
 });
 
 
+let captureInsertionRunning=false;
 async function insertScreenshotHere():Promise<void>{
-  if(busy||!documentState||activeImageTab)return;
+  if(busy||!documentState||activeImageTab||captureInsertionRunning)return;
+  captureInsertionRunning=true;
   const root=projectRoot,page=documentState.page,position=editor.selectionStart;
-  const origin=captureInsertionContext(insertionState());
-  const rich=milkdown.isRichEditing?milkdown.captureSelectionEdit(true):undefined;
-  if(milkdown.isRichEditing&&!rich)throw new Error('挿入する位置を選択してください。');
-  const valid=()=>isInsertionCurrent(origin,insertionState())&&!activeImageTab;
-  await savedBeforeOperation();
-  if(!valid())throw new Error('原稿が変更されました。挿入位置を選び直してください。');
-  const method=await chooseScreenshotMethod();
-  if(!method||!valid())return;
-  const existing=method==='existing'?await chooseExistingScreenshot(root,valid):undefined;
-  const id=method==='ai'?await screenshotAi.create(true):method==='manual'?await screenshotLibrary.recordForInsertion():existing?.id;
-  if(!id)return;
-  if(!valid()){status('撮影画像はリソース一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
-  const library=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;edits:Array<{id:string}>}>};
-  if(!valid())return;
-  const revision=existing?.revision||library.items.find(item=>item.id===id)?.edits.at(-1)?.id;
-  if(!revision)throw new Error('撮影候補が見つかりません。');
-  const image=JSON.parse(await rpc('screenshots-image',{id,json:{revision}},root)) as {data:string;edit:{id:string};screenshot:{adopted:string|null}};
-  if(!valid())return;
-  const {dialog,body}=featureDialog('スクショを確認して挿入');dialog.id='editor-screenshot-preview';
-  if(method==='ai'&&screenshotAi.insertionWarning()){const warning=document.createElement('p');warning.className='error';warning.setAttribute('role','alert');warning.textContent=screenshotAi.insertionWarning()!;body.append(warning);}
-  const note=document.createElement('p');note.textContent=`${page} の指定位置に挿入します。閉じた場合も撮影画像と手順はリソース一覧に残ります。`;
-  const preview=document.createElement('img');preview.src=image.data;preview.alt='挿入するスクリーンショットの候補';preview.style.maxWidth='100%';preview.style.maxHeight='50vh';preview.style.objectFit='contain';
-  const insert=document.createElement('button');insert.type='button';insert.className='primary';insert.dataset.uiIcon='image';insert.textContent='この位置に挿入';body.append(note,preview,insert);
-  const accepted=await new Promise<boolean>(resolve=>{let answer=false;insert.onclick=()=>{answer=true;dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
-  if(!accepted)return;
-  await work(async()=>{
-    if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
-    if(!existing)await rpc('screenshots-change',{id,json:{adopt:image.edit.id,expected_revision:image.screenshot.adopted}},root);
-    const markdown=await rpc('screenshots-reference',{id,page},root);
-    if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
-    if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,`\n\n${markdown}\n\n`,0,markdown.length+4);
-    updateHistoryButtons();await saveDocument(false);await screenshotLibrary.refresh();status('指定位置にスクショを挿入しました。');
-  });
+  const timing=new OperationTiming(rpc,root);
+  const progress=operationProgress(root,()=>projectRoot);
+  let outcome:'success'|'cancelled'|'error'='cancelled';
+  const stage=(code:string)=>{if(code==='error')outcome='error';if(stageLabels[code])timing.stage(code);progress.stage(code);};
+  try {
+    const origin=captureInsertionContext(insertionState());
+    const rich=milkdown.isRichEditing?milkdown.captureSelectionEdit(true):undefined;
+    if(milkdown.isRichEditing&&!rich)throw new Error('挿入する位置を選択してください。');
+    const valid=()=>isInsertionCurrent(origin,insertionState())&&!activeImageTab;
+    stage('save');
+    await savedBeforeOperation();
+    if(!valid())throw new Error('原稿が変更されました。挿入位置を選び直してください。');
+    stage('select');
+    const method=await chooseScreenshotMethod();
+    if(!method||!valid())return;
+    const existing=method==='existing'?await chooseExistingScreenshot(root,valid):undefined;
+    stage(method==='ai'?'ai':'select');
+    const id=method==='ai'?await screenshotAi.create(true):method==='manual'?await screenshotLibrary.recordForInsertion(stage):existing?.id;
+    if(!id)return;
+    if(!valid()){status('撮影画像はリソース一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
+    stage('preview');
+    const image=JSON.parse(await rpc('screenshots-image',{id,json:{revision:existing?.revision,latest:!existing}},root)) as {data:string;edit:{id:string};screenshot:{adopted:string|null}};
+    if(!valid())return;
+    stage('review');
+    const {dialog,body}=featureDialog('スクショを確認して挿入');dialog.id='editor-screenshot-preview';
+    if(method==='ai'&&screenshotAi.insertionWarning()){const warning=document.createElement('p');warning.className='error';warning.setAttribute('role','alert');warning.textContent=screenshotAi.insertionWarning()!;body.append(warning);}
+    const note=document.createElement('p');note.textContent=`${page} の指定位置に挿入します。閉じた場合も撮影画像と手順はリソース一覧に残ります。`;
+    const preview=document.createElement('img');preview.src=image.data;preview.alt='挿入するスクリーンショットの候補';preview.style.maxWidth='100%';preview.style.maxHeight='50vh';preview.style.objectFit='contain';
+    const insert=document.createElement('button');insert.type='button';insert.className='primary';insert.dataset.uiIcon='image';insert.textContent='この位置に挿入';body.append(note,preview,insert);
+    const accepted=await new Promise<boolean>(resolve=>{let answer=false;insert.onclick=()=>{answer=true;dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
+    if(!accepted){await screenshotLibrary.refresh();return;}
+    outcome='error';
+    await work(async()=>{
+      if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
+      stage('adopt');
+      if(!existing)await rpc('screenshots-change',{id,json:{adopt:image.edit.id,expected_revision:image.screenshot.adopted}},root);
+      stage('reference');
+      const markdown=await rpc('screenshots-reference',{id,page},root);
+      if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
+      stage('insert');
+      if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,`\n\n${markdown}\n\n`,0,markdown.length+4);
+      updateHistoryButtons();stage('save');await saveDocument(false);stage('refresh');await screenshotLibrary.refresh();outcome='success';status('指定位置にスクショを挿入しました。');
+    });
+  } catch(error) {outcome='error';throw error;}
+  finally {
+    progress.close();captureInsertionRunning=false;
+    await timing.finish(outcome).catch(error=>console.warn('処理時間を記録できません',error));
+  }
 }
+
 element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));});
 
 function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{

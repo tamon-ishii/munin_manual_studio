@@ -1,3 +1,4 @@
+import {stageLabels} from './operationTimings';
 import {setupResourceBrowser, type Resource, type ResourceUsage} from './resourceBrowser';
 import type {ImageGenerationEntry} from './imageGeneration';
 import { featureDialog,confirmAction,requestText } from './screenshotWorkflow';
@@ -28,7 +29,7 @@ interface Options {
 export function setupScreenshotLibrary(options: Options) {
   const list = document.getElementById('screenshot-library-list')!;
   let generation = 0;
-  let recording: {root: string; id: string; ready?: (id:string)=>void; failed?:()=>void} | null = null;
+  let recording: {root: string; id: string; ready?: (id:string)=>void; failed?:()=>void;stage?:(stage:string)=>void} | null = null;
   let currentShots:Screenshot[]=[];
   const editStates=new Map<string,string>();
   function editState(root:string,id:string,message:string){
@@ -192,6 +193,7 @@ export function setupScreenshotLibrary(options: Options) {
   try { pending = JSON.parse(localStorage.getItem(pendingKey) || '[]'); } catch { /* No saved sessions. */ }
   const watching = new Set<string>();
   const handoffCallbacks=new Map<string,(id:string)=>void>();
+  const handoffProgress=new Map<string,(stage:string)=>void>();
   function updateControls() {
     const root = options.root();
     document.getElementById('screenshot-library-record')!.hidden = Boolean(recording);
@@ -200,28 +202,49 @@ export function setupScreenshotLibrary(options: Options) {
     document.getElementById('screenshot-library-retry')!.hidden = !pending.some(session => session.root === root && !watching.has(session.completionFile));
   }
   function persist() { localStorage.setItem(pendingKey, JSON.stringify(pending)); updateControls(); }
-  async function watch(session: Pending,ready?: (id:string)=>void) {
+  async function watch(session: Pending,ready?: (id:string)=>void,stage?: (stage:string)=>void) {
+    if(stage)handoffProgress.set(session.completionFile,stage);
     if(ready)handoffCallbacks.set(session.completionFile,ready);
     if (!pending.some(item => item.completionFile === session.completionFile)) { pending.push(session); persist(); }
     if (watching.has(session.completionFile)) return;
     watching.add(session.completionFile); updateControls();
     const poll = async () => {
+      let importStarted:number|undefined;
       try {
         const scene = await invoke<string | null>('markits_annotation_ready', { ...session });
-        if (scene === null) { setTimeout(() => { void poll(); }, 800); return; }
-        await invoke('import_library_capture', { root: session.root, id: session.id, revision: session.revision || null, imageFile: session.annotationFile });
+        if (scene === null) { setTimeout(() => { void poll(); }, 200); return; }
+        const notify=handoffProgress.get(session.completionFile);notify?.('import');
+        if(session.root===options.root())progress.textContent=stageLabels.import;
+        if(session.root===options.root())await invoke('restore_manual_studio').catch(error=>console.warn('画面に戻れません',error));
+        importStarted=performance.now();
+        const imported=await invoke<string>('import_library_capture', { root: session.root, id: session.id, revision: session.revision || null, imageFile: session.annotationFile });
+        const details=JSON.parse(imported||'{}') as {timings?:Array<{stage:string;duration_ms:number}>};
+        const durations=details.timings?.length?details.timings:[{stage:'import',duration_ms:performance.now()-importStarted}];
+        // Timing persistence does not delay insertion or invalidate a saved edit.
+        void options.request('operation-timings-record',{json:{operation:'markits-import',outcome:'success',stages:durations}},session.root).catch(error=>console.warn('処理時間を記録できません',error));
+        notify?.('restore');
+        handoffProgress.delete(session.completionFile);
         pending = pending.filter(item => item.completionFile !== session.completionFile); persist(); watching.delete(session.completionFile);
         updateControls();
-        if (session.root === options.root()) { editState(session.root,session.id,'編集内容を候補として保存しました。「履歴・管理」で比較し、採用できます。');progress.textContent = '編集内容を画像一覧へ保存しました。'; await refresh();await invoke('restore_manual_studio'); }
-        const complete=handoffCallbacks.get(session.completionFile);handoffCallbacks.delete(session.completionFile);complete?.(session.id);
+        const complete=handoffCallbacks.get(session.completionFile);handoffCallbacks.delete(session.completionFile);
+        if (session.root === options.root()) {
+          editState(session.root,session.id,'編集内容を候補として保存しました。「履歴・管理」で比較し、採用できます。');progress.textContent = '編集内容を画像一覧へ保存しました。';
+          // Insertion refreshes the library after saving the document. Do not
+          // delay its preview with a full library scan and editor image reload.
+          if (!complete) await refresh();
+          await invoke('restore_manual_studio').catch(error=>console.warn('画面に戻れません',error));
+        }
+        complete?.(session.id);
       } catch (error) {
+        if(importStarted!==undefined)void options.request('operation-timings-record',{json:{operation:'markits-import',outcome:'error',stages:[{stage:'import',duration_ms:performance.now()-importStarted}]}},session.root).catch(error=>console.warn('処理時間を記録できません',error));
         watching.delete(session.completionFile);
         const message=String(error);
         const ended=message.includes('MarkItsの編集を中止しました')||message.includes('MarkItsが編集完了前に終了しました');
-        if(ended){pending=pending.filter(item=>item.completionFile!==session.completionFile);handoffCallbacks.delete(session.completionFile);persist();}
+        if(ended){handoffProgress.get(session.completionFile)?.('cancelled');handoffProgress.delete(session.completionFile);pending=pending.filter(item=>item.completionFile!==session.completionFile);handoffCallbacks.delete(session.completionFile);persist();}
         updateControls();
         if(session.root===options.root()){
           const feedback=ended?`${message} 再度「編集」で開始できます。`:`${message} 編集内容を保持しています。「編集結果を再確認」で再試行できます。`;
+          handoffProgress.get(session.completionFile)?.('retry');
           editState(session.root,session.id,feedback);progress.textContent=feedback;
           await refresh().catch(()=>{});await invoke('restore_manual_studio').catch(()=>{});
         }
@@ -235,8 +258,9 @@ export function setupScreenshotLibrary(options: Options) {
     if (!recording) return;
     const owner = recording; recording = null; updateControls();
     progress.textContent = result.message;
-    if (result.markitsStarted) await watch({ ...result, ...owner, id: result.screenshotId },owner.ready);
-    if (owner.root === options.root()) await refresh();
+    owner.stage?.('markits');
+    if (result.markitsStarted) await watch({ ...result, ...owner, id: result.screenshotId },owner.ready,owner.stage);
+    if (owner.root === options.root() && !owner.ready) await refresh();
     if(!result.markitsStarted)owner.ready?.(result.screenshotId);
   }
   if (native) void listen<Handoff & { screenshotId: string; markitsStarted: boolean; message: string }>('manual-studio-screenshot-finished', event => { void accept(event.payload); });
@@ -246,7 +270,7 @@ export function setupScreenshotLibrary(options: Options) {
     owner?.failed?.();
   }
   if (native) void listen<string>('manual-studio-screenshot-failed', event => { failRecording(event.payload); });
-  async function startRecording(ready?: (id:string)=>void,started?:()=>void,cancelled?:()=>void,failed?:()=>void) {
+  async function startRecording(ready?: (id:string)=>void,started?:()=>void,cancelled?:()=>void,failed?:()=>void,stage?:(stage:string)=>void) {
     if (!native) throw new Error('操作の記録はデスクトップ版で利用できます。');
     if(recording)throw new Error('操作の記録が進行中です。撮影を完了してから開始してください。');
     const root = options.root(); if (!root) throw new Error('プロジェクトを開いてください。');
@@ -263,7 +287,7 @@ export function setupScreenshotLibrary(options: Options) {
       const profile = profiles[Number(select.value)]; const id = `shot-${crypto.randomUUID()}`;
       if (root !== options.root()) return;
       await invoke('start_operation_recording', { root, program: profile.program, args: [...profile.args], windowTitle: '', taskId: id, markitsProgram: '' });
-      recording = {root,id,ready,failed}; updateControls(); dialog.close();started?.(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
+      recording = {root,id,ready,failed,stage};stage?.('recording'); updateControls(); dialog.close();started?.(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
       await invoke('show_recording_control');
     }); };
     field.append(select); actions.append(cancel,start); start.className = "primary"; dialog.append(heading,field,actions); dialog.addEventListener('close',()=>{dialog.remove();if(!recording)cancelled?.();}); document.body.append(dialog); dialog.showModal();
@@ -271,13 +295,14 @@ export function setupScreenshotLibrary(options: Options) {
   document.getElementById('screenshot-library-record')!.addEventListener('click',()=>{void options.work(()=>startRecording());});
   async function finishRecording() {
     if (!recording) return;
+    recording.stage?.('capture');
     await invoke('hide_manual_studio');
     try { const result = await invoke<Handoff & {screenshotId:string;markitsStarted:boolean;message:string}>('finish_operation_recording'); await accept(result); }
     catch(error){failRecording(String(error));throw error;}
     finally { await invoke('restore_manual_studio'); await invoke('close_recording_control'); }
   }
   document.getElementById('screenshot-library-stop')!.addEventListener('click',()=>{void options.work(finishRecording);});
-  async function recordForInsertion():Promise<string|undefined>{
+  async function recordForInsertion(stage?:(stage:string)=>void):Promise<string|undefined>{
     const root=options.root();
     return new Promise((resolve,reject)=>{
       let waiting:HTMLDialogElement|undefined,completed=false;
@@ -287,10 +312,13 @@ export function setupScreenshotLibrary(options: Options) {
         const help=document.createElement('p');help.textContent='対象アプリを操作し、撮影したい画面で「撮影する」を押してください。MarkItsで注釈を編集して保存すると、挿入候補を表示します。';
         const capture=document.createElement('button');capture.type='button';capture.textContent='撮影する';capture.className='primary';capture.dataset.uiIcon='camera';
         capture.onclick=()=>{void options.work(async()=>{try{if(recording?.root!==root)throw new Error('記録対象が変更されました。');await finishRecording();capture.hidden=true;help.textContent='MarkItsで編集して保存してください。保存後も候補が表示されない場合は「編集結果を再確認」を押してください。';}catch(error){help.textContent=String(error);}});};
+        const stageStatus=document.createElement('p');stageStatus.role='status';stageStatus.dataset.captureStage='';stageStatus.textContent=stageLabels.recording;body.append(stageStatus);
+        const stageListener=(event:Event)=>{const code=(event as CustomEvent<string>).detail;stageStatus.textContent=stageLabels[code]||'編集結果を確認してください。';};
+        dialog.addEventListener('capture-stage',stageListener);
         const retry=document.createElement('button');retry.type='button';retry.textContent='編集結果を再確認';retry.onclick=()=>{for(const session of pending.filter(item=>item.root===root))void watch(session);};
         const note=document.createElement('p');note.className='muted';note.textContent='閉じると挿入を取り消します。記録は撮影用の操作ウィンドウから完了でき、画像はリソース一覧に保存されます。';body.append(help,capture,retry,note);
-        dialog.addEventListener('close',()=>{if(!completed){if(recording?.root===root)recording.ready=undefined;for(const session of pending.filter(item=>item.root===root))handoffCallbacks.delete(session.completionFile);resolve(undefined);}},{once:true});
-      },()=>resolve(undefined),()=>{waiting?.close();resolve(undefined);}).catch(reject);
+        dialog.addEventListener('close',()=>{if(!completed){if(recording?.root===root)recording.ready=undefined;for(const session of pending.filter(item=>item.root===root)){handoffCallbacks.delete(session.completionFile);handoffProgress.delete(session.completionFile);}resolve(undefined);}},{once:true});
+      },()=>resolve(undefined),()=>{stage?.('error');waiting?.close();resolve(undefined);},code=>{stage?.(code);if(code==='cancelled'){waiting?.close();return;}waiting?.dispatchEvent(new CustomEvent('capture-stage',{detail:code}));}).catch(reject);
     });
   }
   const input = document.getElementById('screenshot-library-import') as HTMLInputElement;
