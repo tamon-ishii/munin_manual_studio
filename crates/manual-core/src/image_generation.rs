@@ -699,7 +699,7 @@ mod tests {
                     source.display()
                 )
             };
-            let script = script.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n[ \"$PWD\" = '{}' ] || exit 3\n[ -f AGENTS.md ] || exit 4\n", root.path().display()), 1);
+            let script = script.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n[ \"$PWD\" = '{}' ] || exit 3\n[ -f AGENTS.md ] || exit 4\n", root.path().canonicalize().unwrap().display()), 1);
             fs::write(&binary, script).unwrap();
             fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
             let result =
