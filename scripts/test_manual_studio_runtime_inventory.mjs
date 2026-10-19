@@ -54,6 +54,7 @@ try {
  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
  for(const name of ['settings','appearance','publish','brief','applications']) {
   if(name==='applications')await page.locator('[data-tab=screenshots]').click();
+  if(name==='brief')await page.locator('#editor-more>summary').click();
   await page.locator(`[data-tab=${name}]`).click();await snapshot(name);
   await page.locator(`[data-close-dialog=panel-${name}]`).click();
  }
