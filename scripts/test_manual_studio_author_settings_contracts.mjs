@@ -124,7 +124,7 @@ try{
  assert.match(await page.locator('#manual-brief').inputValue(),/初心者向け/);
  await page.locator('[data-close-dialog=panel-brief]').click();
  const settingsAfterWorkspace=await readFile(path.join(root,'manual_setting.json'));
- await record('P02.brief-persistence','P02',['data-tab="brief"','id="manual-brief"','id="brief-save-retry"','data-close-dialog="panel-brief"','element("manual-brief").addEventListener'],['open independent writing brief','edit brief and wait for autosave','read actual manual/brief.md','verify original manuscript is unchanged','close and reload application','reopen and verify stored brief'],{brief:await readFile(path.join(root,'manual/brief.md'),'utf8'),persistence:'manual/brief.md'});
+ await record('P02.brief-persistence','P02',['data-tab="brief"','id="manual-brief"','id="brief-save-retry"','data-close-dialog="panel-brief"','element("manual-brief").addEventListener','element("brief-save-retry").addEventListener'],['open independent writing brief','inject brief save failure and click retry','verify settings preserved after retry','edit brief and wait for autosave','read actual manual/brief.md','verify original manuscript is unchanged','close and reload application','reopen and verify stored brief'],{brief:await readFile(path.join(root,'manual/brief.md'),'utf8'),persistence:'manual/brief.md'});
 
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
  const editor=page.locator('#markdown-editor');

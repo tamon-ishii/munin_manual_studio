@@ -12925,8 +12925,9 @@
       "cases": [
         "P02.brief-persistence"
       ],
-      "reviewStatus": "needs-entry-specific-review",
-      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
+      "reviewStatus": "reviewed",
+      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen.",
+      "reviewNote": "Reviewed against test_manual_studio_author_settings_contracts.mjs: injected brief-save failure, actual retry click, preserved AI/path settings, persisted brief and reload."
     },
     {
       "id": "apps/manual-studio/src/main.ts:event:input:3282bb0b36f96da1:1",
@@ -12941,8 +12942,9 @@
       "cases": [
         "P02.brief-persistence"
       ],
-      "reviewStatus": "needs-entry-specific-review",
-      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
+      "reviewStatus": "reviewed",
+      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen.",
+      "reviewNote": "Reviewed against test_manual_studio_author_settings_contracts.mjs: injected brief-save failure, actual retry click, preserved AI/path settings, persisted brief and reload."
     },
     {
       "id": "apps/manual-studio/src/main.ts:event:click:a1564a94d7244d86:1",
@@ -12957,8 +12959,9 @@
       "cases": [
         "P02.brief-persistence"
       ],
-      "reviewStatus": "needs-entry-specific-review",
-      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen."
+      "reviewStatus": "reviewed",
+      "reviewBasis": "Actual browser controls and backend file checks: open writing brief, save, compare brief.md and manuscript, reload and reopen.",
+      "reviewNote": "Reviewed against test_manual_studio_author_settings_contracts.mjs: injected brief-save failure, actual retry click, preserved AI/path settings, persisted brief and reload."
     },
     {
       "id": "apps/manual-studio/src/readerReview.ts:create:button:fa4b818478d57454:1",
