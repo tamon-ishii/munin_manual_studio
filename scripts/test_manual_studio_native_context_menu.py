@@ -113,7 +113,7 @@ def session():
                 assert any(label in name.replace('_', '') for name in names), (label, names)
             ui.screenshot(app.pid, RESULTS / 'native-menu.png')
             ui.click('選択範囲をAIで修正', 'menu item')
-            ui.find('選択範囲をAIで修正', 'heading')
+            ui.find('AIへの指示', owner=app.pid)
             assert any(NativeUI.text(node) == INITIAL for node in ui.allnodes()), 'instruction preview retains the exact selected text'
             assert (root / 'docs/index.md').read_text() == INITIAL
             ui.click('閉じる')
@@ -143,7 +143,7 @@ def session():
             ui.t.XTestFakeButtonEvent(ui.display, 3, False, 0)
             ui.x.XFlush(ui.display)
             ui.click('選択範囲をAIで修正', 'menu item')
-            ui.find('選択範囲をAIで修正', 'heading')
+            ui.find('AIへの指示', owner=app.pid)
             assert (root / 'docs/index.md').read_text() == INITIAL
             ui.fill('AIへの指示', 'Make this concise')
             chord(65383)
