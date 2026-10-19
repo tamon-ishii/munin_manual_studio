@@ -82,11 +82,18 @@ try {
   await page.locator('.column-label button').click();
   const richEditor=page.locator('#milkdown-editor .ProseMirror');
   await richEditor.focus();
+  const waitForSelectionLabel=async(pattern)=>page.waitForFunction(
+    pattern=>document.querySelector('#selection-ai').textContent.includes(pattern),pattern,{timeout:3000}
+  ).then(()=>true,()=>false);
   for(let attempt=0;attempt<5;attempt++){
-    await richEditor.press('Control+Home');await richEditor.press('Shift+End');
-    await page.waitForFunction(()=>document.querySelector('#selection-ai').textContent.includes('選択範囲をAIで修正'));
+    let selected=false;
+    for(let retry=0;retry<3&&!selected;retry++){
+      await richEditor.press('Control+Home');await richEditor.press('Shift+End');
+      selected=await waitForSelectionLabel('選択範囲をAIで修正');
+    }
+    assert.ok(selected,'rich editor selection updates the AI action label');
     await richEditor.press('ArrowRight');
-    await page.waitForFunction(()=>document.querySelector('#selection-ai').textContent.includes('AIで修正・挿入'));
+    assert.ok(await waitForSelectionLabel('AIで修正・挿入'),'collapsing the rich editor selection restores the insertion label');
   }
   await page.evaluate(()=>localStorage.setItem('manual-studio-workspace-history',JSON.stringify(['/tmp/munin-ui-fixture','/tmp/second-folder','/tmp/third-folder'])));
   await page.locator('#workspace-name').focus();await page.keyboard.press('ArrowDown');
