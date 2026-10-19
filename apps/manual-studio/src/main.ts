@@ -2623,6 +2623,7 @@ let captureInsertionRunning=false;
 async function insertScreenshotHere():Promise<void>{
   if(busy||!documentState||activeImageTab||captureInsertionRunning)return;
   captureInsertionRunning=true;
+  setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),true);
   const root=projectRoot,page=documentState.page,position=editor.selectionStart;
   const timing=new OperationTiming(rpc,root);
   const progress=operationProgress(root,()=>projectRoot);
@@ -2654,7 +2655,7 @@ async function insertScreenshotHere():Promise<void>{
     const preview=document.createElement('img');preview.src=image.data;preview.alt='挿入するスクリーンショットの候補';preview.style.maxWidth='100%';preview.style.maxHeight='50vh';preview.style.objectFit='contain';
     const insert=document.createElement('button');insert.type='button';insert.className='primary';insert.dataset.uiIcon='image';insert.textContent='この位置に挿入';body.append(note,preview,insert);
     const accepted=await new Promise<boolean>(resolve=>{let answer=false;insert.onclick=()=>{answer=true;dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
-    if(!accepted){await screenshotLibrary.refresh();return;}
+    if(!accepted){if(!existing){stage('refresh');await screenshotLibrary.refresh();}return;}
     outcome='error';
     await work(async()=>{
       if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
@@ -2670,6 +2671,7 @@ async function insertScreenshotHere():Promise<void>{
   } catch(error) {outcome='error';throw error;}
   finally {
     progress.close();captureInsertionRunning=false;
+    setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),false);
     await timing.finish(outcome).catch(error=>console.warn('処理時間を記録できません',error));
   }
 }
