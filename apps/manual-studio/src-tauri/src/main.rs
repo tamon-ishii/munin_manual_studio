@@ -74,6 +74,8 @@ struct LaunchCommand {
     program: String,
     #[serde(default)]
     args: Vec<String>,
+    #[serde(default)]
+    working_directory: String,
 }
 
 fn normalize_launch_commands(commands: &mut [LaunchCommand]) -> bool {
@@ -122,6 +124,9 @@ fn save_launch_commands(root: String, commands: Vec<LaunchCommand>) -> Result<()
         if command.id.is_empty() || !ids.insert(command.id.clone()) {
             return Err("アプリの識別情報が不正です。".into());
         }
+        if command.working_directory.len() > 4096 || command.working_directory.contains('\0') {
+            return Err("作業フォルダのパスが不正です。".into());
+        }
     }
     let path = launch_commands_path(&root)?;
     let parent = path.parent().ok_or("設定フォルダーを取得できません。")?;
@@ -161,16 +166,29 @@ struct LaunchedApplication {
 }
 
 #[tauri::command]
-fn test_launch_application(program: String, args: Vec<String>, root: Option<String>) -> Result<LaunchedApplication, String> {
+fn test_launch_application(program: String, args: Vec<String>, root: Option<String>, working_directory: Option<String>) -> Result<LaunchedApplication, String> {
     if program.trim().is_empty() { return Err("アプリのパスを指定してください。".into()); }
-    let executable = manual_core::platform::application_executable(&program)?;
+    let executable = if let Some(root) = root.as_deref() {
+        manual_core::platform::application_executable_in(std::path::Path::new(root), &program)?
+    } else {
+        manual_core::platform::application_executable(&program)?
+    };
     let mut command = std::process::Command::new(&executable);
     command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    if let Some(root) = root { command.current_dir(root); }
+    if let Some(directory) = resolve_working_directory(root.as_deref(), working_directory.as_deref())? { command.current_dir(directory); }
     let mut child = command.spawn().map_err(|e| format!("アプリを起動できません: {e}"))?;
     let pid = child.id();
     std::thread::spawn(move || { let _ = child.wait(); });
     Ok(LaunchedApplication { pid, host_pid: std::process::id(), program: executable.to_string_lossy().into_owned() })
+}
+
+fn resolve_working_directory(root: Option<&str>, working_directory: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let Some(directory) = working_directory.filter(|value| !value.trim().is_empty()).or(root) else { return Ok(None); };
+    let path = PathBuf::from(directory);
+    let path = if path.is_absolute() { path } else if let Some(root) = root { PathBuf::from(root).join(path) } else { std::env::current_dir().map_err(|error| error.to_string())?.join(path) };
+    let path = path.canonicalize().map_err(|_| format!("作業フォルダが見つかりません: {}", path.display()))?;
+    if !path.is_dir() { return Err(format!("作業フォルダはディレクトリではありません: {}", path.display())); }
+    Ok(Some(path))
 }
 
 #[tauri::command]
@@ -611,6 +629,18 @@ async fn choose_application() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+async fn choose_working_directory(initial_directory: Option<String>) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new().set_title("アプリの作業フォルダを選択");
+        if let Some(directory) = initial_directory.filter(|directory| !directory.trim().is_empty()) {
+            let path = PathBuf::from(directory);
+            if path.is_dir() { dialog = dialog.set_directory(path); }
+        }
+        dialog.pick_folder().map(|path| path.to_string_lossy().into_owned())
+    }).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn open_output(root: String) -> Result<(), String> {
     let root = PathBuf::from(root);
     let output =
@@ -655,6 +685,7 @@ async fn start_operation_recording(
     root: String,
     program: String,
     args: Vec<String>,
+    working_directory: String,
     window_title: String,
     task_id: String,
     markits_program: String,
@@ -666,6 +697,7 @@ async fn start_operation_recording(
             root,
             program,
             args,
+            working_directory,
             window_title,
             task_id,
             markits_program,
@@ -1231,6 +1263,7 @@ fn main() {
             read_clipboard_image,
             paste_clipboard_image,
             choose_application,
+            choose_working_directory,
             start_operation_recording,
             operation_recording_running,
             finish_operation_recording,
@@ -1359,7 +1392,7 @@ mod application_profile_tests {
         let second = tempfile::tempdir().unwrap();
         let first_root = first.path().to_str().unwrap().to_string();
         let second_root = second.path().to_str().unwrap().to_string();
-        let commands = vec![LaunchCommand { id: "app-one".into(), name: "".into(), program: "/path with spaces/app".into(), args: vec![" value $(literal) ".into()] }];
+        let commands = vec![LaunchCommand { id: "app-one".into(), name: "".into(), program: "/path with spaces/app".into(), args: vec![" value $(literal) ".into()], working_directory: "/tmp/work space".into() }];
         save_launch_commands(first_root.clone(), commands).unwrap();
         assert!(load_launch_commands(second_root).unwrap().is_empty());
         let restored = load_launch_commands(first_root.clone()).unwrap();

@@ -12,4 +12,4 @@ export interface State {
 export interface Document { page: string; content: string; revision: string }
 export interface NativeWindow { id: string; title: string; width: number; height: number }
 export interface RecordingResult { scenarioFile: string; events: number; operationText: string; sourceFile: string; annotationFile: string; completionFile: string; markitsStarted: boolean; message: string }
-export interface LaunchCommand { id?: string; name: string; program: string; args: string[] }
+export interface LaunchCommand { id?: string; name: string; program: string; args: string[]; workingDirectory?: string }

@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -114,6 +114,9 @@ pub(crate) fn validate_with_tasks(
                     })
                 {
                     return Err(format!("Launch step {number} has invalid arguments"));
+                }
+                if value.get("workingDirectory").is_some_and(|directory| directory.as_str().is_none_or(|path| path.len() > 4096 || path.contains('\0'))) {
+                    return Err(format!("Launch step {number} has an invalid working directory"));
                 }
             }
             "window" | "expect_window" => {
@@ -799,9 +802,13 @@ pub fn run(
                         .map(|items| items.iter().filter_map(Value::as_str).collect())
                         .unwrap_or_default();
                     let executable = super::platform::application_executable_in(root, program)?;
+                    let working_directory = value.get("workingDirectory").and_then(Value::as_str).filter(|path| !path.trim().is_empty()).map(PathBuf::from).unwrap_or_else(|| root.to_path_buf());
+                    let working_directory = if working_directory.is_absolute() { working_directory } else { root.join(working_directory) };
+                    let working_directory = working_directory.canonicalize().map_err(|_| format!("Working directory does not exist: {}", working_directory.display()))?;
+                    if !working_directory.is_dir() { return Err(format!("Working directory is not a directory: {}", working_directory.display())); }
                     let mut child = Command::new(executable)
                         .args(args)
-                        .current_dir(root)
+                        .current_dir(working_directory)
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())

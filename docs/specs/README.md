@@ -10,7 +10,7 @@
 | フォルダー・保存 | [フォルダーと保存先](workspace-storage.md) | 開始位置、原稿ルート、資産の保存先、旧構成との互換 | manual-authoring / screenshot-library |
 | 検索・履歴 | [全文検索・置換とGit履歴](manuscript-search-and-git.md) | 選択置換、比較、原稿単位のコミットと復元 | 原稿操作API・変更計画も参照 |
 | リソース管理 | [リソース一覧](resource-library.md) | 画像の統合表示、検索、挿入、使用箇所、差し替え | resource-library |
-| アプリ登録 | [画面と操作](manual-studio-ui.md) / [撮影管理](screenshot-library.md) | 上部の登録入口、起動パス・引数、プロジェクト所有 | [application-launch-settings](../../openspec/specs/application-launch-settings/spec.md) |
+| アプリ登録 | [画面と操作](manual-studio-ui.md) / [撮影管理](screenshot-library.md) | 上部の登録入口、起動パス・作業フォルダ・引数、プロジェクト所有 | [application-launch-settings](../../openspec/specs/application-launch-settings/spec.md) |
 | 撮影管理 | [スクリーンショット管理](screenshot-library.md) | 操作記録、原本、注釈、再撮影、候補採用 | screenshot-library |
 | AI作画 | [AI画像生成](ai-image-generation.md) | Agy／Codex／API、履歴、修正、比較、中断 | ai-image-generation |
 | 文書AI支援 | [レビュー・範囲編集・撮影指示](document-ai-assistance.md) | 読者レビュー、校正、画像整合、Diff採用、新規挿入、撮影指示 | [document-ai-assistance](../../openspec/specs/document-ai-assistance/spec.md) / [ai-screenshot-authoring](../../openspec/specs/ai-screenshot-authoring/spec.md) |

@@ -4,6 +4,16 @@ Munin Manual Studioは、Markdown原稿の編集、AIによるレビューと文
 
 このガイドは、初めて利用する方が原稿を作成し、画像を追加して公開するまでの手順を説明します。既存の操作ガイドと現行仕様をもとにした下書きです。公開前に、各OSの実画面でボタン名と操作結果を確認してください。
 
+<br />
+
+<!-- screenshot:ref id=shot-bb638e11-2121-4e8e-a516-93dc03fcc66a -->
+
+![スクリーンショット](docs/assets/screenshots/shot-bb638e11-2121-4e8e-a516-93dc03fcc66a.png)
+
+<!-- /screenshot:ref -->
+
+<br />
+
 ## 目次
 
 1. [準備と最初の原稿作成](getting-started.md)

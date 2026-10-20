@@ -22,6 +22,7 @@ const miscControlCases = [
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const steps = [
+  { group: 'unit', name: 'document persistence serialization and ownership', command: npx, args: ['tsx', 'scripts/test_manual_studio_document_persistence.ts'], timeoutMs: 60_000 },
   { group: 'unit', name: 'operation timing ownership and lifecycle', command: npx, args: ['tsx','scripts/test_manual_studio_operation_timings.ts'], timeoutMs: 60_000 },
   { group: 'unit', name: 'execution report provenance and failure checks', command: process.execPath, args: ['scripts/test_manual_studio_execution_reports.mjs'], timeoutMs: 60_000 },
   { group: 'unit', name: 'UI coverage contract and fault checks', command: process.execPath, args: ['scripts/test_manual_studio_coverage.mjs'], timeoutMs: 60_000 },

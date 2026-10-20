@@ -63,6 +63,7 @@ struct Session {
     root: PathBuf,
     program: String,
     args: Vec<String>,
+    working_directory: PathBuf,
     window_title: String,
     window: WindowBounds,
     task_id: String,
@@ -451,6 +452,7 @@ pub fn start(
     root: String,
     program: String,
     args: Vec<String>,
+    working_directory: String,
     window_title: String,
     task_id: String,
     markits_program: String,
@@ -475,10 +477,14 @@ pub fn start(
     if program.trim().is_empty() || task_id.trim().is_empty() {
         return Err("起動アプリと指示IDを入力してください。".into());
     }
-    let root_path = PathBuf::from(&root);
-    if !root_path.is_dir() {
-        return Err("プロジェクトフォルダーが見つかりません。".into());
-    }
+    let root_path = PathBuf::from(&root).canonicalize().map_err(|_| "プロジェクトフォルダーが見つかりません。")?;
+    let working_directory = if working_directory.trim().is_empty() { root_path.clone() } else {
+        let configured = PathBuf::from(&working_directory);
+        let configured = if configured.is_absolute() { configured } else { root_path.join(configured) };
+        let configured = configured.canonicalize().map_err(|_| format!("作業フォルダが見つかりません: {}", configured.display()))?;
+        if !configured.is_dir() { return Err(format!("作業フォルダはディレクトリではありません: {}", configured.display())); }
+        configured
+    };
     let before_raw =
         crate::native_worker::request(json!({"root": root.clone(), "action": "list-windows"}))?;
     let before_windows: Vec<Value> =
@@ -490,7 +496,7 @@ pub fn start(
     let executable = manual_core::platform::application_executable_in(&root_path, &program)?;
     let mut app = Command::new(&executable)
         .args(&args)
-        .current_dir(&root_path)
+        .current_dir(&working_directory)
         .stdin(Stdio::null())
         .spawn()
         .map_err(|error| format!("アプリを起動できません: {error}"))?;
@@ -661,6 +667,7 @@ pub fn start(
         root: root_path,
         program,
         args,
+        working_directory,
         window_title,
         window,
         task_id,
@@ -971,7 +978,7 @@ fn read_events(path: &Path) -> Result<Vec<RecordedEvent>, String> {
 
 fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
     let mut steps = vec![
-        json!({"launch": {"program": session.program, "args": session.args}}),
+        json!({"launch": {"program": session.program, "args": session.args, "workingDirectory": session.working_directory}}),
         json!({"window": session.window_title}),
     ];
     let mut text_buffer = String::new();
@@ -1693,6 +1700,7 @@ mod tests {
             root: root.clone(),
             program: "demo".into(),
             args: vec![],
+            working_directory: root.clone(),
             window_title: "Demo".into(),
             window: WindowBounds {
                 id: "1".into(),
@@ -1749,6 +1757,7 @@ mod tests {
             root: PathBuf::new(),
             program: "demo".into(),
             args: vec!["--safe".into()],
+            working_directory: PathBuf::from("/tmp"),
             window_title: "Demo".into(),
             window: WindowBounds {
                 id: "0x1".into(),

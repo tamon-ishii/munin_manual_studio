@@ -925,8 +925,8 @@ dialog input,dialog textarea,dialog select{min-width:0;max-width:100%}
 dialog button{max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
 dialog .settings-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
 dialog .actions:last-child{justify-content:flex-end}
-.launch-command-row{grid-template-columns:minmax(0,1fr);align-items:start;padding:16px;gap:12px}
-.launch-program-field,.launch-row-actions{grid-column:1/-1}.launch-row-actions{justify-content:flex-end}
+.launch-command-row{grid-template-columns:minmax(140px,.7fr) minmax(180px,1fr) auto;align-items:start;padding:16px;gap:12px}
+.launch-program-field,.launch-working-directory-field,.launch-row-actions{grid-column:1/-1}.launch-row-actions{justify-content:flex-end}
 .ui-help{margin:0 0 16px;color:var(--text-muted);font-size:12px}.ui-help summary{cursor:pointer}.ui-help p{margin:8px 0}
 .screenshot-library-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));align-items:start}
 .screenshot-library-card{min-width:0;padding:16px;margin:0}.screenshot-library-card h2{font-size:15px;overflow-wrap:anywhere;margin-bottom:12px}
@@ -937,7 +937,7 @@ dialog .actions:last-child{justify-content:flex-end}
 .capture-application-dialog select{width:100%}.capture-application-dialog .actions{margin-top:20px}
 .brand small{display:none}
 @media(max-width:1100px){.app-header{gap:10px;padding:10px 12px}.header-workspace{gap:6px}.brand{min-width:0}.brand strong{font-size:17px}}
-@media(max-width:640px){dialog .settings-grid,.launch-command-row{grid-template-columns:minmax(0,1fr)}.launch-program-field,.launch-row-actions{grid-column:1}.capture-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.generation-diff,.image-comparison-grid{grid-template-columns:minmax(0,1fr)}dialog .panel-header{align-items:flex-start}dialog .actions button{flex:1 1 auto}}
+@media(max-width:640px){dialog .settings-grid,.launch-command-row{grid-template-columns:minmax(0,1fr)}.launch-program-field,.launch-working-directory-field,.launch-row-actions{grid-column:1}.capture-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.generation-diff,.image-comparison-grid{grid-template-columns:minmax(0,1fr)}dialog .panel-header{align-items:flex-start}dialog .actions button{flex:1 1 auto}}
 
 dialog.panel-dialog>.panel-header{position:sticky;top:-16px;z-index:2;background:var(--surface-bg);padding:8px 0;border-bottom:1px solid var(--border-color)}
 .dialog-actions{position:sticky;bottom:-16px;z-index:2;background:var(--surface-bg);padding:12px 0;border-top:1px solid var(--border-color)}

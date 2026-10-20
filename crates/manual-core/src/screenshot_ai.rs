@@ -6,8 +6,8 @@ use std::io::Read;
 pub(crate) fn application(root: &Path, options: &Value) -> Result<String, String> {
     let instruction = instruction(options)?;
     let config = crate::config::read_config(root);
-    let schema = json!({"type":"object","properties":{"name":{"type":"string"},"program":{"type":"string"},"args":{"type":"array","items":{"type":"string"}}},"required":["name","program","args"],"additionalProperties":false});
-    let prompt=format!("Choose the target application from the screenshot instruction. Reuse an existing registration where possible. Automatically fill the executable and all launch arguments needed for the requested screen, using the instruction, existing registrations and launch_context evidence. Preserve each argument as one array entry, including spaces. Resolve project-relative file/directory arguments against project. Prefer selected_application when present and complete its arguments. Do not invent undocumented flags; if no arguments are needed return []. Return an executable path or executable name and arguments, never a shell command. Do not use shell/interpreter commands to launch another program. Investigate the real executable path and required arguments together in this single request before returning the registration. Use executable_candidates as verified paths; when read-only tools are available, also inspect installed application entries, PATH and project launch/build files as needed. Do not defer discovery to another AI request. If investigation still cannot identify a real path, return an empty program rather than inventing one. Input JSON: {}",json!({"instruction":instruction,"applications":options["applications"],"project":root.to_string_lossy(),"os":std::env::consts::OS,"selected_application":options["selected_application"],"launch_context":launch_context(root),"executable_candidates":executable_candidates(root,instruction)}));
+    let schema = json!({"type":"object","properties":{"name":{"type":"string"},"program":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"}},"required":["name","program","args","workingDirectory"],"additionalProperties":false});
+    let prompt=format!("Choose the target application from the screenshot instruction. Reuse an existing registration where possible. Automatically fill the executable and all launch arguments needed for the requested screen, using the instruction, existing registrations and launch_context evidence. Preserve each argument as one array entry, including spaces. Resolve project-relative file/directory arguments against project. Prefer selected_application when present and complete its arguments. Preserve its workingDirectory; when none is set, return an empty workingDirectory so the project folder remains the default. Do not invent undocumented flags; if no arguments are needed return []. Return an executable path or executable name and arguments, never a shell command. Do not use shell/interpreter commands to launch another program. Investigate the real executable path and required arguments together in this single request before returning the registration. Use executable_candidates as verified paths; when read-only tools are available, also inspect installed application entries, PATH and project launch/build files as needed. Do not defer discovery to another AI request. If investigation still cannot identify a real path, return an empty program rather than inventing one. Input JSON: {}",json!({"instruction":instruction,"applications":options["applications"],"project":root.to_string_lossy(),"os":std::env::consts::OS,"selected_application":options["selected_application"],"launch_context":launch_context(root),"executable_candidates":executable_candidates(root,instruction)}));
     let mut app = crate::agent::agent_json(root, &prompt, &schema, &config.agent, &config.model)?;
     validate_application(&app)?;
     if let Some(existing) = options["applications"].as_array().and_then(|apps| {
@@ -17,6 +17,10 @@ pub(crate) fn application(root: &Path, options: &Value) -> Result<String, String
         if let Some(id) = existing["id"].as_str() {
             app["id"] = json!(id);
         }
+        if let Some(directory) = existing.get("workingDirectory") { app["workingDirectory"] = directory.clone(); }
+    }
+    if app.get("workingDirectory").and_then(Value::as_str).is_none() {
+        app["workingDirectory"] = json!("");
     }
     let executable =
         crate::platform::application_executable_in(root, app["program"].as_str().unwrap_or(""));
@@ -113,6 +117,9 @@ fn validate_application(app: &Value) -> Result<(), String> {
         .any(|arg| arg.as_str().is_none_or(|s| s.len() > 4096))
     {
         return Err("起動引数の形式が不正です。".into());
+    }
+    if app.get("workingDirectory").is_some_and(|directory| directory.as_str().is_none_or(|path| path.len() > 4096 || path.contains('\0'))) {
+        return Err("作業フォルダの形式が不正です。".into());
     }
     Ok(())
 }

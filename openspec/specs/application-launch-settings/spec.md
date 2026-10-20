@@ -7,7 +7,7 @@ Provide a dedicated application settings area for preregistering programs and th
 ## Requirements
 
 ### Requirement: Preregister target applications
-Manual Studio SHALL provide an application registration button immediately to the right of the resource-library entry in the top workspace navigation, available after opening a project. Manual Studio SHALL provide application settings for adding, editing, selecting, and removing launch profiles containing an executable path, an ordered argument list, and an optional display name. Users SHALL NOT be required to enter a profile identifier or a display name.
+Manual Studio SHALL provide an application registration button immediately to the right of the resource-library entry in the top workspace navigation, available after opening a project. Manual Studio SHALL provide application settings for adding, editing, selecting, and removing launch profiles containing an executable path, an ordered argument list, an optional display name, and an optional working folder. Users SHALL NOT be required to enter a profile identifier or a display name. An empty working folder SHALL use the project root.
 
 #### Scenario: Open registration while editing
 - **WHEN** a project is open and the user is editing a manuscript
@@ -22,16 +22,30 @@ Manual Studio SHALL provide an application registration button immediately to th
 - **WHEN** a registered argument contains spaces or shell metacharacters
 - **THEN** the application passes that entry as one argument without evaluating it as a shell expression.
 
+#### Scenario: Set an application's working folder
+- **WHEN** a user chooses a working folder while registering or editing an application
+- **THEN** Manual Studio saves it with the application path and arguments
+- **AND** launch checks and screenshot recordings start the application in that folder
+- **AND** newly recorded screenshot scenarios retain the folder for replay.
+
+#### Scenario: Use the project root by default
+- **WHEN** a registration or recorded scenario has no working folder
+- **THEN** Manual Studio launches the application from the project root.
+
+#### Scenario: Correct an unavailable working folder
+- **WHEN** the configured folder is missing or is not a directory
+- **THEN** Manual Studio reports the folder problem before starting the application and leaves the registration available to edit.
+
 #### Scenario: Detect an unavailable program
 - **WHEN** a launch profile points to a missing executable
 - **THEN** the application reports the invalid path before recording and offers a way to edit it
 - **AND** saved screenshots remain available for viewing and MarkIts editing.
 
 ### Requirement: Preserve launch configuration ownership
-Manual Studio SHALL persist launch profiles inside their owning project across sessions and SHALL NOT expose another project's registrations when switching projects and preserve the launch path and arguments used by each recording independently of subsequent profile edits or deletion.
+Manual Studio SHALL persist launch profiles inside their owning project across sessions and SHALL NOT expose another project's registrations when switching projects and preserve the launch path, working folder, and arguments used by each recording independently of subsequent profile edits or deletion.
 
 #### Scenario: Edit a profile after recording
-- **WHEN** a user changes the arguments of a profile previously used for a recording
+- **WHEN** a user changes the working folder or arguments of a profile previously used for a recording
 - **THEN** existing recordings retain their original launch configuration
 - **AND** using new configuration for an existing recording requires an explicit choice.
 

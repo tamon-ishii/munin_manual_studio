@@ -1,3 +1,4 @@
+import { DocumentPersistence } from './documentPersistence';
 import {OperationTiming,stageLabels,operationProgress} from './operationTimings';
 import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
 import {setupEditorContextMenu} from './editorContextMenu';
@@ -111,8 +112,19 @@ let workspace: State | null = null;
 let documentState: Document | null = null;
 let dirty = false;
 let documentAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
-let documentSavePending: Promise<void> | undefined;
-let documentSaveState: { owner: Document; state: 'saving' | 'error'; message?: string } | null = null;
+const documentPersistence = new DocumentPersistence({
+  context: () => documentState ? { document: documentState, root: projectRoot, content: editor.value, version: documentRequestVersion } : null,
+  write: async ({ document: current, root, content }) => JSON.parse(await rpc('editor-save', {
+    page: current.page, json: { content, revision: current.revision },
+  }, root)) as Document,
+  stateChanged: updateSaveState,
+  apply: (saved, { content }) => {
+    if (editor.value === content && saved.content !== content) editor.value = saved.content;
+    documentState = saved; dirty = editor.value !== saved.content; retainDocumentTab();
+  },
+  refresh: refreshWorkspace,
+  saved: page => status(`${page}を保存しました。`),
+});
 let busy = false;
 let previewVersion = 0;
 let previewRequestPending = false;
@@ -477,7 +489,7 @@ function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
 }
 async function savedBeforeOperation(): Promise<void> {
   await saveBriefSettings();
-  while (documentSavePending) await documentSavePending;
+  await documentPersistence.wait();
   if (dirty) await saveDocument(false);
   if (dirty) throw new Error("原稿の保存が完了しませんでした。編集内容を確認して再試行してください。");
 }
@@ -591,7 +603,7 @@ function renderDocumentTabs(): void {
 
       if (documentState?.page !== page) await openPage(page);
       if (!await confirmDiscard()) return;
-      documentTabs.delete(page); documentState = null; documentSaveState = null; dirty = false;
+      documentTabs.delete(page); documentState = null; documentPersistence.state = null; dirty = false;
       const next = [...documentTabs.keys()].at(-1);
       if (next) await openPage(next);
       else { editor.value = ''; resetEditHistory(); ++previewVersion; element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages();  }
@@ -620,7 +632,7 @@ async function confirmAllDocumentTabs(): Promise<boolean> {
   return true;
 }
 function updateSaveState(): void {
-  const ownerState = documentSaveState?.owner === documentState ? documentSaveState : null;
+  const ownerState = documentPersistence.state?.owner === documentState ? documentPersistence.state : null;
   clearTimeout(documentAutosaveTimer);
   if (dirty && documentState && !ownerState) {
     const owner = documentState;
@@ -695,8 +707,8 @@ async function openPage(page: string, check = true, restored?: Document): Promis
   const docsPrefix = (workspace?.config.docs || 'docs').replace(/\/$/,'') + '/';
   if (page.startsWith(docsPrefix) && workspace?.pages.includes(page.slice(docsPrefix.length))) page = page.slice(docsPrefix.length);
   if (check && documentState?.page === page && !activeImageTab) { chooseTab('editor'); return; }
-  while (documentSavePending) await documentSavePending;
-  if (dirty && documentState && documentSaveState?.state !== 'error') await saveDocument(false);
+  await documentPersistence.wait();
+  if (dirty && documentState && documentPersistence.state?.state !== 'error') await saveDocument(false);
   retainDocumentTab();
   showDocumentView();
   let cached = check ? documentTabs.get(page) : undefined;
@@ -1158,7 +1170,7 @@ async function openProject(root: string, check = true): Promise<void> {
   projectRoot = root; workspace = loaded; documentState = null; dirty = false;
   await loadLaunchCommands();
   if (version !== projectRequestVersion) return;
-  documentSaveState = null;
+  documentPersistence.state = null;
   setAiPhase(element('ai-workflow-status'), 'idle');
   previewNavigator.setStatus('empty');
   clearTimeout(previewTimer); ++previewVersion;
@@ -1224,39 +1236,11 @@ async function openProject(root: string, check = true): Promise<void> {
   });
   const restoredDocument = documentState as Document | null;
   if (restoredDocument) status(`プロジェクトを開きました。${restoredDocument.page}を編集できます。`);
-  if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は「設定 → AI・撮影設定」で確認できます。");
+  if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は上部の「AI設定 → 文章・図の生成」で設定できます。");
 
 }
-async function saveDocument(refresh = true): Promise<void> {
-  while (documentSavePending) await documentSavePending;
-  const pending = persistDocument(refresh);
-  documentSavePending = pending;
-  try { await pending; }
-  finally { if (documentSavePending === pending) documentSavePending = undefined; }
-}
-async function persistDocument(refresh: boolean): Promise<void> {
-  if (!documentState) throw new Error("保存する原稿を選択してください。");
-  const current = documentState;
-  const root = projectRoot;
-  const page = current.page;
-  const content = editor.value;
-  const version = documentRequestVersion;
-  documentSaveState = { owner: current, state: 'saving' }; updateSaveState();
-  let saved: Document;
-  try {
-    saved = JSON.parse(await rpc("editor-save", { page, json: { content, revision: current.revision } }, root)) as Document;
-  } catch (error) {
-    if (root === projectRoot && current === documentState && version === documentRequestVersion) {
-      documentSaveState = { owner: current, state: 'error', message: String(error) }; updateSaveState();
-    }
-    throw error;
-  }
-  if (root !== projectRoot || current !== documentState || version !== documentRequestVersion) return;
-  documentSaveState = null;
-  if (editor.value === content && saved.content !== content) editor.value = saved.content;
-  documentState = saved; dirty = editor.value !== saved.content; retainDocumentTab(); updateSaveState();
-  if (refresh) await refreshWorkspace();
-  status(`${page}を保存しました。`);
+function saveDocument(refresh = true): Promise<void> {
+  return documentPersistence.save(refresh);
 }
 async function runAction(action: string, options: Record<string, unknown> = {}, resultId?: string): Promise<void> {
   await savedBeforeOperation();
@@ -1686,16 +1670,22 @@ function renderLaunchCommands(): void {
     const program = document.createElement("input"); program.value = command.program; program.placeholder = "例: firefox または /usr/bin/firefox"; program.dataset.launchProgram = String(index);
     const browse = document.createElement("button"); browse.type = "button"; browse.textContent = "選択"; browse.dataset.launchBrowse = String(index);
     programWrap.append(program, browse); programLabel.append(programWrap);
+    const workingDirectoryLabel = document.createElement("label"); workingDirectoryLabel.className = "launch-working-directory-field"; workingDirectoryLabel.textContent = "作業フォルダ（省略時はプロジェクト）";
+    const workingDirectoryWrap = document.createElement("div"); workingDirectoryWrap.className = "app-picker-row";
+    const workingDirectory = document.createElement("input"); workingDirectory.value = command.workingDirectory || ""; workingDirectory.placeholder = "例: /home/user/my-app"; workingDirectory.dataset.launchWorkingDirectory = String(index);
+    const browseWorkingDirectory = document.createElement("button"); browseWorkingDirectory.type = "button"; browseWorkingDirectory.textContent = "選択"; browseWorkingDirectory.dataset.launchWorkingDirectoryBrowse = String(index);
+    workingDirectoryWrap.append(workingDirectory, browseWorkingDirectory); workingDirectoryLabel.append(workingDirectoryWrap);
     const argsLabel = document.createElement("label"); argsLabel.textContent = "起動引数（1行に1つ）";
     const args = document.createElement("textarea"); args.rows = 2; args.value = command.args.join("\n"); args.dataset.launchArgs = String(index); argsLabel.append(args);
     name.addEventListener("input", () => { command.name = name.value; });
     program.addEventListener("input", () => { command.program = program.value; });
+    workingDirectory.addEventListener("input", () => { command.workingDirectory = workingDirectory.value; });
     args.addEventListener("input", () => { command.args = args.value.split("\n").filter(value => value.length > 0); });
     const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "削除"; remove.dataset.launchRemove = String(index);
     const test = document.createElement("button"); test.type = "button"; test.textContent = "起動確認";
-    test.addEventListener("click", () => { void work(async () => { if (!native) throw new Error("起動確認はデスクトップ版で利用できます。"); await invoke("test_launch_application", { program: program.value, args: args.value.split("\n").filter(value => value.length > 0) }); status("対象アプリを起動しました。"); }); });
+    test.addEventListener("click", () => { void work(async () => { if (!native) throw new Error("起動確認はデスクトップ版で利用できます。"); await invoke("test_launch_application", { program: program.value, args: args.value.split("\n").filter(value => value.length > 0), root: projectRoot || undefined, workingDirectory: workingDirectory.value.trim() || undefined }); status("対象アプリを起動しました。"); }); });
     const actions = document.createElement("div"); actions.className = "actions launch-row-actions"; actions.append(test, remove);
-    row.append(nameLabel, programLabel, argsLabel, actions); list.append(row);
+    row.append(nameLabel, programLabel, workingDirectoryLabel, argsLabel, actions); list.append(row);
   });
   list.querySelectorAll<HTMLButtonElement>("[data-launch-browse]").forEach((button) => button.addEventListener("click", () => { void work(async () => {
     if (!native) throw new Error("アプリ選択はデスクトップアプリで利用できます。");
@@ -1705,6 +1695,12 @@ function renderLaunchCommands(): void {
       program.value = path;
       program.dispatchEvent(new Event("input", { bubbles: true }));
     }
+  }); }));
+  list.querySelectorAll<HTMLButtonElement>("[data-launch-working-directory-browse]").forEach((button) => button.addEventListener("click", () => { void work(async () => {
+    if (!native) throw new Error("フォルダー選択はデスクトップ版で利用できます。");
+    const field = list.querySelector<HTMLInputElement>(`[data-launch-working-directory="${button.dataset.launchWorkingDirectoryBrowse}"]`)!;
+    const path = await invoke<string | null>("choose_working_directory", { initialDirectory: field.value.trim() || projectRoot });
+    if (path) { field.value = path; field.dispatchEvent(new Event("input", { bubbles: true })); }
   }); }));
   list.querySelectorAll<HTMLButtonElement>("[data-launch-remove]").forEach((button) => button.addEventListener("click", () => {
     launchCommands.splice(Number(button.dataset.launchRemove), 1); renderLaunchCommands();
@@ -2362,6 +2358,7 @@ element("save-launch-commands").addEventListener("click", () => { void work(asyn
     id: _command.id || `app-${crypto.randomUUID()}`,
     name: document.querySelector<HTMLInputElement>(`[data-launch-name="${index}"]`)!.value.trim(),
     program: document.querySelector<HTMLInputElement>(`[data-launch-program="${index}"]`)!.value.trim(),
+    workingDirectory: document.querySelector<HTMLInputElement>(`[data-launch-working-directory="${index}"]`)!.value.trim(),
     args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args="${index}"]`)!.value.split("\n").filter((value) => value.length > 0),
   }));
   await invoke<void>("save_launch_commands", { root: projectRoot, commands: launchCommands });
@@ -2765,7 +2762,7 @@ const manuscriptToolOptions:ManuscriptToolsOptions={
         if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
         milkdown.showSource();
         const before=editor.value;if(before!==saved.content)changeImageMarkdown(saved.content,before);
-        documentState={...saved,page:current.page};dirty=false;documentSaveState=null;updateSaveState();retainDocumentTab();
+        documentState={...saved,page:current.page};dirty=false;documentPersistence.state=null;updateSaveState();retainDocumentTab();
       }
       for(const [page,tab] of documentTabs){
         if(manuscriptPagePath(page)!==path||page===documentState?.page)continue;

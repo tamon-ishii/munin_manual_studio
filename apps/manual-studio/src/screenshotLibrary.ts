@@ -286,7 +286,7 @@ export function setupScreenshotLibrary(options: Options) {
     start.onclick = () => { void options.work(async () => {
       const profile = profiles[Number(select.value)]; const id = `shot-${crypto.randomUUID()}`;
       if (root !== options.root()) return;
-      await invoke('start_operation_recording', { root, program: profile.program, args: [...profile.args], windowTitle: '', taskId: id, markitsProgram: '' });
+      await invoke('start_operation_recording', { root, program: profile.program, args: [...profile.args], workingDirectory: profile.workingDirectory || '', windowTitle: '', taskId: id, markitsProgram: '' });
       recording = {root,id,ready,failed,stage};stage?.('recording'); updateControls(); dialog.close();started?.(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
       await invoke('show_recording_control');
     }); };
