@@ -13715,11 +13715,11 @@
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
     },
     {
-      "id": "apps/manual-studio/src/recordingControl.ts:event:click:76140c39c7a5352f:1",
+      "id": "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
       "file": "apps/manual-studio/src/recordingControl.ts",
       "line": 18,
       "kind": "event:click",
-      "expression": "capture.addEventListener('click',()=>{void(async()=>{ if(running)return;running=true;capture.disabled=cancel.disabled=true;capture.textContent='撮影してMarkItsを起動中…'; try{await emitTo('main','manual-studio-screenshot-requested');await invoke('finish_operation_recording');} catch(failure){error.textContent=`撮影に失敗しました: ${String(failure)}`;await invoke('show_recording_control_again').catch(()=>{});await emitTo('main','manual-studio-screenshot-failed',String(failure)).catch(()=>{});running=false;capture.disabled=cancel.disabled=false;capture.textContent='スクリーンショットを実行';} })();})",
+      "expression": "capture.addEventListener('click',()=>{void(async()=>{ if(running)return;running=true;capture.disabled=cancel.disabled=true;capture.textContent='撮影してMarkItsを起動中…'; try{await emitTo('main','manual-studio-screenshot-requested');await invoke('finish_operation_recording');} catch(failure){error.textContent=`撮影に失敗しました: ${String(failure)}`;await invoke('show_recording_control_again').catch(()=>{});await emitTo('main','manual-studio-screenshot-failed',String(failure)).catch(()=>{});running=false;capture.hidden=true;cancel.disabled=false;cancel.textContent='閉じてMunin Manual Studioに戻る';} })();})",
       "feature": "P04",
       "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
       "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
@@ -14886,7 +14886,7 @@
         "apps/manual-studio/recording-control.html:html:button:e858670661cbf8b2:1",
         "apps/manual-studio/src/recordingControl.ts:event:keydown:5485a89e0932726c:1",
         "apps/manual-studio/src/recordingControl.ts:event:click:a3d081af1599368a:1",
-        "apps/manual-studio/src/recordingControl.ts:event:click:76140c39c7a5352f:1",
+        "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
         "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1"
       ],
       "expected": {
@@ -14953,7 +14953,7 @@
         "apps/manual-studio/recording-control.html:html:button:e858670661cbf8b2:1",
         "apps/manual-studio/src/recordingControl.ts:event:keydown:5485a89e0932726c:1",
         "apps/manual-studio/src/recordingControl.ts:event:click:a3d081af1599368a:1",
-        "apps/manual-studio/src/recordingControl.ts:event:click:76140c39c7a5352f:1",
+        "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
         "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1"
       ],
       "expected": {
@@ -15020,7 +15020,7 @@
         "apps/manual-studio/recording-control.html:html:button:e858670661cbf8b2:1",
         "apps/manual-studio/src/recordingControl.ts:event:keydown:5485a89e0932726c:1",
         "apps/manual-studio/src/recordingControl.ts:event:click:a3d081af1599368a:1",
-        "apps/manual-studio/src/recordingControl.ts:event:click:76140c39c7a5352f:1",
+        "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
         "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1"
       ],
       "expected": {

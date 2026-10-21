@@ -18,6 +18,6 @@ cancel.addEventListener('click',()=>{void cancelRecording();});
 capture.addEventListener('click',()=>{void(async()=>{
   if(running)return;running=true;capture.disabled=cancel.disabled=true;capture.textContent='撮影してMarkItsを起動中…';
   try{await emitTo('main','manual-studio-screenshot-requested');await invoke('finish_operation_recording');}
-  catch(failure){error.textContent=`撮影に失敗しました: ${String(failure)}`;await invoke('show_recording_control_again').catch(()=>{});await emitTo('main','manual-studio-screenshot-failed',String(failure)).catch(()=>{});running=false;capture.disabled=cancel.disabled=false;capture.textContent='スクリーンショットを実行';}
+  catch(failure){error.textContent=`撮影に失敗しました: ${String(failure)}`;await invoke('show_recording_control_again').catch(()=>{});await emitTo('main','manual-studio-screenshot-failed',String(failure)).catch(()=>{});running=false;capture.hidden=true;cancel.disabled=false;cancel.textContent='閉じてMunin Manual Studioに戻る';}
 })();});
 document.querySelector('header')!.addEventListener('mousedown',event=>{if(event.button===0)void getCurrentWindow().startDragging().catch(()=>{});});
