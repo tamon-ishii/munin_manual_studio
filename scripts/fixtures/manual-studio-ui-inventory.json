@@ -700,7 +700,7 @@
     {
       "id": "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
       "file": "apps/manual-studio/index.html",
-      "line": 27,
+      "line": 14,
       "kind": "html:button",
       "expression": "<button type=\"button\" id=\"editor-screenshot-ai\" data-ui-icon=\"camera\" title=\"手動撮影・AI撮影・撮影済み画像から選んでカーソル位置に挿入\">",
       "feature": "P04",

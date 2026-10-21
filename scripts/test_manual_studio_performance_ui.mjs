@@ -65,6 +65,8 @@ try {
   assert.equal(await page.locator('#save-state').isVisible(),false);
   assert.equal(await page.locator('#panel-editor .column-label').count(),0);
   assert.equal(await page.locator('.workspace-ai-group #reader-review').count(),1);
+  assert.equal(await page.locator('.workspace-ai-group #editor-screenshot-ai').count(),1);
+  assert.equal(await page.locator('#document-tabs #editor-screenshot-ai').count(),0);
   await mkdir(path.join(root,'docs/moved'),{recursive:true});
   await page.reload();
   await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('Changed text'));
