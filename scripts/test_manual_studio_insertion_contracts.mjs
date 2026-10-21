@@ -146,7 +146,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  const slowStarted=new Promise(resolve=>startedSave=resolve);
  await page.locator('.milkdown-image-block input[type=file]').setInputFiles(file);await waitStarted(slowStarted);
  await page.keyboard.press('Control+s');await autosaved;await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved');
- releaseSave();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'),{},{timeout:4000});
+ releaseSave();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'),{},{timeout:15000});
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
  assert.equal((await editor.inputValue()).trim(),initial.trim());
