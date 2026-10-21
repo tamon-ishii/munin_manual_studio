@@ -210,12 +210,22 @@ export function setupMilkdownEditor(
     if (activeImg) updateOverlayPosition();
   }, { passive: true });
 
+  let richOwner: string | null = null;
+  let richSource: string | null = null;
   function refresh(force = false) {
     hideOverlay();
     ++imageRefreshVersion;
     if (!ready || !instance || syncing || (sourceMode && !force)) return;
     syncing = true;
-    try { instance.action(replaceAll(sourceValue(), true)); } finally { syncing = false; }
+    try { instance.action(ctx=>{
+      const owner=source.dataset.owner||'';
+      if(owner===richOwner&&sourceValue()===richSource)return;
+      const view=ctx.get(editorViewCtx),parsed=ctx.get(parserCtx)(sourceValue());
+      const trimEnd=(doc:typeof view.state.doc)=>{while(doc.childCount>1&&doc.lastChild?.type.name==='paragraph'&&!doc.lastChild.content.size)doc=doc.copy(doc.content.cut(0,doc.content.size-doc.lastChild.nodeSize));return doc;};
+      if(owner===richOwner&&parsed&&trimEnd(view.state.doc).eq(trimEnd(parsed)))return;
+      replaceAll(sourceValue(),owner!==richOwner)(ctx);
+      richOwner=owner;richSource=sourceValue();
+    }); } finally { syncing = false; }
   }
   Object.defineProperty(source, 'value', {
     get: sourceValue,
@@ -291,6 +301,7 @@ export function setupMilkdownEditor(
         const serializable = doc.childCount > 1 && last?.type.name === 'paragraph' && !last.content.size
           ? doc.copy(doc.content.cut(0, doc.content.size - last.nodeSize)) : doc;
         valueProperty.set!.call(source, ctx.get(serializerCtx)(serializable));
+        richSource=sourceValue();
       }
       if (!sourceMode && (changed || !view.state.selection.eq(previous.selection))) {
         let offset = 0;

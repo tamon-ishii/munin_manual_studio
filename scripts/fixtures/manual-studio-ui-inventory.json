@@ -1210,7 +1210,7 @@
         "P02.success",
         "P02.cancel",
         "P02.failure-retry",
-        "P02.editor-autosave"
+        "P02.editor-manual-save"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
@@ -4627,7 +4627,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:d6e087ca76e25dca:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 368,
+      "line": 367,
       "kind": "event:click",
       "expression": "element('progress-cancel').addEventListener('click',cancelAiGeneration)",
       "feature": "P12",
@@ -4645,7 +4645,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:00fee73a915aefc8:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 369,
+      "line": 368,
       "kind": "event:click",
       "expression": "element('progress-compact-cancel').addEventListener('click',cancelAiGeneration)",
       "feature": "P12",
@@ -4663,7 +4663,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:47183cc4aec05c88:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 404,
+      "line": 403,
       "kind": "event:click",
       "expression": "element(\"progress-dismiss\").addEventListener(\"click\", () => { element(\"operation-progress\").hidden = true; element(\"progress-open\").hidden = false; element(\"progress-compact-cancel\").hidden = !progressRunning; })",
       "feature": "P12",
@@ -4681,7 +4681,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:cd52bde8b897a599:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 409,
+      "line": 408,
       "kind": "event:click",
       "expression": "element(\"progress-open\").addEventListener(\"click\", () => { element(\"operation-progress\").hidden = false; element(\"progress-open\").hidden = true; element(\"progress-compact-cancel\").hidden = true; })",
       "feature": "P12",
@@ -4699,7 +4699,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:loop-controls:c909b21aa0ccb97a:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 608,
+      "line": 606,
       "kind": "loop-controls",
       "expression": "for (const [page, tab] of documentTabs) { const active = !activeImageTab && documentState?.page === page; const changed = active ? dirty : tab.content !== tab.document.content; const group = document.createElement('div'); group.className = 'document-tab'; const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.setAttribute('aria-selected', String(active)); button.title = page; button.textContent = `${page.split('/').at(-1)}${changed ? ' *' : ''}`; button.dataset.documentPage = page; button.setAttribute('aria-label', `${page}${changed ? '（未保存の変更）' : ''}`); button.onclick = () => { void work(() => openPage(page)); }; const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${page}を閉じる`); close.onclick = () => { void work(async () => { if (documentState?.page !== page) await openPage(page); if (!await confirmDiscard()) return; documentTabs.delete(page); documentState = null; documentPersistence.state = null; dirty = false; const next = [...documentTabs.keys()].at(-1); if (next) await openPage(next); else { editor.value = ''; resetEditHistory(); element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages(); } }); }; group.append(button, close); strip.append(group); }",
       "feature": "P02",
@@ -4716,7 +4716,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:03eafe20acfdbe2f:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 612,
+      "line": 610,
       "kind": "create:button",
       "expression": "button = document.createElement('button')",
       "feature": "P02",
@@ -4733,7 +4733,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:cc0d1f77ff0a4416:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 615,
+      "line": 613,
       "kind": "handler",
       "expression": "button.onclick = () => { void work(() => openPage(page)); }",
       "feature": "P02",
@@ -4750,7 +4750,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:696a457255b6ecf5:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 616,
+      "line": 614,
       "kind": "create:button",
       "expression": "close = document.createElement('button')",
       "feature": "P02",
@@ -4767,7 +4767,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:7de99c9104b31d3e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 617,
+      "line": 615,
       "kind": "handler",
       "expression": "close.onclick = () => { void work(async () => { if (documentState?.page !== page) await openPage(page); if (!await confirmDiscard()) return; documentTabs.delete(page); documentState = null; documentPersistence.state = null; dirty = false; const next = [...documentTabs.keys()].at(-1); if (next) await openPage(next); else { editor.value = ''; resetEditHistory(); element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages(); } }); }",
       "feature": "P02",
@@ -4784,7 +4784,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:loop-controls:75a12a150a4dd719:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 628,
+      "line": 626,
       "kind": "loop-controls",
       "expression": "for (const path of imageTabs) { const group = document.createElement('div'); group.className = 'document-tab'; const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.textContent = path.split('/').at(-1) || path; button.title = path; button.dataset.imagePage = path; button.setAttribute('aria-selected', String(activeImageTab === path)); button.onclick = () => { void work(() => openImageTab(path)); }; const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${path}を閉じる`); close.onclick = () => { void work(async () => { imageTabs.delete(path); if (activeImageTab === path) { showDocumentView(); if (documentState) { element('editor-title').textContent = documentState.page; chooseTab('editor'); } else if (imageTabs.size) await openImageTab([...imageTabs].at(-1)!); } renderDocumentTabs(); }); }; group.append(button, close); strip.append(group); }",
       "feature": "P02",
@@ -4801,7 +4801,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:03eafe20acfdbe2f:2",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 630,
+      "line": 628,
       "kind": "create:button",
       "expression": "button = document.createElement('button')",
       "feature": "P02",
@@ -4818,7 +4818,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:1224590d2b41a37e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 630,
+      "line": 628,
       "kind": "handler",
       "expression": "button.onclick = () => { void work(() => openImageTab(path)); }",
       "feature": "P02",
@@ -4835,7 +4835,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:696a457255b6ecf5:2",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 631,
+      "line": 629,
       "kind": "create:button",
       "expression": "close = document.createElement('button')",
       "feature": "P02",
@@ -4852,7 +4852,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:c31554f305027f0c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 632,
+      "line": 630,
       "kind": "handler",
       "expression": "close.onclick = () => { void work(async () => { imageTabs.delete(path); if (activeImageTab === path) { showDocumentView(); if (documentState) { element('editor-title').textContent = documentState.page; chooseTab('editor'); } else if (imageTabs.size) await openImageTab([...imageTabs].at(-1)!); } renderDocumentTabs(); }); }",
       "feature": "P02",
@@ -4869,7 +4869,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:loop-controls:84e8de32a0047cd0:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 800,
+      "line": 787,
       "kind": "loop-controls",
       "expression": "for(const issue of report.issues){ const row=document.createElement('div');row.className='quality-issue'; const jump=document.createElement('button');jump.type='button';jump.textContent=`${issue.page}${issue.line?`:${issue.line}`:''} — 該当箇所を開く`; jump.onclick=()=>{void work(async()=>{if(root!==projectRoot)return;await openResourceUsage({page:issue.page,line:issue.line||1,start:issue.start??-1,end:issue.end??-1,snippet:issue.snippet||''});});}; const message=document.createElement('span');message.textContent=issue.message;row.append(jump,message);target.append(row); }",
       "feature": "P02",
@@ -4886,7 +4886,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:1ab6d6d0d20ed1b0:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 802,
+      "line": 789,
       "kind": "create:button",
       "expression": "jump=document.createElement('button')",
       "feature": "P02",
@@ -4903,7 +4903,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:c3e1c62f599ba311:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 803,
+      "line": 790,
       "kind": "handler",
       "expression": "jump.onclick=()=>{void work(async()=>{if(root!==projectRoot)return;await openResourceUsage({page:issue.page,line:issue.line||1,start:issue.start??-1,end:issue.end??-1,snippet:issue.snippet||''});});}",
       "feature": "P02",
@@ -4920,7 +4920,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:input:229faac02e9702fe:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 860,
+      "line": 847,
       "kind": "create:input",
       "expression": "width=document.createElement('input')",
       "feature": "P02",
@@ -4937,7 +4937,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:select:7d487735e8030016:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 861,
+      "line": 848,
       "kind": "create:select",
       "expression": "align=document.createElement('select')",
       "feature": "P02",
@@ -4954,7 +4954,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:input:a0a5e0eded9038fb:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 862,
+      "line": 849,
       "kind": "create:input",
       "expression": "caption=document.createElement('input')",
       "feature": "P02",
@@ -4971,7 +4971,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:19487002d798c079:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 864,
+      "line": 851,
       "kind": "create:button",
       "expression": "apply=document.createElement('button')",
       "feature": "P02",
@@ -4988,7 +4988,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:ee2a0339b98641b5:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 865,
+      "line": 852,
       "kind": "handler",
       "expression": "apply.onclick=()=>{try{if(root!==projectRoot||documentState?.page!==page)throw new Error('原稿が切り替わりました。');const value=Number(width.value);if(!Number.isInteger(value)||value<1||value>100)throw new Error('表示幅は1〜100の整数で指定してください。'); const raw=renderFigure({...selected,width:value,align:align.value as DocumentImage['align'],caption:caption.value,configured:true});const before=expected.slice(0,selected.start),after=expected.slice(selected.end);const gapBefore=before&&!before.endsWith('\\n\\n')?(before.endsWith('\\n')?'\\n':'\\n\\n'):'';const gapAfter=after&&!after.startsWith('\\n\\n')?(after.startsWith('\\n')?'\\n':'\\n\\n'):'';changeImageMarkdown(before+gapBefore+raw+gapAfter+after,expected);dialog.close();void milkdown.refreshImages();status('画像の表示設定を更新しました。'); }catch(error){feedback.textContent=String(error);}}",
       "feature": "P02",
@@ -5005,7 +5005,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:168c11d286a50736:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 870,
+      "line": 857,
       "kind": "event:click",
       "expression": "element('image-presentation').addEventListener('click',()=>showImagePresentation())",
       "feature": "P03",
@@ -5022,7 +5022,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:c13fad671eb26f0a:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1335,
+      "line": 1322,
       "kind": "event:click",
       "expression": "button.addEventListener(\"click\", () => chooseTab(button.dataset.tab!))",
       "feature": "P02",
@@ -5039,7 +5039,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:cbc8c9b2c823830d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1339,
+      "line": 1326,
       "kind": "event:click",
       "expression": "button.addEventListener(\"click\", () => dialog.close())",
       "feature": "P02",
@@ -5056,7 +5056,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:14463ac8643f00da:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1341,
+      "line": 1328,
       "kind": "event:keydown",
       "expression": "dialog.addEventListener(\"keydown\", (e) => { if (e.key === \"Escape\") dialog.close(); })",
       "feature": "P02",
@@ -5073,7 +5073,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1351,
+      "line": 1338,
       "kind": "event:click",
       "expression": "element(\"open-existing-workspace\").addEventListener(\"click\", () => { input(\"project-root\").value = projectRoot; element<HTMLDialogElement>(\"workspace-dialog\").showModal(); input(\"project-root\").focus(); })",
       "feature": "P01",
@@ -5090,7 +5090,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1356,
+      "line": 1343,
       "kind": "event:click",
       "expression": "element(\"cancel-open-workspace\").addEventListener(\"click\", () => element<HTMLDialogElement>(\"workspace-dialog\").close())",
       "feature": "P01",
@@ -5107,7 +5107,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:531cf434ff791bbd:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1357,
+      "line": 1344,
       "kind": "event:click",
       "expression": "element(\"workspace-name\").addEventListener(\"click\", () => { if (document.getElementById(\"workspace-history-dialog\")) return; void work(async () => { const history = await loadWorkspaceHistory(native); const request=rpc; showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)), projectRoot ? [ {label:'原稿・画像の保存先',run:()=>{void showWorkspacePaths({root:()=>projectRoot,request, prepare:async()=>{if(busy)throw new Error('処理が終わってから変更してください。');await savedBeforeOperation();return confirmAllDocumentTabs();}, changed:async root=>{if(root===projectRoot)await work(()=>openProject(root,false));}, }).catch(error=>status(String(error),true));}}, {label:'撮影・挿入の処理時間',run:()=>{void showOperationTimings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}}, ] : []); }); })",
       "feature": "P01",
@@ -5124,7 +5124,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:submit:cc7623e78547325e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1371,
+      "line": 1358,
       "kind": "event:submit",
       "expression": "element(\"project-form\").addEventListener(\"submit\", (event) => { event.preventDefault(); void work(() => openProject(input(\"project-root\").value.trim())); })",
       "feature": "P01",
@@ -5141,7 +5141,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:7b6f231ed0065601:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1372,
+      "line": 1359,
       "kind": "event:click",
       "expression": "element(\"browse-project\").addEventListener(\"click\", () => { void work(async () => { if (!native) { status(\"ブラウザーでの開発表示では、プロジェクトのパスを入力して「開く」を押してください。\"); input(\"project-root\").focus(); return; } const path = await invoke<string | null>(\"choose_project\", { initialDirectory: input(\"project-root\").value.trim() || projectRoot }); if (path) { input(\"project-root\").value = path; await openProject(path); } }); })",
       "feature": "P01",
@@ -5158,7 +5158,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:e6707d8e0f172902:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1377,
+      "line": 1364,
       "kind": "event:click",
       "expression": "element(\"page-list\").addEventListener(\"click\", (event) => { const image = (event.target as HTMLElement).closest<HTMLElement>('[data-image]'); if (image) { void work(() => openImageTab(image.dataset.image!)); return; } const button = (event.target as HTMLElement).closest<HTMLButtonElement>(\"[data-page]\"); if (button) void work(() => openPage(button.dataset.page!)); })",
       "feature": "P02",
@@ -5175,7 +5175,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:toggle:b2c2bc3ee9354f6d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1383,
+      "line": 1370,
       "kind": "event:toggle",
       "expression": "element(\"page-list\").addEventListener(\"toggle\", (event) => { const folder = event.target as HTMLDetailsElement; if (!folder.matches(\"details[data-folder]\")) return; if (input(\"tree-search\").value.trim() || element<HTMLSelectElement>(\"tree-filter\").value === \"markdown\") return; if (folder.open) expandedFolders.add(folder.dataset.folder!); else expandedFolders.delete(folder.dataset.folder!); }, true)",
       "feature": "P02",
@@ -5192,7 +5192,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:e58cbb2b859616bc:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1390,
+      "line": 1377,
       "kind": "event:input",
       "expression": "input(\"tree-search\").addEventListener(\"input\", renderPages)",
       "feature": "P02",
@@ -5209,7 +5209,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:change:7b143460cc99eef4:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1391,
+      "line": 1378,
       "kind": "event:change",
       "expression": "element(\"tree-filter\").addEventListener(\"change\", renderPages)",
       "feature": "P02",
@@ -5226,7 +5226,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:4ba20a93d5f2eb1f:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1392,
+      "line": 1379,
       "kind": "event:click",
       "expression": "element(\"editor-more\").addEventListener(\"click\", event => { if ((event.target as HTMLElement).closest(\"button\")) element<HTMLDetailsElement>(\"editor-more\").open = false; })",
       "feature": "P02",
@@ -5243,7 +5243,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1395,
+      "line": 1382,
       "kind": "event:click",
       "expression": "document.addEventListener(\"click\", event => { const menu = element<HTMLDetailsElement>(\"editor-more\"); if (!menu.contains(event.target as Node)) menu.open = false; })",
       "feature": "P01",
@@ -5260,7 +5260,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:3442a44184d21f0b:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1399,
+      "line": 1386,
       "kind": "event:keydown",
       "expression": "element(\"editor-more\").addEventListener(\"keydown\", event => { if (event.key === \"Escape\") { element<HTMLDetailsElement>(\"editor-more\").open = false; element(\"editor-more\").querySelector<HTMLElement>(\"summary\")?.focus(); } })",
       "feature": "P02",
@@ -5277,7 +5277,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1405,
+      "line": 1392,
       "kind": "event:keydown",
       "expression": "document.addEventListener(\"keydown\", event => { if (event.key !== \"Escape\") return; const openMenu = document.querySelector<HTMLDetailsElement>(\".format-insert-menu[open]\"); if (openMenu) { openMenu.open = false; openMenu.querySelector<HTMLElement>(\"summary\")?.focus(); } })",
       "feature": "P01",
@@ -5294,7 +5294,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:77bdb125b3203256:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1410,
+      "line": 1397,
       "kind": "event:click",
       "expression": "document.querySelector(\".format-insert-actions\")?.addEventListener(\"click\", event => { if ((event.target as HTMLElement).closest(\"button\")) document.querySelector<HTMLDetailsElement>(\".format-insert-menu\")!.open = false; })",
       "feature": "P02",
@@ -5311,7 +5311,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:066dd1ead7fb1c43:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1431,
+      "line": 1418,
       "kind": "event:click",
       "expression": "button.addEventListener(\"click\", () => { preferredEditorView = button.dataset.editorView as EditorView; try { localStorage.setItem(\"manual-studio-editor-view\", preferredEditorView); } catch { /* Optional persistence. */ } applyEditorView(); })",
       "feature": "P02",
@@ -5328,7 +5328,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:5fe19315ad42bc50:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1495,
+      "line": 1483,
       "kind": "event:click",
       "expression": "element(\"reload-page\").addEventListener(\"click\", () => { if (documentState) void work(async () => { if (!await confirmDiscard() || !documentState) return; await openPage(documentState.page, false); }); })",
       "feature": "P02",
@@ -5345,7 +5345,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:6cab2ff78383e98d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1499,
+      "line": 1487,
       "kind": "event:click",
       "expression": "element(\"undo-edit\").addEventListener(\"click\", () => stepEditHistory(-1))",
       "feature": "P02",
@@ -5362,7 +5362,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:1ce79ff04bbe32b2:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1500,
+      "line": 1488,
       "kind": "event:click",
       "expression": "element(\"redo-edit\").addEventListener(\"click\", () => stepEditHistory(1))",
       "feature": "P02",
@@ -5379,7 +5379,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:8b9638d04de7c20e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1501,
+      "line": 1489,
       "kind": "event:click",
       "expression": "element(\"detach-editor\").addEventListener(\"click\", () => { void work(async () => { await savedBeforeOperation(); if (!documentState) throw new Error(\"原稿を選択してください。\"); if (native) await invoke(\"open_editor\", { root: projectRoot, page: documentState.page }); else window.open(`/?editor=1&root=${encodeURIComponent(projectRoot)}&page=${encodeURIComponent(documentState.page)}`, \"_blank\"); }); })",
       "feature": "P02",
@@ -5396,7 +5396,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:c2fa1e528d04d1a7:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1514,
+      "line": 1502,
       "kind": "event:input",
       "expression": "editor.addEventListener(\"input\", (event) => { recordEditHistory(event); dirty = editor.value !== documentState?.content; updateSaveState(); updateCursor(); previewScheduler.schedule(); })",
       "feature": "P02",
@@ -5413,7 +5413,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:3fb80603343fcaf0:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1527,
+      "line": 1515,
       "kind": "event:keydown",
       "expression": "previewDocument?.addEventListener('keydown', handleDocumentShortcut)",
       "feature": "P02",
@@ -5430,7 +5430,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:cebd5a1986bd91f7:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1540,
+      "line": 1528,
       "kind": "event:click",
       "expression": "editor.addEventListener(\"click\", updateCursor)",
       "feature": "P02",
@@ -5447,7 +5447,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keyup:9e12b37079103bfe:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1540,
+      "line": 1528,
       "kind": "event:keyup",
       "expression": "editor.addEventListener(\"keyup\", updateCursor)",
       "feature": "P02",
@@ -5464,7 +5464,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:select:ac800a973526f256:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1540,
+      "line": 1528,
       "kind": "event:select",
       "expression": "editor.addEventListener(\"select\", updateCursor)",
       "feature": "P02",
@@ -5481,7 +5481,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:4584d9398027a85a:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1610,
+      "line": 1598,
       "kind": "event:click",
       "expression": "button.addEventListener(\"click\", () => applyMarkdownFormat(button.dataset.format!))",
       "feature": "P02",
@@ -5498,7 +5498,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:96ae62f15f3df471:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1611,
+      "line": 1599,
       "kind": "event:keydown",
       "expression": "editor.addEventListener(\"keydown\", (event) => { if (busy || !documentState) return; if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === \"z\") { event.preventDefault(); stepEditHistory(event.shiftKey ? 1 : -1); return; } if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === \"y\") { event.preventDefault(); stepEditHistory(1); return; } if ((event.ctrlKey || event.metaKey) && [\"b\", \"i\", \"k\"].includes(event.key.toLowerCase())) { event.preventDefault(); applyMarkdownFormat(({ b: \"bold\", i: \"italic\", k: \"link\" } as Record<string, string>)[event.key.toLowerCase()]); return; } if (event.key === \"Enter\" && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && editor.selectionStart === editor.selectionEnd) { event.preventDefault(); applyAssist(continueMarkdownList(editor.value, editor.selectionStart)); return; } if (event.key === \"Tab\" && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); if (event.shiftKey || editor.selectionStart !== editor.selectionEnd) applyAssist(changeIndent(editor.value, editor.selectionStart, editor.selectionEnd, event.shiftKey ? \"unindent\" : \"indent\")); else replaceMarkdown(editor.selectionStart, editor.selectionEnd, \" \", 2); } })",
       "feature": "P02",
@@ -5515,7 +5515,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:98dd53a2bfdf7d1c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1650,
+      "line": 1638,
       "kind": "event:keydown",
       "expression": "document.addEventListener('keydown', handleDocumentShortcut)",
       "feature": "P02",
@@ -5532,7 +5532,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:621eaa4e09fc6007:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1651,
+      "line": 1639,
       "kind": "event:click",
       "expression": "element('shortcut-help').addEventListener('click', showShortcutHelp)",
       "feature": "P02",
@@ -5549,7 +5549,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:dc00639c5fd224f9:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1652,
+      "line": 1640,
       "kind": "event:click",
       "expression": "element('workspace-guide').querySelector('[data-guide-settings]')!.addEventListener('click', () => chooseTab('settings'))",
       "feature": "P01",
@@ -5566,7 +5566,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:f6af51c76747e2e3:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1653,
+      "line": 1641,
       "kind": "event:click",
       "expression": "element('workspace-guide').querySelector('[data-guide-dismiss]')!.addEventListener('click', () => { try { localStorage.setItem(`manual-studio-guide:${projectRoot}`, 'hidden'); } catch { /* Optional preference. */ } element('workspace-guide').hidden = true; })",
       "feature": "P01",
@@ -5583,7 +5583,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:input:fb5e55dba4bcf90a:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1687,
+      "line": 1675,
       "kind": "create:input",
       "expression": "name = document.createElement(\"input\")",
       "feature": "P02",
@@ -5600,7 +5600,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:input:f4e4f11cb934c2dc:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1690,
+      "line": 1678,
       "kind": "create:input",
       "expression": "program = document.createElement(\"input\")",
       "feature": "P02",
@@ -5617,7 +5617,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:e33fdb68bda696b3:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1691,
+      "line": 1679,
       "kind": "create:button",
       "expression": "browse = document.createElement(\"button\")",
       "feature": "P02",
@@ -5634,7 +5634,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:textarea:aa7b5826510db792:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1699,
+      "line": 1687,
       "kind": "create:textarea",
       "expression": "args = document.createElement(\"textarea\")",
       "feature": "P02",
@@ -5651,7 +5651,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:53db6b226ef2a271:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1700,
+      "line": 1688,
       "kind": "event:input",
       "expression": "name.addEventListener(\"input\", () => { command.name = name.value; })",
       "feature": "P02",
@@ -5668,7 +5668,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:b08051efe44ada27:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1701,
+      "line": 1689,
       "kind": "event:input",
       "expression": "program.addEventListener(\"input\", () => { command.program = program.value; })",
       "feature": "P02",
@@ -5685,7 +5685,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:db32766d389c2821:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1703,
+      "line": 1691,
       "kind": "event:input",
       "expression": "args.addEventListener(\"input\", () => { command.args = args.value.split(\"\\n\").filter(value => value.length > 0); })",
       "feature": "P02",
@@ -5702,7 +5702,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:4bd9192d30ffd8c9:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1704,
+      "line": 1692,
       "kind": "create:button",
       "expression": "remove = document.createElement(\"button\")",
       "feature": "P02",
@@ -5719,7 +5719,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:da893a7f0d79b322:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1705,
+      "line": 1693,
       "kind": "create:button",
       "expression": "test = document.createElement(\"button\")",
       "feature": "P02",
@@ -5736,7 +5736,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:671f3b7902181c6f:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1706,
+      "line": 1694,
       "kind": "event:click",
       "expression": "test.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"起動確認はデスクトップ版で利用できます。\"); await invoke(\"test_launch_application\", { program: program.value, args: args.value.split(\"\\n\").filter(value => value.length > 0), root: projectRoot || undefined, workingDirectory: workingDirectory.value.trim() || undefined }); status(\"対象アプリを起動しました。\"); }); })",
       "feature": "P13",
@@ -5753,7 +5753,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:2599600f20709639:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1710,
+      "line": 1698,
       "kind": "event:click",
       "expression": "button.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"アプリ選択はデスクトップアプリで利用できます。\"); const path = await invoke<string | null>(\"choose_application\"); if (path) { const program = list.querySelector<HTMLInputElement>(`[data-launch-program=\"${button.dataset.launchBrowse}\"]`)!; program.value = path; program.dispatchEvent(new Event(\"input\", { bubbles: true })); } }); })",
       "feature": "P13",
@@ -5770,7 +5770,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:5e9bf31bd94f95e4:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1725,
+      "line": 1713,
       "kind": "event:click",
       "expression": "button.addEventListener(\"click\", () => { launchCommands.splice(Number(button.dataset.launchRemove), 1); renderLaunchCommands(); })",
       "feature": "P13",
@@ -5787,7 +5787,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:61267645794f03df:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1740,
+      "line": 1728,
       "kind": "event:click",
       "expression": "element('image-tab-zoom').addEventListener('click',()=>{const canvas=element('image-tab-preview').parentElement!;const actual=canvas.dataset.actual!=='true';canvas.dataset.actual=String(actual);element('image-tab-zoom').textContent=actual?'画面に合わせる':'実寸表示';})",
       "feature": "P02",
@@ -5804,7 +5804,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:67cb39220ae4770c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1742,
+      "line": 1730,
       "kind": "event:click",
       "expression": "element(\"new-page\").addEventListener(\"click\", (event) => { element<HTMLDetailsElement>(\"tree-create-menu\").open = false; if (event.isTrusted) contextCreateParent = null; if (!projectRoot) { status(\"先にプロジェクトを開いてください。\", true); return; } if (contextCreateParent !== null) { input('new-page-path').value = contextCreateParent ? contextCreateParent + '/' : ''; input('new-page-title').value = ''; } element<HTMLDialogElement>(\"new-page-dialog\").showModal(); input(\"new-page-path\").focus(); })",
       "feature": "P02",
@@ -5821,7 +5821,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:loop-controls:92c48fae5b32a90d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1783,
+      "line": 1771,
       "kind": "loop-controls",
       "expression": "for (const [label, id] of [['Markdownを作成','new-page'],['フォルダーを作成','new-folder']]) { const button = document.createElement('button'); button.type = 'button'; button.role = 'menuitem'; button.textContent = label; button.onclick = () => { treeContextMenu.hidden = true; element<HTMLButtonElement>(id).click(); }; treeContextMenu.append(button); }",
       "feature": "P02",
@@ -5838,7 +5838,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:03eafe20acfdbe2f:3",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1784,
+      "line": 1772,
       "kind": "create:button",
       "expression": "button = document.createElement('button')",
       "feature": "P02",
@@ -5855,7 +5855,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:f66726ffb85654f5:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1784,
+      "line": 1772,
       "kind": "handler",
       "expression": "button.onclick = () => { treeContextMenu.hidden = true; element<HTMLButtonElement>(id).click(); }",
       "feature": "P02",
@@ -5872,7 +5872,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:contextmenu:6a97e2a20a001c2b:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1789,
+      "line": 1777,
       "kind": "event:contextmenu",
       "expression": "element('page-list').addEventListener('contextmenu', event => { if (!workspace || busy) return; event.preventDefault(); const target = event.target as HTMLElement; const file = target.closest<HTMLElement>('[data-page],[data-image],[data-file]'); contextMoveSource=file?(file.dataset.page||file.dataset.image||file.dataset.file||null):null;moveMenuItem.hidden=!contextMoveSource; contextCreateParent = file ? (file.dataset.page || file.dataset.image || file.dataset.file || '').split('/').slice(0,-1).join('/') : target.closest<HTMLElement>('[data-folder]')?.dataset.folder || workspace.config.docs; treeContextMenu.hidden = false; const box = treeContextMenu.getBoundingClientRect(); treeContextMenu.style.left = `${Math.max(0,Math.min(event.clientX,innerWidth-box.width))}px`; treeContextMenu.style.top = `${Math.max(0,Math.min(event.clientY,innerHeight-box.height))}px`; treeContextMenu.querySelector<HTMLButtonElement>('button')!.focus(); })",
       "feature": "P01",
@@ -5889,7 +5889,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:pointerdown:f992bfc947ed1c27:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1799,
+      "line": 1787,
       "kind": "event:pointerdown",
       "expression": "document.addEventListener('pointerdown',event=>{ if (!treeContextMenu.contains(event.target as Node)) treeContextMenu.hidden = true; })",
       "feature": "P02",
@@ -5906,7 +5906,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:24df2a7ec9a448ca:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1800,
+      "line": 1788,
       "kind": "event:keydown",
       "expression": "document.addEventListener('keydown',event=>{if(event.key==='Escape')treeContextMenu.hidden=true;})",
       "feature": "P02",
@@ -5923,7 +5923,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dragstart:25876876cb45624c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1801,
+      "line": 1789,
       "kind": "event:dragstart",
       "expression": "element('page-list').addEventListener('dragstart', event => { const file=(event.target as HTMLElement).closest<HTMLElement>('[data-page],[data-image],[data-file]'); if(!file||!event.dataTransfer||busy)return; const path=file.dataset.page||file.dataset.image||file.dataset.file; event.dataTransfer.setData('application/x-munin-file',JSON.stringify({root:projectRoot,path})); event.dataTransfer.effectAllowed='copyMove'; if(file.dataset.image)event.dataTransfer.setData('application/x-munin-image',JSON.stringify({root:projectRoot,path})); })",
       "feature": "P03",
@@ -5942,7 +5942,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dragover:ee01b859d5623a73:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1827,
+      "line": 1815,
       "kind": "event:dragover",
       "expression": "target.addEventListener('dragover',event=>{if(event.dataTransfer?.types.includes('application/x-munin-image')){event.preventDefault();event.dataTransfer.dropEffect='copy';}})",
       "feature": "P03",
@@ -5959,7 +5959,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:drop:42c920f7a993b4d0:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1828,
+      "line": 1816,
       "kind": "event:drop",
       "expression": "target.addEventListener('drop',event=>{ const data = event.dataTransfer?.getData('application/x-munin-image'); if (!data) return; event.preventDefault();event.stopImmediatePropagation(); if (!documentState || activeImageTab || busy) { status('画像を挿入する原稿を開いてください。',true);return; } let asset:{root:string;path:string;screenshot_id?:string}; try{asset=JSON.parse(data);if(typeof asset.path!=='string'||!asset.path)throw new Error();}catch{status('画像のドラッグ情報を読み込めません。',true);return;} if (asset.root !== projectRoot) {status('同じプロジェクトの画像を選択してください。',true);return;} const page=documentState.page,root=projectRoot,start=editor.selectionStart,end=editor.selectionEnd,left=event.clientX,top=event.clientY; const expected=editor.value;const droppedImage=(event.target as Element).closest<HTMLImageElement>('img'); const existing=target===milkdown.host?(droppedImage?milkdown.imageSourceRange(droppedImage):undefined):imageAtSelection(expected,start,end); if(existing){ const next=replaceDocumentImage(expected,existing,relativeProjectAsset(asset.path,page),asset.screenshot_id); try{changeImageMarkdown(next,expected);void milkdown.refreshImages();status('画像の参照を置き換えました。説明と表示設定は保持しています。');}catch(error){status(String(error),true);}return; } const origin=captureInsertionContext(insertionState()); // Resolve rich viewport coordinates before awaiting a reference or changing readonly layout. const richDrop=target===milkdown.host?milkdown.captureSelectionEdit(true,{left,top}):undefined; const insert=(markdown:string)=>{ if(!isInsertionCurrent(origin,insertionState())||activeImageTab)throw new Error('原稿が変更されました。挿入位置を選び直してください。'); if(target===milkdown.host){if(!richDrop)throw new Error('挿入する位置を選択してください。');richDrop.apply(markdown,true);} else {rememberCurrentSelection(start,end);editor.setRangeText(markdown,start,end,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));} status('画像の参照を挿入しました。'); }; if(asset.screenshot_id){void work(async()=>{insert(await rpc('screenshots-reference',{id:asset.screenshot_id,page},root));});} else {const path=relativeProjectAsset(asset.path,page);insert(`![${(asset.path.split('/').at(-1)||'画像').replace(/[\\[\\]\\\\]/g,'\\\\$&')}](<${path}>)`);} },true)",
       "feature": "P03",
@@ -5981,7 +5981,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dragover:2dce5f4480e63055:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1858,
+      "line": 1846,
       "kind": "event:dragover",
       "expression": "editorNavigation?.addEventListener('dragover',event=>{ if(!event.dataTransfer?.types.includes('application/x-munin-image'))return; event.preventDefault();event.dataTransfer.dropEffect='copy'; resourceDragHover??=setTimeout(()=>{resourceDragHover=undefined;if(documentState&&!busy)chooseTab('editor');},400); })",
       "feature": "P03",
@@ -5998,7 +5998,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dragleave:d6ee7d20b80e8ba5:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1864,
+      "line": 1852,
       "kind": "event:dragleave",
       "expression": "editorNavigation?.addEventListener('dragleave',clearResourceDragHover)",
       "feature": "P02",
@@ -6015,7 +6015,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dragend:ac2e9b70cc010ca7:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1864,
+      "line": 1852,
       "kind": "event:dragend",
       "expression": "document.addEventListener('dragend',clearResourceDragHover)",
       "feature": "P02",
@@ -6032,7 +6032,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:drop:5d1d071adb0e4f47:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1864,
+      "line": 1852,
       "kind": "event:drop",
       "expression": "document.addEventListener('drop',clearResourceDragHover)",
       "feature": "P03",
@@ -6049,7 +6049,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:6fb9f379619dd657:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1865,
+      "line": 1853,
       "kind": "event:click",
       "expression": "element(\"cancel-new-page\").addEventListener(\"click\", () => element<HTMLDialogElement>(\"new-page-dialog\").close())",
       "feature": "P02",
@@ -6066,7 +6066,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:submit:578d439a2ed32d3e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1866,
+      "line": 1854,
       "kind": "event:submit",
       "expression": "element(\"new-page-form\").addEventListener(\"submit\", (event) => { event.preventDefault(); void work(async () => { let page = input(\"new-page-path\").value.trim().replace(/\\\\/g, \"/\"); const docsRoot = `${workspace?.config.docs || \"docs\"}/`; if (page.startsWith(docsRoot)) page = page.slice(docsRoot.length); await rpc(\"editor-save\", { page, json: { content: `# ${input(\"new-page-title\").value.trim()}\\n\\n`, revision: null } }); element<HTMLDialogElement>(\"new-page-dialog\").close(); await refreshWorkspace(); await openPage(page, false); status(`${page}を作成しました。`); }); })",
       "feature": "P01",
@@ -6083,7 +6083,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1877,
+      "line": 1865,
       "kind": "event:click",
       "expression": "element(\"new-folder\").addEventListener(\"click\", (event) => { element<HTMLDetailsElement>(\"tree-create-menu\").open = false; if (event.isTrusted) contextCreateParent = null; if (!projectRoot || !workspace) { status(\"先にプロジェクトを開いてください。\", true); return; } element(\"new-folder-parent\").textContent = `作成先: ${workspace.config.docs}`; input(\"new-folder-path\").value = contextCreateParent ? contextCreateParent + '/' : ''; if (contextCreateParent !== null) element('new-folder-parent').textContent = `作成先: ${contextCreateParent || 'プロジェクト直下'}`; element<HTMLDialogElement>(\"new-folder-dialog\").showModal(); input(\"new-folder-path\").focus(); })",
       "feature": "P01",
@@ -6100,7 +6100,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:010e0577cba4749d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1887,
+      "line": 1875,
       "kind": "event:click",
       "expression": "element(\"cancel-new-folder\").addEventListener(\"click\", () => element<HTMLDialogElement>(\"new-folder-dialog\").close())",
       "feature": "P02",
@@ -6117,7 +6117,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:submit:38988d9624495922:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1888,
+      "line": 1876,
       "kind": "event:submit",
       "expression": "element(\"new-folder-form\").addEventListener(\"submit\", (event) => { event.preventDefault(); void work(async () => { if (!projectRoot || !workspace) throw new Error(\"先にプロジェクトを開いてください。\"); const relative = input(\"new-folder-path\").value.trim().replace(/\\\\/g, \"/\"); const created = await rpc(\"create-folder\", { path: relative, json: { project_relative: contextCreateParent !== null } }); for (const [index] of created.split(\"/\").entries()) expandedFolders.add(created.split(\"/\").slice(0, index + 1).join(\"/\")); element<HTMLDialogElement>(\"new-folder-dialog\").close(); await refreshWorkspace(); status(`${created} フォルダーを作成しました。`); }); })",
       "feature": "P01",
@@ -6134,7 +6134,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:e540c4c7ecccec5e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1904,
+      "line": 1892,
       "kind": "event:click",
       "expression": "element(\"insert-image\").addEventListener(\"click\", () => { if (!documentState) { status(\"先にMarkdown原稿を開いてください。\", true); return; } pendingImageSelection = null; toolbarImageInput.click(); })",
       "feature": "P03",
@@ -6152,7 +6152,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:change:4fd079c5c9622fef:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1909,
+      "line": 1897,
       "kind": "event:change",
       "expression": "toolbarImageInput.addEventListener(\"change\", () => { const origin = captureInsertionContext(insertionState()); const file = toolbarImageInput.files?.[0]; const selection = { start: editor.selectionStart, end: editor.selectionEnd }; toolbarImageInput.value = \"\"; if (!file) { pendingImageSelection = null; return; } if (!/^image\\/(png|jpeg|gif|webp|svg\\+xml)$/.test(file.type)) { pendingImageSelection = null; status(\"PNG、JPEG、GIF、WebP、SVGの画像を選んでください。\", true); return; } const reader = new FileReader(); reader.onload = () => { if (!isInsertionCurrent(origin, insertionState())) { pendingImageSelection = null; status(STALE_INSERTION_MESSAGE, true); return; } if (typeof reader.result === \"string\") { const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, \"_\"); pendingImageSelection = selection; openImageSaveDialog(reader.result, cleanName, cleanName.replace(/\\.[^.]+$/, \"\")); } }; reader.onerror = () => { pendingImageSelection = null; status(\"画像を読み込めませんでした。\", true); }; reader.readAsDataURL(file); })",
       "feature": "P03",
@@ -6168,7 +6168,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:cb756de997906cf4:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2007,
+      "line": 1995,
       "kind": "event:input",
       "expression": "element(\"image-save-folder\").addEventListener(\"input\", updateMarkdownInsertPreview)",
       "feature": "P03",
@@ -6185,7 +6185,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:d3096fb11bc7f2dc:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2008,
+      "line": 1996,
       "kind": "event:input",
       "expression": "element(\"image-save-filename\").addEventListener(\"input\", updateMarkdownInsertPreview)",
       "feature": "P03",
@@ -6202,7 +6202,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:b56f782293e20bb2:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2009,
+      "line": 1997,
       "kind": "event:input",
       "expression": "element(\"image-save-alt\").addEventListener(\"input\", updateMarkdownInsertPreview)",
       "feature": "P03",
@@ -6219,7 +6219,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:7958afe5f3cce4ba:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2019,
+      "line": 2007,
       "kind": "event:click",
       "expression": "element(\"cancel-image-save\").addEventListener(\"click\", cancelImageSave)",
       "feature": "P03",
@@ -6236,7 +6236,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2021,
+      "line": 2009,
       "kind": "event:submit",
       "expression": "element(\"image-save-form\").addEventListener(\"submit\", (event) => { event.preventDefault(); if (!pendingImageDataUrl || !documentState) return; const folder = input(\"image-save-folder\").value.trim().replace(/\\/+$/, \"\"); const filename = input(\"image-save-filename\").value.trim(); const alt = input(\"image-save-alt\").value.trim(); if (!filename) { status(\"ファイル名を入力してください。\", true); return; } const fullAssetPath = folder ? `${folder}/${filename}` : filename; const dataUrl = pendingImageDataUrl; const owner=pendingImageOwner; const selection=pendingImageSelection||{start:editor.selectionStart,end:editor.selectionEnd}; void work(async () => { const valid=()=>owner&&pendingImageOwner===owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion; if(!valid())throw new Error('原稿が変更されました。画像の挿入をやり直してください。'); await rpc(\"save-asset\", { path: fullAssetPath, data: dataUrl },owner!.root); if(pendingImageOwner!==owner){if(owner!.root===projectRoot)status('画像を保存しました。挿入はキャンセルされました。');return;} if(!valid())throw new Error('原稿が変更されました。保存した画像はリソース一覧に残しています。'); element<HTMLDialogElement>(\"image-save-dialog\").close(); pendingImageDataUrl = null; pendingImageOwner = null; const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || \"docs\"); const markdownCode = `![${alt}](${relPath})`; const start = selection.start; const end = selection.end; pendingImageSelection = null; rememberCurrentSelection(start, end); editor.setRangeText(markdownCode, start, end, \"end\"); dirty = true; updateSaveState(); editor.dispatchEvent(new Event(\"input\")); editor.focus(); status(`画像を ${fullAssetPath} に保存し、原稿に挿入しました。`); }); })",
       "feature": "P01",
@@ -6253,7 +6253,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:paste:ae06d9e52cf90fd6:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2273,
+      "line": 2261,
       "kind": "event:paste",
       "expression": "editor.addEventListener(\"paste\", (event: ClipboardEvent) => { if (handleImagePaste(event.clipboardData)) { event.preventDefault(); lastImagePasteTime = Date.now(); return; } if (native) { void tryNativeImagePaste(); } })",
       "feature": "P03",
@@ -6269,7 +6269,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:paste:bce554f260ca84b1:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2284,
+      "line": 2272,
       "kind": "event:paste",
       "expression": "document.addEventListener(\"paste\", (event: ClipboardEvent) => { if (event.target instanceof Node && milkdown.host.contains(event.target)) return; if (event.defaultPrevented) return; const active = document.activeElement; if (active && active !== editor && (active.tagName === \"INPUT\" || active.tagName === \"TEXTAREA\")) { return; } if (!element(\"panel-editor\").hidden) { if (!documentState) { status(\"先にMarkdown原稿を開いてください。\", true); return; } if (handleImagePaste(event.clipboardData)) { event.preventDefault(); lastImagePasteTime = Date.now(); return; } if (native) { void tryNativeImagePaste(); } } })",
       "feature": "P03",
@@ -6285,7 +6285,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:4e080cdb522a3da1:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2307,
+      "line": 2295,
       "kind": "event:keydown",
       "expression": "window.addEventListener(\"keydown\", (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === \"v\") { const active = document.activeElement; if (active && milkdown.host.contains(active)) return; if (active && active !== editor && (active.tagName === \"INPUT\" || active.tagName === \"TEXTAREA\")) { return; } if (!element(\"panel-editor\").hidden) { if (!documentState) { status(\"先にMarkdown原稿を開いてください。\", true); return; } if (native) { void tryNativeImagePaste(); } } } })",
       "feature": "P03",
@@ -6301,7 +6301,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:drop:be42545bb6a381ed:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2343,
+      "line": 2331,
       "kind": "event:drop",
       "expression": "editorColumn.addEventListener(\"drop\", (event) => { if (event.target instanceof Node && milkdown.host.contains(event.target)) return; event.preventDefault(); editorColumn.classList.remove(\"drag-over\"); if (!documentState) { status(\"先にMarkdown原稿を開いてください。\", true); return; } const origin = captureInsertionContext(insertionState()); const selection = { start: editor.selectionStart, end: editor.selectionEnd }; const files = event.dataTransfer?.files; if (!files || files.length === 0) return; for (let i = 0; i < files.length; i++) { const file = files[i]; if (file.type.startsWith(\"image/\") || /\\.(png|jpe?g|gif|svg|webp)$/i.test(file.name)) { const reader = new FileReader(); reader.onload = () => { if (!isInsertionCurrent(origin, insertionState())) { pendingImageSelection = null; status(STALE_INSERTION_MESSAGE, true); return; } if (typeof reader.result === \"string\") { const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, \"_\"); const alt = cleanName.replace(/\\.[^.]+$/, \"\"); pendingImageSelection = selection; openImageSaveDialog(reader.result, cleanName, alt); } }; reader.readAsDataURL(file); break; } } })",
       "feature": "P03",
@@ -6317,7 +6317,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:0343c3ef66b70ff4:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2379,
+      "line": 2367,
       "kind": "event:click",
       "expression": "element(id).addEventListener(\"click\", () => { void work(() => runAction(action, options(), result)); })",
       "feature": "P02",
@@ -6334,7 +6334,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:change:10927f37b5167fa8:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2384,
+      "line": 2372,
       "kind": "event:change",
       "expression": "element(\"ai-connection-type\").addEventListener(\"change\", updateAiSettingsVisibility)",
       "feature": "P13",
@@ -6351,7 +6351,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:change:3491e41cc917ee8d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2385,
+      "line": 2373,
       "kind": "event:change",
       "expression": "element(\"ai-agent\").addEventListener(\"change\", () => { input(\"ai-model\").value = \"\"; scheduleAiSave(); })",
       "feature": "P13",
@@ -6368,7 +6368,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:change:66dad3df69fb7206:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2389,
+      "line": 2377,
       "kind": "event:change",
       "expression": "element(\"ai-connection-type\").addEventListener(\"change\", scheduleAiSave)",
       "feature": "P13",
@@ -6385,7 +6385,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:24db80849fcac9dd:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2390,
+      "line": 2378,
       "kind": "event:click",
       "expression": "element(\"ai-key-migrate\").addEventListener(\"click\", () => { input(\"ai-api-key\").value = assignLegacyAiCredential(projectRoot, input(\"ai-endpoint-url\").value); element(\"ai-key-migrate\").hidden = true; scheduleAiSave(); })",
       "feature": "P13",
@@ -6402,7 +6402,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:7c37222ae6863a90:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2395,
+      "line": 2383,
       "kind": "event:input",
       "expression": "element(\"ai-endpoint-url\").addEventListener(\"input\", () => { input(\"ai-api-key\").value = readAiCredential(projectRoot, input(\"ai-endpoint-url\").value); scheduleAiSave(); })",
       "feature": "P13",
@@ -6419,7 +6419,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:df844352c5c1d900:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2399,
+      "line": 2387,
       "kind": "event:input",
       "expression": "element(\"ai-api-key\").addEventListener(\"input\", () => { saveAiCredential(projectRoot, input(\"ai-endpoint-url\").value, input(\"ai-api-key\").value); })",
       "feature": "P13",
@@ -6436,7 +6436,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:029b5c9427bdba6b:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2403,
+      "line": 2391,
       "kind": "event:input",
       "expression": "element(id).addEventListener(\"input\", scheduleAiSave)",
       "feature": "P02",
@@ -6453,7 +6453,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:change:7736193bd67c7f9f:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2404,
+      "line": 2392,
       "kind": "event:change",
       "expression": "element(id).addEventListener(\"change\", scheduleAiSave)",
       "feature": "P02",
@@ -6470,7 +6470,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:403e0ff786631f6e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2406,
+      "line": 2394,
       "kind": "event:click",
       "expression": "element(\"ai-save-retry\").addEventListener(\"click\", () => { void saveAiSettings().catch(() => {}); })",
       "feature": "P13",
@@ -6488,7 +6488,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:change:0b11014c5c7a081c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2407,
+      "line": 2395,
       "kind": "event:change",
       "expression": "themePicker.addEventListener(\"change\", () => { if (!isThemeId(themePicker.value)) return; applyTheme(themePicker.value); if (native) void emit(\"manual-studio-theme-changed\", themePicker.value); })",
       "feature": "P13",
@@ -6505,7 +6505,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:6f635cb30a15afce:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2412,
+      "line": 2400,
       "kind": "event:click",
       "expression": "element(\"import-launch-commands\").addEventListener(\"click\", () => { void work(async () => { if (!workspace || !native) throw new Error(\"プロジェクトを開いてデスクトップ版で取り込んでください。\"); const root = projectRoot; const commands = await invoke<LaunchCommand[]>(\"import_launch_commands\", { root }); if (projectRoot !== root) return; launchCommands = commands; renderLaunchCommands(); status(\"以前の共通設定をこのプロジェクトへ取り込みました。\"); }); })",
       "feature": "P01",
@@ -6522,7 +6522,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:bc0aa5105b28817c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2421,
+      "line": 2409,
       "kind": "event:click",
       "expression": "element(\"add-launch-command\").addEventListener(\"click\", () => { launchCommands.push({ id: `app-${crypto.randomUUID()}`, name: \"\", program: \"\", args: [] }); renderLaunchCommands(); document.querySelector<HTMLInputElement>(`[data-launch-name=\"${launchCommands.length - 1}\"]`)?.focus(); })",
       "feature": "P13",
@@ -6539,7 +6539,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:012f50b2d935d416:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2425,
+      "line": 2413,
       "kind": "event:click",
       "expression": "element(\"save-launch-commands\").addEventListener(\"click\", () => { void work(async () => { launchCommands = launchCommands.map((_command, index) => ({ id: _command.id || `app-${crypto.randomUUID()}`, name: document.querySelector<HTMLInputElement>(`[data-launch-name=\"${index}\"]`)!.value.trim(), program: document.querySelector<HTMLInputElement>(`[data-launch-program=\"${index}\"]`)!.value.trim(), workingDirectory: document.querySelector<HTMLInputElement>(`[data-launch-working-directory=\"${index}\"]`)!.value.trim(), args: document.querySelector<HTMLTextAreaElement>(`[data-launch-args=\"${index}\"]`)!.value.split(\"\\n\").filter((value) => value.length > 0), })); await invoke<void>(\"save_launch_commands\", { root: projectRoot, commands: launchCommands }); renderLaunchCommands(); status(\"このプロジェクトの撮影するアプリの登録を保存しました。\"); }); })",
       "feature": "P13",
@@ -6556,7 +6556,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:019c43c5860e3141:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2478,
+      "line": 2466,
       "kind": "event:click",
       "expression": "element('generate-draft').addEventListener('click',()=>{void createFullDraft().catch(error=>status(String(error),true));})",
       "feature": "P10",
@@ -6574,7 +6574,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:factory:ad7d8ec5435f5c11:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2479,
+      "line": 2467,
       "kind": "factory",
       "expression": "actionButton(\"quality-check\", \"quality-check\", () => ({}), \"publish-result\")",
       "feature": "P14",
@@ -6593,7 +6593,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:html:button:2c1b0288cbe61cd5:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2486,
+      "line": 2474,
       "kind": "html:button",
       "expression": "<button type=\"button\">",
       "feature": "P02",
@@ -6610,7 +6610,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:mousedown:651bb603c744af6c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2487,
+      "line": 2475,
       "kind": "event:mousedown",
       "expression": "control.querySelector(\"span\")!.addEventListener(\"mousedown\", (event) => { if (event.button === 0) void getCurrentWindow().startDragging().catch((error) => status(`撮影ウィンドウを移動できません: ${String(error)}`, true)); })",
       "feature": "P02",
@@ -6627,7 +6627,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:4c1b55958f493df8:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2490,
+      "line": 2478,
       "kind": "event:click",
       "expression": "control.querySelector(\"button\")!.addEventListener(\"click\", async () => { const button = control.querySelector(\"button\")!; button.disabled = true; button.textContent = \"撮影してMarkItsを起動中…\"; try { await emitTo(\"main\", \"manual-studio-screenshot-requested\"); await invoke<RecordingResult>(\"finish_operation_recording\"); } catch (error) { await invoke(\"show_recording_control_again\").catch(() => {}); const message = `撮影に失敗しました: ${String(error)}`; const notice = document.createElement(\"span\"); notice.className = \"recording-control-error\"; notice.textContent = message; notice.title = message; const returnButton = document.createElement(\"button\"); returnButton.type = \"button\"; returnButton.className = \"recording-control-return\"; returnButton.textContent = \"閉じてMunin Manual Studioに戻る\"; returnButton.addEventListener(\"click\", () => { void invoke(\"return_to_manual_studio\"); }); control.replaceChildren(notice, returnButton); await emitTo(\"main\", \"manual-studio-screenshot-failed\", message).catch(() => {}); } })",
       "feature": "P02",
@@ -6644,7 +6644,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:07ed5dfa84565d0d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2503,
+      "line": 2491,
       "kind": "create:button",
       "expression": "returnButton = document.createElement(\"button\")",
       "feature": "P02",
@@ -6661,7 +6661,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:24c6b4770f9d242b:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2507,
+      "line": 2495,
       "kind": "event:click",
       "expression": "returnButton.addEventListener(\"click\", () => { void invoke(\"return_to_manual_studio\"); })",
       "feature": "P02",
@@ -6678,7 +6678,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:8f767d42f81adb66:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2570,
+      "line": 2558,
       "kind": "event:click",
       "expression": "element('selection-ai').addEventListener('click',()=>{void createSelectionDocument().catch(error=>status(String(error),true));})",
       "feature": "P10",
@@ -6697,7 +6697,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:ffad7c8c0ad14189:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2675,
+      "line": 2663,
       "kind": "event:click",
       "expression": "element('reader-review').addEventListener('click',()=>{void reviewCurrentDocument().catch(error=>status(String(error),true));})",
       "feature": "P09",
@@ -6716,7 +6716,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:a54f3517d8599595:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2722,
+      "line": 2710,
       "kind": "create:button",
       "expression": "insert=document.createElement('button')",
       "feature": "P02",
@@ -6733,7 +6733,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:007764b1d265e5d3:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2723,
+      "line": 2711,
       "kind": "handler",
       "expression": "insert.onclick=()=>{answer=true;dialog.close();}",
       "feature": "P02",
@@ -6750,7 +6750,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2745,
+      "line": 2733,
       "kind": "event:click",
       "expression": "element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));})",
       "feature": "P04",
@@ -6771,7 +6771,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:loop-controls:4bd5fa6fb4f159d0:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2751,
+      "line": 2739,
       "kind": "loop-controls",
       "expression": "for(const [method,text,icon,description] of [['manual','手動で撮影','camera','アプリを操作して撮影。AI設定は不要です。'],['ai','AIに撮影を指示','sparkle','撮影する画面や番号・注釈を文章で指示します。'],['existing','撮影済み画像を選ぶ','library','リソースに保存した採用済みの画像から選びます。']] as const){ const button=document.createElement('button');button.type='button';button.className='screenshot-method';button.dataset.uiIcon=icon;button.textContent=text;button.onclick=()=>{selected=method;dialog.close();};const note=document.createElement('p');note.className='muted';note.textContent=description;body.append(button,note); }",
       "feature": "P04",
@@ -6788,7 +6788,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:0cd3653d8136ca98:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2752,
+      "line": 2740,
       "kind": "create:button",
       "expression": "button=document.createElement('button')",
       "feature": "P02",
@@ -6805,7 +6805,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:34f4ca7254f8f38b:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2752,
+      "line": 2740,
       "kind": "handler",
       "expression": "button.onclick=()=>{selected=method;dialog.close();}",
       "feature": "P02",
@@ -6822,7 +6822,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:loop-controls:a96583c5dcde3063:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2777,
+      "line": 2765,
       "kind": "loop-controls",
       "expression": "for(const shot of available){ const card=document.createElement('section');card.className='card'; const title=document.createElement('h2');title.textContent=shot.name||shot.output;card.append(title); if(shot.id===recentId){const label=document.createElement('p');label.className='muted';label.textContent='前回選択した画像';card.append(label);} if(shot.thumbnail){const image=document.createElement('img');image.src=shot.thumbnail;image.alt=title.textContent;image.style.maxWidth='100%';image.style.maxHeight='160px';card.append(image);} const button=document.createElement('button');button.type='button';button.textContent='この画像を選ぶ';button.dataset.screenshotId=shot.id; button.onclick=()=>{ if(root!==projectRoot||!valid()){dialog.close();return;} selected={id:shot.id,revision:shot.adopted!}; recentScreenshotSelections.set(root,shot.id); try{localStorage.setItem(selectionKey,shot.id);}catch{/* Selection remains available in memory. */} dialog.close(); }; card.append(button);body.append(card); }",
       "feature": "P02",
@@ -6839,7 +6839,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:0cd3653d8136ca98:2",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2782,
+      "line": 2770,
       "kind": "create:button",
       "expression": "button=document.createElement('button')",
       "feature": "P02",
@@ -7506,7 +7506,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:event:click:d91ed9b155a86c83:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 265,
+      "line": 275,
       "kind": "event:click",
       "expression": "toggle.addEventListener('click', () => { if (!sourceMode) { showSource(); source.focus(); } else { refresh(true); if (sourceToolbar) sourceToolbar.hidden = true; if (sourceAiToolbar) sourceAiToolbar.hidden = true; sourceMode = false; host.hidden = false; source.hidden = true; toggle.textContent = 'Markdownソース'; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); } })",
       "feature": "P02",
@@ -7523,7 +7523,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:event:input:81b57490489a813a:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 269,
+      "line": 279,
       "kind": "event:input",
       "expression": "source.addEventListener('input', () => { if (!syncing) refresh(); })",
       "feature": "P02",
@@ -11005,7 +11005,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:3e85cc864ddd4742:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1335,
+      "line": 1322,
       "kind": "binding-loop",
       "expression": "document.querySelectorAll<HTMLElement>(\"[data-tab]\").forEach((button) => button.addEventListener(\"click\", () => chooseTab(button.dataset.tab!)))",
       "feature": "P13",
@@ -11022,7 +11022,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:45163c073e6a9e6f:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1337,
+      "line": 1324,
       "kind": "binding-loop",
       "expression": "document.querySelectorAll<HTMLDialogElement>('dialog.panel-dialog[id^=\"panel-\"]').forEach((dialog) => { dialog.querySelectorAll(\"[data-close-dialog]\").forEach((button) => { button.addEventListener(\"click\", () => dialog.close()); }); dialog.addEventListener(\"keydown\", (e) => { if (e.key === \"Escape\") dialog.close(); }); dialog.addEventListener(\"close\", () => { document.querySelectorAll<HTMLElement>(\"[data-tab]\").forEach((button) => { button.classList.toggle(\"active\", button.dataset.tab === activeWorkspaceTab); }); }); })",
       "feature": "P13",
@@ -11039,7 +11039,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:d39921c346ccbecf:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1338,
+      "line": 1325,
       "kind": "binding-loop",
       "expression": "dialog.querySelectorAll(\"[data-close-dialog]\").forEach((button) => { button.addEventListener(\"click\", () => dialog.close()); })",
       "feature": "P13",
@@ -11056,7 +11056,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:7062279db7ede4be:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1430,
+      "line": 1417,
       "kind": "binding-loop",
       "expression": "document.querySelectorAll<HTMLButtonElement>(\"#panel-editor button[data-editor-view]\").forEach(button => { button.addEventListener(\"click\", () => { preferredEditorView = button.dataset.editorView as EditorView; try { localStorage.setItem(\"manual-studio-editor-view\", preferredEditorView); } catch { /* Optional persistence. */ } applyEditorView(); }); })",
       "feature": "P02",
@@ -11073,7 +11073,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:9d758989c6c8c0cb:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1610,
+      "line": 1598,
       "kind": "binding-loop",
       "expression": "document.querySelectorAll<HTMLButtonElement>(\"[data-format]\").forEach((button) => button.addEventListener(\"click\", () => applyMarkdownFormat(button.dataset.format!)))",
       "feature": "P02",
@@ -11090,7 +11090,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:59f333bd5afb7fed:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1684,
+      "line": 1672,
       "kind": "binding-loop",
       "expression": "launchCommands.forEach((command, index) => { const row = document.createElement(\"div\"); row.className = \"launch-command-row\"; const nameLabel = document.createElement(\"label\"); nameLabel.textContent = \"表示名（省略可）\"; const name = document.createElement(\"input\"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name); const programLabel = document.createElement(\"label\"); programLabel.className = \"launch-program-field\"; programLabel.textContent = \"起動パス\"; const programWrap = document.createElement(\"div\"); programWrap.className = \"app-picker-row\"; const program = document.createElement(\"input\"); program.value = command.program; program.placeholder = \"例: firefox または /usr/bin/firefox\"; program.dataset.launchProgram = String(index); const browse = document.createElement(\"button\"); browse.type = \"button\"; browse.textContent = \"選択\"; browse.dataset.launchBrowse = String(index); programWrap.append(program, browse); programLabel.append(programWrap); const workingDirectoryLabel = document.createElement(\"label\"); workingDirectoryLabel.className = \"launch-working-directory-field\"; workingDirectoryLabel.textContent = \"作業フォルダ（省略時はプロジェクト）\"; const workingDirectoryWrap = document.createElement(\"div\"); workingDirectoryWrap.className = \"app-picker-row\"; const workingDirectory = document.createElement(\"input\"); workingDirectory.value = command.workingDirectory || \"\"; workingDirectory.placeholder = \"例: /home/user/my-app\"; workingDirectory.dataset.launchWorkingDirectory = String(index); const browseWorkingDirectory = document.createElement(\"button\"); browseWorkingDirectory.type = \"button\"; browseWorkingDirectory.textContent = \"選択\"; browseWorkingDirectory.dataset.launchWorkingDirectoryBrowse = String(index); workingDirectoryWrap.append(workingDirectory, browseWorkingDirectory); workingDirectoryLabel.append(workingDirectoryWrap); const argsLabel = document.createElement(\"label\"); argsLabel.textContent = \"起動引数（1行に1つ）\"; const args = document.createElement(\"textarea\"); args.rows = 2; args.value = command.args.join(\"\\n\"); args.dataset.launchArgs = String(index); argsLabel.append(args); name.addEventListener(\"input\", () => { command.name = name.value; }); program.addEventListener(\"input\", () => { command.program = program.value; }); workingDirectory.addEventListener(\"input\", () => { command.workingDirectory = workingDirectory.value; }); args.addEventListener(\"input\", () => { command.args = args.value.split(\"\\n\").filter(value => value.length > 0); }); const remove = document.createElement(\"button\"); remove.type = \"button\"; remove.textContent = \"削除\"; remove.dataset.launchRemove = String(index); const test = document.createElement(\"button\"); test.type = \"button\"; test.textContent = \"起動確認\"; test.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"起動確認はデスクトップ版で利用できます。\"); await invoke(\"test_launch_application\", { program: program.value, args: args.value.split(\"\\n\").filter(value => value.length > 0), root: projectRoot || undefined, workingDirectory: workingDirectory.value.trim() || undefined }); status(\"対象アプリを起動しました。\"); }); }); const actions = document.createElement(\"div\"); actions.className = \"actions launch-row-actions\"; actions.append(test, remove); row.append(nameLabel, programLabel, workingDirectoryLabel, argsLabel, actions); list.append(row); })",
       "feature": "P13",
@@ -11107,7 +11107,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1710,
+      "line": 1698,
       "kind": "binding-loop",
       "expression": "list.querySelectorAll<HTMLButtonElement>(\"[data-launch-browse]\").forEach((button) => button.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"アプリ選択はデスクトップアプリで利用できます。\"); const path = await invoke<string | null>(\"choose_application\"); if (path) { const program = list.querySelector<HTMLInputElement>(`[data-launch-program=\"${button.dataset.launchBrowse}\"]`)!; program.value = path; program.dispatchEvent(new Event(\"input\", { bubbles: true })); } }); }))",
       "feature": "P13",
@@ -11124,7 +11124,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1725,
+      "line": 1713,
       "kind": "binding-loop",
       "expression": "list.querySelectorAll<HTMLButtonElement>(\"[data-launch-remove]\").forEach((button) => button.addEventListener(\"click\", () => { launchCommands.splice(Number(button.dataset.launchRemove), 1); renderLaunchCommands(); }))",
       "feature": "P13",
@@ -11141,7 +11141,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:11cdede8f48a2d64:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2327,
+      "line": 2315,
       "kind": "binding-loop",
       "expression": "[\"dragenter\", \"dragover\"].forEach((type) => { editorColumn.addEventListener(type, (event) => { if (event.target instanceof Node && milkdown.host.contains(event.target)) return; event.preventDefault(); if (documentState) { editorColumn.classList.add(\"drag-over\"); } }); })",
       "feature": "P03",
@@ -11158,7 +11158,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dynamic:09fabe4e62b56125:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2328,
+      "line": 2316,
       "kind": "event:dynamic",
       "expression": "editorColumn.addEventListener(type, (event) => { if (event.target instanceof Node && milkdown.host.contains(event.target)) return; event.preventDefault(); if (documentState) { editorColumn.classList.add(\"drag-over\"); } })",
       "feature": "P03",
@@ -11175,7 +11175,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:2e252295387bbcfa:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2336,
+      "line": 2324,
       "kind": "binding-loop",
       "expression": "[\"dragleave\", \"dragend\"].forEach((type) => { editorColumn.addEventListener(type, (event) => { if (event.target instanceof Node && milkdown.host.contains(event.target)) return; event.preventDefault(); editorColumn.classList.remove(\"drag-over\"); }); })",
       "feature": "P03",
@@ -11192,7 +11192,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dynamic:d684acadefb026a2:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2337,
+      "line": 2325,
       "kind": "event:dynamic",
       "expression": "editorColumn.addEventListener(type, (event) => { if (event.target instanceof Node && milkdown.host.contains(event.target)) return; event.preventDefault(); editorColumn.classList.remove(\"drag-over\"); })",
       "feature": "P03",
@@ -11330,7 +11330,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:63476d969a350e8f:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 847,
+      "line": 834,
       "kind": "event:click",
       "expression": "element('document-image-retry').addEventListener('click', () => { if (retryDocumentImageEdit) void work(retryDocumentImageEdit); })",
       "feature": "P05",
@@ -11402,7 +11402,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:4071106645de0d83:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 370,
+      "line": 381,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => { undoOrCancel(ctx); }",
       "feature": "P03",
@@ -11420,7 +11420,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:e1577d48f0f2da80:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 371,
+      "line": 382,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); redo(view.state, view.dispatch); }",
       "feature": "P02",
@@ -11437,7 +11437,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:ae7e40f3d387bf9d:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 372,
+      "line": 383,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => insert(mermaidSource)(ctx)",
       "feature": "P02",
@@ -11454,7 +11454,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onUpload:ba5a82138eb5ff92:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 390,
+      "line": 401,
       "kind": "callback:onUpload",
       "expression": "onUpload: uploadImage",
       "feature": "P03",
@@ -11472,7 +11472,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:49d7566cac911c04:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 405,
+      "line": 416,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => { callCommand(clearTextInCurrentBlockCommand.key)(ctx); insert(mermaidSource)(ctx); }",
       "feature": "P02",
@@ -11489,7 +11489,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:cancel:53392ec02d03487e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2020,
+      "line": 2008,
       "kind": "event:cancel",
       "expression": "element(\"image-save-dialog\").addEventListener(\"cancel\", event=>{event.preventDefault();cancelImageSave();})",
       "feature": "P03",
@@ -11522,7 +11522,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:cba62bca90575923:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2079,
+      "line": 2067,
       "kind": "event:click",
       "expression": "element('cancel-image-paste').addEventListener('click',()=>{ if(!activeImagePaste)return; activeImagePaste.cancelled=true; element('cancel-image-paste').hidden=true; status('画像の挿入をキャンセルしました。保存処理の完了を待っています。'); })",
       "feature": "P03",
@@ -11538,7 +11538,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:event:keydown:3f66e9f691b46b8c:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 451,
+      "line": 462,
       "kind": "event:keydown",
       "expression": "host.addEventListener('keydown', event => { if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror') || event.target.closest('input,textarea')) return; if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'z') return; if (!instance || !ready || sourceMode) return; const cancelled = instance.action(ctx => { const view = ctx.get(editorViewCtx); return !undo(view.state) && cancelLatestUpload(); }); if (cancelled) { event.preventDefault(); event.stopPropagation(); } }, true)",
       "feature": "P03",
@@ -11554,7 +11554,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:6b2b9379008c3095:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2783,
+      "line": 2771,
       "kind": "handler",
       "expression": "button.onclick=()=>{ if(root!==projectRoot||!valid()){dialog.close();return;} selected={id:shot.id,revision:shot.adopted!}; recentScreenshotSelections.set(root,shot.id); try{localStorage.setItem(selectionKey,shot.id);}catch{/* Selection remains available in memory. */} dialog.close(); }",
       "feature": "P02",
@@ -11723,7 +11723,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:d7ec47ab9625e9ab:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1465,
+      "line": 1452,
       "kind": "event:click",
       "expression": "element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click())",
       "feature": "P02",
@@ -11740,7 +11740,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:7550c77f609c13c2:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1466,
+      "line": 1453,
       "kind": "event:click",
       "expression": "element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); })",
       "feature": "P02",
@@ -11757,7 +11757,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:8c754f6c1569e331:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1467,
+      "line": 1454,
       "kind": "event:click",
       "expression": "element('empty-select-page').addEventListener('click', () => { layoutManager?.focusPanel('file-tree'); element('tree-search').focus(); })",
       "feature": "P02",
@@ -11774,7 +11774,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:602eb24b6af1f0fa:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1468,
+      "line": 1456,
       "kind": "event:click",
       "expression": "element('save-retry').addEventListener('click', () => { void work(() => saveDocument(false)); })",
       "feature": "P02",
@@ -11791,7 +11791,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:54983fbdc6bff440:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1469,
+      "line": 1457,
       "kind": "event:click",
       "expression": "element('save-conflict').addEventListener('click', () => { void work(async () => { if (!documentState) return; const owner = documentState, root = projectRoot, draft = editor.value; const stored = JSON.parse(await rpc('editor-read', { page: owner.page }, root)) as Document; if (root !== projectRoot || owner !== documentState || draft !== editor.value) return; const {dialog,body} = featureDialog('外部変更を確認'); dialog.id = 'save-conflict-dialog'; const note = document.createElement('p'); note.textContent = '編集中の内容は保持しています。保存先の内容と比較してください。'; const columns = document.createElement('div'); columns.className = 'selection-diff-columns'; for (const [label,content] of [['編集中の内容',draft],['保存先の内容',stored.content]]) { const column = document.createElement('section'), heading = document.createElement('h3'), pre = document.createElement('pre'); heading.textContent = label; pre.textContent = content; column.append(heading,pre); columns.append(column); } const keep = document.createElement('button'); keep.textContent = '編集中の内容を保持して閉じる'; keep.onclick = () => dialog.close(); const reload = document.createElement('button'); reload.textContent = '保存先の内容を読み直す'; reload.onclick = () => { dialog.close(); element('reload-page').click(); }; body.append(note,columns,keep,reload); }); })",
       "feature": "P02",
@@ -11808,7 +11808,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:a4d6802ac22fa31a:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1480,
+      "line": 1468,
       "kind": "create:button",
       "expression": "keep = document.createElement('button')",
       "feature": "P02",
@@ -11825,7 +11825,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:f08b196413ff3722:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1480,
+      "line": 1468,
       "kind": "handler",
       "expression": "keep.onclick = () => dialog.close()",
       "feature": "P02",
@@ -11842,7 +11842,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:bacb625e5ee78415:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1481,
+      "line": 1469,
       "kind": "create:button",
       "expression": "reload = document.createElement('button')",
       "feature": "P02",
@@ -11859,7 +11859,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:0eb2a5669fa3b10e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1481,
+      "line": 1469,
       "kind": "handler",
       "expression": "reload.onclick = () => { dialog.close(); element('reload-page').click(); }",
       "feature": "P02",
@@ -11876,7 +11876,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:select:ed047c85b8ed91ea:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1484,
+      "line": 1472,
       "kind": "event:select",
       "expression": "editor.addEventListener('select', updateSelectionAction)",
       "feature": "P02",
@@ -11893,7 +11893,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:60ffb34a49df5aca:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1488,
+      "line": 1476,
       "kind": "event:keydown",
       "expression": "element('workspace-name').addEventListener('keydown', event => { if (event.key === 'ArrowDown' && !document.getElementById('workspace-history-dialog')) { event.preventDefault(); element('workspace-name').click(); } })",
       "feature": "P02",
@@ -11910,7 +11910,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:e9768bd658e053d2:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1491,
+      "line": 1479,
       "kind": "event:click",
       "expression": "menu.addEventListener('click', event => { if ((event.target as HTMLElement).closest('button')) menu.open = false; })",
       "feature": "P02",
@@ -11927,7 +11927,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:keydown:169fbe2b8928152e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1492,
+      "line": 1480,
       "kind": "event:keydown",
       "expression": "menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); } })",
       "feature": "P02",
@@ -11944,7 +11944,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:b1d458cf43ab76ef:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1493,
+      "line": 1481,
       "kind": "event:click",
       "expression": "document.addEventListener('click', event => { if (!menu.contains(event.target as Node)) menu.open = false; })",
       "feature": "P02",
@@ -12078,7 +12078,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:d7ffae85165012bb:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2847,
+      "line": 2835,
       "kind": "event:click",
       "expression": "element('manuscript-search-open').addEventListener('click',openManuscriptSearch)",
       "feature": "P17",
@@ -12093,7 +12093,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:d9632c29ad240280:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2849,
+      "line": 2837,
       "kind": "create:button",
       "expression": "manuscriptGitButton=document.createElement('button')",
       "feature": "P19",
@@ -12108,7 +12108,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:80e44cf7fe4d9c24:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2850,
+      "line": 2838,
       "kind": "event:click",
       "expression": "manuscriptGitButton.addEventListener('click',openManuscriptGit)",
       "feature": "P19",
@@ -12932,7 +12932,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:3282bb0b36f96da1:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2381,
+      "line": 2369,
       "kind": "event:input",
       "expression": "element(\"manual-brief\").addEventListener(\"input\", scheduleBriefSave)",
       "feature": "P02",
@@ -12949,7 +12949,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:a1564a94d7244d86:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2382,
+      "line": 2370,
       "kind": "event:click",
       "expression": "element(\"brief-save-retry\").addEventListener(\"click\", () => { void saveBriefSettings().catch(() => {}); })",
       "feature": "P02",
@@ -13271,7 +13271,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:input:bfa28799baeca699:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1695,
+      "line": 1683,
       "kind": "create:input",
       "expression": "workingDirectory = document.createElement(\"input\")",
       "feature": "P13",
@@ -13288,7 +13288,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:228807bff7e172f0:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1696,
+      "line": 1684,
       "kind": "create:button",
       "expression": "browseWorkingDirectory = document.createElement(\"button\")",
       "feature": "P13",
@@ -13305,7 +13305,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:input:284c897c3bf641a6:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1702,
+      "line": 1690,
       "kind": "event:input",
       "expression": "workingDirectory.addEventListener(\"input\", () => { command.workingDirectory = workingDirectory.value; })",
       "feature": "P13",
@@ -13322,7 +13322,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:binding-loop:19b2f301ac28144d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1719,
+      "line": 1707,
       "kind": "binding-loop",
       "expression": "list.querySelectorAll<HTMLButtonElement>(\"[data-launch-working-directory-browse]\").forEach((button) => button.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"フォルダー選択はデスクトップ版で利用できます。\"); const field = list.querySelector<HTMLInputElement>(`[data-launch-working-directory=\"${button.dataset.launchWorkingDirectoryBrowse}\"]`)!; const path = await invoke<string | null>(\"choose_working_directory\", { initialDirectory: field.value.trim() || projectRoot }); if (path) { field.value = path; field.dispatchEvent(new Event(\"input\", { bubbles: true })); } }); }))",
       "feature": "P13",
@@ -13339,7 +13339,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:click:0b03fb39b07d1bea:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1719,
+      "line": 1707,
       "kind": "event:click",
       "expression": "button.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"フォルダー選択はデスクトップ版で利用できます。\"); const field = list.querySelector<HTMLInputElement>(`[data-launch-working-directory=\"${button.dataset.launchWorkingDirectoryBrowse}\"]`)!; const path = await invoke<string | null>(\"choose_working_directory\", { initialDirectory: field.value.trim() || projectRoot }); if (path) { field.value = path; field.dispatchEvent(new Event(\"input\", { bubbles: true })); } }); })",
       "feature": "P13",
@@ -13613,7 +13613,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:create:button:b03a12a97f76b498:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1786,
+      "line": 1774,
       "kind": "create:button",
       "expression": "moveMenuItem=document.createElement('button')",
       "feature": "P02",
@@ -13630,7 +13630,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:handler:b9a117828242b8b7:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1787,
+      "line": 1775,
       "kind": "handler",
       "expression": "moveMenuItem.onclick=()=>{treeContextMenu.hidden=true;if(contextMoveSource)void moveTreeFile(contextMoveSource);}",
       "feature": "P02",
@@ -13647,7 +13647,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:dragover:0c96b6a5403e579e:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1809,
+      "line": 1797,
       "kind": "event:dragover",
       "expression": "element('page-list').addEventListener('dragover',event=>{ if(!(event.target as HTMLElement).closest('[data-folder]')||!event.dataTransfer?.types.includes('application/x-munin-file'))return; event.preventDefault();event.dataTransfer.dropEffect='move'; })",
       "feature": "P02",
@@ -13664,7 +13664,7 @@
     {
       "id": "apps/manual-studio/src/main.ts:event:drop:4aa452eb0e055389:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1813,
+      "line": 1801,
       "kind": "event:drop",
       "expression": "element('page-list').addEventListener('drop',event=>{ const folder=(event.target as HTMLElement).closest<HTMLElement>('[data-folder]'); if(!folder||!event.dataTransfer?.types.includes('application/x-munin-file'))return; event.preventDefault();event.stopPropagation(); try{const source=JSON.parse(event.dataTransfer.getData('application/x-munin-file')) as {root:string;path:string};if(source.root===projectRoot&&typeof source.path==='string')void moveTreeFile(source.path,folder.dataset.folder);}catch{status('移動するファイルを選び直してください。',true);} })",
       "feature": "P02",
@@ -13773,6 +13773,40 @@
       "line": 46,
       "kind": "event:change",
       "expression": "select.addEventListener('change',()=>{if(select.value)onInsert(alertMarkdown(select.value));select.value='';})",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/index.html:html:button:8d0c395cf79b6465:1",
+      "file": "apps/manual-studio/index.html",
+      "line": 14,
+      "kind": "html:button",
+      "expression": "<button type=\"button\" id=\"save-page\" data-ui-icon=\"save\" title=\"原稿を保存 (Ctrl/Cmd+S)\">",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1455,
+      "kind": "event:click",
+      "expression": "element('save-page').addEventListener('click',()=>{if(documentState&&!activeImageTab)void work(saveDocument);})",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -14156,7 +14190,9 @@
         "apps/manual-studio/src/main.ts:event:dragover:0c96b6a5403e579e:1",
         "apps/manual-studio/src/main.ts:event:drop:4aa452eb0e055389:1",
         "apps/manual-studio/src/gfmEditor.ts:create:select:5791b9aa8456a6fe:1",
-        "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1"
+        "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1",
+        "apps/manual-studio/index.html:html:button:8d0c395cf79b6465:1",
+        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1"
       ],
       "expected": {
         "visible": "本文・タブ・プレビューが編集対象と一致する",
@@ -14400,7 +14436,9 @@
         "apps/manual-studio/src/main.ts:event:dragover:0c96b6a5403e579e:1",
         "apps/manual-studio/src/main.ts:event:drop:4aa452eb0e055389:1",
         "apps/manual-studio/src/gfmEditor.ts:create:select:5791b9aa8456a6fe:1",
-        "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1"
+        "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1",
+        "apps/manual-studio/index.html:html:button:8d0c395cf79b6465:1",
+        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1"
       ],
       "expected": {
         "visible": "本文・タブ・プレビューが編集対象と一致する",
@@ -14644,7 +14682,9 @@
         "apps/manual-studio/src/main.ts:event:dragover:0c96b6a5403e579e:1",
         "apps/manual-studio/src/main.ts:event:drop:4aa452eb0e055389:1",
         "apps/manual-studio/src/gfmEditor.ts:create:select:5791b9aa8456a6fe:1",
-        "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1"
+        "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1",
+        "apps/manual-studio/index.html:html:button:8d0c395cf79b6465:1",
+        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1"
       ],
       "expected": {
         "visible": "本文・タブ・プレビューが編集対象と一致する",
@@ -18062,11 +18102,11 @@
       "notes": "Actual browser gesture and temporary real manualctl backend files; no real OS claim."
     },
     {
-      "id": "P02.editor-autosave",
+      "id": "P02.editor-manual-save",
       "feature": "P02",
       "expected": {
-        "visible": "編集後に保存済み表示となり、再読込で同じ本文と原稿名を表示する",
-        "stored": "docs/index.mdの実ファイルが編集本文と一致する",
+        "visible": "編集後はタブの*を保持し、保存ボタンで保存後に消える。再読込で保存した本文を表示する",
+        "stored": "待機・タブ切替ではdocs/index.mdを書き換えず、明示保存した本文だけ実ファイルへ反映する",
         "preserved": "manual_setting.jsonと元原稿以外の設定は編集で変わらない",
         "returnTarget": "index.mdの編集画面"
       },

@@ -114,7 +114,6 @@ let projectRoot = "";
 let workspace: State | null = null;
 let documentState: Document | null = null;
 let dirty = false;
-let documentAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 const documentPersistence = new DocumentPersistence({
   context: () => documentState ? { document: documentState, root: projectRoot, content: editor.value, version: documentRequestVersion } : null,
   write: async ({ document: current, root, content }) => JSON.parse(await rpc('editor-save', {
@@ -502,8 +501,7 @@ function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
 async function savedBeforeOperation(): Promise<void> {
   await saveBriefSettings();
   await documentPersistence.wait();
-  if (dirty) await saveDocument(false);
-  if (dirty) throw new Error("原稿の保存が完了しませんでした。編集内容を確認して再試行してください。");
+  if (dirty) throw new Error('原稿に未保存の変更があります。保存ボタンまたはCtrl/Cmd+Sで保存してください。');
 }
 async function work(operation: () => Promise<void>): Promise<void> {
   if (busy) return;
@@ -648,16 +646,6 @@ async function confirmAllDocumentTabs(): Promise<boolean> {
 }
 function updateSaveState(): void {
   const ownerState = documentPersistence.state?.owner === documentState ? documentPersistence.state : null;
-  clearTimeout(documentAutosaveTimer);
-  if (dirty && documentState && !ownerState) {
-    const owner = documentState;
-    const root = projectRoot;
-    documentAutosaveTimer = setTimeout(() => {
-      if (documentState !== owner || projectRoot !== root || !dirty) return;
-      if (busy || document.querySelector('dialog[open]')) { updateSaveState(); return; }
-      void saveDocument(false).catch(error => status(`自動保存できませんでした：${String(error)}`, true));
-    }, 800);
-  }
   renderDocumentTabs();
   const badge = element("save-state");
   badge.hidden = !documentState || ownerState?.state !== 'error';
@@ -665,7 +653,7 @@ function updateSaveState(): void {
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
   const conflicted = ownerState?.state === 'error' && /変更されています|conflict|revision/i.test(ownerState.message || '');
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
-  badge.title = ownerState?.message || (dirty ? '自動保存を待っています。' : '原稿の保存状態');
+  badge.title = ownerState?.message || (dirty ? '保存ボタンまたはCtrl/Cmd+Sで保存してください。' : '原稿の保存状態');
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
   element('save-retry').hidden = ownerState?.state !== 'error' || conflicted;
   element('save-conflict').hidden = !conflicted;
@@ -721,7 +709,6 @@ async function openPage(page: string, check = true, restored?: Document): Promis
   if (page.startsWith(docsPrefix) && workspace?.pages.includes(page.slice(docsPrefix.length))) page = page.slice(docsPrefix.length);
   if (check && documentState?.page === page && !activeImageTab) { chooseTab('editor'); return; }
   await documentPersistence.wait();
-  if (dirty && documentState && documentPersistence.state?.state !== 'error') await saveDocument(false);
   retainDocumentTab();
   showDocumentView();
   let cached = check ? documentTabs.get(page) : undefined;
@@ -787,7 +774,7 @@ function insertDocumentMarkdown(markdown:string): void {
       editor.dispatchEvent(new Event("input", { bubbles: true }));
       editor.focus();
     }
-    status("画像を原稿に挿入しました。原稿は自動保存されます。");
+    status("画像を原稿に挿入しました。保存ボタンまたはCtrl/Cmd+Sで保存してください。");
   }
 async function insertResourceAsset(path:string):Promise<boolean>{
   if(!await chooseImageDestination()||!documentState)return false;
@@ -1460,11 +1447,12 @@ function updateEditorEmptyState(): void {
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
   element('panel-editor').classList.toggle('editor-is-empty', empty);
-  for (const id of ['reader-review','selection-ai','generate-ai-image']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  for (const id of ['reader-review','selection-ai','generate-ai-image','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
 element('empty-select-page').addEventListener('click', () => { layoutManager?.focusPanel('file-tree'); element('tree-search').focus(); });
+element('save-page').addEventListener('click',()=>{if(documentState&&!activeImageTab)void work(saveDocument);});
 element('save-retry').addEventListener('click', () => { void work(() => saveDocument(false)); });
 element('save-conflict').addEventListener('click', () => { void work(async () => {
   if (!documentState) return;
@@ -1633,7 +1621,7 @@ editor.addEventListener("keydown", (event) => {
 function handleDocumentShortcut(event: KeyboardEvent): void {
   if (event.isComposing || event.repeat || event.defaultPrevented || event.altKey || !(event.ctrlKey || event.metaKey)) return;
   const target = event.target instanceof Element ? event.target : null;
-  if (document.querySelector('dialog[open]') || target?.closest('#panel-terminal')) return;
+  if (document.querySelector('dialog:modal') || target?.closest('#panel-terminal')) return;
   if (target?.matches('input,select,textarea') && target !== editor && !milkdown.host.contains(target)) return;
   const key = event.key.toLowerCase();
   if (key === 's' && !event.shiftKey) { event.preventDefault(); if (documentState && !activeImageTab) void work(saveDocument); return; }
@@ -1751,7 +1739,7 @@ const moveTreeFile = setupFileMove({
   prepare:async()=>{
     await savedBeforeOperation();retainDocumentTab();
     const active=documentState?.page;
-    for(const [page,tab] of [...documentTabs])if(tab.content!==tab.document.content){await openPage(page);await saveDocument(false);}
+    for(const [page,tab] of documentTabs)if(tab.content!==tab.document.content)throw new Error(`${page}に未保存の変更があります。先に保存してください。`);
     if(active&&documentState?.page!==active)await openPage(active);
   },
   changed:async(result:FileMoveResult)=>{
@@ -2564,7 +2552,7 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
     if(decision.action==='retry'){previousCandidate={content:candidate,accepted:decision.accepted,feedback:decision.feedback};instruction=decision.feedback||instruction;continue;}
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
     if(decision.content===selection.text){status("採用する変更はありません。本文を保持しました。");return;}
-    selection.apply(decision.content);updateHistoryButtons();await saveDocument(false);status(selection.text?'指定範囲へAI文書を反映しました。':'カーソル位置にAI文書を挿入しました。');return true;
+    selection.apply(decision.content);updateHistoryButtons();status(selection.text?'指定範囲へAI文書を反映しました。':'カーソル位置にAI文書を挿入しました。');return true;
   }
 }
 element('selection-ai').addEventListener('click',()=>{void createSelectionDocument().catch(error=>status(String(error),true));});
@@ -2624,7 +2612,7 @@ function installReaderReport(root:string,page:string,expected:string,result:Read
       document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();reopenReaderReview?.();
       const filter=document.querySelector<HTMLSelectElement>('#reader-review-results select');
       if(filter){filter.value=previousFilter;filter.dispatchEvent(new Event('change'));}
-      await saveDocument(false);status(`レビューの修正案 ${changes.applied}件を適用しました。`);
+      status(`レビューの修正案 ${changes.applied}件を適用しました。`);
     });
   };
   reopenReaderReview=()=>{
@@ -2732,7 +2720,7 @@ async function insertScreenshotHere():Promise<void>{
       if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
       stage('insert');
       if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,`\n\n${markdown}\n\n`,0,markdown.length+4);
-      updateHistoryButtons();stage('save');await saveDocument(false);stage('refresh');await screenshotLibrary.refresh();outcome='success';status('指定位置にスクショを挿入しました。');
+      updateHistoryButtons();stage('refresh');await screenshotLibrary.refresh();outcome='success';status('指定位置にスクショを挿入しました。');
     });
   } catch(error) {outcome='error';throw error;}
   finally {

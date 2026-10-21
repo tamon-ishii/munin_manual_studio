@@ -25,14 +25,17 @@ try {
   async function idle(){await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');}
   async function tree(file){await page.locator('#tree-search').fill(file.split('/').at(-1));await page.locator(`[data-page="${file}"],[data-image="${file}"]`).click();await idle();await page.locator('#tree-search').fill('');}
   await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
-  assert.equal(await page.locator('#save-page').count(),0,'the editor has no save button');
+  assert.equal(await page.locator('#save-page').count(),1,'the editor has an explicit save button');
   assert.equal(await page.locator('#generate-page').count(),0,'the retired task update button is not present');
   await page.locator('#editor-more>summary').click();
   assert.equal(await page.locator('#shortcut-help').textContent(),'ショートカット');
   await page.locator('#editor-more>summary').click();
   await page.locator('#markdown-editor').fill(initial+'Autosaved draft.\n');
+  await page.waitForTimeout(1200);
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),initial,'idle edits do not write the manuscript');
+  await page.locator('#save-page').click();
   await page.waitForFunction(()=>document.querySelector('#document-tabs [data-document-page="index.md"]').textContent==='index.md');
-  assert.match(await readFile(path.join(root,'docs/index.md'),'utf8'),/Autosaved draft/,'idle edits are persisted without a save action');
+  assert.match(await readFile(path.join(root,'docs/index.md'),'utf8'),/Autosaved draft/,'explicit Save persists the edit');
   let delayedSaveRequests = 0;
   const delayedSave = async route => {
     if (route.request().postDataJSON().action === 'editor-save') {
@@ -43,17 +46,20 @@ try {
   };
   await page.route('**/__manual/rpc', delayedSave);
   await page.locator('#markdown-editor').fill(initial+'Saving draft.\n');
+  await page.locator('#save-page').click();
   await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saving');
   await page.locator('#markdown-editor').fill(initial+'Autosaved draft.\n');
+  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  await page.locator('#save-page').click();
   await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved' && document.querySelector('#document-tabs [data-document-page="index.md"]').textContent==='index.md');
-  assert.equal(delayedSaveRequests,2,'an edit during saving causes a second serialized save');
+  assert.equal(delayedSaveRequests,2,'a second explicit save serializes the edit made during saving');
   assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),initial+'Autosaved draft.\n','edits made during saving are saved in a subsequent request');
   await page.unroute('**/__manual/rpc', delayedSave);
   await page.locator('#markdown-editor').fill(initial+'Unsaved draft.\n');
   assert.equal(await page.locator('#document-tabs [data-document-page="index.md"]').textContent(),'index.md *');
   await tree('docs/guide.md');
   assert.equal(await page.locator('#document-tabs [role=tab]').count(),2);
-  assert.equal(await page.locator('#document-tabs [data-document-page="index.md"]').textContent(),'index.md');
+  assert.equal(await page.locator('#document-tabs [data-document-page="index.md"]').textContent(),'index.md *');
   await page.locator('[data-document-page="index.md"]').click();await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(),/Unsaved draft/);
   await page.locator('#markdown-editor').focus();await page.keyboard.press('Control+z');assert.equal(await page.locator('#markdown-editor').inputValue(),initial+'Autosaved draft.\n');

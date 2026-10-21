@@ -193,6 +193,7 @@ def session():
             assert inserted.count('<!-- screenshot:ref id=') == 1
             shot_id = re.search(r'<!-- screenshot:ref id=([^ >]+)', inserted).group(1)
             assert shot_id != first_id
+            chord(ord('s'))
             wait(lambda: (root / 'docs/index.md').read_text() == inserted, 'captured reference saved to real manuscript')
             assert editor.get_component_iface().grab_focus()
             chord(ord('z'))

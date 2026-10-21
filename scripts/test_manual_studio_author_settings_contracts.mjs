@@ -130,13 +130,16 @@ try{
  const editor=page.locator('#markdown-editor');
  const draft=original+'Saved through editor.\n';
  await editor.fill(draft);
+ await page.waitForTimeout(1200);
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original,'editing preserves the stored manuscript until explicit save');
+ await page.locator('#save-page').click();
  await page.waitForFunction(()=>document.querySelector('#save-state')?.dataset.state==='saved');
- assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft,'autosave writes the real manuscript');
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft,'explicit save writes the real manuscript');
  await page.reload();await idle();
  assert.equal(await editor.inputValue(),draft,'editor reload restores actual saved content');
  assert.equal(await page.locator('#editor-title').textContent(),'index.md');
  assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsAfterWorkspace);
- await record('P02.editor-autosave','P02',['id="markdown-editor" spellcheck'],['edit source manuscript','wait for autosave state','read actual docs/index.md','reload editor and compare body and active title'],{manuscript:'docs/index.md',contentHash:hash(draft)});
+ await record('P02.editor-manual-save','P02',['id="markdown-editor" spellcheck'],['edit source manuscript','verify unsaved body then click Save','read actual docs/index.md','reload editor and compare body and active title'],{manuscript:'docs/index.md',contentHash:hash(draft)});
 
  await page.getByRole('button',{name:'外観',exact:true}).click();
  await page.locator('#toolbar-customization>summary').click();
@@ -156,6 +159,6 @@ try{
  assert.deepEqual(await readFile(path.join(root,'manual_setting.json')),settingsAfterWorkspace);
  await record('P13.toolbar-visibility','P13',['data-tab="appearance" data-ui-icon','id="reset-toolbar-customization"','checkbox.onchange=()=>{if(checkbox.checked)hidden.delete'],['open appearance panel','hide bold control','verify toolbar and localStorage','reload and verify preference restores','reset toolbar visibility','verify manuscript unchanged'],{persistence:'browser localStorage',reset:'storage key removed'});
  assert.deepEqual(errors,[]);
- await writeFile(path.join(reportDir,'result.json'),JSON.stringify({...await finishVerification(start),type:'real-backend',scope:'removed workspace settings, P02 source autosave, P13 toolbar preference; browser UI with actual local backend files; remaining actions unverified',notes:'Vite fixture ran on port 5181. Browser RPC Origin was adapted to its development allowlist on port 5174 while requests passed through the actual backend.',results},null,2));
+ await writeFile(path.join(reportDir,'result.json'),JSON.stringify({...await finishVerification(start),type:'real-backend',scope:'removed workspace settings, P02 explicit manuscript save, P13 toolbar preference; browser UI with actual local backend files; remaining actions unverified',notes:'Vite fixture ran on port 5181. Browser RPC Origin was adapted to its development allowlist on port 5174 while requests passed through the actual backend.',results},null,2));
  console.log(`Author/settings contracts passed: ${results.length} entry-specific results across 3 scenarios.`);
 }finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

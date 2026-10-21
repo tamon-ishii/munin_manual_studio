@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {chromium} from 'playwright-core';
+const root=await mkdtemp(path.join(tmpdir(),'munin-manual-save-')),base='http://127.0.0.1:5189';
+const original='# First\n\nOriginal text\n',other='# Second\n\nOther text\n';
+let server,browser,writes=0;
+try{
+ await mkdir(path.join(root,'docs'));await writeFile(path.join(root,'docs/index.md'),original);await writeFile(path.join(root,'docs/other.md'),other);
+ await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',targets:['docs'],output:'manual',connection_type:'none'}));
+ server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','apps/manual-studio/vite.config.ts','--port','5189','--strictPort'],{stdio:'ignore'});
+ for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
+ browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage({viewport:{width:1440,height:960}});page.setDefaultTimeout(30_000);
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/__manual/rpc',async route=>{if(route.request().postDataJSON().action==='editor-save')writes++;const response=await route.fetch({headers:{...route.request().headers(),origin:'http://127.0.0.1:5174'}});await route.fulfill({response});});
+ const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+ await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=index.md`);await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('Original text'));await idle();
+ await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
+ const editor=page.locator('#markdown-editor'),tab=page.locator('[data-document-page="index.md"]');
+ const draft=original+'Unsaved edit\n';await editor.fill(draft);await page.waitForTimeout(1400);
+ assert.equal(writes,0);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);assert.match(await tab.textContent(),/\*$/);
+ await page.locator('#tree-search').fill('other.md');await page.locator('[data-page="docs/other.md"]').click();await idle();await page.locator('#tree-search').fill('');
+ assert.equal(writes,0);assert.match(await tab.textContent(),/\*$/);await tab.click();await idle();assert.equal(await editor.inputValue(),draft);
+ await editor.press('ControlOrMeta+z');assert.equal(await editor.inputValue(),original);await editor.press('ControlOrMeta+Shift+z');assert.equal(await editor.inputValue(),draft);
+ await page.evaluate(()=>{const panel=document.createElement('dialog');panel.id='modeless-test';panel.textContent='Review results';document.body.append(panel);panel.show();});
+ await editor.press('ControlOrMeta+s');await idle();assert.equal(writes,1);
+ await page.locator('#modeless-test').evaluate(panel=>{panel.close();panel.remove();});
+ assert.equal(writes,1);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft);assert.doesNotMatch(await tab.textContent(),/\*$/);
+ await editor.press('ControlOrMeta+z');assert.equal(await editor.inputValue(),original);assert.match(await tab.textContent(),/\*$/);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft);
+ await editor.press('ControlOrMeta+Shift+z');await editor.press('ControlOrMeta+s');await idle();
+ await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+ const paragraph=page.locator('.ProseMirror p').filter({hasText:'Original text'});await paragraph.click();await page.keyboard.press('End');await page.keyboard.type(' rich change');
+ await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('rich change'));await page.waitForTimeout(1200);const beforeSave=writes;
+ await page.keyboard.press('ControlOrMeta+s');await idle();assert.equal(writes,beforeSave+1);
+ await page.getByRole('button',{name:'Markdownソース',exact:true}).click();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+ await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.doesNotMatch(await editor.inputValue(),/rich change/);assert.match(await tab.textContent(),/\*$/);
+ await page.locator('.milkdown-top-bar').getByRole('button',{name:'やり直す',exact:true}).click();assert.match(await editor.inputValue(),/rich change/);
+ await page.getByRole('button',{name:'Markdownソース',exact:true}).click();await editor.fill(draft+'Keep me\n');
+ await page.getByRole('button',{name:'index.mdを閉じる',exact:true}).click();await page.locator('#unsaved-changes-dialog').waitFor();await page.locator('[data-unsaved-action="cancel"]').click();await idle();assert.match(await editor.inputValue(),/Keep me/);assert.match(await tab.textContent(),/\*$/);
+ assert.deepEqual(errors,[]);console.log('Manual manuscript save: no idle/tab writes; drafts and stars survive tab changes; explicit Save/Ctrl+S; source and rich Undo/Redo survive save and mode changes; unsaved close cancellation passed.');
+}finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

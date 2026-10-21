@@ -6,7 +6,7 @@ import { verificationIdentity } from './lib/manual_ui_identity.mjs';
 const registry = JSON.parse(await readFile('scripts/fixtures/manual-studio-ui-inventory.json', 'utf8'));
 const nativeResourceCases = registry.cases.filter(test => (test.existingChecks || []).includes('scripts/test_manual_studio_native_resource_edit.py') || test.script === 'scripts/test_manual_studio_native_resource_edit.py').map(test => test.id);
 const integrityCases = ["P02.integrity-conflict-project-cancel", "P13.integrity-settings-retry", "P15.integrity-legacy-open", "P06.integrity-protected-sharing", "P08.integrity-recapture-partial-retry"];
-const authorSettingsCases = ['P02.brief-persistence', 'P02.editor-autosave', 'P13.toolbar-visibility'];
+const authorSettingsCases = ['P02.brief-persistence', 'P02.editor-manual-save', 'P13.toolbar-visibility'];
 const imageControlCases = [
   'P06.control-search', 'P06.control-kind', 'P06.control-usage', 'P06.control-compact-menu',
   'P06.control-refresh', 'P06.control-usage-link', 'P06.control-replace', 'P07.control-restore',
@@ -44,6 +44,8 @@ steps.push({ group: 'unit', name: 'selective Diff checks', command: npx, args: [
 steps.push({group:'unit',name:'manuscript replacement and section move checks',command:npx,args:['tsx','scripts/test_manuscript_tools.ts'],timeoutMs:60_000});
 steps.push({group:'unit',name:'review correction apply and batch checks',command:process.execPath,args:['scripts/test_manual_studio_review_corrections.mjs'],timeoutMs:60_000});
 const unitStepCount = steps.length;
+steps.push({group:'ui',name:'manual save and Undo across modes and tabs',command:process.execPath,args:['scripts/test_manual_studio_manual_save.mjs'],timeoutMs:90_000});
+steps.push({group:'ui',name:'GitHub alert contrast across all themes',command:process.execPath,args:['scripts/test_manual_studio_gfm_contrast.mjs'],timeoutMs:60_000});
 steps.push({group:'ui',name:'resource and preview performance regressions',command:process.execPath,args:['scripts/test_manual_studio_performance_ui.mjs'],timeoutMs:120_000});
 
 
@@ -71,7 +73,7 @@ steps.push(
   { group: 'ui', name: 'managed, generated, library and rich/source drag insertion contracts', command: process.execPath, args: ['scripts/test_manual_studio_managed_insertion.mjs'], timeoutMs: 180_000 },
   { group: 'ui', name: 'entry-specific managed insertion evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', 'P03.imported-card,P11.generated-card,P04.screenshot-card,P11.editor-dialog,P11.resource-dialog,P03.resource-drop-source,P03.resource-drop-rich,P03.tree-drop-source,P03.tree-drop-rich,P04.editor-existing', '--report', 'ui-coverage-results/managed-insertion/result.json', '--require-complete', '--output', 'ui-coverage-results/managed-insertion-gate.json'], timeoutMs: 60_000 },
   { group: 'ui', name: 'entry-specific insertion evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', 'P03.source-file,P03.source-clipboard,P03.document-clipboard,P03.source-drop,P03.rich-upload,P03.rich-paste,P03.rich-drop', '--report', 'ui-coverage-results/insertion/result.json', '--require-complete', '--output', 'ui-coverage-results/insertion-gate.json'], timeoutMs: 60_000 },
-  { group: 'ui', name: 'author settings and editor autosave contracts', command: process.execPath, args: ['scripts/test_manual_studio_author_settings_contracts.mjs'], timeoutMs: 120_000 },
+  { group: 'ui', name: 'author settings and explicit manuscript save contracts', command: process.execPath, args: ['scripts/test_manual_studio_author_settings_contracts.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'entry-specific author settings evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', authorSettingsCases.join(','), '--report', 'ui-coverage-results/author-settings/result.json', '--require-complete', '--output', 'ui-coverage-results/author-settings-gate.json'], timeoutMs: 60_000 },
   { group: 'ui', name: 'resource filter, compact menu, replacement and comparison contracts', command: process.execPath, args: ['scripts/test_manual_studio_image_control_contracts.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'entry-specific image control evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', imageControlCases.join(','), '--report', 'ui-coverage-results/image-controls/result.json', '--require-complete', '--output', 'ui-coverage-results/image-controls-gate.json'], timeoutMs: 60_000 },

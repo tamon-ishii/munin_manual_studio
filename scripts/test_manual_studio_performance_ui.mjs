@@ -34,10 +34,14 @@ try {
   const before={preview:count('editor-preview'),resources:count('resources-list')};
   const updated='# Performance\n\nChanged text\n';
   await page.locator('#markdown-editor').fill(updated);
+  await page.waitForTimeout(1200);
+  assert.equal(count('editor-save'),0,'editing does not save automatically');
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),'# Performance\n\nOriginal text\n');
+  await page.locator('#markdown-editor').press('ControlOrMeta+s');
   await page.waitForFunction(()=>document.querySelector('#save-state')?.textContent==='保存済み');
   assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),updated);
   assert.equal(count('editor-preview'),before.preview,'hidden preview is not generated after editing');
-  assert.equal(count('resources-list'),before.resources,'autosave does not refresh the hidden library');
+  assert.equal(count('resources-list'),before.resources,'explicit save does not refresh the hidden library');
   await page.locator('#markdown-editor').press('ControlOrMeta+s');
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   assert.equal(count('resources-list'),before.resources,'manual save also skips the hidden library');

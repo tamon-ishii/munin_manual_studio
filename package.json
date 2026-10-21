@@ -1,7 +1,7 @@
 {
   "name": "munin-manual-studio",
   "private": true,
-  "version": "0.9.12",
+  "version": "0.9.13",
   "type": "module",
   "scripts": {
     "manual:dev": "vite --config apps/manual-studio/vite.config.ts",

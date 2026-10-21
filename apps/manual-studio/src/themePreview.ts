@@ -19,6 +19,7 @@ export function setupPreviewTheme(iframe: HTMLIFrameElement): void {
         a { color: ${color('--accent', '#246b54')}; }
         pre, code { background: ${color('--surface-soft', '#f2f5f3')}; color: ${color('--text-primary', '#26342f')}; }
         blockquote { border-color: ${color('--accent', '#74a58a')}; color: ${color('--text-secondary', '#52665a')}; }
+        blockquote[class^="markdown-alert-"] { background: ${color('--surface-soft', '#f2f5f3')}; color: ${color('--text-primary', '#26342f')}; }
         ::selection { background: ${color('--selection-bg', '#dfe9dd')}; }
       `;
     } catch {

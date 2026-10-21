@@ -136,7 +136,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  // Rich editor's actual upload entry shares document identity
  // protection, with native ProseMirror Undo.
  await editor.fill(initial);await editor.press('Control+s');await idle();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();await page.locator('.ProseMirror p').filter({hasText:'After text.'}).click();await page.keyboard.press('Home');const richBefore=await editor.inputValue();await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();await page.locator('.milkdown-image-block input[type=file]').setInputFiles(file);await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'));const richPath=(await editor.inputValue()).match(/(?:\.\.\/)*assets\/image-[A-Za-z0-9._-]+/)?.[0];assert.ok(richPath,'uploaded asset reference must be serialized');assert.deepEqual(await readFile(path.join(root,'docs',richPath)),png);await verifySaved(await editor.inputValue());await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.ok((await editor.inputValue()).includes('![]()'));await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal((await editor.inputValue()).trim(),richBefore.trim());await verifySaved(await editor.inputValue());
- // Slow upload must survive the rich editor's normal autosave.
+ // Slow upload must survive an explicit manuscript save.
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
  await editor.fill(initial);await editor.press('Control+s');await idle();
  await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
@@ -145,7 +145,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();
  const slowStarted=new Promise(resolve=>startedSave=resolve);
  await page.locator('.milkdown-image-block input[type=file]').setInputFiles(file);await waitStarted(slowStarted);
- await autosaved;await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved');
+ await page.keyboard.press('Control+s');await autosaved;await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved');
  releaseSave();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'),{},{timeout:4000});
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
@@ -176,7 +176,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  const switchedPath=assetRequests.at(-1);await openDocument('other.md');releaseSave();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('編集中の原稿が切り替わりました'));
  assert.equal(await editor.inputValue(),'# Other\n\nOther body.\n');assert.equal(await readFile(path.join(root,'docs/other.md'),'utf8'),'# Other\n\nOther body.\n');assert.deepEqual(await readFile(path.join(root,switchedPath)),png);
  await resetSource();
- records.push({entry:'rich image upload',steps:['choose insertion context','upload real PNG through Milkdown','check Markdown reference','native editor Undo','hold upload through real manuscript autosave','retry same file after visible error','cancel image block with Undo during save','switch through actual manuscript tab and reject late upload'],assertions:{visible:true,stored:true,preserved:true,returnTarget:true}});
+ records.push({entry:'rich image upload',steps:['choose insertion context','upload real PNG through Milkdown','check Markdown reference','native editor Undo','hold upload through explicit manuscript save','retry same file after visible error','cancel image block with Undo during save','switch through actual manuscript tab and reject late upload'],assertions:{visible:true,stored:true,preserved:true,returnTarget:true}});
  // Crepe's file gestures use an upload placeholder, rather than the image-input block.
  for(const gesture of ['paste','drop']){
   const entry=`rich image ${gesture}`;

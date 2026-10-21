@@ -1220,7 +1220,7 @@ footer>.document-save-status[hidden]{display:none}
 footer>.document-save-status{flex:0 0 auto}
 .footer-cursor{margin-left:auto;flex:0 0 auto;font:11px ui-monospace,monospace}
 @media(max-width:900px){.workspace-ai-group{margin-left:0}}
-.ProseMirror blockquote[data-gfm-alert]{padding:10px 16px;border-left:4px solid #0969da;background:color-mix(in srgb,var(--panel-bg,#fff) 94%,#0969da)}
+.ProseMirror blockquote[data-gfm-alert]{padding:10px 16px;border-left:4px solid #0969da;background:var(--surface-soft,var(--crepe-color-surface));color:var(--input-text,var(--crepe-color-on-background))}
 .ProseMirror blockquote[data-gfm-alert=TIP]{border-color:#1a7f37}
 .ProseMirror blockquote[data-gfm-alert=IMPORTANT]{border-color:#8250df}
 .ProseMirror blockquote[data-gfm-alert=WARNING]{border-color:#9a6700}
