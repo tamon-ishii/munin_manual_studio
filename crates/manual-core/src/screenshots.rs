@@ -207,42 +207,39 @@ fn adopt_locked(root: &Path, shot: &mut Screenshot, revision: &str) -> Result<()
     shot.adopting = None;
     save(root, shot)
 }
-fn usages(root: &Path, shot: &Screenshot) -> Result<Vec<String>, String> {
+type UsageIndex = (std::collections::BTreeMap<String, Vec<String>>, std::collections::BTreeMap<String, Vec<String>>);
+fn usage_index(root: &Path) -> Result<UsageIndex, String> {
     let config = crate::config::read_config(root);
-    let mut found = Vec::new();
+    let mut index = crate::resource_index::ProjectIndex::scan(root)?;
+    let mut images = std::collections::BTreeMap::<String, Vec<String>>::new();
+    let mut markers = std::collections::BTreeMap::<String, Vec<String>>::new();
+    let canonical = root.canonicalize().map_err(|e| e.to_string())?;
     for (page, path) in task::collect_target_markdown_files(root, &config) {
-        let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        let pattern = regex::Regex::new(&format!(
-            r"<!--\s*screenshot:ref\s+id={}\s*-->",
-            regex::escape(&shot.id)
-        ))
-        .unwrap();
-        let ranges = task::ignored_tag_ranges(&text);
-        let image_reference = pulldown_cmark::Parser::new(&text).any(|event| {
-            if let pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image { dest_url, .. }) = event
-            {
-                crate::quality::local_path(root, &path, &dest_url).ok()
-                    == project_path(root, &shot.output).ok()
-            } else if let pulldown_cmark::Event::Html(html)|pulldown_cmark::Event::InlineHtml(html)=event {
-                regex::Regex::new(r#"(?is)<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#).unwrap().captures_iter(&html).any(|cap|
-                    crate::quality::local_path(root,&path,&crate::quality::decode_html_attr(&cap[1])).ok()==project_path(root,&shot.output).ok())
-            } else {false}
-        });
-        if image_reference
-            || pattern
-                .find_iter(&text)
-                .any(|m| !task::is_inside_ranges(&(m.start()..m.end()), &ranges))
-        {
-            found.push(page);
+        let document = index.document(&path)?;
+        let mut targets = std::collections::BTreeSet::new();
+        for image in document.images {
+            if let Ok(target) = crate::quality::local_path(root, &path, &image.url) {
+                if let Ok(relative) = target.strip_prefix(&canonical) { targets.insert(relative.to_string_lossy().replace('\\', "/")); }
+            }
         }
+        for target in targets { images.entry(target).or_default().push(page.clone()); }
+        for id in document.screenshots { let pages = markers.entry(id).or_default(); if !pages.contains(&page) { pages.push(page.clone()); } }
     }
-    Ok(found)
+    index.save();
+    Ok((images, markers))
 }
+fn indexed_usages(index: &UsageIndex, shot: &Screenshot) -> Vec<String> {
+    let mut pages = index.0.get(&shot.output).cloned().unwrap_or_default();
+    for page in index.1.get(&shot.id).into_iter().flatten() { if !pages.contains(page) { pages.push(page.clone()); } }
+    pages.sort(); pages
+}
+fn usages(root: &Path, shot: &Screenshot) -> Result<Vec<String>, String> { Ok(indexed_usages(&usage_index(root)?, shot)) }
 pub fn list(root: &Path) -> Result<Value, String> {
     let _lock = workflow::resource_lock(root, ".munin/screenshots")?;
     let home = project_path(root, ".munin/screenshots")?;
     let mut items = Vec::new();
     if home.exists() {
+        let usage = usage_index(root)?;
         for dir in fs::read_dir(home).map_err(|e| e.to_string())? {
             let dir = dir.map_err(|e| e.to_string())?;
             if !dir.file_type().map_err(|e| e.to_string())?.is_dir() {
@@ -254,9 +251,9 @@ pub fn list(root: &Path) -> Result<Value, String> {
             }
             let shot = recovered(root, load(root, &id)?)?;
             let mut value = serde_json::to_value(&shot).map_err(|e| e.to_string())?;
-            value["usage"] = json!(usages(root, &shot)?);
+            value["usage"] = json!(indexed_usages(&usage, &shot));
             value["thumbnail"] = if let Some(revision) = &shot.adopted {
-                json!(data(&read_render(root, &shot, revision)?))
+                json!(crate::resources::thumbnail_from_bytes(root, &shot.output, &read_render(root, &shot, revision)?)?)
             } else {
                 Value::Null
             };

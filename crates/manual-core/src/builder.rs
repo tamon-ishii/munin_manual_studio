@@ -448,7 +448,7 @@ fn build_inner(
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        fs::write(&dest, final_page).map_err(|e| e.to_string())?;
+        fs::write(&dest, crate::gfm::for_publication(&final_page)).map_err(|e| e.to_string())?;
     }
 
     // markdown 以外の静的ファイルをコピー
@@ -531,6 +531,12 @@ fn build_inner(
         use_directory_urls: {}\n\
         site_dir: {}\n\
         markdown_extensions:\n\
+          - tables\n\
+          - footnotes\n\
+          - admonition\n\
+          - pymdownx.tilde\n\
+          - pymdownx.tasklist\n\
+          - pymdownx.magiclink\n\
           - pymdownx.superfences:\n\
               custom_fences:\n\
                 - name: mermaid\n\

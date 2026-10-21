@@ -20,7 +20,7 @@ const interactionEvents = new Set(['click','dblclick','contextmenu','input','cha
 const controlTags = new Set(['button','summary','input','select','textarea','a']);
 
 export async function sourceInventory(root) {
-  const files = ['apps/manual-studio/index.html'];
+  const files = ['apps/manual-studio/index.html','apps/manual-studio/recording-control.html'];
   for (const file of await readdir(path.join(root,'apps/manual-studio/src'))) {
     if (/\.tsx?$/.test(file) && !/\.test\./.test(file)) files.push(`apps/manual-studio/src/${file}`);
   }

@@ -23,6 +23,8 @@ export function showReaderReport(report:ReaderReport,valid:()=>boolean,jump:(fin
   const existing=document.querySelector<HTMLDialogElement>('#reader-review-results');
   if(existing?.open){existing.focus();return;}
   const {dialog,body}=featureDialog('読者レビュー・校正の結果',false);dialog.id='reader-review-results';
+  const nav=document.querySelector('.workspace-ai-group')?.parentElement;
+  const top=Math.max(12,Math.ceil(nav?.getBoundingClientRect().bottom||12)+8);dialog.style.top=`${top}px`;dialog.style.height=`calc(100dvh - ${top+48}px)`;
   const summary=document.createElement('p');summary.role='status';summary.textContent=`指摘 ${report.issues.length}件・画像確認 ${report.images.filter(image=>image.status==='checked').length}/${report.images.length}件`;
   const stale=document.createElement('p');stale.role='alert';
   const applyAll=document.createElement('button');applyAll.type='button';applyAll.className='primary';applyAll.textContent='すべて適用';

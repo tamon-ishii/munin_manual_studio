@@ -43,6 +43,7 @@ try {
  await mkdir(path.join(temp,'apps/manual-studio/src'),{recursive:true});
  const html=path.join(temp,'apps/manual-studio/index.html');
  await writeFile(html,'<button id="known">Known</button>');
+ await writeFile(path.join(temp,'apps/manual-studio/recording-control.html'),'');
  await writeFile(path.join(temp,'apps/manual-studio/src/interaction.ts'),`element('known').addEventListener('keydown', e=>{if(e.key==='x')run();}); target.addEventListener('drop',run); const b=document.createElement('button'); b.onclick=run; const delegates={onUpload:upload,onRun:run};`);
  const before=await sourceInventory(temp);assert.ok(before.operations.some(o=>o.kind==='event:drop'));assert.ok(before.operations.some(o=>o.kind==='event:keydown'));assert.ok(before.operations.some(o=>o.kind==='handler'));assert.ok(before.operations.some(o=>o.kind==='callback:onUpload'));assert.ok(before.operations.some(o=>o.kind==='callback:onRun'));
  const r=clone(registry);r.actions=before.operations.map(o=>({...registry.actions[0],id:o.id}));r.cases[0].entryPoints=r.actions.map(a=>a.id);

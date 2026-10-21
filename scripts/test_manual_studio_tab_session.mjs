@@ -40,7 +40,7 @@ try {
   assert.equal(requests.filter(request=>request.action==='state').length,1,'startup reads workspace state once');
   assert.deepEqual(requests.find(request=>request.action==='state').options.json,{editor:true},'editor skips unused publication previews');
   assert.equal(requests.filter(request=>request.action==='editor-read'&&request.options.page==='guide.md').length,1,'active tab content is reused');
-  assert.ok(requests.some(request=>request.action==='screenshots-list'),'resource loading started in the background');
+  assert.ok(requests.some(request=>request.action==='resources-list'),'resource loading started in the background');
   assert.equal(await page.locator('#markdown-editor').evaluate(editor=>editor.readOnly),false,'editor is ready while resource scans are blocked');
   blockResources=false;releaseResources();
 

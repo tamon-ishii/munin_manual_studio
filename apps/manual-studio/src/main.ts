@@ -1,3 +1,6 @@
+import {setupGfmSourceToolbar} from './gfmEditor';
+import { setupFileMove, type FileMoveResult } from './fileMove';
+import { PreviewScheduler } from './previewScheduler';
 import { DocumentPersistence } from './documentPersistence';
 import {OperationTiming,stageLabels,operationProgress} from './operationTimings';
 import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
@@ -121,12 +124,12 @@ const documentPersistence = new DocumentPersistence({
   apply: (saved, { content }) => {
     if (editor.value === content && saved.content !== content) editor.value = saved.content;
     documentState = saved; dirty = editor.value !== saved.content; retainDocumentTab();
+    resourceLibraryDirty = true; scheduleResourceUsageRefresh();
   },
-  refresh: refreshWorkspace,
+  refresh: () => refreshWorkspace(false, false),
   saved: page => status(`${page}を保存しました。`),
 });
 let busy = false;
-let previewVersion = 0;
 let previewRequestPending = false;
 let previewScrollWindow: Window | null = null;
 let syncingScroll = false;
@@ -136,7 +139,16 @@ let progressRunning = false;
 let progressDisplayLogs: string[] = [];
 let progressConnection = "AI";
 let manualStudioHiddenForCapture = false;
-let previewTimer: ReturnType<typeof setTimeout>;
+let resourceLibraryDirty = true;
+let resourceRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleResourceUsageRefresh(): void {
+  clearTimeout(resourceRefreshTimer);
+  if (!resourceLibraryDirty || !element('panel-screenshots').getClientRects().length) return;
+  resourceRefreshTimer = setTimeout(() => {
+    resourceLibraryDirty = false;
+    void screenshotLibrary.refresh(false).catch(error => { resourceLibraryDirty = true; console.warn('リソース一覧を更新できません', error); });
+  }, 300);
+}
 const expandedFolders = new Set<string>();
 let editHistory = new EditorHistory();
 let replayingHistory = false;
@@ -158,7 +170,7 @@ setupPaneResizers();
 const previewNavigator = createPreviewNavigator({
   getCurrentPage: () => documentState?.page || null,
   openPage: (page) => work(() => openPage(page)),
-  refreshPreview: () => work(() => renderPreview()),
+  refreshPreview: () => work(() => renderPreview(true)),
   onError: (error) => status(`プレビュー: ${String(error)}`, true),
 });
 const previewNavBar = element<HTMLElement>("preview-nav-bar");
@@ -543,6 +555,7 @@ function chooseTab(name: string): void {
     return;
   }
   activeWorkspaceTab = name;
+  if (name === "screenshots") resourceLibraryDirty = true;
   closeAllPanelDialogs();
   if (layoutManager) {
     layoutManager.focusPanel(tabToComponentId(name));
@@ -550,6 +563,8 @@ function chooseTab(name: string): void {
     document.querySelectorAll<HTMLElement>(".panel").forEach((panel) => { panel.hidden = panel.id !== `panel-${name}`; });
   }
   document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
+  scheduleResourceUsageRefresh();
+  if (name === "editor") void renderPreview();
   if (name === "terminal") {
     setTimeout(() => { terminalController?.fit(); }, 50);
   }
@@ -606,7 +621,7 @@ function renderDocumentTabs(): void {
       documentTabs.delete(page); documentState = null; documentPersistence.state = null; dirty = false;
       const next = [...documentTabs.keys()].at(-1);
       if (next) await openPage(next);
-      else { editor.value = ''; resetEditHistory(); ++previewVersion; element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages();  }
+      else { editor.value = ''; resetEditHistory(); element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages();  }
     }); };
     group.append(button, close); strip.append(group);
   }
@@ -645,7 +660,8 @@ function updateSaveState(): void {
   }
   renderDocumentTabs();
   const badge = element("save-state");
-  badge.hidden = !documentState;
+  badge.hidden = !documentState || ownerState?.state !== 'error';
+  badge.parentElement!.hidden = badge.hidden;
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
   const conflicted = ownerState?.state === 'error' && /変更されています|conflict|revision/i.test(ownerState.message || '');
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
@@ -664,20 +680,17 @@ function updateWorkspaceGuide(): void {
   try { dismissed = localStorage.getItem(`manual-studio-guide:${projectRoot}`) === 'hidden'; } catch { /* Optional preference. */ }
   guide.hidden = detached || !workspace || dismissed || workspace.config.connection_type !== 'none' && workspace.has_config;
 }
-async function renderPreview(): Promise<void> {
-  if (!documentState) return;
-  const version = ++previewVersion;
-  previewRequestPending = true;
-  previewNavigator.setStatus('loading');
-  try {
-    const html = await rpc("editor-preview", { page: documentState.page, body: editor.value });
-    if (version === previewVersion) {
-      previewRequestPending = false;
-      element<HTMLIFrameElement>("markdown-preview").srcdoc = html;
-      previewNavigator.updateToolbarState();
-    }
-  } catch (error) { if (version === previewVersion) { previewRequestPending = false; previewNavigator.setStatus('error', String(error)); status(`プレビュー: ${String(error)}`, true); } }
-}
+type PreviewSnapshot = { root: string; page: string; body: string; version: number };
+const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
+  snapshot: () => documentState ? {root: projectRoot, page: documentState.page, body: editor.value, version: documentRequestVersion} : null,
+  key: snapshot => JSON.stringify(snapshot),
+  visible: () => element('panel-editor').dataset.editorView !== 'edit' && !activeImageTab && Boolean(element('markdown-preview').getClientRects().length),
+  generate: snapshot => rpc('editor-preview', {page: snapshot.page, body: snapshot.body}, snapshot.root),
+  loading: () => { previewRequestPending = true; previewNavigator.setStatus('loading'); },
+  apply: html => { previewRequestPending = false; element<HTMLIFrameElement>('markdown-preview').srcdoc = html; previewNavigator.updateToolbarState(); },
+  error: error => { previewRequestPending = false; previewNavigator.setStatus('error', String(error)); status(`プレビュー: ${String(error)}`, true); },
+});
+function renderPreview(force = false): Promise<void> { return previewScheduler.request(force); }
 function updateCursor(): void {
   updateSelectionAction();
   const lines = editor.value.slice(0, editor.selectionStart).split("\n");
@@ -719,7 +732,6 @@ async function openPage(page: string, check = true, restored?: Document): Promis
     : restored ?? JSON.parse(await rpc("editor-read", { page }, root)) as Document;
   if (cached && cached.document.revision !== opened.revision) cached = undefined;
   if (root !== projectRoot || version !== documentRequestVersion) return;
-  ++previewVersion;
   documentState = opened;
   editor.dataset.owner = JSON.stringify([root, page]);
   editor.value = cached?.content ?? opened.content;
@@ -809,6 +821,7 @@ const screenshotLibrary = setupScreenshotLibrary({
   root: () => projectRoot, request: rpc, work, applications: () => launchCommands,
   refreshAssets: async root => {
     if (root !== projectRoot) return;
+    previewScheduler.invalidate();
     if (documentState) await Promise.all([renderPreview(), milkdown.refreshImages()]);
     const image = activeImageTab;
     if (image) {
@@ -912,7 +925,7 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
         if (editingRoot !== projectRoot) return;
         status(`編集コピーを保存しました: ${result.relativePath}。元画像と原稿は保持しています。リソース一覧から挿入・差し替えできます。`);
         await milkdown.refreshImages();
-        void renderPreview();
+        previewScheduler.invalidate(); void renderPreview();
         await refreshWorkspace();
         if (activeImageTab) {
           void openImageTab(activeImageTab);
@@ -937,7 +950,7 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
     status(`MarkItsの起動に失敗しました: ${String(err)}`, true);
   }
 }
-async function refreshWorkspace(reloadPage = false): Promise<void> {
+async function refreshWorkspace(reloadPage = false, refreshResources = true): Promise<void> {
   const root = projectRoot;
   const current = documentState;
   const content = editor.value;
@@ -947,7 +960,7 @@ async function refreshWorkspace(reloadPage = false): Promise<void> {
   if (root !== projectRoot || version !== workspaceRequestVersion) return;
   workspace = loaded;
   renderPages();  updateWorkspaceGuide();
-  await screenshotLibrary.refresh();
+  if (refreshResources) { await screenshotLibrary.refresh(); resourceLibraryDirty = false; }
   if (reloadPage && current) {
     if (documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
     const opened = JSON.parse(await rpc("editor-read", { page: current.page }, root)) as Document;
@@ -1173,7 +1186,7 @@ async function openProject(root: string, check = true): Promise<void> {
   documentPersistence.state = null;
   setAiPhase(element('ai-workflow-status'), 'idle');
   previewNavigator.setStatus('empty');
-  clearTimeout(previewTimer); ++previewVersion;
+  previewScheduler.invalidate();
   editor.value = "";
   resetEditHistory();
   element<HTMLIFrameElement>("markdown-preview").srcdoc = "";
@@ -1313,6 +1326,7 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
     await restoreManualStudioAfterCapture().catch(() => {});
   }
 }
+setupGfmSourceToolbar(element('panel-editor').querySelector<HTMLElement>('.formatting-toolbar')!,markdown=>{if(!documentState||busy)return;insertDocumentMarkdown(markdown);status('GitHubアラートを挿入しました。');});
 setupControlIcons();
 for (const [selector, name] of [["#undo-edit", "undo"], ["#redo-edit", "redo"], ["#insert-image", "image"], ['[data-format="link"]', "link"]] as const) {
   const button = document.querySelector<HTMLButtonElement>(selector);
@@ -1405,7 +1419,10 @@ try {
 let editorPanelWidth = 0;
 function applyEditorView(): void {
   const view = preferredEditorView || (editorPanelWidth < 850 ? "edit" : "split");
+  const changed = element("panel-editor").dataset.editorView !== view;
   element("panel-editor").dataset.editorView = view;
+  if (view === 'edit' && changed) previewScheduler.invalidate();
+  else if (changed) void renderPreview();
   document.querySelectorAll<HTMLButtonElement>("#panel-editor button[data-editor-view]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.editorView === view));
   });
@@ -1422,6 +1439,8 @@ new ResizeObserver(entries => {
   applyEditorView();
 }).observe(element("panel-editor"));
 applyEditorView();
+new ResizeObserver(() => scheduleResourceUsageRefresh()).observe(element('panel-screenshots'));
+new ResizeObserver(() => { if (element('markdown-preview').getClientRects().length) void renderPreview(); }).observe(element('markdown-preview'));
 editor.addEventListener("editor-mode-change", () => {
   if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
 });
@@ -1441,6 +1460,7 @@ function updateEditorEmptyState(): void {
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
   element('panel-editor').classList.toggle('editor-is-empty', empty);
+  for (const id of ['reader-review','selection-ai','generate-ai-image']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
@@ -1495,7 +1515,7 @@ editor.addEventListener("input", (event) => {
   recordEditHistory(event);
   dirty = editor.value !== documentState?.content; updateSaveState(); updateCursor();
 
-  clearTimeout(previewTimer); previewTimer = setTimeout(() => { void renderPreview(); }, 250);
+  previewScheduler.schedule();
 });
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 milkdown.host.addEventListener("scroll", () => syncScroll(milkdown.host, previewScrollElement()));
@@ -1726,15 +1746,51 @@ element("new-page").addEventListener("click", (event) => {
   if (contextCreateParent !== null) { input('new-page-path').value = contextCreateParent ? contextCreateParent + '/' : ''; input('new-page-title').value = ''; }
   element<HTMLDialogElement>("new-page-dialog").showModal(); input("new-page-path").focus();
 });
+const moveTreeFile = setupFileMove({
+  root:()=>projectRoot,busy:()=>busy,folders:()=>workspace?.project_entries.filter(e=>e.directory).map(e=>e.path)||[],request:rpc,work,report:status,
+  prepare:async()=>{
+    await savedBeforeOperation();retainDocumentTab();
+    const active=documentState?.page;
+    for(const [page,tab] of [...documentTabs])if(tab.content!==tab.document.content){await openPage(page);await saveDocument(false);}
+    if(active&&documentState?.page!==active)await openPage(active);
+  },
+  changed:async(result:FileMoveResult)=>{
+    const active=documentState?manuscriptPagePath(documentState.page):undefined;
+    const tabs=[...documentTabs.values()].map(tab=>({tab,path:manuscriptPagePath(tab.document.page)}));
+    const image=activeImageTab;
+    for(const path of [...imageTabs])if(path===result.source){imageTabs.delete(path);imageTabs.add(result.destination);}
+    documentState=null;documentPersistence.state=null;dirty=false;previewScheduler.invalidate();
+    await refreshWorkspace(false,false);documentTabs.clear();
+    const displayPath=(path:string)=>{
+      const prefix=(workspace?.config.docs||'docs').replace(/\/$/,'')+'/';
+      return path.startsWith(prefix)&&workspace?.pages.includes(path.slice(prefix.length))?path.slice(prefix.length):path;
+    };
+    for(const {tab,path} of tabs){
+      const next=path===result.source?result.destination:path;
+      const saved=result.documents.find(d=>d.page===next);
+      const label=displayPath(next);
+      if(saved){const history=new EditorHistory();history.reset({value:saved.content,start:0,end:0});documentTabs.set(label,{...tab,document:{...saved,page:label},content:saved.content,history,richState:null,start:0,end:0});}
+      else documentTabs.set(label,{...tab,document:{...tab.document,page:label}});
+    }
+    expandedFolders.add(result.destination.split('/').slice(0,-1).join('/'));
+    if(active)await openPage(active===result.source?result.destination:active);
+    if(image)await openImageTab(image===result.source?result.destination:image);
+    resourceLibraryDirty=true;await screenshotLibrary.refresh();renderPages();renderDocumentTabs();saveDocumentTabSession();
+  },
+});
+let contextMoveSource:string|null=null;
 const treeContextMenu = document.createElement('div'); treeContextMenu.id = 'tree-context-menu'; treeContextMenu.className = 'tree-context-menu'; treeContextMenu.role = 'menu'; treeContextMenu.hidden = true;
 for (const [label, id] of [['Markdownを作成','new-page'],['フォルダーを作成','new-folder']]) {
   const button = document.createElement('button'); button.type = 'button'; button.role = 'menuitem'; button.textContent = label; button.onclick = () => { treeContextMenu.hidden = true; element<HTMLButtonElement>(id).click(); }; treeContextMenu.append(button);
 }
+const moveMenuItem=document.createElement('button');moveMenuItem.type='button';moveMenuItem.role='menuitem';moveMenuItem.textContent='移動してリンクを更新';moveMenuItem.hidden=true;
+moveMenuItem.onclick=()=>{treeContextMenu.hidden=true;if(contextMoveSource)void moveTreeFile(contextMoveSource);};treeContextMenu.append(moveMenuItem);
 document.body.append(treeContextMenu);
 element('page-list').addEventListener('contextmenu', event => {
   if (!workspace || busy) return; event.preventDefault();
   const target = event.target as HTMLElement;
   const file = target.closest<HTMLElement>('[data-page],[data-image],[data-file]');
+  contextMoveSource=file?(file.dataset.page||file.dataset.image||file.dataset.file||null):null;moveMenuItem.hidden=!contextMoveSource;
   contextCreateParent = file ? (file.dataset.page || file.dataset.image || file.dataset.file || '').split('/').slice(0,-1).join('/') : target.closest<HTMLElement>('[data-folder]')?.dataset.folder || workspace.config.docs;
   treeContextMenu.hidden = false;
   const box = treeContextMenu.getBoundingClientRect(); treeContextMenu.style.left = `${Math.max(0,Math.min(event.clientX,innerWidth-box.width))}px`; treeContextMenu.style.top = `${Math.max(0,Math.min(event.clientY,innerHeight-box.height))}px`;
@@ -1743,9 +1799,22 @@ element('page-list').addEventListener('contextmenu', event => {
 document.addEventListener('pointerdown',event=>{ if (!treeContextMenu.contains(event.target as Node)) treeContextMenu.hidden = true; });
 document.addEventListener('keydown',event=>{if(event.key==='Escape')treeContextMenu.hidden=true;});
 element('page-list').addEventListener('dragstart', event => {
-  const image = (event.target as HTMLElement).closest<HTMLElement>('[data-image]');
-  if (!image || !event.dataTransfer) return;
-  event.dataTransfer.setData('application/x-munin-image', JSON.stringify({root:projectRoot,path:image.dataset.image})); event.dataTransfer.effectAllowed = 'copy';
+  const file=(event.target as HTMLElement).closest<HTMLElement>('[data-page],[data-image],[data-file]');
+  if(!file||!event.dataTransfer||busy)return;
+  const path=file.dataset.page||file.dataset.image||file.dataset.file;
+  event.dataTransfer.setData('application/x-munin-file',JSON.stringify({root:projectRoot,path}));
+  event.dataTransfer.effectAllowed='copyMove';
+  if(file.dataset.image)event.dataTransfer.setData('application/x-munin-image',JSON.stringify({root:projectRoot,path}));
+});
+element('page-list').addEventListener('dragover',event=>{
+  if(!(event.target as HTMLElement).closest('[data-folder]')||!event.dataTransfer?.types.includes('application/x-munin-file'))return;
+  event.preventDefault();event.dataTransfer.dropEffect='move';
+});
+element('page-list').addEventListener('drop',event=>{
+  const folder=(event.target as HTMLElement).closest<HTMLElement>('[data-folder]');
+  if(!folder||!event.dataTransfer?.types.includes('application/x-munin-file'))return;
+  event.preventDefault();event.stopPropagation();
+  try{const source=JSON.parse(event.dataTransfer.getData('application/x-munin-file')) as {root:string;path:string};if(source.root===projectRoot&&typeof source.path==='string')void moveTreeFile(source.path,folder.dataset.folder);}catch{status('移動するファイルを選び直してください。',true);}
 });
 function relativeProjectAsset(asset: string, page: string): string {
   const docs = workspace?.config.docs.replace(/\\/g,'/').replace(/\/$/,'') || 'docs';

@@ -1,3 +1,4 @@
+import {gfmAlerts,configureGfmAlerts,alertKinds,alertMarkdown} from './gfmEditor';
 import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePresentation} from './imagePresentation';
 import { Slice } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
@@ -57,7 +58,9 @@ export function setupMilkdownEditor(
   source.before(host);
   const toggle = document.createElement('button');
   toggle.type = 'button'; toggle.textContent = 'Markdownソース';
-  source.parentElement!.querySelector('.column-label')!.append(toggle);
+  toggle.id = 'editor-mode-toggle';
+  const modeControls = source.closest('#panel-editor')?.querySelector('.editor-action-group') || source.parentElement!.querySelector('.column-label') || source.parentElement!;
+  modeControls.insertBefore(toggle, modeControls.querySelector('#editor-more'));
   const pendingUploads: Array<{ cancelled: boolean }> = [];
   function cancelLatestUpload(): boolean {
     const pending = [...pendingUploads].reverse().find(upload => !upload.cancelled);
@@ -374,6 +377,7 @@ export function setupMilkdownEditor(
             icon: '', active: () => false,
             selector: { activeLabel: () => '挿入・その他', options: advanced.map(item => ({ label: labels[item.key] || item.key, onSelect: ctx => item.onRun!(ctx) })) },
           });
+          builder.addGroup('gfm-alerts','GitHub').addItem('gfm-alert',{icon:'',active:()=>false,selector:{activeLabel:()=> 'GitHubアラート',options:alertKinds.map(([kind,label])=>({label:`${label} (${kind})`,onSelect:(ctx:Ctx)=>insert(alertMarkdown(kind))(ctx)}))}});
           const groups = builder.build();
           for (let index = groups.length - 1; index >= 0; index--) {
             if (!groups[index].items.length) groups.splice(index, 1);
@@ -404,6 +408,7 @@ export function setupMilkdownEditor(
     },
   });
   crepe.editor.config(ctx => {
+    configureGfmAlerts(ctx);
     // The upload plugin leaves its placeholder behind when its uploader rejects.
     // The upload callback already reports the error; an empty result lets the
     // plugin remove the placeholder without inserting an image.
@@ -437,7 +442,7 @@ export function setupMilkdownEditor(
         } },
       };
     });
-  }).use(imagePresentationPlugin).use(bridge);
+  }).use(imagePresentationPlugin).use(gfmAlerts).use(bridge);
   void crepe.create().then(editor => {
     instance = editor; ready = true; refresh(); updateReadonly();
     if (!sourceMode) source.hidden = true;

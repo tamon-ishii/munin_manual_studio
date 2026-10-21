@@ -29,7 +29,7 @@ interface Options {
 export function setupScreenshotLibrary(options: Options) {
   const list = document.getElementById('screenshot-library-list')!;
   let generation = 0;
-  let recording: {root: string; id: string; ready?: (id:string)=>void; failed?:()=>void;stage?:(stage:string)=>void} | null = null;
+  let recording: {root: string; id: string; ready?: (id:string)=>void; failed?:()=>void;cancelled?:()=>void;stage?:(stage:string)=>void} | null = null;
   let currentShots:Screenshot[]=[];
   const editStates=new Map<string,string>();
   function editState(root:string,id:string,message:string){
@@ -37,16 +37,15 @@ export function setupScreenshotLibrary(options: Options) {
     for(const card of list.querySelectorAll<HTMLElement>('[data-screenshot-id]'))if(card.dataset.screenshotId===id&&root===options.root()){const status=card.querySelector<HTMLElement>('.screenshot-edit-status');if(status)status.textContent=message;}
   }
   const resources=setupResourceBrowser({...options,refresh},()=>render(options.root()));
-  async function refresh() {
+  async function refresh(refreshAssets = true) {
     const root = options.root(), version = ++generation;
     updateControls();
     if (recaptureOwnerRoot && recaptureOwnerRoot !== root) recaptureStatus.textContent = "";
     if (!root) { list.textContent = 'プロジェクトを開いてください。'; return; }
-    const [shots,assets]=await Promise.all([options.request('screenshots-list',{},root),options.request('resources-list',{},root)]);
-    const result = JSON.parse(shots) as {items:Screenshot[]};
-    const resourceResult=JSON.parse(assets) as {items:Resource[]};
+    const resourceResult=JSON.parse(await options.request('resources-list',{},root)) as {items:Resource[];screenshots?:{items:Screenshot[]}};
+    const result=resourceResult.screenshots||JSON.parse(await options.request('screenshots-list',{},root)) as {items:Screenshot[]};
     if (root !== options.root() || version !== generation) return;
-    currentShots=result.items||[];resources.setItems(resourceResult.items||[]);render(root);await options.refreshAssets?.(root);
+    currentShots=result.items||[];resources.setItems(resourceResult.items||[]);render(root);if(refreshAssets)await options.refreshAssets?.(root);
   }
   function render(root:string){
     const result={items:currentShots};resources.captureViews(list);list.replaceChildren();
@@ -269,6 +268,7 @@ export function setupScreenshotLibrary(options: Options) {
     progress.textContent=message;
     owner?.failed?.();
   }
+  if (native) void listen('manual-studio-screenshot-cancelled', () => { const owner=recording; recording=null; updateControls(); progress.textContent='撮影をキャンセルしました。'; owner?.stage?.('cancelled'); owner?.cancelled?.(); });
   if (native) void listen<string>('manual-studio-screenshot-failed', event => { failRecording(event.payload); });
   async function startRecording(ready?: (id:string)=>void,started?:()=>void,cancelled?:()=>void,failed?:()=>void,stage?:(stage:string)=>void) {
     if (!native) throw new Error('操作の記録はデスクトップ版で利用できます。');
@@ -287,7 +287,7 @@ export function setupScreenshotLibrary(options: Options) {
       const profile = profiles[Number(select.value)]; const id = `shot-${crypto.randomUUID()}`;
       if (root !== options.root()) return;
       await invoke('start_operation_recording', { root, program: profile.program, args: [...profile.args], workingDirectory: profile.workingDirectory || '', windowTitle: '', taskId: id, markitsProgram: '' });
-      recording = {root,id,ready,failed,stage};stage?.('recording'); updateControls(); dialog.close();started?.(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
+      recording = {root,id,ready,failed,cancelled,stage};stage?.('recording'); updateControls(); dialog.close();started?.(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
       await invoke('show_recording_control');
     }); };
     field.append(select); actions.append(cancel,start); start.className = "primary"; dialog.append(heading,field,actions); dialog.addEventListener('close',()=>{dialog.remove();if(!recording)cancelled?.();}); document.body.append(dialog); dialog.showModal();
@@ -318,7 +318,7 @@ export function setupScreenshotLibrary(options: Options) {
         const retry=document.createElement('button');retry.type='button';retry.textContent='編集結果を再確認';retry.onclick=()=>{for(const session of pending.filter(item=>item.root===root))void watch(session);};
         const note=document.createElement('p');note.className='muted';note.textContent='閉じると挿入を取り消します。記録は撮影用の操作ウィンドウから完了でき、画像はリソース一覧に保存されます。';body.append(help,capture,retry,note);
         dialog.addEventListener('close',()=>{if(!completed){if(recording?.root===root)recording.ready=undefined;for(const session of pending.filter(item=>item.root===root)){handoffCallbacks.delete(session.completionFile);handoffProgress.delete(session.completionFile);}resolve(undefined);}},{once:true});
-      },()=>resolve(undefined),()=>{stage?.('error');waiting?.close();resolve(undefined);},code=>{stage?.(code);if(code==='cancelled'){waiting?.close();return;}waiting?.dispatchEvent(new CustomEvent('capture-stage',{detail:code}));}).catch(reject);
+      },()=>{completed=true;waiting?.close();resolve(undefined);},()=>{stage?.('error');waiting?.close();resolve(undefined);},code=>{stage?.(code);if(code==='cancelled'){waiting?.close();return;}waiting?.dispatchEvent(new CustomEvent('capture-stage',{detail:code}));}).catch(reject);
     });
   }
   const input = document.getElementById('screenshot-library-import') as HTMLInputElement;

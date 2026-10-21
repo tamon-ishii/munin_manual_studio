@@ -191,23 +191,68 @@ fn resolve_working_directory(root: Option<&str>, working_directory: Option<&str>
     Ok(Some(path))
 }
 
+#[derive(Default)]
+struct RecordingControlGuard(std::sync::atomic::AtomicU64);
+fn disarm_recording_escape(app: &tauri::AppHandle) {
+    app.state::<RecordingControlGuard>().0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+#[cfg(target_os = "windows")]
+fn arm_recording_escape(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    let generation = app.state::<RecordingControlGuard>().0.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        #[link(name = "user32")]
+        extern "system" { fn GetAsyncKeyState(key: i32) -> i16; }
+        let mut down = unsafe { GetAsyncKeyState(0x1B) } < 0;
+        loop {
+            if app.state::<RecordingControlGuard>().0.load(Ordering::SeqCst) != generation { break; }
+            let Some(window) = app.get_webview_window("recording-control") else { break; };
+            if !window.is_visible().unwrap_or(false) { break; }
+            let pressed = unsafe { GetAsyncKeyState(0x1B) } < 0;
+            if pressed && !down {
+                let owner = app.clone();
+                let _ = app.run_on_main_thread(move || { let _ = cancel_operation_recording(owner.clone(), owner.state::<recorder::RecorderState>()); });
+                break;
+            }
+            down = pressed;
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    });
+}
+#[cfg(not(target_os = "windows"))]
+fn arm_recording_escape(_app: &tauri::AppHandle) {}
+
+#[tauri::command]
+fn cancel_operation_recording(app: tauri::AppHandle, state: State<'_, recorder::RecorderState>) -> Result<(), String> {
+    disarm_recording_escape(&app);
+    let cancelled = recorder::cancel(state.inner())?;
+    let close = close_recording_control(app.clone());
+    let restore = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
+    if cancelled { let _ = app.emit_to("main", "manual-studio-screenshot-cancelled", ()); }
+    close.and(restore)
+}
+
 #[tauri::command]
 fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
+    disarm_recording_escape(&app);
     if let Some(window) = app.get_webview_window("recording-control") {
         window.show().map_err(|error| error.to_string())?;
         window.unminimize().map_err(|error| error.to_string())?;
         window
             .set_always_on_top(true)
             .map_err(|error| error.to_string())?;
-        return window.set_focus().map_err(|error| error.to_string());
+        window.set_focus().map_err(|error| error.to_string())?;
+        arm_recording_escape(&app);
+        return Ok(());
     }
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         "recording-control",
-        tauri::WebviewUrl::App("index.html?recordingControl=1".into()),
+        tauri::WebviewUrl::App("recording-control.html".into()),
     )
     .title("Munin Manual Studio — 撮影")
-    .inner_size(310.0, 100.0)
+    .inner_size(380.0, 150.0)
     .min_inner_size(1.0, 1.0)
     // GTK locks an unresizable WebView at its initial minimum (200px).
     // Allow the content-driven resize to shrink the native popup.
@@ -220,11 +265,14 @@ fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.unminimize().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())
+    window.set_focus().map_err(|error| error.to_string())?;
+    arm_recording_escape(&app);
+    Ok(())
 }
 
 #[tauri::command]
 fn close_recording_control(app: tauri::AppHandle) -> Result<(), String> {
+    disarm_recording_escape(&app);
     if let Some(window) = app.get_webview_window("recording-control") {
         window.close().map_err(|error| error.to_string())?;
     }
@@ -233,6 +281,7 @@ fn close_recording_control(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn hide_recording_control(app: tauri::AppHandle) -> Result<(), String> {
+    disarm_recording_escape(&app);
     if let Some(window) = app.get_webview_window("recording-control") {
         window.hide().map_err(|error| error.to_string())?;
     }
@@ -244,6 +293,7 @@ fn show_recording_control_again(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("recording-control") {
         window.show().map_err(|error| error.to_string())?;
         window.set_focus().map_err(|error| error.to_string())?;
+        arm_recording_escape(&app);
     }
     Ok(())
 }
@@ -1242,6 +1292,7 @@ fn main() {
         .manage(recorder::RecorderState::default())
         .manage(editor_context_menu::EditorContextMenus::default())
         .manage(HiddenStudioWindows::default())
+        .manage(RecordingControlGuard::default())
         .invoke_handler(tauri::generate_handler![
             manual_request,
             editor_context_menu::set_editor_context_menu_state,
@@ -1252,6 +1303,7 @@ fn main() {
             save_launch_commands,
             test_launch_application,
             show_recording_control,
+            cancel_operation_recording,
             close_recording_control,
             hide_recording_control,
             show_recording_control_again,

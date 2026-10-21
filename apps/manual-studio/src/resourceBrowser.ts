@@ -1,7 +1,8 @@
+import { ThumbnailCache } from './thumbnailCache';
 import {featureDialog} from './screenshotWorkflow';
 import type {ImageGenerationEntry} from './imageGeneration';
 export interface ResourceUsage {page:string;line:number;start:number;end:number;snippet:string}
-export interface Resource {path:string;name:string;kind:'screenshot'|'generated'|'imported';screenshot_id?:string;generation?:ImageGenerationEntry;thumbnail?:string;usages:ResourceUsage[];missing?:boolean;error?:string;sha256?:string}
+export interface Resource {path:string;name:string;kind:'screenshot'|'generated'|'imported';screenshot_id?:string;generation?:ImageGenerationEntry;thumbnail?:string;usages:ResourceUsage[];missing?:boolean;error?:string;sha256?:string;revision?:string}
 interface Options {
   root():string;request(action:string,options:Record<string,unknown>,root:string):Promise<string>;
   work(operation:()=>Promise<void>):Promise<void>;refresh():Promise<void>;
@@ -22,17 +23,18 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
   });
   const labels={screenshot:'撮影画像',generated:'AI生成',imported:'取り込み画像'};
   let items:Resource[]=[],byPath=new Map<string,Resource>();
-  const thumbnails=new Map<string,string>();
+  const thumbnails=new ThumbnailCache();
+  let resourceEpoch=0;
+  const thumbnailKey=(root:string,path:string)=>JSON.stringify([root,path,byPath.get(path)?.revision||`uncached-${resourceEpoch}`]);
   let observer:IntersectionObserver|null=null;let loading=0;
-  const queue:Array<{image:HTMLImageElement;root:string;path:string}>=[];
+  const queue:Array<{image:HTMLImageElement;root:string;path:string;key:string}>=[];
   function drain(){
     while(loading<3&&queue.length){const item=queue.shift()!;if(!item.image.isConnected||item.root!==options.root())continue;
-      loading++;void options.request('resources-thumbnail',{asset:item.path},item.root).then(src=>{if(item.image.isConnected&&item.root===options.root()){item.image.src=src;thumbnails.set(`${item.root}:${item.path}`,src);}}).catch(()=>{item.image.alt+='（プレビューを読み込めません）';}).finally(()=>{loading--;drain();});
+      loading++;void thumbnails.load(item.key,()=>options.request('resources-thumbnail',{asset:item.path},item.root)).then(src=>{if(item.image.isConnected&&item.root===options.root()&&item.key===thumbnailKey(item.root,item.path)){item.image.src=src;}}).catch(()=>{item.image.alt+='（プレビューを読み込めません）';}).finally(()=>{loading--;drain();});
     }
   }
   function observe(image:HTMLImageElement,root:string,path:string){
-    const cached=thumbnails.get(`${root}:${path}`);if(cached){image.src=cached;return;}
-    if(!observer)observer=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting){const image=entry.target as HTMLImageElement;observer?.unobserve(image);queue.push({image,root:image.dataset.resourceRoot!,path:image.dataset.resourcePreview!});}}drain();},{rootMargin:'150px'});
+    if(!observer)observer=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting){const image=entry.target as HTMLImageElement;observer?.unobserve(image);queue.push({image,root:image.dataset.resourceRoot!,path:image.dataset.resourcePreview!,key:thumbnailKey(image.dataset.resourceRoot!,image.dataset.resourcePreview!)});}}drain();},{rootMargin:'150px'});
     image.dataset.resourceRoot=root;image.dataset.resourcePreview=path;observer.observe(image);
   }
   for(const field of [search,kind,used])field.addEventListener(field===search?'input':'change',()=>rerender());
@@ -135,7 +137,7 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
     if(!displayed){list.textContent=items.length?'条件に合うリソースがありません。':'撮影・画像の取り込み・AI作画でリソースを追加できます。';}
   }
   return {
-    setItems(next:Resource[]){observer?.disconnect();observer=null;queue.length=0;thumbnails.clear();items=next;byPath=new Map(next.map(item=>[item.path,item]));},
+    setItems(next:Resource[]){observer?.disconnect();observer=null;queue.length=0;resourceEpoch++;items=next;byPath=new Map(next.map(item=>[item.path,item]));thumbnails.retain(next.filter(item=>!item.missing).map(item=>thumbnailKey(options.root(),item.path)));},
     matchesShot(path:string,fallback:Resource){return matches(byPath.get(path)||fallback);},
     decorateShot(card:HTMLElement,path:string){const item=byPath.get(path);if(item)decorate(card,item);},renderExtras,captureViews,compactCard,
   };

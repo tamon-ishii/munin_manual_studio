@@ -1,7 +1,7 @@
 {
   "name": "munin-manual-studio",
   "private": true,
-  "version": "0.9.11",
+  "version": "0.9.12",
   "type": "module",
   "scripts": {
     "manual:dev": "vite --config apps/manual-studio/vite.config.ts",
@@ -32,7 +32,8 @@
     "flexlayout-react": "^0.11.1",
     "mermaid": "^11.17.2",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "mdast-util-to-markdown": "^2.2.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",

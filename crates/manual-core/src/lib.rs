@@ -16,7 +16,9 @@ mod desktop_scenario;
 pub mod semantic_target;
 pub mod visual_target;
 pub mod editor;
+mod gfm;
 mod manuscript_tools;
+mod file_move;
 mod manuscript_git;
 pub mod fact;
 mod legacy_ai;
@@ -32,6 +34,7 @@ pub mod scenario;
 pub mod screenshots;
 mod image_generation;
 pub mod resources;
+mod resource_index;
 pub mod task;
 pub mod template;
 pub mod window_capture;
@@ -153,6 +156,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "editor-save",
         "editor-preview",
         "project-search",
+        "project-move-file",
         "editor-batch-save",
         "editor-outline",
         "manuscript-git-status",
@@ -380,6 +384,10 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "manuscript-git-status" | "manuscript-git-init" | "manuscript-git-history" | "manuscript-git-version" | "manuscript-git-commit" => {
             let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
             serde_json::to_string(&manuscript_git::handle(root,action,&value)?).map_err(|e|e.to_string())
+        }
+        "project-move-file" => {
+            let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
+            Ok(file_move::execute(root,&value)?.to_string())
         }
         "project-search" | "editor-batch-save" | "editor-outline" => {
             let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;

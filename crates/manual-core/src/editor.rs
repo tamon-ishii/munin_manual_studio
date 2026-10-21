@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::html;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
@@ -207,13 +207,8 @@ pub fn save_asset(root: &Path, target_path: &str, data: &str) -> Result<SavedAss
 
 pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, String> {
     document_path(root, page)?;
-    let options = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_FOOTNOTES;
-    let parser = Parser::new_ext(content, options);
     let mut body = String::new();
-    html::push_html(&mut body, parser);
+    html::push_html(&mut body, crate::gfm::events(content).into_iter());
     // srcdoc resolves ordinary hrefs against the app URL. Keep links inert until
     // the parent installs its navigation handler (iframe load can be delayed).
     static ANCHOR_TAGS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(||
@@ -255,7 +250,7 @@ pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, Str
     }
     inlined_body.push_str(&body[last_end..]);
     Ok(format!(
-        r#"<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>body{{font:16px/1.8 system-ui,sans-serif;color:#26342f;background:#fff;max-width:850px;margin:32px auto;padding:0 28px}}h1,h2,h3{{line-height:1.4}}h1{{font-size:30px}}h2{{border-bottom:1px solid #dbe4df;padding-bottom:8px}}a{{color:#246b54;cursor:pointer;text-decoration:underline}}pre,code{{font-family:ui-monospace,monospace;background:#f2f5f3}}code{{padding:2px 4px}}pre{{padding:16px;overflow:auto}}img{{max-width:100%;height:auto}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #dbe4df;padding:8px;text-align:left}}blockquote{{border-left:3px solid #74a58a;margin-left:0;padding-left:18px;color:#52665a}}</style></head><body>{inlined_body}</body></html>"#
+        r#"<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><style>body{{font:16px/1.8 system-ui,sans-serif;color:#26342f;background:#fff;max-width:850px;margin:32px auto;padding:0 28px}}h1,h2,h3{{line-height:1.4}}h1{{font-size:30px}}h2{{border-bottom:1px solid #dbe4df;padding-bottom:8px}}a{{color:#246b54;cursor:pointer;text-decoration:underline}}pre,code{{font-family:ui-monospace,monospace;background:#f2f5f3}}code{{padding:2px 4px}}pre{{padding:16px;overflow:auto}}img{{max-width:100%;height:auto}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #dbe4df;padding:8px;text-align:left}}blockquote{{border-left:3px solid #74a58a;margin-left:0;padding-left:18px;color:#52665a}}.markdown-alert-note{{border-color:#0969da}}.markdown-alert-tip{{border-color:#1a7f37}}.markdown-alert-important{{border-color:#8250df}}.markdown-alert-warning{{border-color:#9a6700}}.markdown-alert-caution{{border-color:#cf222e}}blockquote[class^="markdown-alert-"]{{padding:10px 18px;background:#f6f8fa}}blockquote[class^="markdown-alert-"]::before{{display:block;font-weight:650;content:attr(class)}}.markdown-alert-note::before{{content:"Note"!important}}.markdown-alert-tip::before{{content:"Tip"!important}}.markdown-alert-important::before{{content:"Important"!important}}.markdown-alert-warning::before{{content:"Warning"!important}}.markdown-alert-caution::before{{content:"Caution"!important}}</style></head><body>{inlined_body}</body></html>"#
     ))
 }
 

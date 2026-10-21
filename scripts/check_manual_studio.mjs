@@ -22,6 +22,7 @@ const miscControlCases = [
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const steps = [
+  { group: 'unit', name: 'preview coalescing and thumbnail reuse', command: npx, args: ['tsx', 'scripts/test_manual_studio_performance.ts'], timeoutMs: 60_000 },
   { group: 'unit', name: 'document persistence serialization and ownership', command: npx, args: ['tsx', 'scripts/test_manual_studio_document_persistence.ts'], timeoutMs: 60_000 },
   { group: 'unit', name: 'operation timing ownership and lifecycle', command: npx, args: ['tsx','scripts/test_manual_studio_operation_timings.ts'], timeoutMs: 60_000 },
   { group: 'unit', name: 'execution report provenance and failure checks', command: process.execPath, args: ['scripts/test_manual_studio_execution_reports.mjs'], timeoutMs: 60_000 },
@@ -43,6 +44,8 @@ steps.push({ group: 'unit', name: 'selective Diff checks', command: npx, args: [
 steps.push({group:'unit',name:'manuscript replacement and section move checks',command:npx,args:['tsx','scripts/test_manuscript_tools.ts'],timeoutMs:60_000});
 steps.push({group:'unit',name:'review correction apply and batch checks',command:process.execPath,args:['scripts/test_manual_studio_review_corrections.mjs'],timeoutMs:60_000});
 const unitStepCount = steps.length;
+steps.push({group:'ui',name:'resource and preview performance regressions',command:process.execPath,args:['scripts/test_manual_studio_performance_ui.mjs'],timeoutMs:120_000});
+
 
 steps.push(
   {group:'ui',name:'manuscript search real-backend contracts',command:process.execPath,args:['scripts/test_manual_studio_manuscript_tools.mjs'],timeoutMs:120_000},

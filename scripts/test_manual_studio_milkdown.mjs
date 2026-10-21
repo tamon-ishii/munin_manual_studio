@@ -58,11 +58,11 @@ try {
   await page.waitForFunction(() => document.querySelector('textarea').value.includes('assets/uploaded.png'));
   assert.equal(await page.evaluate(() => window.uploadedImage), 'uploaded.png');
   assert.equal(await page.locator('#source').isVisible(), false);
-  await page.locator('.column-label button').click();
+  await page.locator('#editor-mode-toggle').click();
   await page.locator('#source').fill('# Next\n\n```mermaid\ninvalid diagram\n```');
   assert.notEqual(await page.locator('.ProseMirror h1').textContent(), 'Next', 'source edits defer hidden rich editor updates');
   assert.equal(await page.evaluate(() => bridge.captureState()), null, 'source mode never caches stale rich state');
-  await page.locator('.column-label button').click();
+  await page.locator('#editor-mode-toggle').click();
   await page.waitForSelector('.diagram-error');
   assert.equal(await page.locator('.ProseMirror h1').textContent(), 'Next');
   await page.evaluate(() => { source.value = '# Reloaded\n\n```mermaid\ngraph LR\n C --> D\n```'; });

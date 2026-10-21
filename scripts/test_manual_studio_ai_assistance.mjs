@@ -22,6 +22,7 @@ async function fixtureHashes(directory=root,prefix=''){
  const hashes={};for(const item of await readdir(directory,{withFileTypes:true})){const relative=path.posix.join(prefix,item.name),absolute=path.join(directory,item.name);if(item.isDirectory())Object.assign(hashes,await fixtureHashes(absolute,relative));else if(item.isFile())hashes[relative]=fingerprint(await readFile(absolute));}return hashes;
 }
 async function workflowEvidence(page,caseId,details={},stage='final'){
+ console.log(`AI integration: ${caseId} ${stage}`);
  const testCase=workflowRegistry.cases.find(item=>item.id===caseId);assert.ok(testCase,`Explicit AI workflow case missing: ${caseId}`);
  const screenshot=`${caseId}.${stage}.png`,state=`${caseId}.${stage}.state.json`,assertions={visible:true,stored:true,preserved:true,returnTarget:true};
  const editorState=await page.locator('#markdown-editor').evaluate(element=>({value:element.value,start:element.selectionStart,end:element.selectionEnd}));
@@ -65,7 +66,7 @@ const ai=createServer(async(req,res)=>{try{
 }catch(e){res.writeHead(500);res.end(String(e));}});
 await new Promise(resolve=>ai.listen(0,'127.0.0.1',resolve));const endpoint=`http://127.0.0.1:${ai.address().port}/v1`;
 const cli=path.resolve(process.env.CARGO_TARGET_DIR||'target','debug/manualctl');
-const rpc=async(action,options={})=>JSON.parse((await exec(cli,['--request',JSON.stringify({root,action,options:{...options,api_key:'fixture-key'}})])).stdout);
+const rpc=async(action,options={})=>{console.log(`AI integration backend: ${action}`);return JSON.parse((await exec(cli,['--request',JSON.stringify({root,action,options:{...options,api_key:'fixture-key'}})])).stdout);};
 const original='# Guide\n\n前文😀\n\nold A\n\nunchanged\n\nold B\n\n後文\n\n画面 ![sample](assets/sample.png)\n\n```html\n<img src="ignored.png">\n```\n';
 try{
   await mkdir(path.join(root,'bin'),{recursive:true});await writeFile(path.join(root,'bin/fixture-app'),'#!/bin/sh\nexit 0\n',{mode:0o755});
@@ -261,7 +262,7 @@ print(json.dumps({'status':'SUCCESS','structured_output':{'pages':[{'path':'inde
   await page.route('**/__manual/rpc',async route=>{
     const request=route.request().postDataJSON(),{action}=request;let result;
     if(action.startsWith('screenshot-ai-'))editorShotRequests.push(request);
-    if(action==='screenshots-list'&&holdEditorCaptureRefresh){holdEditorCaptureRefresh=false;captureRefreshStarted();await new Promise(resolve=>releaseCaptureRefresh=resolve);await route.continue();return;}
+    if(action==='resources-list'&&holdEditorCaptureRefresh){holdEditorCaptureRefresh=false;captureRefreshStarted();await new Promise(resolve=>releaseCaptureRefresh=resolve);await route.continue();return;}
     if(action==='screenshot-ai-capture'&&failEditorCapture){await route.fulfill({json:{error:'Fixture capture transport failure'}});return;}
     if(action==='list-accessible-windows')result=[{app:'Fixture',title:'Main',query:'Fixture'}];
     else if(action==='screenshot-ai-annotate'&&failEditorAnnotation){await route.fulfill({json:{error:'注釈する画面要素を特定できませんでした。'}});return;}
@@ -292,7 +293,7 @@ print(json.dumps({'status':'SUCCESS','structured_output':{'pages':[{'path':'inde
   const staleScreenshot=(await rpc('screenshots-list')).items.filter(item=>!beforeStaleIds.has(item.id));assert.equal(staleScreenshot.length,1);
   await page.locator('[data-document-page="docs/index.md"], [data-document-page="index.md"]').click();await idle();assert.equal(await editor.inputValue(),beforeScreenshot);assert.equal(await editor.evaluate(node=>node.selectionStart),caret);
   await select(caret,caret);await editorCapture();await editor.evaluate(el=>{el.value+='edited';el.dispatchEvent(new InputEvent('input',{bubbles:true}));});await page.getByRole('button',{name:'この位置に挿入',exact:true}).click();await idle();assert.equal(await editor.inputValue(),beforeScreenshot+'edited');
-  const beforeExisting=await editor.inputValue();const sourceToggle=page.locator('.column-label button');if((await sourceToggle.textContent())==='Markdownソース')await sourceToggle.click();await select(0,0);await page.locator('#editor-screenshot-ai').click();await page.getByRole('button',{name:'撮影済み画像を選ぶ',exact:true}).click();await page.locator('#editor-screenshot-existing [data-screenshot-id]').first().click();await page.getByRole('button',{name:'この位置に挿入',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('screenshots/'));await idle();assert.match(await editor.inputValue(),/screenshots\//);assert.ok((await editor.inputValue()).endsWith(beforeExisting));await editor.press('Control+z');assert.equal(await editor.inputValue(),beforeExisting);
+  const beforeExisting=await editor.inputValue();const sourceToggle=page.locator('#editor-mode-toggle');if((await sourceToggle.textContent())==='Markdownソース')await sourceToggle.click();await select(0,0);await page.locator('#editor-screenshot-ai').click();await page.getByRole('button',{name:'撮影済み画像を選ぶ',exact:true}).click();await page.locator('#editor-screenshot-existing [data-screenshot-id]').first().click();await page.getByRole('button',{name:'この位置に挿入',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('screenshots/'));await idle();assert.match(await editor.inputValue(),/screenshots\//);assert.ok((await editor.inputValue()).endsWith(beforeExisting));await editor.press('Control+z');assert.equal(await editor.inputValue(),beforeExisting);
   // Exercise exact rich selections and cursor insertion against real Milkdown.
   await page.route('**/rich-ai-test',route=>route.fulfill({contentType:'text/html',body:`<meta charset="UTF-8"><div><div class="column-label"></div><textarea id="rich-source"></textarea></div><script type="module">
     import {setupMilkdownEditor} from '/src/milkdownEditor.ts';

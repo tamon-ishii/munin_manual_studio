@@ -1,7 +1,6 @@
 //! A common view of captured, generated, and project-owned image resources.
 use crate::{config::project_path, image_generation, screenshots, task};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use pulldown_cmark::{Event, Parser, Tag};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -74,54 +73,24 @@ pub fn usages(root: &Path) -> Result<BTreeMap<String, Vec<Value>>, String> {
             })
             .collect();
     let mut seen: BTreeSet<String> = pages.iter().map(|(page, _)| page.clone()).collect();
-    for entry in walkdir::WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            entry.depth() == 0
-                || (!name.starts_with('.')
-                    && !matches!(
-                        name.as_ref(),
-                        "node_modules" | "target" | "dist" | "__pycache__" | "site"
-                    ))
-        })
-        .filter_map(Result::ok)
-    {
-        if entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext == "md") {
-            let page = entry
-                .path()
-                .strip_prefix(root)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .replace('\\', "/");
-            if seen.insert(page.clone()) {
-                pages.push((page, entry.path().to_path_buf()));
-            }
+    let mut index = crate::resource_index::ProjectIndex::scan(root)?;
+    for file in &index.files {
+        if file.extension().is_some_and(|ext| ext == "md") {
+            let page = file.strip_prefix(root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
+            if seen.insert(page.clone()) { pages.push((page, file.clone())); }
         }
     }
     for (page, file) in pages {
-        let text = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-        let html_images=regex::Regex::new(r#"(?is)<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#).unwrap();
-        for (event, range) in Parser::new(&text).into_offset_iter() {
-            let images:Vec<(String,std::ops::Range<usize>)>=match event {
-                Event::Start(Tag::Image{dest_url,..})=>vec![(dest_url.to_string(),range.clone())],
-                Event::Html(html)|Event::InlineHtml(html)=>html_images.captures_iter(&html).map(|cap|{let matched=cap.get(0).unwrap();(crate::quality::decode_html_attr(&cap[1]),range.start+matched.start()..range.start+matched.end())}).collect(),
-                _=>vec![],
-            };
-            for (url,range) in images {
-                if let Ok(target) = crate::quality::local_path(root, &file, &url) {
-                    if let Ok(relative) = target.strip_prefix(&canonical) {
-                        let path = relative.to_string_lossy().replace('\\', "/");
-                        result.entry(path).or_default().push(json!({"page":page,
-                            "line":text[..range.start].bytes().filter(|b|*b==b'\n').count()+1,
-                            "start":text[..range.start].encode_utf16().count(),"end":text[..range.end].encode_utf16().count(),
-                            "snippet":&text[range]}));
-                    }
+        for reference in index.document(&file)?.images {
+            if let Ok(target) = crate::quality::local_path(root, &file, &reference.url) {
+                if let Ok(relative) = target.strip_prefix(&canonical) {
+                    let path = relative.to_string_lossy().replace('\\', "/");
+                    result.entry(path).or_default().push(json!({"page":page,"line":reference.line,"start":reference.start,"end":reference.end,"snippet":reference.snippet}));
                 }
             }
         }
     }
+    index.save();
     Ok(result)
 }
 pub fn list(root: &Path) -> Result<Value, String> {
@@ -139,28 +108,11 @@ pub fn list(root: &Path) -> Result<Value, String> {
             records.entry(path.to_string()).or_insert_with(||json!({"path":path,"name":item["prompt"].as_str().unwrap_or("AI生成画像").chars().take(48).collect::<String>(),"kind":"generated","generation":item,"created_at":item["created_at"]}));
         }
     }
-    for entry in walkdir::WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            entry.depth() == 0
-                || (!name.starts_with('.')
-                    && !matches!(
-                        name.as_ref(),
-                        "node_modules" | "target" | "dist" | "__pycache__" | "site"
-                    ))
-        })
-        .filter_map(Result::ok)
-    {
-        if entry.file_type().is_file() && image_extension(entry.path()) {
-            let path = entry
-                .path()
-                .strip_prefix(root)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .replace('\\', "/");
-            records.entry(path.clone()).or_insert_with(||json!({"path":path,"name":entry.file_name().to_string_lossy(),"kind":"imported"}));
+    let index = crate::resource_index::ProjectIndex::scan(root)?;
+    for file in &index.files {
+        if image_extension(file) {
+            let path = file.strip_prefix(root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
+            records.entry(path.clone()).or_insert_with(||json!({"path":path,"name":file.file_name().unwrap_or_default().to_string_lossy(),"kind":"imported"}));
         }
     }
     let mut items = Vec::new();
@@ -172,6 +124,7 @@ pub fn list(root: &Path) -> Result<Value, String> {
             Ok(metadata) if metadata.is_file() => {
                 item["missing"] = json!(false);
                 item["bytes"] = json!(metadata.len());
+                item["revision"] = json!(crate::resource_index::stamp(&metadata));
             }
             Ok(_) => {
                 item["missing"] = json!(true);
@@ -184,15 +137,26 @@ pub fn list(root: &Path) -> Result<Value, String> {
         }
         items.push(item);
     }
-    Ok(json!({"items":items}))
+    Ok(json!({"items":items,"screenshots":shots}))
+}
+pub(crate) fn thumbnail_from_bytes(root: &Path, path: &str, bytes: &[u8]) -> Result<String, String> {
+    let hash = format!("{:x}", Sha256::digest(bytes));
+    let name = format!("thumb-{:x}.json", Sha256::digest(path.as_bytes()));
+    if let Some(value) = crate::resource_index::read_cache::<Value>(root, &name) {
+        if value["hash"].as_str() == Some(&hash) {
+            if let Some(data) = value["data"].as_str().filter(|v| v.starts_with("data:image/png;base64,")) {
+                if STANDARD.decode(&data["data:image/png;base64,".len()..]).is_ok_and(|bytes| bytes.starts_with(b"\x89PNG\r\n\x1a\n")) { return Ok(data.into()); }
+            }
+        }
+    }
+    // Preserve original format for SVG/GIF/WebP when no decoder is available.
+    let result = match thumbnail(bytes) { Some(image) => image, None => image_data(root, path)? };
+    if result.starts_with("data:image/png;base64,") { crate::resource_index::write_cache(root, &name, &json!({"hash":hash,"data":result})); }
+    Ok(result)
 }
 pub fn preview_thumbnail(root: &Path, path: &str) -> Result<String, String> {
     let bytes = image_bytes(root, path)?;
-    if let Some(image) = thumbnail(&bytes) {
-        Ok(image)
-    } else {
-        image_data(root, path)
-    }
+    thumbnail_from_bytes(root, path, &bytes)
 }
 pub fn detail(root: &Path, path: &str) -> Result<Value, String> {
     let bytes = image_bytes(root, path)?;
@@ -342,6 +306,38 @@ mod tests {
         let mut out = std::io::Cursor::new(Vec::new());
         image.write_to(&mut out, image::ImageFormat::Png).unwrap();
         out.into_inner()
+    }
+    #[test]
+    fn thumbnails_are_small_cached_and_invalidated_by_changed_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("assets")).unwrap();
+        let path = "assets/large.png";
+        let write = |color: u8| {
+            let image = image::RgbaImage::from_pixel(1600, 1000, image::Rgba([color, 20, 30, 255]));
+            image.save(root.path().join(path)).unwrap();
+        };
+        write(10);
+        let first = preview_thumbnail(root.path(), path).unwrap();
+        let bytes = STANDARD.decode(first.strip_prefix("data:image/png;base64,").unwrap()).unwrap();
+        let image = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((image.width(), image.height()), (320, 200));
+        assert_eq!(preview_thumbnail(root.path(), path).unwrap(), first);
+        write(90);
+        let second = preview_thumbnail(root.path(), path).unwrap();
+        assert_ne!(first, second);
+        let before = list(root.path()).unwrap()["items"][0]["revision"].clone();
+        write(120);
+        assert_ne!(list(root.path()).unwrap()["items"][0]["revision"], before);
+    }
+    #[test]
+    fn usage_cache_tracks_deletion_and_renamed_manuscripts() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("a.md"), "![A](a.png)").unwrap();
+        assert_eq!(usages(root.path()).unwrap()["a.png"][0]["page"], "a.md");
+        fs::rename(root.path().join("a.md"), root.path().join("b.md")).unwrap();
+        assert_eq!(usages(root.path()).unwrap()["a.png"][0]["page"], "b.md");
+        fs::remove_file(root.path().join("b.md")).unwrap();
+        assert!(usages(root.path()).unwrap().is_empty());
     }
     #[test]
     fn configured_html_images_track_escaped_paths_and_ignore_examples() {

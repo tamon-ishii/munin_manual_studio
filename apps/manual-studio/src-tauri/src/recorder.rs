@@ -809,6 +809,14 @@ fn select_existing_app_window<'a>(
         })
 }
 
+/// Taking the session drops only the recorder and application processes we own.
+pub fn cancel(state: &RecorderState) -> Result<bool, String> {
+    let session = state.0.lock().map_err(|e| e.to_string())?.session.take();
+    let cancelled = session.is_some();
+    drop(session);
+    Ok(cancelled)
+}
+
 pub fn is_running(state: &RecorderState) -> Result<bool, String> {
     let mut lock = state.0.lock().map_err(|e| e.to_string())?;
     let Some(session) = lock.session.as_mut() else {
@@ -1341,6 +1349,25 @@ pub fn cleanup_completed_capture(image_file: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cancellation_removes_the_session_and_is_idempotent() {
+        let state = super::RecorderState::default();
+        assert!(!super::cancel(&state).unwrap());
+        let root = tempfile::tempdir().unwrap();
+        let event_file = root.path().join("events.jsonl");
+        std::fs::write(&event_file, "").unwrap();
+        state.0.lock().unwrap().session = Some(super::Session {
+            recorder: None, app_child: None, event_file: event_file.clone(), root: root.path().into(),
+            program: "fixture".into(), args: vec![], working_directory: root.path().into(), window_title: "Fixture".into(),
+            window: super::WindowBounds { id:"fixture".into(), x:0, y:0, width:100, height:100 },
+            task_id:"fixture".into(), markits_program:"".into(),
+        });
+        assert!(super::cancel(&state).unwrap());
+        assert!(!super::cancel(&state).unwrap());
+        assert!(!super::is_running(&state).unwrap());
+        assert!(!event_file.exists());
+    }
+
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 

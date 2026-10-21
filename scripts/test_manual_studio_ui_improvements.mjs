@@ -74,12 +74,12 @@ try {
   await page.getByRole('button',{name:'執筆方針',exact:true}).click();
   assert.equal(await page.locator('#panel-brief #manual-brief').isVisible(),true);
   await page.locator('[data-close-dialog=panel-brief]').click();
-  await page.locator('.column-label button').click();
+  await page.locator('#editor-mode-toggle').click();
   await page.locator('#markdown-editor').evaluate(el=>{el.focus();el.setSelectionRange(0,7);el.dispatchEvent(new Event('select'));});
   assert.match(await page.locator('#selection-ai').textContent(),/選択範囲をAIで修正/);
   await page.locator('#markdown-editor').evaluate(el=>{el.setSelectionRange(7,7);el.dispatchEvent(new Event('select'));});
   assert.match(await page.locator('#selection-ai').textContent(),/AIで修正・挿入/);
-  await page.locator('.column-label button').click();
+  await page.locator('#editor-mode-toggle').click();
   const richEditor=page.locator('#milkdown-editor .ProseMirror');
   await richEditor.focus();
   const waitForSelectionLabel=async(pattern)=>page.waitForFunction(
@@ -177,7 +177,7 @@ try {
   assert.equal(await page.locator('#screenshot-library-recapture-all').isVisible(),true);
   await page.keyboard.press('Escape');
   await page.locator('[data-tab=editor]').click();
-  await page.locator('.column-label button').click();
+  await page.locator('#editor-mode-toggle').click();
   await page.locator('.format-insert-menu summary').click();
   assert.equal(await page.locator('[data-format=mermaid]').isVisible(),true);
   await page.locator('[data-format=mermaid]').click();
