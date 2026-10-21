@@ -30,6 +30,7 @@ try{
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=index.md`);await idle();
   await page.locator('[data-tab=screenshots]').click();
+  await page.locator('[data-resource-kind=generated]').first().waitFor();
   assert.equal(await page.locator('[data-resource-kind=generated]').count(),1);
   assert.equal(await page.locator('[data-resource-kind=screenshot]').count(),1);
   assert.equal(await page.locator('[data-resource-kind=imported]').count(),2);

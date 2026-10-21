@@ -368,6 +368,8 @@ fn write_checked(root: &Path, path: &str, before: &[u8], after: &[u8]) -> Result
     Ok(())
 }
 pub(crate) fn execute(root: &Path, options: &Value) -> Result<Value, String> {
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let root = canonical_root.as_path();
     let source = options["source"]
         .as_str()
         .ok_or("移動元を指定してください。")?

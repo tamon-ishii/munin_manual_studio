@@ -202,7 +202,7 @@ impl ProjectIndex {
                 && (path.extension().is_some_and(|ext| ext == "md")
                     || crate::resources::image_extension(&path))
             {
-                self.files.push(path);
+                self.files.push(self.root.join(&child));
             }
         }
         Ok(())
@@ -346,6 +346,22 @@ mod tests {
         assert_eq!(
             rebuilt.document(&after.join("a.md")).unwrap().images[0].url,
             "b.png"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn index_preserves_project_path_spelling_for_aliased_roots() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("project");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/page.md"), "![A](a.png)").unwrap();
+        let alias = parent.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let mut index = ProjectIndex::scan(&alias).unwrap();
+        assert_eq!(index.files, vec![alias.join("docs/page.md")]);
+        assert_eq!(
+            index.document(&index.files[0].clone()).unwrap().images[0].url,
+            "a.png"
         );
     }
     #[cfg(unix)]
