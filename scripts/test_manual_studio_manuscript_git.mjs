@@ -41,6 +41,8 @@ try{
   assert.equal(await editor.inputValue(),original);
   await dialog.getByRole('button',{name:'閉じる',exact:true}).click();await page.getByRole('button',{name:'元に戻す',exact:true}).click();
   assert.equal(await editor.inputValue(),current,'restore participates in normal editor Undo');
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original,'Undo does not save automatically');
+  await editor.press('ControlOrMeta+s');
   await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved');
   assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),current);
   dialog=await openGit();await dialog.getByRole('combobox',{name:'原稿のコミット'}).selectOption(first);await dialog.getByRole('button',{name:'選択した版と比較'}).click();await idle();
