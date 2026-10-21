@@ -70,6 +70,7 @@ export function setupMilkdownEditor(
   }
   function undoOrCancel(ctx: Ctx): boolean {
     const view = ctx.get(editorViewCtx);
+    if (pendingUploads.length === 1 && !/!\[\]\(\)/.test(sourceValue()) && cancelLatestUpload()) return true;
     if (undo(view.state)) return undo(view.state, view.dispatch);
     return cancelLatestUpload();
   }
@@ -467,6 +468,7 @@ export function setupMilkdownEditor(
     if (!instance || !ready || sourceMode) return;
     const cancelled = instance.action(ctx => {
       const view = ctx.get(editorViewCtx);
+      if (pendingUploads.length === 1 && !/!\[\]\(\)/.test(sourceValue()) && cancelLatestUpload()) return true;
       return !undo(view.state) && cancelLatestUpload();
     });
     if (cancelled) { event.preventDefault(); event.stopPropagation(); }

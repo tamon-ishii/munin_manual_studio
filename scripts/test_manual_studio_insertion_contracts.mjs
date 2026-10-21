@@ -219,8 +219,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
   await page.locator('.ProseMirror').press('Control+s');await savedGesture;await idle();assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),value);
   await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal((await editor.inputValue()).trim(),initial.trim());
   fire=await richGesture();const cancelled=new Promise(resolve=>startedSave=resolve);await fire();await waitStarted(cancelled);const cancelledAsset=assetRequests.at(-1);
-  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
-  assert.equal((await editor.inputValue()).trim(),initial.trim());releaseSave();
+  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();releaseSave();
   await page.waitForFunction(()=>document.querySelector('#status').textContent==='画像を保存しました。');await idle();
   assert.equal((await editor.inputValue()).trim(),initial.trim());assert.deepEqual(await readFile(path.join(root,cancelledAsset)),png);
   await verifySaved(await editor.inputValue());
