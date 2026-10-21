@@ -658,15 +658,6 @@ function updateSaveState(): void {
   element('save-retry').hidden = ownerState?.state !== 'error' || conflicted;
   element('save-conflict').hidden = !conflicted;
   updateEditorEmptyState(); updateSelectionAction();
-
-
-  updateWorkspaceGuide();
-}
-function updateWorkspaceGuide(): void {
-  const guide = element<HTMLElement>('workspace-guide');
-  let dismissed = false;
-  try { dismissed = localStorage.getItem(`manual-studio-guide:${projectRoot}`) === 'hidden'; } catch { /* Optional preference. */ }
-  guide.hidden = detached || !workspace || dismissed || workspace.config.connection_type !== 'none' && workspace.has_config;
 }
 type PreviewSnapshot = { root: string; page: string; body: string; version: number };
 const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
@@ -946,7 +937,7 @@ async function refreshWorkspace(reloadPage = false, refreshResources = true): Pr
   const loaded = JSON.parse(await rpc("state", {json:{editor:true}}, root)) as State;
   if (root !== projectRoot || version !== workspaceRequestVersion) return;
   workspace = loaded;
-  renderPages();  updateWorkspaceGuide();
+  renderPages();
   if (refreshResources) { await screenshotLibrary.refresh(); resourceLibraryDirty = false; }
   if (reloadPage && current) {
     if (documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
@@ -1313,7 +1304,7 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
     await restoreManualStudioAfterCapture().catch(() => {});
   }
 }
-setupGfmSourceToolbar(element('panel-editor').querySelector<HTMLElement>('.formatting-toolbar')!,markdown=>{if(!documentState||busy)return;insertDocumentMarkdown(markdown);status('GitHubアラートを挿入しました。');});
+setupGfmSourceToolbar(element('panel-editor').querySelector<HTMLElement>('.formatting-toolbar')!,markdown=>{if(!documentState||busy)return;insertDocumentMarkdown(markdown);status('注釈を挿入しました。');});
 setupControlIcons();
 for (const [selector, name] of [["#undo-edit", "undo"], ["#redo-edit", "redo"], ["#insert-image", "image"], ['[data-format="link"]', "link"]] as const) {
   const button = document.querySelector<HTMLButtonElement>(selector);
@@ -1637,11 +1628,6 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
 }
 document.addEventListener('keydown', handleDocumentShortcut);
 element('shortcut-help').addEventListener('click', showShortcutHelp);
-element('workspace-guide').querySelector('[data-guide-settings]')!.addEventListener('click', () => chooseTab('settings'));
-element('workspace-guide').querySelector('[data-guide-dismiss]')!.addEventListener('click', () => {
-  try { localStorage.setItem(`manual-studio-guide:${projectRoot}`, 'hidden'); } catch { /* Optional preference. */ }
-  element('workspace-guide').hidden = true;
-});
 document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button => { button.title = `${button.getAttribute("aria-label") || button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
 let closingApproved = false;
 let closingPrompt = false;
@@ -1780,27 +1766,49 @@ element('page-list').addEventListener('contextmenu', event => {
   const file = target.closest<HTMLElement>('[data-page],[data-image],[data-file]');
   contextMoveSource=file?(file.dataset.page||file.dataset.image||file.dataset.file||null):null;moveMenuItem.hidden=!contextMoveSource;
   contextCreateParent = file ? (file.dataset.page || file.dataset.image || file.dataset.file || '').split('/').slice(0,-1).join('/') : target.closest<HTMLElement>('[data-folder]')?.dataset.folder || workspace.config.docs;
+  contextCreateParent = contextCreateParent.replace(/\\/g, '/').split('/').filter(part => part && part !== '.').join('/');
   treeContextMenu.hidden = false;
   const box = treeContextMenu.getBoundingClientRect(); treeContextMenu.style.left = `${Math.max(0,Math.min(event.clientX,innerWidth-box.width))}px`; treeContextMenu.style.top = `${Math.max(0,Math.min(event.clientY,innerHeight-box.height))}px`;
   treeContextMenu.querySelector<HTMLButtonElement>('button')!.focus();
 });
 document.addEventListener('pointerdown',event=>{ if (!treeContextMenu.contains(event.target as Node)) treeContextMenu.hidden = true; });
 document.addEventListener('keydown',event=>{if(event.key==='Escape')treeContextMenu.hidden=true;});
+let treeDragSource: HTMLElement | null = null;
+let treeDropTarget: HTMLElement | null = null;
+function setTreeDropTarget(folder: HTMLElement | null): void {
+  if (treeDropTarget === folder) return;
+  treeDropTarget?.classList.remove('tree-drop-target');
+  treeDropTarget = folder;
+  treeDropTarget?.classList.add('tree-drop-target');
+}
+function clearTreeDragIndicator(): void {
+  setTreeDropTarget(null);
+  treeDragSource?.classList.remove('tree-drag-source');
+  treeDragSource = null;
+}
+document.addEventListener('dragend', clearTreeDragIndicator);
+document.addEventListener('drop', clearTreeDragIndicator);
+element('page-list').addEventListener('dragleave', event => {
+  if (!(event.relatedTarget instanceof Node) || !element('page-list').contains(event.relatedTarget)) setTreeDropTarget(null);
+});
 element('page-list').addEventListener('dragstart', event => {
   const file=(event.target as HTMLElement).closest<HTMLElement>('[data-page],[data-image],[data-file]');
   if(!file||!event.dataTransfer||busy)return;
   const path=file.dataset.page||file.dataset.image||file.dataset.file;
   event.dataTransfer.setData('application/x-munin-file',JSON.stringify({root:projectRoot,path}));
   event.dataTransfer.effectAllowed='copyMove';
+  treeDragSource=file;file.classList.add('tree-drag-source');
   if(file.dataset.image)event.dataTransfer.setData('application/x-munin-image',JSON.stringify({root:projectRoot,path}));
 });
 element('page-list').addEventListener('dragover',event=>{
-  if(!(event.target as HTMLElement).closest('[data-folder]')||!event.dataTransfer?.types.includes('application/x-munin-file'))return;
-  event.preventDefault();event.dataTransfer.dropEffect='move';
+  const folder=(event.target as HTMLElement).closest<HTMLElement>('[data-folder]');
+  if(busy||!folder||!event.dataTransfer?.types.includes('application/x-munin-file')){setTreeDropTarget(null);return;}
+  event.preventDefault();event.dataTransfer.dropEffect='move';setTreeDropTarget(folder);
 });
 element('page-list').addEventListener('drop',event=>{
   const folder=(event.target as HTMLElement).closest<HTMLElement>('[data-folder]');
-  if(!folder||!event.dataTransfer?.types.includes('application/x-munin-file'))return;
+  clearTreeDragIndicator();
+  if(busy||!folder||!event.dataTransfer?.types.includes('application/x-munin-file'))return;
   event.preventDefault();event.stopPropagation();
   try{const source=JSON.parse(event.dataTransfer.getData('application/x-munin-file')) as {root:string;path:string};if(source.root===projectRoot&&typeof source.path==='string')void moveTreeFile(source.path,folder.dataset.folder);}catch{status('移動するファイルを選び直してください。',true);}
 });

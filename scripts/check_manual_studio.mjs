@@ -47,6 +47,7 @@ const unitStepCount = steps.length;
 steps.push({group:'ui',name:'manual save and Undo across modes and tabs',command:process.execPath,args:['scripts/test_manual_studio_manual_save.mjs'],timeoutMs:90_000});
 steps.push({group:'ui',name:'GitHub alert contrast across all themes',command:process.execPath,args:['scripts/test_manual_studio_gfm_contrast.mjs'],timeoutMs:60_000});
 steps.push({group:'ui',name:'resource and preview performance regressions',command:process.execPath,args:['scripts/test_manual_studio_performance_ui.mjs'],timeoutMs:120_000});
+steps.push({group:'ui',name:'folder creation through menus and context menus',command:process.execPath,args:['scripts/test_manual_studio_folder_creation.mjs'],timeoutMs:120_000});
 
 
 steps.push(

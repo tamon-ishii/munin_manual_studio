@@ -39,9 +39,9 @@ export function alertMarkdown(kind:string,text='説明を入力してくださ�
   return `> [!${kind}]\n${text.split('\n').map(line=>`> ${line}`).join('\n')}\n\n`;
 }
 export function setupGfmSourceToolbar(host:HTMLElement,onInsert:(markdown:string)=>void):void{
-  const label=document.createElement('label');label.className='gfm-alert-control';label.textContent='GitHub';
-  const select=document.createElement('select');select.setAttribute('aria-label','GitHubアラートを挿入');
-  select.add(new Option('アラートを挿入',''));
+  const label=document.createElement('label');label.className='gfm-alert-control';label.textContent='注釈';
+  const select=document.createElement('select');select.setAttribute('aria-label','注釈を挿入');
+  select.add(new Option('注釈を挿入',''));
   for(const [kind,title] of alertKinds)select.add(new Option(`${title} (${kind})`,kind));
   select.addEventListener('change',()=>{if(select.value)onInsert(alertMarkdown(select.value));select.value='';});
   label.append(select);host.append(label);

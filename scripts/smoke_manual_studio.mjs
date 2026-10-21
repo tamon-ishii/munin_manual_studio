@@ -196,14 +196,14 @@ try {
   await page.locator('#page-list [data-page="notes/extra.md"]').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Unsaved dialog check/);
-  assert.match(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), /Unsaved dialog check/, 'switching tabs persists the previous draft');
+  assert.equal(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), originalNote, 'switching tabs retains the draft without writing to disk');
   await (await sourceEditor(page)).fill(originalNote + '\nUnsaved dialog check\nPending close edit\n');
   await page.getByRole('button', { name: 'notes/extra.mdを閉じる', exact: true }).click();
   assert.equal(await page.locator('#unsaved-changes-dialog button').count(), 3);
   await page.locator('[data-unsaved-action=cancel]').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Unsaved dialog check/);
-  assert.match(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), /Unsaved dialog check/);
+  assert.equal(await readFile(path.join(root, 'notes/extra.md'), 'utf8'), originalNote, 'cancelling close preserves the unsaved draft without saving');
   await page.getByRole('button', { name: 'notes/extra.mdを閉じる', exact: true }).click();
   await page.locator('[data-unsaved-action=save]').click();
   await idle();

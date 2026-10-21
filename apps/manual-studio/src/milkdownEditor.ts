@@ -391,7 +391,7 @@ export function setupMilkdownEditor(
             icon: '', active: () => false,
             selector: { activeLabel: () => '挿入・その他', options: advanced.map(item => ({ label: labels[item.key] || item.key, onSelect: ctx => item.onRun!(ctx) })) },
           });
-          builder.addGroup('gfm-alerts','GitHub').addItem('gfm-alert',{icon:'',active:()=>false,selector:{activeLabel:()=> 'GitHubアラート',options:alertKinds.map(([kind,label])=>({label:`${label} (${kind})`,onSelect:(ctx:Ctx)=>insert(alertMarkdown(kind))(ctx)}))}});
+          builder.addGroup('gfm-alerts','注釈').addItem('gfm-alert',{icon:'',active:()=>false,selector:{activeLabel:()=> '注釈',options:alertKinds.map(([kind,label])=>({label:`${label} (${kind})`,onSelect:(ctx:Ctx)=>insert(alertMarkdown(kind))(ctx)}))}});
           const groups = builder.build();
           for (let index = groups.length - 1; index >= 0; index--) {
             if (!groups[index].items.length) groups.splice(index, 1);

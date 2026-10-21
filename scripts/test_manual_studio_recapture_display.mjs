@@ -17,14 +17,23 @@ try {
  await page.goto(`${base}/?root=${encodeURIComponent(root)}`);await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
  const preview=page.frameLocator('#markdown-preview').locator('img').first();
  async function color(image,expected){
-   await image.waitFor();
-   await image.evaluate((image,expected)=>new Promise((resolve,reject)=>{
-     const deadline=Date.now()+10000;
-     const check=()=>{
-       if(image.complete&&image.naturalWidth){const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');context.drawImage(image,0,0,1,1);const pixel=[...context.getImageData(0,0,1,1).data].slice(0,3);if(pixel.join(',')===expected.join(','))return resolve();}
-       if(Date.now()>deadline)return reject(new Error('Displayed image did not update'));setTimeout(check,50);
-     };check();
-   }),expected);
+   const deadline=Date.now()+10000;
+   while(Date.now()<deadline){
+     try{
+       const pixel=await image.evaluate(image=>{
+         if(!image.complete||!image.naturalWidth)return null;
+         const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+         const context=canvas.getContext('2d');context.drawImage(image,0,0,1,1);
+         return [...context.getImageData(0,0,1,1).data].slice(0,3);
+       },undefined,{timeout:1000});
+       if(pixel?.join(',')===expected.join(','))return;
+     }catch(error){
+       // Preview srcdoc is replaced asynchronously; resolve the current frame again.
+       if(!/Execution context was destroyed|Frame was detached|Timeout/.test(String(error)))throw error;
+     }
+     await new Promise(resolve=>setTimeout(resolve,50));
+   }
+   throw new Error(`Displayed image did not update to ${expected.join(',')}`);
  }
  await color(preview,[255,0,0]);
  const original=await readFile(path.join(root,'docs/index.md'),'utf8');

@@ -62,6 +62,7 @@ pub fn document_path(root: &Path, page: &str) -> Result<PathBuf, String> {
 pub fn create_folder(root: &Path, folder: &str) -> Result<String, String> { create_folder_at(root,folder,false) }
 pub fn create_folder_at(root: &Path, folder: &str, project_relative: bool) -> Result<String, String> {
     let clean = folder.trim().replace('\\', "/");
+    let clean = clean.trim_start_matches("./").to_string();
     let relative = Path::new(&clean);
     if clean.is_empty()
         || relative.is_absolute()
@@ -78,7 +79,7 @@ pub fn create_folder_at(root: &Path, folder: &str, project_relative: bool) -> Re
         .trim_start_matches("./")
         .trim_end_matches('/')
         .to_string();
-    let project_relative = if project_relative || docs.is_empty() { clean } else { format!("{docs}/{clean}") };
+    let project_relative = if project_relative || docs.is_empty() || docs == "." { clean } else { format!("{docs}/{clean}") };
     let path = project_path(root, &project_relative)?;
     if path.exists() {
         return Err("同じ名前のファイルまたはフォルダーが既にあります。".into());
@@ -257,6 +258,25 @@ pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_folder_supports_project_root_and_context_paths() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("README.md"), "# Project").unwrap();
+        assert_eq!(create_folder(root.path(), "通常作成").unwrap(), "通常作成");
+        assert_eq!(create_folder_at(root.path(), "./右クリック/子", true).unwrap(), "右クリック/子");
+        assert!(root.path().join("通常作成").is_dir());
+        assert!(root.path().join("右クリック/子").is_dir());
+        assert!(create_folder_at(root.path(), "./右クリック/子", true).is_err());
+        for path in [".", "./", "../outside", "./../outside", "/absolute"] {
+            assert!(create_folder_at(root.path(), path, true).is_err(), "{path}");
+        }
+
+        let legacy = tempfile::tempdir().unwrap();
+        fs::create_dir(legacy.path().join("docs")).unwrap();
+        assert_eq!(create_folder(legacy.path(), "guide/advanced").unwrap(), "docs/guide/advanced");
+        assert!(legacy.path().join("docs/guide/advanced").is_dir());
+    }
 
     #[test]
     fn editing_removes_legacy_tags_and_detects_external_changes() {

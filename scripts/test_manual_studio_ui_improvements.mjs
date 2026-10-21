@@ -189,13 +189,10 @@ try {
     await page.locator('[data-tab=appearance]').dispatchEvent('click');await page.locator('#ui-theme').selectOption(theme);await page.locator('[data-close-dialog=panel-appearance]').click();
     await page.screenshot({path:`/tmp/munin-ui-review/${theme}-${width}.png`});
   }
-  // AI setup is optional, and dismissing the guide is scoped to the workspace.
+  // Editing remains available without AI configuration or an onboarding bar.
   state.config.connection_type='none';await page.reload();await idle();
-  assert.equal(await page.locator('#workspace-guide').isVisible(),true);
-  await page.locator('#workspace-guide summary').click();await page.locator('[data-guide-settings]').click();
-  assert.equal(await page.locator('#panel-settings').isVisible(),true);await page.locator('[data-close-dialog=panel-settings]').click();
-  await page.locator('[data-guide-dismiss]').click();await page.reload();await idle();
-  assert.equal(await page.locator('#workspace-guide').isVisible(),false);
+  assert.equal(await page.locator('#workspace-guide').count(),0);
+  assert.equal(await page.locator('#editor-workspace').isVisible(),true);
 
   await page.evaluate(()=>localStorage.removeItem('manual-studio-project'));
   await page.goto(base);await idle();
