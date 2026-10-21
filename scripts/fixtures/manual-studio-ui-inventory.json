@@ -7434,7 +7434,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:create:button:04c227777333dbcd:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 93,
+      "line": 94,
       "kind": "create:button",
       "expression": "editBtn = document.createElement('button')",
       "feature": "P05",
@@ -7453,7 +7453,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:create:button:26eff535e0463f98:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 99,
+      "line": 100,
       "kind": "create:button",
       "expression": "settingsBtn=document.createElement('button')",
       "feature": "P02",
@@ -7470,7 +7470,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:handler:19079c30497656d4:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 99,
+      "line": 100,
       "kind": "handler",
       "expression": "settingsBtn.onclick=()=>{if(activeImg)onImageSettings?.(activeImg);}",
       "feature": "P02",
@@ -7487,7 +7487,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:event:click:55806170896b68b0:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 180,
+      "line": 181,
       "kind": "event:click",
       "expression": "editBtn.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); if (activeImg && activeSource && onEditImage) { onEditImage(activeSource, activeImg); } })",
       "feature": "P05",
@@ -7506,7 +7506,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:event:click:d91ed9b155a86c83:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 275,
+      "line": 278,
       "kind": "event:click",
       "expression": "toggle.addEventListener('click', () => { if (!sourceMode) { showSource(); source.focus(); } else { refresh(true); if (sourceToolbar) sourceToolbar.hidden = true; if (sourceAiToolbar) sourceAiToolbar.hidden = true; sourceMode = false; host.hidden = false; source.hidden = true; toggle.textContent = 'Markdownソース'; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); } })",
       "feature": "P02",
@@ -7523,7 +7523,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:event:input:81b57490489a813a:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 279,
+      "line": 282,
       "kind": "event:input",
       "expression": "source.addEventListener('input', () => { if (!syncing) refresh(); })",
       "feature": "P02",
@@ -11402,7 +11402,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:4071106645de0d83:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 381,
+      "line": 384,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => { undoOrCancel(ctx); }",
       "feature": "P03",
@@ -11420,7 +11420,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:e1577d48f0f2da80:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 382,
+      "line": 385,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); redo(view.state, view.dispatch); }",
       "feature": "P02",
@@ -11437,7 +11437,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:ae7e40f3d387bf9d:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 383,
+      "line": 386,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => insert(mermaidSource)(ctx)",
       "feature": "P02",
@@ -11454,7 +11454,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onUpload:ba5a82138eb5ff92:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 401,
+      "line": 404,
       "kind": "callback:onUpload",
       "expression": "onUpload: uploadImage",
       "feature": "P03",
@@ -11472,7 +11472,7 @@
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:49d7566cac911c04:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 416,
+      "line": 419,
       "kind": "callback:onRun",
       "expression": "onRun: (ctx: Ctx) => { callCommand(clearTextInCurrentBlockCommand.key)(ctx); insert(mermaidSource)(ctx); }",
       "feature": "P02",
@@ -11536,11 +11536,11 @@
       "reviewBasis": "実バックエンドの画像保存を保留して表示ボタンで取消、遅い応答でPNGのみ保存、再貼り付けとUndoを確認。FileReader完了前の取消では保存しない。OSクリップボードは未確認"
     },
     {
-      "id": "apps/manual-studio/src/milkdownEditor.ts:event:keydown:3f66e9f691b46b8c:1",
+      "id": "apps/manual-studio/src/milkdownEditor.ts:event:keydown:8bdc1ac01e1ca85b:1",
       "file": "apps/manual-studio/src/milkdownEditor.ts",
-      "line": 462,
+      "line": 465,
       "kind": "event:keydown",
-      "expression": "host.addEventListener('keydown', event => { if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror') || event.target.closest('input,textarea')) return; if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'z') return; if (!instance || !ready || sourceMode) return; const cancelled = instance.action(ctx => { const view = ctx.get(editorViewCtx); return !undo(view.state) && cancelLatestUpload(); }); if (cancelled) { event.preventDefault(); event.stopPropagation(); } }, true)",
+      "expression": "host.addEventListener('keydown', event => { if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror') || event.target.closest('input,textarea')) return; if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'z') return; if (!instance || !ready || sourceMode) return; const cancelled = instance.action(ctx => { const view = ctx.get(editorViewCtx); if (pendingUploads.length === 1 && !/!\\[\\]\\(\\)/.test(sourceValue()) && cancelLatestUpload()) return true; return !undo(view.state) && cancelLatestUpload(); }); if (cancelled) { event.preventDefault(); event.stopPropagation(); } }, true)",
       "feature": "P03",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "Undo履歴を戻し、履歴のない場合は直近の待機画像だけ取消。保存済みPNGと独立した待機画像を保持する",
@@ -17388,7 +17388,7 @@
       "feature": "P03",
       "entryPoints": [
         "apps/manual-studio/src/milkdownEditor.ts:callback:onUpload:ba5a82138eb5ff92:1",
-        "apps/manual-studio/src/milkdownEditor.ts:event:keydown:3f66e9f691b46b8c:1",
+        "apps/manual-studio/src/milkdownEditor.ts:event:keydown:8bdc1ac01e1ca85b:1",
         "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:4071106645de0d83:1"
       ],
       "evidenceRecord": "rich image paste",
@@ -17411,7 +17411,7 @@
       "feature": "P03",
       "entryPoints": [
         "apps/manual-studio/src/milkdownEditor.ts:callback:onUpload:ba5a82138eb5ff92:1",
-        "apps/manual-studio/src/milkdownEditor.ts:event:keydown:3f66e9f691b46b8c:1",
+        "apps/manual-studio/src/milkdownEditor.ts:event:keydown:8bdc1ac01e1ca85b:1",
         "apps/manual-studio/src/milkdownEditor.ts:callback:onRun:4071106645de0d83:1"
       ],
       "evidenceRecord": "rich image drop",
