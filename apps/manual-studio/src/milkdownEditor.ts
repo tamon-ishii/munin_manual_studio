@@ -14,7 +14,7 @@ import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 import { type Editor, editorViewCtx, editorViewOptionsCtx, serializerCtx, parserCtx } from '@milkdown/kit/core';
 import { imageSchema, clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
-import { undo, redo } from '@milkdown/kit/prose/history';
+import { undo, redo, closeHistory } from '@milkdown/kit/prose/history';
 import { Plugin } from '@milkdown/kit/prose/state';
 import { $prose, $remark, replaceAll, callCommand, insert } from '@milkdown/kit/utils';
 type ImageAstNode={type:string;value?:string;children?:ImageAstNode[];muninPresentation?:ImagePresentation};
@@ -223,7 +223,9 @@ export function setupMilkdownEditor(
       const view=ctx.get(editorViewCtx),parsed=ctx.get(parserCtx)(sourceValue());
       const trimEnd=(doc:typeof view.state.doc)=>{while(doc.childCount>1&&doc.lastChild?.type.name==='paragraph'&&!doc.lastChild.content.size)doc=doc.copy(doc.content.cut(0,doc.content.size-doc.lastChild.nodeSize));return doc;};
       if(owner===richOwner&&parsed&&trimEnd(view.state.doc).eq(trimEnd(parsed)))return;
+      view.dispatch(closeHistory(view.state.tr));
       replaceAll(sourceValue(),owner!==richOwner)(ctx);
+      view.dispatch(closeHistory(view.state.tr));
       richOwner=owner;richSource=sourceValue();
     }); } finally { syncing = false; }
   }
@@ -481,7 +483,7 @@ export function setupMilkdownEditor(
   }
   return { showSource, refresh, refreshImages, host, stepHistory,imageSourceRange,
     selectedImageSourceRange:()=>{if(!ready||!instance||sourceMode)return;let image:HTMLImageElement|undefined;instance.action(ctx=>{const view=ctx.get(editorViewCtx);const dom=view.nodeDOM(view.state.selection.from);image=dom instanceof HTMLImageElement?dom:dom instanceof HTMLElement?dom.querySelector<HTMLImageElement>('img')||undefined:undefined;});return image?imageSourceRange(image):undefined;},
-    replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(replaceAll(markdown));return true;},
+    replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.dispatch(closeHistory(view.state.tr));replaceAll(markdown,false)(ctx);view.dispatch(closeHistory(view.state.tr));});return true;},
     focus: () => { if (sourceMode) source.focus(); else instance?.action(ctx=>ctx.get(editorViewCtx).focus()); },
     captureState: () => ready && instance && !sourceMode ? instance.action(ctx => {
       let state = ctx.get(editorViewCtx).state;
