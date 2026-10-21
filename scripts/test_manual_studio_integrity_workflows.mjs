@@ -58,7 +58,7 @@ try{
  const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
  await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=index.md`);await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('Original manuscript'));await idle();await page.getByRole('button',{name:'Markdownソース',exact:true}).click();const editor=page.locator('#markdown-editor');
  let started;const pending=new Promise(resolve=>started=resolve);saveStarted=started;releaseSave=()=>{};
- const draft=original+'Unsaved local changes.\n';await editor.fill(draft);await pending;
+ const draft=original+'Unsaved local changes.\n';await editor.fill(draft);await page.locator('#save-page').click();await pending;
  const external=original+'External changes.\n';await writeFile(path.join(root,'docs/index.md'),external);releaseSave();
  await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='error');assert.equal(await editor.inputValue(),draft);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),external);
  await page.locator('#open-existing-workspace').click();await page.locator('#project-root').fill(other);await page.locator('#project-form button[type=submit]').click();await page.locator('#unsaved-changes-dialog [data-unsaved-action=cancel]').click();await page.locator('#cancel-open-workspace').click();await idle();assert.equal(await editor.inputValue(),draft);assert.equal(await readFile(path.join(other,'docs/index.md'),'utf8'),original);
