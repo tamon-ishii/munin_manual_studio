@@ -1,0 +1,4 @@
+[submodule "crates/markits"]
+	path = crates/markits
+	url = https://github.com/tamon-ishii/markits.git
+	branch = manual-studio-integration-20261022

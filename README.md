@@ -25,6 +25,14 @@ Munin Manual StudioはAIとの連携を目指したマークダウンエディ�
 
 ## クイックスタート
 
+MarkItsは`crates/markits`のGitサブモジュールとして管理しています。初回取得時は次を実行してください。
+
+```sh
+git clone --recurse-submodules https://github.com/tamon-ishii/munin_manual_studio.git
+```
+
+既存のチェックアウトでは、`git submodule update --init --recursive`で取得できます。親リポジトリの更新後も同じコマンドで参照先を合わせてください。
+
 Python 3を用意し、プロジェクトルート（`start_manual_studio.py`のあるフォルダー）で実行します。初回ビルドにはnpmとCargoも必要です。
 
 ```sh
