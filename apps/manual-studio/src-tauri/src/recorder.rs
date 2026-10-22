@@ -493,7 +493,8 @@ pub fn start(
         .iter()
         .filter_map(|window| window["id"].as_str().map(str::to_owned))
         .collect();
-    let executable = manual_core::platform::application_executable_in(&root_path, &program)?;
+    let (executable, args) = manual_core::platform::application_command_in(&working_directory, &program, &args)?;
+    let program = executable.to_string_lossy().into_owned();
     let mut app = Command::new(&executable)
         .args(&args)
         .current_dir(&working_directory)
@@ -717,29 +718,8 @@ fn select_launched_window<'a>(
         })
 }
 
-fn process_descends_from(mut pid: u32, launched_pid: u32) -> bool {
-    for _ in 0..64 {
-        if pid == launched_pid {
-            return true;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let Some(parent) = fs::read_to_string(format!("/proc/{pid}/stat"))
-                .ok()
-                .and_then(|stat| stat.rsplit_once(')').map(|(_, fields)| fields.to_string()))
-                .and_then(|fields| fields.split_whitespace().nth(1)?.parse::<u32>().ok())
-            else {
-                return false;
-            };
-            if parent == 0 || parent == pid {
-                return false;
-            }
-            pid = parent;
-        }
-        #[cfg(not(target_os = "linux"))]
-        return false;
-    }
-    false
+fn process_descends_from(pid: u32, launched_pid: u32) -> bool {
+    manual_core::platform::process_descends_from(pid, launched_pid)
 }
 
 fn launched_app_window_ids(

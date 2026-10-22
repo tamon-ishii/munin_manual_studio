@@ -31,6 +31,22 @@ try {
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   assert.equal(await page.locator('#milkdown-editor').isVisible(),true,'insertion returns to the rich editor');
   await page.locator('#milkdown-editor img[data-type=image-block]').waitFor();
+  let recaptureId;
+  await page.route('**/__manual/rpc',async route=>{
+    const request=route.request().postDataJSON();
+    if(request.action==='screenshots-recapture-plan'){
+      recaptureId=request.options.id;
+      await route.fulfill({json:{output:JSON.stringify({items:[{status:'pending',reason:null}],capture_count:1})}});
+    }else await route.continue();
+  });
+  await page.locator('#milkdown-editor img[data-type=image-block]').hover();
+  await page.locator('.milkdown-image-recapture-btn').click();
+  await page.locator('[data-confirm-action]').waitFor();
+  assert.equal(recaptureId,first.id,'the image overlay recaptures the clicked screenshot');
+  await page.locator('[data-confirm-action]').getByRole('button',{name:'キャンセル',exact:true}).click();
+  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  await page.unroute('**/__manual/rpc');
+  await page.locator('[data-tab=editor]').click();
   await page.locator('#milkdown-editor .ProseMirror').focus();
   await page.keyboard.press('Control+z');
   await page.waitForFunction(()=>!document.querySelector('#markdown-editor').value.includes('screenshot:ref'));
@@ -211,6 +227,12 @@ try {
   await nativePage.evaluate(()=>{window.__libraryMock.documentEnabled=true;window.__libraryMock.holdImports=false;document.querySelector('#project-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
   await nativePage.waitForFunction(()=>document.querySelector('#editor-title').textContent==='index.md');await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await nativePage.locator('[data-tab=editor]').click();await nativePage.getByRole('button',{name:'Markdownソース',exact:true}).click();const nativeEditor=nativePage.locator('#markdown-editor');const manuscript=await nativeEditor.inputValue();
+  await nativeEditor.fill(manuscript+'\nUnsaved capture insertion.\n');
+  await nativePage.locator('#editor-screenshot-ai').click();
+  await nativePage.locator('#editor-screenshot-method').waitFor();
+  await nativePage.locator('#editor-screenshot-method').getByRole('button',{name:'閉じる',exact:true}).click();
+  assert.equal(await nativeEditor.inputValue(),manuscript+'\nUnsaved capture insertion.\n','opening capture preserves unsaved prose');
+  await nativeEditor.fill(manuscript);
   await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'キャンセル',exact:true}).click();assert.equal(await nativeEditor.inputValue(),manuscript);
   await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await nativePage.evaluate(()=>{__libraryMock.failFinish=true;});await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();await nativePage.waitForFunction(()=>!document.querySelector('#editor-screenshot-recording')&&document.querySelector('#screenshot-library-record').hidden===false);assert.equal(await nativeEditor.inputValue(),manuscript);assert.equal(await nativeEditor.evaluate(el=>el.selectionStart),10);

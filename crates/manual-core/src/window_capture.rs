@@ -987,7 +987,7 @@ mod native {
     }
     pub fn window_process_ids() -> Result<Vec<(String, u32)>, String> {
         Ok(Window::all().map_err(|e| e.to_string())?.into_iter().filter_map(|window| {
-            Some((window.id().ok()?.to_string(), window.pid().ok()?))
+            Some((format!("0x{:x}", window.id().ok()?), window.pid().ok()?))
         }).collect())
     }
 
@@ -1098,6 +1098,15 @@ fn scale_capture_elements(elements: &mut [markits::ui_elements::DetectedUiElemen
 #[cfg(test)]
 mod capture_scale_tests {
     use super::*;
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    fn native_window_ids_can_be_joined_to_their_processes() {
+        let windows = list_windows().unwrap();
+        if windows.is_empty() { return; } // No interactive desktop in some CI environments.
+        let owners = window_process_ids().unwrap();
+        assert!(windows.iter().any(|window| owners.iter().any(|(id, pid)| id == &window.id && *pid > 0)),
+            "Native window enumeration and process ownership must use the same ID format");
+    }
     #[test]
     fn logical_coordinates_are_scaled_to_capture_pixels() {
         let mut elements = vec![markits::ui_elements::DetectedUiElement {

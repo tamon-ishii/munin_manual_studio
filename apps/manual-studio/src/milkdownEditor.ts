@@ -50,7 +50,8 @@ export function setupMilkdownEditor(
   uploadImage?: (file: File) => Promise<string>,
   _requestAiTask?: undefined,
   onEditImage?: (source: string, img: HTMLImageElement) => void,
-  onImageSettings?: (img: HTMLImageElement) => void
+  onImageSettings?: (img: HTMLImageElement) => void,
+  onRecaptureImage?: (source: string, img: HTMLImageElement) => void
 ) {
   const host = document.createElement('div');
   host.id = 'milkdown-editor';
@@ -97,6 +98,10 @@ export function setupMilkdownEditor(
   editBtn.textContent = '🎨 画像の編集';
   editBtn.title = 'MarkItsで画像に注釈やトリミングを加えて編集します';
   overlay.appendChild(editBtn);
+  if(onRecaptureImage){
+    const recaptureBtn=document.createElement('button');recaptureBtn.type='button';recaptureBtn.className='milkdown-image-recapture-btn';recaptureBtn.textContent='再撮影';recaptureBtn.title='保存済みの撮影手順でこの画像を再撮影します';
+    recaptureBtn.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(activeImg&&activeSource)onRecaptureImage(activeSource,activeImg);});overlay.append(recaptureBtn);
+  }
   const settingsBtn=document.createElement('button');settingsBtn.type='button';settingsBtn.textContent='画像の表示設定';settingsBtn.onclick=()=>{if(activeImg)onImageSettings?.(activeImg);};if(onImageSettings)overlay.append(settingsBtn);
   host.appendChild(overlay);
 
@@ -168,7 +173,7 @@ export function setupMilkdownEditor(
   }
 
   function handleImageHover(img: HTMLImageElement) {
-    if ((!onEditImage&&!onImageSettings) || readonly) return;
+    if ((!onEditImage&&!onImageSettings&&!onRecaptureImage) || readonly) return;
     cancelHide();
     activeImg = img;
     activeSource = getOriginalSrc(img) || '';

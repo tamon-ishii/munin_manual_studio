@@ -305,21 +305,8 @@ fn find_window(query: &str) -> Result<WindowInfo, String> {
     }
 }
 
-fn process_belongs_to(mut pid: u32, launched: u32) -> bool {
-    for _ in 0..64 {
-        if pid == launched { return true; }
-        #[cfg(target_os = "linux")]
-        {
-            let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else { return false; };
-            let Some(fields) = stat.rsplit_once(") ").map(|(_, rest)| rest) else { return false; };
-            let Some(parent) = fields.split_whitespace().nth(1).and_then(|value| value.parse::<u32>().ok()) else { return false; };
-            if parent == 0 || parent == pid { return false; }
-            pid = parent;
-        }
-        #[cfg(not(target_os = "linux"))]
-        { return false; }
-    }
-    false
+fn process_belongs_to(pid: u32, launched: u32) -> bool {
+    crate::platform::process_descends_from(pid, launched)
 }
 
 fn select_launched_window(query: &str, windows: &[WindowInfo], owners: &[(String, u32)], launched: u32) -> Result<WindowInfo, String> {
@@ -801,11 +788,12 @@ pub fn run(
                         .and_then(Value::as_array)
                         .map(|items| items.iter().filter_map(Value::as_str).collect())
                         .unwrap_or_default();
-                    let executable = super::platform::application_executable_in(root, program)?;
                     let working_directory = value.get("workingDirectory").and_then(Value::as_str).filter(|path| !path.trim().is_empty()).map(PathBuf::from).unwrap_or_else(|| root.to_path_buf());
                     let working_directory = if working_directory.is_absolute() { working_directory } else { root.join(working_directory) };
                     let working_directory = working_directory.canonicalize().map_err(|_| format!("Working directory does not exist: {}", working_directory.display()))?;
                     if !working_directory.is_dir() { return Err(format!("Working directory is not a directory: {}", working_directory.display())); }
+                    let args: Vec<String> = args.into_iter().map(str::to_owned).collect();
+                    let (executable, args) = super::platform::application_command_in(&working_directory, program, &args)?;
                     let mut child = Command::new(executable)
                         .args(args)
                         .current_dir(working_directory)

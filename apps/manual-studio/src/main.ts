@@ -71,7 +71,7 @@ const milkdown = setupMilkdownEditor(editor, message => status(message, true), s
     status(`画像を挿入できませんでした。${String(error)} 画像を選び直して再試行できます。`, true);
     throw error;
   }
-}, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img));
+}, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img),source=>{void recaptureDocumentImage(source);});
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 let refreshEditorContextMenu = () => {};
@@ -846,6 +846,21 @@ function showImagePresentation(image?:HTMLImageElement){
   body.append(widthLabel,alignLabel,captionLabel,help,feedback,apply);
 }
 element('image-presentation').addEventListener('click',()=>showImagePresentation());
+async function recaptureDocumentImage(imageSource:string):Promise<void>{
+  if(busy||!documentState||activeImageTab)return;
+  const root=projectRoot,page=documentState.page;
+  await work(async()=>{
+    const shots=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;output:string}>};
+    if(root!==projectRoot||page!==documentState?.page)return;
+    const docs=workspace?.config.docs.replaceAll('\\','/').replace(/\/$/,'')||'docs';
+    const projectPage=docs==='.'||workspace?.project_entries.some(entry=>entry.path===page)?page:`${docs}/${page}`;
+    const normalized=(path:string)=>{try{return decodeURIComponent(new URL(path.replaceAll('\\','/'),`https://project.invalid/${projectPage}`).href);}catch{return path;}};
+    const shot=shots.items.find(item=>normalized(relativeProjectAsset(item.output,page))===normalized(imageSource));
+    if(!shot)throw new Error('この画像には再撮影用の登録がありません。「スクリーンショット」から撮影した画像を挿入してください。');
+    layoutManager?.focusPanel('screenshots');
+    await screenshotLibrary.recapture(shot.id,root);
+  });
+}
 async function handleEditDocumentImage(imageSource: string, _img: HTMLImageElement): Promise<void> {
   if (documentImageEditing) {
     status(retryDocumentImageEdit ? "保存待ちの画像があります。「画像の編集保存を再試行」で保存してください。" : "他の画像をMarkItsで編集中です。MarkItsの編集を完了してください。", true);
@@ -1367,6 +1382,18 @@ element("page-list").addEventListener("toggle", (event) => {
 }, true);
 input("tree-search").addEventListener("input", renderPages);
 element("tree-filter").addEventListener("change", renderPages);
+// The toolbar scrolls horizontally; position the dropdown outside its clipping area.
+function positionEditorMoreMenu(): void {
+  const menu=element<HTMLDetailsElement>('editor-more');
+  if(!menu.open)return;
+  const bounds=menu.querySelector('summary')!.getBoundingClientRect();
+  const dropdown=menu.querySelector<HTMLElement>('.editor-more-menu')!;
+  dropdown.style.top=String(bounds.bottom+5)+'px';
+  dropdown.style.right=String(Math.max(8,window.innerWidth-bounds.right))+'px';
+}
+element('editor-more').addEventListener('toggle',positionEditorMoreMenu);
+window.addEventListener('resize',positionEditorMoreMenu);
+document.querySelector('.workspace-tabs')!.addEventListener('scroll',positionEditorMoreMenu);
 element("editor-more").addEventListener("click", event => {
   if ((event.target as HTMLElement).closest("button")) element<HTMLDetailsElement>("editor-more").open = false;
 });
@@ -1438,7 +1465,7 @@ function updateEditorEmptyState(): void {
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
   element('panel-editor').classList.toggle('editor-is-empty', empty);
-  for (const id of ['reader-review','selection-ai','generate-ai-image','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  for (const id of ['reader-review','selection-ai','generate-ai-image','save-page','editor-screenshot-ai']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
@@ -1661,9 +1688,10 @@ function renderLaunchCommands(): void {
     const name = document.createElement("input"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name);
     const programLabel = document.createElement("label"); programLabel.className = "launch-program-field"; programLabel.textContent = "起動パス";
     const programWrap = document.createElement("div"); programWrap.className = "app-picker-row";
-    const program = document.createElement("input"); program.value = command.program; program.placeholder = "例: firefox または /usr/bin/firefox"; program.dataset.launchProgram = String(index);
+    const program = document.createElement("input"); program.value = command.program; program.placeholder = "例: uv run start_manual_studio.py"; program.dataset.launchProgram = String(index);
     const browse = document.createElement("button"); browse.type = "button"; browse.textContent = "選択"; browse.dataset.launchBrowse = String(index);
     programWrap.append(program, browse); programLabel.append(programWrap);
+    const programHint = document.createElement('small'); programHint.className = 'muted'; programHint.textContent = '引数もまとめて入力できます。スペースを含むパスや引数は引用符（"）で囲んでください。下の起動引数は末尾に追加されます。'; programLabel.append(programHint);
     const workingDirectoryLabel = document.createElement("label"); workingDirectoryLabel.className = "launch-working-directory-field"; workingDirectoryLabel.textContent = "作業フォルダ（省略時はプロジェクト）";
     const workingDirectoryWrap = document.createElement("div"); workingDirectoryWrap.className = "app-picker-row";
     const workingDirectory = document.createElement("input"); workingDirectory.value = command.workingDirectory || ""; workingDirectory.placeholder = "例: /home/user/my-app"; workingDirectory.dataset.launchWorkingDirectory = String(index);
@@ -2696,8 +2724,7 @@ async function insertScreenshotHere():Promise<void>{
     const rich=milkdown.isRichEditing?milkdown.captureSelectionEdit(true):undefined;
     if(milkdown.isRichEditing&&!rich)throw new Error('挿入する位置を選択してください。');
     const valid=()=>isInsertionCurrent(origin,insertionState())&&!activeImageTab;
-    stage('save');
-    await savedBeforeOperation();
+    await documentPersistence.wait();
     if(!valid())throw new Error('原稿が変更されました。挿入位置を選び直してください。');
     stage('select');
     const method=await chooseScreenshotMethod();

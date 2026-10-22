@@ -1,8 +1,15 @@
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
 use std::sync::{atomic::{AtomicU8, Ordering}, Arc, Mutex, Weak};
 
+#[cfg(target_os = "linux")]
 #[derive(Default)]
 pub struct EditorContextMenus(Mutex<HashMap<String, Weak<AtomicU8>>>);
+
+#[cfg(not(target_os = "linux"))]
+#[derive(Default)]
+pub struct EditorContextMenus;
 
 /// Extend WebKit's menu instead of replacing its clipboard, spelling and link actions.
 #[tauri::command]

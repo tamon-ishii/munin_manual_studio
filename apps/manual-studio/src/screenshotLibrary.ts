@@ -160,6 +160,8 @@ export function setupScreenshotLibrary(options: Options) {
         const count = (status: string) => run.items.filter(item => item.status === status).length;
         const interrupted = count('cancelled') > 0 || count('pending') > 0;
         recaptureStatus.textContent = `再撮影${interrupted ? 'を中断しました' : 'が完了しました'}。成功 ${count('succeeded')}件・失敗 ${count('failed')}件・未完了 ${count('cancelled') + count('pending')}件・対象外 ${count('skipped')}件。成功した画像は候補として保存しました。比較して採用してください。`;
+        const reasons=[...new Set(run.items.filter(item=>item.status==='failed').map(item=>item.reason).filter(Boolean))];
+        if(reasons.length)recaptureStatus.textContent+=` 失敗の理由：${reasons.join(' ／ ')}`;
         await refresh();
       }
       return run;
@@ -339,5 +341,5 @@ export function setupScreenshotLibrary(options: Options) {
     const result=await invoke<Handoff>('edit_library_screenshot',{root,id,revision:revision||null});
     await watch({...result,root,id});
   }
-  return { refresh,recordForInsertion,editManaged };
+  return { refresh,recordForInsertion,editManaged,recapture:(id:string,root=options.root())=>recapture({id},root) };
 }

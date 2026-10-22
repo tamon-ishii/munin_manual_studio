@@ -168,14 +168,12 @@ struct LaunchedApplication {
 #[tauri::command]
 fn test_launch_application(program: String, args: Vec<String>, root: Option<String>, working_directory: Option<String>) -> Result<LaunchedApplication, String> {
     if program.trim().is_empty() { return Err("アプリのパスを指定してください。".into()); }
-    let executable = if let Some(root) = root.as_deref() {
-        manual_core::platform::application_executable_in(std::path::Path::new(root), &program)?
-    } else {
-        manual_core::platform::application_executable(&program)?
-    };
+    let directory = resolve_working_directory(root.as_deref(), working_directory.as_deref())?;
+    let launch_root = directory.clone().unwrap_or(std::env::current_dir().map_err(|e| e.to_string())?);
+    let (executable, args) = manual_core::platform::application_command_in(&launch_root, &program, &args)?;
     let mut command = std::process::Command::new(&executable);
     command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    if let Some(directory) = resolve_working_directory(root.as_deref(), working_directory.as_deref())? { command.current_dir(directory); }
+    if let Some(directory) = directory { command.current_dir(directory); }
     let mut child = command.spawn().map_err(|e| format!("アプリを起動できません: {e}"))?;
     let pid = child.id();
     std::thread::spawn(move || { let _ = child.wait(); });
@@ -234,7 +232,9 @@ fn cancel_operation_recording(app: tauri::AppHandle, state: State<'_, recorder::
 }
 
 #[tauri::command]
-fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
+async fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
+    // WebView2 creation deadlocks inside synchronous commands on Windows.
+    // Tauri runs async commands off the UI thread, allowing build() to finish.
     disarm_recording_escape(&app);
     if let Some(window) = app.get_webview_window("recording-control") {
         window.show().map_err(|error| error.to_string())?;
