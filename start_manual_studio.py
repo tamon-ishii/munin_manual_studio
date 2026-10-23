@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -56,6 +57,34 @@ def required_tool(name: str) -> str:
 def prepare_frontend(npm: str, directory: Path = PROJECT_ROOT) -> None:
     if not (directory / "node_modules").is_dir():
         subprocess.run([npm, "ci"], cwd=directory, check=True)
+
+
+def prepare_markits_sources() -> None:
+    directory = PROJECT_ROOT / "crates/markits"
+    required = (directory / "Cargo.toml", directory / "apps/desktop/package.json")
+    if all(path.is_file() for path in required):
+        return
+    if not (PROJECT_ROOT / ".git").exists() or not (PROJECT_ROOT / ".gitmodules").is_file():
+        raise RuntimeError("MarkItsのソースがありません。git clone --recurse-submodules で取得してください。")
+    git = required_tool("git")
+    backup = None
+    if directory.is_dir() and not (directory / ".git").exists() and any(directory.iterdir()):
+        backup_root = PROJECT_ROOT / ".munin/launcher-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = Path(tempfile.mkdtemp(prefix="markits-", dir=backup_root)) / "markits"
+        shutil.move(str(directory), str(backup))
+        print(f"MarkItsの既存ファイルを保管しました: {backup}", flush=True)
+    print("MarkItsサブモジュールを取得します。", flush=True)
+    subprocess.run([git, "submodule", "update", "--init", "--recursive", "--", "crates/markits"],
+                   cwd=PROJECT_ROOT, check=True)
+    if not all(path.is_file() for path in required):
+        raise RuntimeError("MarkItsの取得後もビルドに必要なファイルがありません。サブモジュールの状態を確認してください。")
+    if backup is not None:
+        for relative in ("apps/desktop/node_modules", "apps/desktop/src-tauri/target", "target"):
+            previous, restored = backup / relative, directory / relative
+            if previous.is_dir() and not restored.exists():
+                restored.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(previous), str(restored))
 
 
 def parse_args() -> argparse.Namespace:
@@ -122,6 +151,7 @@ def main() -> int:
     args = parse_args()
 
     try:
+        prepare_markits_sources()
         if args.dev:
             return run_development_mode()
         target = target_directory()

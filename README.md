@@ -39,6 +39,8 @@ git clone --recurse-submodules https://github.com/tamon-ishii/munin_manual_studi
 
 既存のチェックアウトでは、`git submodule update --init --recursive`で取得できます。親リポジトリの更新後も同じコマンドで参照先を合わせてください。
 
+起動ランチャーはMarkItsのソースが未取得の場合に自動で取得します。以前の構成のキャッシュやデータが残っている場合は、`.munin/launcher-backups`へ保管してから取得し、ビルドキャッシュを再利用します。
+
 Python 3を用意し、プロジェクトルート（`start_manual_studio.py`のあるフォルダー）で実行します。初回ビルドにはnpmとCargoも必要です。
 
 ```sh

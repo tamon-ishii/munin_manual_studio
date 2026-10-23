@@ -10984,11 +10984,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:binding-loop:59f333bd5afb7fed:1",
+      "id": "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1672,
+      "line": 1685,
       "kind": "binding-loop",
-      "expression": "launchCommands.forEach((command, index) => { const row = document.createElement(\"div\"); row.className = \"launch-command-row\"; const nameLabel = document.createElement(\"label\"); nameLabel.textContent = \"表示名（省略可）\"; const name = document.createElement(\"input\"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name); const programLabel = document.createElement(\"label\"); programLabel.className = \"launch-program-field\"; programLabel.textContent = \"起動パス\"; const programWrap = document.createElement(\"div\"); programWrap.className = \"app-picker-row\"; const program = document.createElement(\"input\"); program.value = command.program; program.placeholder = \"例: firefox または /usr/bin/firefox\"; program.dataset.launchProgram = String(index); const browse = document.createElement(\"button\"); browse.type = \"button\"; browse.textContent = \"選択\"; browse.dataset.launchBrowse = String(index); programWrap.append(program, browse); programLabel.append(programWrap); const workingDirectoryLabel = document.createElement(\"label\"); workingDirectoryLabel.className = \"launch-working-directory-field\"; workingDirectoryLabel.textContent = \"作業フォルダ（省略時はプロジェクト）\"; const workingDirectoryWrap = document.createElement(\"div\"); workingDirectoryWrap.className = \"app-picker-row\"; const workingDirectory = document.createElement(\"input\"); workingDirectory.value = command.workingDirectory || \"\"; workingDirectory.placeholder = \"例: /home/user/my-app\"; workingDirectory.dataset.launchWorkingDirectory = String(index); const browseWorkingDirectory = document.createElement(\"button\"); browseWorkingDirectory.type = \"button\"; browseWorkingDirectory.textContent = \"選択\"; browseWorkingDirectory.dataset.launchWorkingDirectoryBrowse = String(index); workingDirectoryWrap.append(workingDirectory, browseWorkingDirectory); workingDirectoryLabel.append(workingDirectoryWrap); const argsLabel = document.createElement(\"label\"); argsLabel.textContent = \"起動引数（1行に1つ）\"; const args = document.createElement(\"textarea\"); args.rows = 2; args.value = command.args.join(\"\\n\"); args.dataset.launchArgs = String(index); argsLabel.append(args); name.addEventListener(\"input\", () => { command.name = name.value; }); program.addEventListener(\"input\", () => { command.program = program.value; }); workingDirectory.addEventListener(\"input\", () => { command.workingDirectory = workingDirectory.value; }); args.addEventListener(\"input\", () => { command.args = args.value.split(\"\\n\").filter(value => value.length > 0); }); const remove = document.createElement(\"button\"); remove.type = \"button\"; remove.textContent = \"削除\"; remove.dataset.launchRemove = String(index); const test = document.createElement(\"button\"); test.type = \"button\"; test.textContent = \"起動確認\"; test.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"起動確認はデスクトップ版で利用できます。\"); await invoke(\"test_launch_application\", { program: program.value, args: args.value.split(\"\\n\").filter(value => value.length > 0), root: projectRoot || undefined, workingDirectory: workingDirectory.value.trim() || undefined }); status(\"対象アプリを起動しました。\"); }); }); const actions = document.createElement(\"div\"); actions.className = \"actions launch-row-actions\"; actions.append(test, remove); row.append(nameLabel, programLabel, workingDirectoryLabel, argsLabel, actions); list.append(row); })",
+      "expression": "launchCommands.forEach((command, index) => { const row = document.createElement(\"div\"); row.className = \"launch-command-row\"; const nameLabel = document.createElement(\"label\"); nameLabel.textContent = \"表示名（省略可）\"; const name = document.createElement(\"input\"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name); const programLabel = document.createElement(\"label\"); programLabel.className = \"launch-program-field\"; programLabel.textContent = \"起動パス\"; const programWrap = document.createElement(\"div\"); programWrap.className = \"app-picker-row\"; const program = document.createElement(\"input\"); program.value = command.program; program.placeholder = \"例: uv run start_manual_studio.py\"; program.dataset.launchProgram = String(index); const browse = document.createElement(\"button\"); browse.type = \"button\"; browse.textContent = \"選択\"; browse.dataset.launchBrowse = String(index); programWrap.append(program, browse); programLabel.append(programWrap); const programHint = document.createElement('small'); programHint.className = 'muted'; programHint.textContent = '引数もまとめて入力できます。スペースを含むパスや引数は引用符（\"）で囲んでください。下の起動引数は末尾に追加されます。'; programLabel.append(programHint); const workingDirectoryLabel = document.createElement(\"label\"); workingDirectoryLabel.className = \"launch-working-directory-field\"; workingDirectoryLabel.textContent = \"作業フォルダ（省略時はプロジェクト）\"; const workingDirectoryWrap = document.createElement(\"div\"); workingDirectoryWrap.className = \"app-picker-row\"; const workingDirectory = document.createElement(\"input\"); workingDirectory.value = command.workingDirectory || \"\"; workingDirectory.placeholder = \"例: /home/user/my-app\"; workingDirectory.dataset.launchWorkingDirectory = String(index); const browseWorkingDirectory = document.createElement(\"button\"); browseWorkingDirectory.type = \"button\"; browseWorkingDirectory.textContent = \"選択\"; browseWorkingDirectory.dataset.launchWorkingDirectoryBrowse = String(index); workingDirectoryWrap.append(workingDirectory, browseWorkingDirectory); workingDirectoryLabel.append(workingDirectoryWrap); const argsLabel = document.createElement(\"label\"); argsLabel.textContent = \"起動引数（1行に1つ）\"; const args = document.createElement(\"textarea\"); args.rows = 2; args.value = command.args.join(\"\\n\"); args.dataset.launchArgs = String(index); argsLabel.append(args); name.addEventListener(\"input\", () => { command.name = name.value; }); program.addEventListener(\"input\", () => { command.program = program.value; }); workingDirectory.addEventListener(\"input\", () => { command.workingDirectory = workingDirectory.value; }); args.addEventListener(\"input\", () => { command.args = args.value.split(\"\\n\").filter(value => value.length > 0); }); const remove = document.createElement(\"button\"); remove.type = \"button\"; remove.textContent = \"削除\"; remove.dataset.launchRemove = String(index); const test = document.createElement(\"button\"); test.type = \"button\"; test.textContent = \"起動確認\"; test.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"起動確認はデスクトップ版で利用できます。\"); await invoke(\"test_launch_application\", { program: program.value, args: args.value.split(\"\\n\").filter(value => value.length > 0), root: projectRoot || undefined, workingDirectory: workingDirectory.value.trim() || undefined }); status(\"対象アプリを起動しました。\"); }); }); const actions = document.createElement(\"div\"); actions.className = \"actions launch-row-actions\"; actions.append(test, remove); row.append(nameLabel, programLabel, workingDirectoryLabel, argsLabel, actions); list.append(row); })",
       "feature": "P13",
       "spec": "openspec/specs/application-launch-settings/spec.md",
       "result": "端末/プロジェクト/接続先の所有範囲に保存する",
@@ -13755,6 +13755,53 @@
         "P02.failure-retry"
       ],
       "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:toggle:5cdf65abd4310790:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1394,
+      "kind": "event:toggle",
+      "expression": "element('editor-more').addEventListener('toggle',positionEditorMoreMenu)",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "メニューが画面内に配置され、原稿は変更されない",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/milkdownEditor.ts:create:button:9e4338c3e56e9870:1",
+      "file": "apps/manual-studio/src/milkdownEditor.ts",
+      "line": 102,
+      "kind": "create:button",
+      "expression": "recaptureBtn=document.createElement('button')",
+      "feature": "P08",
+      "spec": "openspec/specs/screenshot-library/spec.md",
+      "result": "対象画像の再撮影を開始し、原稿と採用画像を保持する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P08.integrity-recapture-partial-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/milkdownEditor.ts:event:click:1c6d27b6c8516196:1",
+      "file": "apps/manual-studio/src/milkdownEditor.ts",
+      "line": 103,
+      "kind": "event:click",
+      "expression": "recaptureBtn.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(activeImg&&activeSource)onRecaptureImage(activeSource,activeImg);})",
+      "feature": "P08",
+      "spec": "openspec/specs/screenshot-library/spec.md",
+      "result": "対象画像の再撮影を開始し、原稿と採用画像を保持する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P08.integrity-recapture-partial-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
     }
   ],
   "cases": [
@@ -14120,7 +14167,8 @@
         "apps/manual-studio/src/gfmEditor.ts:create:select:5791b9aa8456a6fe:1",
         "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1",
         "apps/manual-studio/index.html:html:button:8d0c395cf79b6465:1",
-        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1"
+        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1",
+        "apps/manual-studio/src/main.ts:event:toggle:5cdf65abd4310790:1"
       ],
       "expected": {
         "visible": "本文・タブ・プレビューが編集対象と一致する",
@@ -14362,7 +14410,8 @@
         "apps/manual-studio/src/gfmEditor.ts:create:select:5791b9aa8456a6fe:1",
         "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1",
         "apps/manual-studio/index.html:html:button:8d0c395cf79b6465:1",
-        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1"
+        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1",
+        "apps/manual-studio/src/main.ts:event:toggle:5cdf65abd4310790:1"
       ],
       "expected": {
         "visible": "本文・タブ・プレビューが編集対象と一致する",
@@ -14604,7 +14653,8 @@
         "apps/manual-studio/src/gfmEditor.ts:create:select:5791b9aa8456a6fe:1",
         "apps/manual-studio/src/gfmEditor.ts:event:change:6409207818b79c48:1",
         "apps/manual-studio/index.html:html:button:8d0c395cf79b6465:1",
-        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1"
+        "apps/manual-studio/src/main.ts:event:click:afb771b61841d43f:1",
+        "apps/manual-studio/src/main.ts:event:toggle:5cdf65abd4310790:1"
       ],
       "expected": {
         "visible": "本文・タブ・プレビューが編集対象と一致する",
@@ -16155,7 +16205,7 @@
         "apps/manual-studio/src/main.ts:binding-loop:3e85cc864ddd4742:1",
         "apps/manual-studio/src/main.ts:binding-loop:45163c073e6a9e6f:1",
         "apps/manual-studio/src/main.ts:binding-loop:d39921c346ccbecf:1",
-        "apps/manual-studio/src/main.ts:binding-loop:59f333bd5afb7fed:1",
+        "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
@@ -16249,7 +16299,7 @@
         "apps/manual-studio/src/main.ts:binding-loop:3e85cc864ddd4742:1",
         "apps/manual-studio/src/main.ts:binding-loop:45163c073e6a9e6f:1",
         "apps/manual-studio/src/main.ts:binding-loop:d39921c346ccbecf:1",
-        "apps/manual-studio/src/main.ts:binding-loop:59f333bd5afb7fed:1",
+        "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
@@ -16343,7 +16393,7 @@
         "apps/manual-studio/src/main.ts:binding-loop:3e85cc864ddd4742:1",
         "apps/manual-studio/src/main.ts:binding-loop:45163c073e6a9e6f:1",
         "apps/manual-studio/src/main.ts:binding-loop:d39921c346ccbecf:1",
-        "apps/manual-studio/src/main.ts:binding-loop:59f333bd5afb7fed:1",
+        "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
@@ -17445,7 +17495,9 @@
       "feature": "P08",
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c3d38ef1484ab8a3:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:event:click:0dad2bc1dd9a579c:1"
+        "apps/manual-studio/src/screenshotLibrary.ts:event:click:0dad2bc1dd9a579c:1",
+        "apps/manual-studio/src/milkdownEditor.ts:create:button:9e4338c3e56e9870:1",
+        "apps/manual-studio/src/milkdownEditor.ts:event:click:1c6d27b6c8516196:1"
       ],
       "requiredEvidence": [
         "browser-mock"
