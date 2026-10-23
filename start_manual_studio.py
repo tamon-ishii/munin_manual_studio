@@ -60,6 +60,8 @@ def prepare_frontend(npm: str, directory: Path = PROJECT_ROOT) -> None:
 
 
 def prepare_markits_sources() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     directory = PROJECT_ROOT / "crates/markits"
     required = (directory / "Cargo.toml", directory / "apps/desktop/package.json")
     if all(path.is_file() for path in required):

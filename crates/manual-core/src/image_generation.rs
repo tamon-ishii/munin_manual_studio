@@ -169,7 +169,7 @@ pub fn history(root: &Path) -> Result<Value, String> {
 }
 pub fn extract_image_path(text: &str) -> Option<String> {
     let re =
-        regex::Regex::new(r#"(?:file://)?(/[^\s"'`\(\)\[\]<>]+\.(?:png|jpg|jpeg|webp))"#).ok()?;
+        regex::Regex::new(r#"(?:file://)?((?:[A-Za-z]:[\\/]|/)[^\s"'`\(\)\[\]<>]+\.(?:png|jpg|jpeg|webp))"#).ok()?;
     let found = re
         .captures_iter(text)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))

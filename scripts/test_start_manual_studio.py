@@ -1,5 +1,6 @@
 """Launcher recovery when a vendored MarkIts checkout becomes a submodule."""
 
+import io
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -36,6 +37,14 @@ class MarkItsRecoveryTests(unittest.TestCase):
         with patch.object(launcher.subprocess, "run") as run:
             launcher.prepare_markits_sources()
         run.assert_not_called()
+
+    def test_recovery_messages_work_with_windows_legacy_encoding(self):
+        output = io.BytesIO()
+        stream = io.TextIOWrapper(output, encoding="cp1252")
+        with patch.object(launcher.sys, "stdout", stream), patch.object(launcher, "required_tool", return_value="git"), patch.object(launcher.subprocess, "run", side_effect=self.checkout):
+            launcher.prepare_markits_sources()
+        stream.flush()
+        self.assertIn(b"MarkIts", output.getvalue())
 
     def test_missing_sources_are_checked_out_before_build(self):
         with patch.object(launcher, "required_tool", return_value="git"), patch.object(launcher.subprocess, "run", side_effect=self.checkout) as run:
