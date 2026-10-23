@@ -1981,6 +1981,12 @@ async function uploadMilkdownImage(file: File): Promise<string> {
   const directory = current.page.split('/').slice(0, -1).join('/');
   const path = `${directory ? `${directory}/` : ''}assets/image-${crypto.randomUUID()}.${extension}`;
   await rpc("save-asset", { path, data }, root);
+  // Milkdown ignores an image node update while the editor is read-only.
+  // A manuscript save may still be refreshing workspace metadata when the
+  // asset finishes; let its editing lock clear before resolving the upload.
+  while (busy && isInsertionCurrent(origin, insertionState())) {
+    await new Promise<void>(resolve => setTimeout(resolve, 20));
+  }
   if (!isInsertionCurrent(origin, insertionState())) throw new Error(STALE_INSERTION_MESSAGE);
   return computeRelativeMarkdownPath(current.page, path, workspace?.config.docs || "docs");
 }

@@ -10,7 +10,7 @@ const verificationStart = await beginVerification();
 await rm('ui-coverage-results/insertion/result.json', { force: true });
 const root=await mkdtemp(path.join(os.tmpdir(),'munin-insert-contract-')),base='http://127.0.0.1:5174';
 const initial='# Insertion\n\nBefore text.\n\nAfter text.\n',caret=initial.indexOf('After');
-let browser,server,failSave=false,releaseSave,startedSave,holdNextSaves=0;
+let browser,server,failSave=false,releaseSave,startedSave,holdNextSaves=0,holdWorkspaceRefresh=false,releaseWorkspaceRefresh;
 const heldSaves=[];
 const records=[],assetRequests=[];
 const waitStarted=promise=>Promise.race([promise,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('Asset save request did not start')),10000);timer.unref();})]);
@@ -19,7 +19,7 @@ try{
  const png=await readFile('apps/manual-studio/src-tauri/icons/icon.png');const file={name:'fixture.png',mimeType:'image/png',buffer:png};
  server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
  browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
- await page.route('**/__manual/rpc',async route=>{const request=route.request().postDataJSON();if(request.action==='save-asset'){assetRequests.push(request.options.path);
+ await page.route('**/__manual/rpc',async route=>{const request=route.request().postDataJSON();if(request.action==='state'&&holdWorkspaceRefresh){holdWorkspaceRefresh=false;await new Promise(resolve=>releaseWorkspaceRefresh=resolve);}if(request.action==='save-asset'){assetRequests.push(request.options.path);
   if(failSave){await route.fulfill({json:{error:'Fixture asset save unavailable'}});return;}
   if(holdNextSaves>0){holdNextSaves--;await new Promise(resolve=>heldSaves.push({path:request.options.path,release:resolve}));}
   if(startedSave){startedSave();await new Promise(resolve=>releaseSave=resolve);startedSave=undefined;}
@@ -145,8 +145,12 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();
  const slowStarted=new Promise(resolve=>startedSave=resolve);
  await page.locator('.milkdown-image-block input[type=file]').setInputFiles(file);await waitStarted(slowStarted);
- await page.keyboard.press('Control+s');await autosaved;await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved');
- releaseSave();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'),{},{timeout:15000});
+ holdWorkspaceRefresh=true;await page.keyboard.press('Control+s');await autosaved;await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saved');
+ await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='true');
+ const assetSaved=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='save-asset');
+ releaseSave();await (await assetSaved).finished();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ assert.equal(await editor.evaluate(node=>node.readOnly),true,'save remains active while the upload completes');
+ releaseWorkspaceRefresh();await idle();await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'),{},{timeout:15000});
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
  assert.equal((await editor.inputValue()).trim(),initial.trim());
