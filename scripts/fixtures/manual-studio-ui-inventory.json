@@ -13781,12 +13781,12 @@
       "expression": "recaptureBtn=document.createElement('button')",
       "feature": "P08",
       "spec": "openspec/specs/screenshot-library/spec.md",
-      "result": "対象画像の再撮影を開始し、原稿と採用画像を保持する",
+      "result": "原稿の画像に対応するIDで再撮影の確認を開く。キャンセルすると原本・採用版・原稿を保持する。撮影の完了はこの入口の検証に含めない。",
       "returnTarget": "開始した原稿と選択位置",
       "cases": [
-        "P08.integrity-recapture-partial-retry"
+        "P08.manuscript-recapture-confirm-cancel"
       ],
-      "reviewStatus": "needs-entry-specific-review"
+      "reviewStatus": "reviewed"
     },
     {
       "id": "apps/manual-studio/src/milkdownEditor.ts:event:click:1c6d27b6c8516196:1",
@@ -13796,12 +13796,12 @@
       "expression": "recaptureBtn.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(activeImg&&activeSource)onRecaptureImage(activeSource,activeImg);})",
       "feature": "P08",
       "spec": "openspec/specs/screenshot-library/spec.md",
-      "result": "対象画像の再撮影を開始し、原稿と採用画像を保持する",
+      "result": "原稿の画像に対応するIDで再撮影の確認を開く。キャンセルすると原本・採用版・原稿を保持する。撮影の完了はこの入口の検証に含めない。",
       "returnTarget": "開始した原稿と選択位置",
       "cases": [
-        "P08.integrity-recapture-partial-retry"
+        "P08.manuscript-recapture-confirm-cancel"
       ],
-      "reviewStatus": "needs-entry-specific-review"
+      "reviewStatus": "reviewed"
     }
   ],
   "cases": [
@@ -17495,9 +17495,7 @@
       "feature": "P08",
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c3d38ef1484ab8a3:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:event:click:0dad2bc1dd9a579c:1",
-        "apps/manual-studio/src/milkdownEditor.ts:create:button:9e4338c3e56e9870:1",
-        "apps/manual-studio/src/milkdownEditor.ts:event:click:1c6d27b6c8516196:1"
+        "apps/manual-studio/src/screenshotLibrary.ts:event:click:0dad2bc1dd9a579c:1"
       ],
       "requiredEvidence": [
         "browser-mock"
@@ -18551,6 +18549,30 @@
         "real-backend"
       ],
       "script": "scripts/test_manual_studio_priority_improvements.mjs"
+    },
+    {
+      "id": "P08.manuscript-recapture-confirm-cancel",
+      "feature": "P08",
+      "kind": "cancel",
+      "entryPoints": [
+        "apps/manual-studio/src/milkdownEditor.ts:create:button:9e4338c3e56e9870:1",
+        "apps/manual-studio/src/milkdownEditor.ts:event:click:1c6d27b6c8516196:1"
+      ],
+      "expected": {
+        "visible": "原稿画像上の再撮影ボタンから対象画像の確認ダイアログが開く",
+        "stored": "キャンセルでは画像と原稿を書き換えない",
+        "preserved": "原本・採用版・挿入済みの画像参照とUndo履歴",
+        "returnTarget": "元の原稿"
+      },
+      "requiredEvidence": [
+        "browser-mock",
+        "real-backend"
+      ],
+      "existingChecks": [
+        "scripts/test_manual_studio_capture_ui.mjs"
+      ],
+      "status": "not-run",
+      "notes": "原稿上の入口専用。リソース一覧の部分再試行とは別の契約。確認計画をモックし、画像登録と原稿挿入は実バックエンドで検証する。"
     }
   ]
 }
