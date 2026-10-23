@@ -1295,7 +1295,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -1306,15 +1306,15 @@
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
     },
     {
-      "id": "apps/manual-studio/index.html:html:input:9a73abaab37071c2:1",
+      "id": "apps/manual-studio/index.html:html:input:3e5771b9c76a0059:1",
       "file": "apps/manual-studio/index.html",
-      "line": 79,
+      "line": 78,
       "kind": "html:input",
-      "expression": "<input id=\"resource-search\" type=\"search\" aria-label=\"リソースを検索\" placeholder=\"名前・パス・使用原稿を検索\" />",
+      "expression": "<input id=\"resource-search\" type=\"search\" aria-label=\"撮影を検索\" placeholder=\"名前・パス・使用原稿を検索\" />",
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -1325,15 +1325,15 @@
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
     },
     {
-      "id": "apps/manual-studio/index.html:html:select:088ecb1e16143200:1",
+      "id": "apps/manual-studio/index.html:html:select:b4b17c447e70843f:1",
       "file": "apps/manual-studio/index.html",
-      "line": 79,
+      "line": 78,
       "kind": "html:select",
-      "expression": "<select id=\"resource-kind\" aria-label=\"リソースの種類\">",
+      "expression": "<select id=\"resource-kind\" aria-label=\"画像の種類\">",
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -1344,15 +1344,15 @@
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
     },
     {
-      "id": "apps/manual-studio/index.html:html:select:94aca66af11fa924:1",
+      "id": "apps/manual-studio/index.html:html:select:cf3dfa943c9201c7:1",
       "file": "apps/manual-studio/index.html",
-      "line": 79,
+      "line": 78,
       "kind": "html:select",
-      "expression": "<select id=\"resource-usage\" aria-label=\"リソースの使用状態\">",
+      "expression": "<select id=\"resource-usage\" aria-label=\"使用状態\">",
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -1388,7 +1388,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "途中終了・取り込み失敗時は原本と採用版を保持。再確認で候補を1版だけ保存する。",
-      "returnTarget": "リソース一覧の対象画像と再確認操作",
+      "returnTarget": "撮影一覧の対象画像と再確認操作",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -6130,11 +6130,11 @@
       "reviewBasis": "ファイル選択とdropの各キャンセルを実ボタンから実行し、本文・保存不変とカーソル復帰を確認"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
+      "id": "apps/manual-studio/src/main.ts:event:submit:013db8cfc2443a9d:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2009,
+      "line": 2051,
       "kind": "event:submit",
-      "expression": "element(\"image-save-form\").addEventListener(\"submit\", (event) => { event.preventDefault(); if (!pendingImageDataUrl || !documentState) return; const folder = input(\"image-save-folder\").value.trim().replace(/\\/+$/, \"\"); const filename = input(\"image-save-filename\").value.trim(); const alt = input(\"image-save-alt\").value.trim(); if (!filename) { status(\"ファイル名を入力してください。\", true); return; } const fullAssetPath = folder ? `${folder}/${filename}` : filename; const dataUrl = pendingImageDataUrl; const owner=pendingImageOwner; const selection=pendingImageSelection||{start:editor.selectionStart,end:editor.selectionEnd}; void work(async () => { const valid=()=>owner&&pendingImageOwner===owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion; if(!valid())throw new Error('原稿が変更されました。画像の挿入をやり直してください。'); await rpc(\"save-asset\", { path: fullAssetPath, data: dataUrl },owner!.root); if(pendingImageOwner!==owner){if(owner!.root===projectRoot)status('画像を保存しました。挿入はキャンセルされました。');return;} if(!valid())throw new Error('原稿が変更されました。保存した画像はリソース一覧に残しています。'); element<HTMLDialogElement>(\"image-save-dialog\").close(); pendingImageDataUrl = null; pendingImageOwner = null; const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || \"docs\"); const markdownCode = `![${alt}](${relPath})`; const start = selection.start; const end = selection.end; pendingImageSelection = null; rememberCurrentSelection(start, end); editor.setRangeText(markdownCode, start, end, \"end\"); dirty = true; updateSaveState(); editor.dispatchEvent(new Event(\"input\")); editor.focus(); status(`画像を ${fullAssetPath} に保存し、原稿に挿入しました。`); }); })",
+      "expression": "element(\"image-save-form\").addEventListener(\"submit\", (event) => { event.preventDefault(); if (!pendingImageDataUrl || !documentState) return; const folder = input(\"image-save-folder\").value.trim().replace(/\\/+$/, \"\"); const filename = input(\"image-save-filename\").value.trim(); const alt = input(\"image-save-alt\").value.trim(); if (!filename) { status(\"ファイル名を入力してください。\", true); return; } const fullAssetPath = folder ? `${folder}/${filename}` : filename; const dataUrl = pendingImageDataUrl; const owner=pendingImageOwner; const selection=pendingImageSelection||{start:editor.selectionStart,end:editor.selectionEnd}; void work(async () => { const valid=()=>owner&&pendingImageOwner===owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion; if(!valid())throw new Error('原稿が変更されました。画像の挿入をやり直してください。'); await rpc(\"save-asset\", { path: fullAssetPath, data: dataUrl },owner!.root); if(pendingImageOwner!==owner){if(owner!.root===projectRoot)status('画像を保存しました。挿入はキャンセルされました。');return;} if(!valid())throw new Error('原稿が変更されました。保存した画像は撮影一覧に残しています。'); element<HTMLDialogElement>(\"image-save-dialog\").close(); pendingImageDataUrl = null; pendingImageOwner = null; const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || \"docs\"); const markdownCode = `![${alt}](${relPath})`; const start = selection.start; const end = selection.end; pendingImageSelection = null; rememberCurrentSelection(start, end); editor.setRangeText(markdownCode, start, end, \"end\"); dirty = true; updateSaveState(); editor.dispatchEvent(new Event(\"input\")); editor.focus(); status(`画像を ${fullAssetPath} に保存し、原稿に挿入しました。`); }); })",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -7302,7 +7302,7 @@
       "feature": "P05",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "管理画像の原本と保存注釈を復元して候補を1版追加。採用版と原稿は保持する。通常画像のコピー契約は未検証。",
-      "returnTarget": "開始した原稿を保持し、リソース一覧で候補を比較して明示的に採用",
+      "returnTarget": "開始した原稿を保持し、撮影一覧で候補を比較して明示的に採用",
       "cases": [
         "P02.success",
         "P02.cancel",
@@ -7355,7 +7355,7 @@
       "feature": "P05",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "管理画像の原本と保存注釈を復元して候補を1版追加。採用版と原稿は保持する。通常画像のコピー契約は未検証。",
-      "returnTarget": "開始した原稿を保持し、リソース一覧で候補を比較して明示的に採用",
+      "returnTarget": "開始した原稿を保持し、撮影一覧で候補を比較して明示的に採用",
       "cases": [
         "P02.success",
         "P02.cancel",
@@ -7913,7 +7913,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -7930,7 +7930,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -7949,7 +7949,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -7968,7 +7968,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -7987,7 +7987,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8006,7 +8006,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8025,7 +8025,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8044,7 +8044,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8080,7 +8080,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8097,7 +8097,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8114,7 +8114,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8148,7 +8148,7 @@
       "feature": "P05",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "元画像を保持し、デスクトップ側で別コピーを一つ作って編集。完了後も原稿の参照は不変",
-      "returnTarget": "リソース一覧。挿入・差し替えは明示操作",
+      "returnTarget": "撮影一覧。挿入・差し替えは明示操作",
       "cases": [
         "P05.success",
         "P05.cancel",
@@ -8166,7 +8166,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8183,7 +8183,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8200,7 +8200,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8217,7 +8217,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8234,7 +8234,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8270,7 +8270,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8287,7 +8287,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -8757,11 +8757,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:00d7a26ddb9da82e:1",
+      "id": "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
       "file": "apps/manual-studio/src/screenshotLibrary.ts",
       "line": 52,
       "kind": "loop-controls",
-      "expression": "for (const shot of result.items) { if(!resources.matchesShot(shot.output,{path:shot.output||'',name:shot.name,kind:shot.recipe?'screenshot':'imported',usages:shot.usage.map(page=>({page,line:1,start:0,end:0,snippet:''}))}))continue; const card = document.createElement('article'); card.className = 'card screenshot-library-card';card.dataset.screenshotId=shot.id; const title = document.createElement('h2'); title.textContent = shot.name || '画像'; card.append(title);resources.decorateShot(card,shot.output); if (shot.thumbnail) { const image = document.createElement('img'); image.src = shot.thumbnail; image.alt = title.textContent; image.draggable=Boolean(shot.adopted);image.title='ドラッグして原稿に挿入';card.append(image); } const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${card.querySelector('.resource-usages') ? '' : shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' 再撮影候補あり' : ''}`.trim(); if(usage.textContent)card.append(usage); const sharedCount = result.items.filter(item => (item.capture_id || item.id) === (shot.capture_id || shot.id)).length; if (sharedCount > 1) { const shared = document.createElement('p'); shared.className = 'muted'; shared.textContent = `原本を共有：${sharedCount}画像 ／ 撮影1回`; card.append(shared); } const actions = document.createElement('div'); actions.className = 'actions screenshot-primary-actions'; card.append(actions); const management = document.createElement('details'); management.className = 'screenshot-management'; const managementTitle = document.createElement('summary'); managementTitle.textContent = '履歴・管理'; const managementActions = document.createElement('div'); managementActions.className = 'actions'; management.append(managementTitle, managementActions); card.append(management); function button(label: string, run: () => Promise<void>, disabled = false, secondary = false) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', () => { void options.work(async () => { if (root !== options.root()) return; await run(); if (root === options.root()) await refresh(); }); }); (secondary ? managementActions : actions).append(button); return button; } const insertButton = button('文書に挿入', async () => { if (!await options.chooseDestination()) return; const page = options.page(); if (!page) { progress.textContent = '先に挿入先の原稿を開いてください。'; throw new Error('挿入する原稿を開いてください。'); } const markdown = await options.request('screenshots-reference', { id: shot.id, page }, root); if (root === options.root() && page === options.page()) options.insert(markdown); }, !shot.adopted); button('共有関係', async () => { const items=(JSON.parse(await options.request('screenshots-list',{},root)) as {items:Screenshot[]}).items; const group=items.filter(item=>(item.capture_id||item.id)===(shot.capture_id||shot.id)); const {body}=featureDialog('共有原本と使用原稿');const source=document.createElement('p');source.textContent=`原本1枚 → 派生画像${group.length}枚 ／ 再撮影1回`;body.append(source); for(const item of group){const card=document.createElement('article');card.className='card';const title=document.createElement('h2');title.textContent=item.name||item.id;card.append(title);const usage=document.createElement('p');usage.textContent=item.usage.length?`使用原稿: ${item.usage.join('、')}`:'未使用';card.append(usage);body.append(card);} }, false, true); button('注釈テンプレートを保存',async()=>{const name=await requestText('テンプレート名');if(!name?.trim())return;await options.request('screenshots-change',{id:shot.id,json:{save_template:name.trim(),revision:versions.value}},root);progress.textContent='注釈テンプレートを保存しました。';},false,true); button('注釈テンプレートを適用',async()=>{ const templates=JSON.parse(await options.request('screenshots-templates',{},root)) as {items:Array<{id:string;name:string}>}; const {dialog,body}=featureDialog('注釈テンプレート');const select=document.createElement('select');select.setAttribute('aria-label','注釈テンプレート');for(const template of templates.items)select.add(new Option(template.name,template.id)); const message=document.createElement('p');message.role='status';if(!templates.items.length)message.textContent='画像の「履歴・管理」からテンプレートを保存してください。'; const apply=document.createElement('button');apply.type='button';apply.textContent='候補として適用';apply.disabled=!templates.items.length; apply.onclick=()=>{void options.work(async()=>{if(root!==options.root())return;try{await options.request('screenshots-change',{id:shot.id,json:{apply_template:select.value,revision:versions.value}},root);dialog.close();progress.textContent='注釈を候補として適用しました。MarkItsで再編集し、確認後に採用できます。';await refresh();}catch(error){message.textContent=String(error);}});}; const remove=document.createElement('button');remove.type='button';remove.textContent='テンプレートを削除';remove.disabled=!templates.items.length;remove.onclick=()=>{void options.work(async()=>{if(root!==options.root()||!await confirmAction('テンプレートを削除しますか？作成済み画像は保持されます。'))return;await options.request('screenshots-change',{id:shot.id,json:{delete_template:select.value}},root);select.selectedOptions[0]?.remove();apply.disabled=remove.disabled=!select.options.length;});};body.append(select,message,apply,remove); },shot.protected,true); button('名前を変更', async () => { const name = await requestText('名前（省略可）', shot.name); if (name !== null) await options.request('screenshots-change', { id: shot.id, json: { name } }, root); }, false, true); button(shot.protected ? '保護を解除' : '画像を保護', async () => { await options.request('screenshots-change', { id: shot.id, json: { protected: !shot.protected } }, root); }, false, true); const recaptureButton = button('再撮影', async () => { await recapture({ id: shot.id }, root); }, shot.protected || !shot.recipe); const versions = document.createElement('select'); versions.setAttribute('aria-label', '画像の編集版'); for (const edit of [...shot.edits].reverse()) versions.add(new Option(`${edit.id === shot.adopted ? '採用済み' : '候補'} ${edit.created_at}`, edit.id)); managementActions.append(versions); const copyButton = button('コピー', async () => { await options.request('screenshots-change', { id: shot.id, json: { copy: true, revision: versions.value } }, root); if (root === options.root()) progress.textContent = 'コピーを作成しました。「編集」で注釈を変更できます。'; }); const editStatus=document.createElement('p');editStatus.role='status';editStatus.className='screenshot-edit-status';editStatus.textContent=editStates.get(JSON.stringify([root,shot.id]))||'';card.append(editStatus); const editButton = button('編集', async () => { if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。'); editState(root,shot.id,'MarkItsを起動しています…'); try { await editManaged(shot.id, versions.value, root); editState(root,shot.id,'MarkItsで編集中です。「編集終了（Manual Studioへ返す）」で候補を保存します。'); } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; } }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile))); editButton.classList.add('primary'); actions.replaceChildren(editButton, copyButton, insertButton, recaptureButton); const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで注釈';aiEdit.disabled=shot.protected||!shot.edits.length; aiEdit.onclick=()=>{if(root===options.root())void options.annotateScreenshot(shot.id);};actions.append(aiEdit); const adoptSelected = async (): Promise<boolean> => { if (!await confirmAction(`${shot.usage.length} 文書で使用する画像を選択版へ更新しますか？\\n再撮影候補の場合、寸法と注釈の位置を比較し、必要ならMarkItsで再編集してください。`)) return false; await options.request('screenshots-change', { id: shot.id, json: { adopt: versions.value, expected_revision: shot.adopted } }, root); return true; }; button('選択版を表示', async () => { const loaded = JSON.parse(await options.request('screenshots-image', { id: shot.id, json: { revision: versions.value } }, root)); if (root !== options.root()) return; const selectedId = versions.value; const images = [{label:'選択版',src:loaded.data,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===selectedId)?.scene)}]; if (shot.thumbnail) images.unshift({label:'採用済み',src:shot.thumbnail,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===shot.adopted)?.scene)}); const alreadyAdopted = selectedId === shot.adopted; // Comparison closes without touching the card; adoption is offered here so no panel round-trip is needed. await showImageComparison(images, '画像の比較・採用前の確認', true, { label: alreadyAdopted ? '採用済みの版です' : '選択版を採用', disabled: shot.protected || alreadyAdopted, run: adoptSelected }); }, false, true); button('選択版を採用', async () => { await adoptSelected(); }, shot.protected, true); button('削除', async () => { if (await confirmAction('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true); if (shot.edits.some(edit => edit.flattened)) { const warning = document.createElement(\"p\"); warning.textContent = \"平坦化画像からの取り込みです。失われた画素や注釈の編集状態は復元できません。\"; card.append(warning); } resources.compactCard(card,shot.usage.length);list.append(card); }",
+      "expression": "for (const shot of result.items) { if(!resources.matchesShot(shot.output,{path:shot.output||'',name:shot.name,kind:shot.recipe?'screenshot':'imported',usages:shot.usage.map(page=>({page,line:1,start:0,end:0,snippet:''}))}))continue; const card = document.createElement('article'); card.className = 'card screenshot-library-card';card.dataset.screenshotId=shot.id; const title = document.createElement('h2'); title.textContent = shot.name || '画像'; card.append(title);resources.decorateShot(card,shot.output); if (shot.thumbnail) { const image = document.createElement('img'); image.src = shot.thumbnail; image.alt = title.textContent; image.draggable=Boolean(shot.adopted);image.title='ドラッグして原稿に挿入';card.append(image); } const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${card.querySelector('.resource-usages') ? '' : shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' 編集候補あり' : ''}`.trim(); if(usage.textContent)card.append(usage); const sharedCount = result.items.filter(item => (item.capture_id || item.id) === (shot.capture_id || shot.id)).length; if (sharedCount > 1) { const shared = document.createElement('p'); shared.className = 'muted'; shared.textContent = `原本を共有：${sharedCount}画像 ／ 撮影1回`; card.append(shared); } const actions = document.createElement('div'); actions.className = 'actions screenshot-primary-actions'; card.append(actions); const management = document.createElement('details'); management.className = 'screenshot-management'; const managementTitle = document.createElement('summary'); managementTitle.textContent = '履歴・管理'; const managementActions = document.createElement('div'); managementActions.className = 'actions'; management.append(managementTitle, managementActions); card.append(management); function button(label: string, run: () => Promise<void>, disabled = false, secondary = false) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', () => { void options.work(async () => { if (root !== options.root()) return; await run(); if (root === options.root()) await refresh(); }); }); (secondary ? managementActions : actions).append(button); return button; } const insertButton = button('文書に挿入', async () => { if (!await options.chooseDestination()) return; const page = options.page(); if (!page) { progress.textContent = '先に挿入先の原稿を開いてください。'; throw new Error('挿入する原稿を開いてください。'); } const markdown = await options.request('screenshots-reference', { id: shot.id, page }, root); if (root === options.root() && page === options.page()) options.insert(markdown); }, !shot.adopted); button('共有関係', async () => { const items=(JSON.parse(await options.request('screenshots-list',{},root)) as {items:Screenshot[]}).items; const group=items.filter(item=>(item.capture_id||item.id)===(shot.capture_id||shot.id)); const {body}=featureDialog('共有原本と使用原稿');const source=document.createElement('p');source.textContent=`原本1枚 → 派生画像${group.length}枚 ／ 再撮影1回`;body.append(source); for(const item of group){const card=document.createElement('article');card.className='card';const title=document.createElement('h2');title.textContent=item.name||item.id;card.append(title);const usage=document.createElement('p');usage.textContent=item.usage.length?`使用原稿: ${item.usage.join('、')}`:'未使用';card.append(usage);body.append(card);} }, false, true); button('注釈テンプレートを保存',async()=>{const name=await requestText('テンプレート名');if(!name?.trim())return;await options.request('screenshots-change',{id:shot.id,json:{save_template:name.trim(),revision:versions.value}},root);progress.textContent='注釈テンプレートを保存しました。';},false,true); button('注釈テンプレートを適用',async()=>{ const templates=JSON.parse(await options.request('screenshots-templates',{},root)) as {items:Array<{id:string;name:string}>}; const {dialog,body}=featureDialog('注釈テンプレート');const select=document.createElement('select');select.setAttribute('aria-label','注釈テンプレート');for(const template of templates.items)select.add(new Option(template.name,template.id)); const message=document.createElement('p');message.role='status';if(!templates.items.length)message.textContent='画像の「履歴・管理」からテンプレートを保存してください。'; const apply=document.createElement('button');apply.type='button';apply.textContent='候補として適用';apply.disabled=!templates.items.length; apply.onclick=()=>{void options.work(async()=>{if(root!==options.root())return;try{await options.request('screenshots-change',{id:shot.id,json:{apply_template:select.value,revision:versions.value}},root);dialog.close();progress.textContent='注釈を候補として適用しました。MarkItsで再編集し、確認後に採用できます。';await refresh();}catch(error){message.textContent=String(error);}});}; const remove=document.createElement('button');remove.type='button';remove.textContent='テンプレートを削除';remove.disabled=!templates.items.length;remove.onclick=()=>{void options.work(async()=>{if(root!==options.root()||!await confirmAction('テンプレートを削除しますか？作成済み画像は保持されます。'))return;await options.request('screenshots-change',{id:shot.id,json:{delete_template:select.value}},root);select.selectedOptions[0]?.remove();apply.disabled=remove.disabled=!select.options.length;});};body.append(select,message,apply,remove); },shot.protected,true); button('名前を変更', async () => { const name = await requestText('名前（省略可）', shot.name); if (name !== null) await options.request('screenshots-change', { id: shot.id, json: { name } }, root); }, false, true); button(shot.protected ? '保護を解除' : '画像を保護', async () => { await options.request('screenshots-change', { id: shot.id, json: { protected: !shot.protected } }, root); }, false, true); const recaptureButton = button('再撮影', async () => { await recapture({ id: shot.id }, root); }, shot.protected || !shot.recipe); const versions = document.createElement('select'); versions.setAttribute('aria-label', '画像の編集版'); for (const edit of [...shot.edits].reverse()) versions.add(new Option(`${edit.id === shot.adopted ? '採用済み' : '候補'} ${edit.created_at}`, edit.id)); managementActions.append(versions); const copyButton = button('コピー', async () => { await options.request('screenshots-change', { id: shot.id, json: { copy: true, revision: versions.value } }, root); if (root === options.root()) progress.textContent = 'コピーを作成しました。「編集」で注釈を変更できます。'; }); const editStatus=document.createElement('p');editStatus.role='status';editStatus.className='screenshot-edit-status';editStatus.textContent=editStates.get(JSON.stringify([root,shot.id]))||'';card.append(editStatus); const editButton = button('編集', async () => { if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。'); editState(root,shot.id,'MarkItsを起動しています…'); try { await editManaged(shot.id, versions.value, root); editState(root,shot.id,'MarkItsで編集中です。「編集終了（Manual Studioへ返す）」で候補を保存します。'); } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; } }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile))); editButton.classList.add('primary'); const createInsertButton = document.createElement('button'); createInsertButton.type = 'button'; createInsertButton.textContent = 'MarkIts画像を作って挿入'; createInsertButton.disabled = shot.protected || !native || pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)); createInsertButton.addEventListener('click', () => { void options.work(async () => { if (root !== options.root() || !await options.chooseDestination()) return; const page = options.page(); if (!page) throw new Error('挿入する原稿を開いてください。'); editState(root,shot.id,'MarkItsで編集しています。保存後、画像を更新して原稿へ挿入します。'); await editManaged(shot.id,versions.value,root,(id,revision)=>{ void options.work(async()=>{ if(root!==options.root()||page!==options.page()){ progress.textContent='MarkIts画像は保存されました。原稿が切り替わったため挿入しませんでした。'; await refresh(); return; } if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。'); const update:{adopt:string;expected_revision?:string}={adopt:revision}; if(shot.adopted)update.expected_revision=shot.adopted; await options.request('screenshots-change',{id,json:update},root); if(root!==options.root()||page!==options.page())return; const markdown=await options.request('screenshots-reference',{id,page},root); if(root===options.root()&&page===options.page()){ options.insert(markdown); editState(root,id,'MarkIts画像を更新し、原稿へ挿入しました。'); progress.textContent='MarkIts画像を更新して原稿へ挿入しました。'; } await refresh(); }); }); }); }); actions.replaceChildren(createInsertButton, editButton, copyButton, insertButton, recaptureButton); const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで注釈';aiEdit.disabled=shot.protected||!shot.edits.length; aiEdit.onclick=()=>{if(root===options.root())void options.annotateScreenshot(shot.id);};actions.append(aiEdit); const adoptSelected = async (): Promise<boolean> => { if (!await confirmAction(`${shot.usage.length} 文書で使用する画像を選択版へ更新しますか？\\n再撮影候補の場合、寸法と注釈の位置を比較し、必要ならMarkItsで再編集してください。`)) return false; await options.request('screenshots-change', { id: shot.id, json: { adopt: versions.value, expected_revision: shot.adopted } }, root); return true; }; button('選択版を表示', async () => { const loaded = JSON.parse(await options.request('screenshots-image', { id: shot.id, json: { revision: versions.value } }, root)); if (root !== options.root()) return; const selectedId = versions.value; const images = [{label:'選択版',src:loaded.data,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===selectedId)?.scene)}]; if (shot.thumbnail) images.unshift({label:'採用済み',src:shot.thumbnail,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===shot.adopted)?.scene)}); const alreadyAdopted = selectedId === shot.adopted; // Comparison closes without touching the card; adoption is offered here so no panel round-trip is needed. await showImageComparison(images, '画像の比較・採用前の確認', true, { label: alreadyAdopted ? '採用済みの版です' : '選択版を採用', disabled: shot.protected || alreadyAdopted, run: adoptSelected }); }, false, true); button('選択版を採用', async () => { await adoptSelected(); }, shot.protected, true); button('削除', async () => { if (await confirmAction('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true); if (shot.edits.some(edit => edit.flattened)) { const warning = document.createElement(\"p\"); warning.textContent = \"平坦化画像からの取り込みです。失われた画素や注釈の編集状態は復元できません。\"; card.append(warning); } resources.compactCard(card,shot.usage.length);list.append(card); }",
       "feature": "P03",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "相対参照・説明・管理関連を保存する",
@@ -9072,7 +9072,7 @@
       "feature": "P05",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "途中終了・取り込み失敗時は原本と採用版を保持。再確認で候補を1版だけ保存する。",
-      "returnTarget": "リソース一覧の対象画像と再確認操作",
+      "returnTarget": "撮影一覧の対象画像と再確認操作",
       "cases": [
         "P05.success",
         "P05.cancel",
@@ -9212,7 +9212,7 @@
       "feature": "P08",
       "spec": "openspec/specs/screenshot-library/spec.md",
       "result": "途中終了・取り込み失敗時は原本と採用版を保持。再確認で候補を1版だけ保存する。",
-      "returnTarget": "リソース一覧の対象画像と再確認操作",
+      "returnTarget": "撮影一覧の対象画像と再確認操作",
       "cases": [
         "P08.success",
         "P08.cancel",
@@ -11128,7 +11128,7 @@
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "資産変更は対象だけに適用される",
-      "returnTarget": "元のリソース一覧とフィルター",
+      "returnTarget": "元の撮影一覧とフィルター",
       "cases": [
         "P06.success",
         "P06.cancel",
@@ -13768,6 +13768,36 @@
         "P08.manuscript-recapture-confirm-cancel"
       ],
       "reviewStatus": "reviewed"
+    },
+    {
+      "id": "apps/manual-studio/src/screenshotLibrary.ts:create:button:64b3b9db1b0682f9:1",
+      "file": "apps/manual-studio/src/screenshotLibrary.ts",
+      "line": 107,
+      "kind": "create:button",
+      "expression": "createInsertButton = document.createElement('button')",
+      "feature": "P04",
+      "spec": "openspec/specs/screenshot-library/spec.md",
+      "result": "MarkIts画像を現在版へ反映して選択中の原稿へ挿入する",
+      "returnTarget": "撮影一覧と選択した原稿",
+      "cases": [
+        "P04.capture-markits-insert"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/screenshotLibrary.ts:event:click:57b782cc916579c9:1",
+      "file": "apps/manual-studio/src/screenshotLibrary.ts",
+      "line": 111,
+      "kind": "event:click",
+      "expression": "createInsertButton.addEventListener('click', () => { void options.work(async () => { if (root !== options.root() || !await options.chooseDestination()) return; const page = options.page(); if (!page) throw new Error('挿入する原稿を開いてください。'); editState(root,shot.id,'MarkItsで編集しています。保存後、画像を更新して原稿へ挿入します。'); await editManaged(shot.id,versions.value,root,(id,revision)=>{ void options.work(async()=>{ if(root!==options.root()||page!==options.page()){ progress.textContent='MarkIts画像は保存されました。原稿が切り替わったため挿入しませんでした。'; await refresh(); return; } if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。'); const update:{adopt:string;expected_revision?:string}={adopt:revision}; if(shot.adopted)update.expected_revision=shot.adopted; await options.request('screenshots-change',{id,json:update},root); if(root!==options.root()||page!==options.page())return; const markdown=await options.request('screenshots-reference',{id,page},root); if(root===options.root()&&page===options.page()){ options.insert(markdown); editState(root,id,'MarkIts画像を更新し、原稿へ挿入しました。'); progress.textContent='MarkIts画像を更新して原稿へ挿入しました。'; } await refresh(); }); }); }); })",
+      "feature": "P04",
+      "spec": "openspec/specs/screenshot-library/spec.md",
+      "result": "MarkIts画像を現在版へ反映して選択中の原稿へ挿入する",
+      "returnTarget": "撮影一覧と選択した原稿",
+      "cases": [
+        "P04.capture-markits-insert"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
     }
   ],
   "cases": [
@@ -13790,7 +13820,7 @@
         "apps/manual-studio/src/main.ts:event:submit:578d439a2ed32d3e:1",
         "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
         "apps/manual-studio/src/main.ts:event:submit:38988d9624495922:1",
-        "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
+        "apps/manual-studio/src/main.ts:event:submit:013db8cfc2443a9d:1",
         "apps/manual-studio/src/main.ts:event:click:6f635cb30a15afce:1",
         "apps/manual-studio/src/workspaceHistory.ts:loop-controls:a83097193f3ef943:1",
         "apps/manual-studio/src/workspaceHistory.ts:create:button:03eafe20acfdbe2f:1",
@@ -13836,7 +13866,7 @@
         "apps/manual-studio/src/main.ts:event:submit:578d439a2ed32d3e:1",
         "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
         "apps/manual-studio/src/main.ts:event:submit:38988d9624495922:1",
-        "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
+        "apps/manual-studio/src/main.ts:event:submit:013db8cfc2443a9d:1",
         "apps/manual-studio/src/main.ts:event:click:6f635cb30a15afce:1",
         "apps/manual-studio/src/workspaceHistory.ts:loop-controls:a83097193f3ef943:1",
         "apps/manual-studio/src/workspaceHistory.ts:create:button:03eafe20acfdbe2f:1",
@@ -13882,7 +13912,7 @@
         "apps/manual-studio/src/main.ts:event:submit:578d439a2ed32d3e:1",
         "apps/manual-studio/src/main.ts:event:click:f9ef995e40b0c130:1",
         "apps/manual-studio/src/main.ts:event:submit:38988d9624495922:1",
-        "apps/manual-studio/src/main.ts:event:submit:ead3d46fe2466ce5:1",
+        "apps/manual-studio/src/main.ts:event:submit:013db8cfc2443a9d:1",
         "apps/manual-studio/src/main.ts:event:click:6f635cb30a15afce:1",
         "apps/manual-studio/src/workspaceHistory.ts:loop-controls:a83097193f3ef943:1",
         "apps/manual-studio/src/workspaceHistory.ts:create:button:03eafe20acfdbe2f:1",
@@ -14654,7 +14684,7 @@
         "apps/manual-studio/src/main.ts:event:input:d3096fb11bc7f2dc:1",
         "apps/manual-studio/src/main.ts:event:input:b56f782293e20bb2:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:60d5d16cca81b3bd:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:00d7a26ddb9da82e:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:1779852d0b3cd7bd:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:handler:b03ebe488b2d0155:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:c84cdd44fbe16dca:1",
@@ -14716,7 +14746,7 @@
         "apps/manual-studio/src/main.ts:event:input:d3096fb11bc7f2dc:1",
         "apps/manual-studio/src/main.ts:event:input:b56f782293e20bb2:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:60d5d16cca81b3bd:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:00d7a26ddb9da82e:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:1779852d0b3cd7bd:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:handler:b03ebe488b2d0155:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:c84cdd44fbe16dca:1",
@@ -14778,7 +14808,7 @@
         "apps/manual-studio/src/main.ts:event:input:d3096fb11bc7f2dc:1",
         "apps/manual-studio/src/main.ts:event:input:b56f782293e20bb2:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:60d5d16cca81b3bd:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:00d7a26ddb9da82e:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:1779852d0b3cd7bd:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:handler:b03ebe488b2d0155:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:c84cdd44fbe16dca:1",
@@ -15107,9 +15137,9 @@
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c3d38ef1484ab8a3:1",
         "apps/manual-studio/index.html:html:button:2dbe11f9581f8d7d:1",
-        "apps/manual-studio/index.html:html:input:9a73abaab37071c2:1",
-        "apps/manual-studio/index.html:html:select:088ecb1e16143200:1",
-        "apps/manual-studio/index.html:html:select:94aca66af11fa924:1",
+        "apps/manual-studio/index.html:html:input:3e5771b9c76a0059:1",
+        "apps/manual-studio/index.html:html:select:b4b17c447e70843f:1",
+        "apps/manual-studio/index.html:html:select:cf3dfa943c9201c7:1",
         "apps/manual-studio/index.html:html:button:47720e32c4413204:1",
         "apps/manual-studio/src/resourceBrowser.ts:event:dragstart:d949e107b63827e9:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:02f93f87fe42be8d:1",
@@ -15135,7 +15165,7 @@
         "visible": "検索・使用箇所と対象画像が一致する",
         "stored": "資産変更は対象だけに適用される",
         "preserved": "他の資産・未保存原稿・保護画像",
-        "returnTarget": "元のリソース一覧とフィルター"
+        "returnTarget": "元の撮影一覧とフィルター"
       },
       "requiredEvidence": [
         "browser-mock"
@@ -15153,9 +15183,9 @@
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c3d38ef1484ab8a3:1",
         "apps/manual-studio/index.html:html:button:2dbe11f9581f8d7d:1",
-        "apps/manual-studio/index.html:html:input:9a73abaab37071c2:1",
-        "apps/manual-studio/index.html:html:select:088ecb1e16143200:1",
-        "apps/manual-studio/index.html:html:select:94aca66af11fa924:1",
+        "apps/manual-studio/index.html:html:input:3e5771b9c76a0059:1",
+        "apps/manual-studio/index.html:html:select:b4b17c447e70843f:1",
+        "apps/manual-studio/index.html:html:select:cf3dfa943c9201c7:1",
         "apps/manual-studio/index.html:html:button:47720e32c4413204:1",
         "apps/manual-studio/src/resourceBrowser.ts:event:dragstart:d949e107b63827e9:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:02f93f87fe42be8d:1",
@@ -15181,7 +15211,7 @@
         "visible": "検索・使用箇所と対象画像が一致する",
         "stored": "資産変更は対象だけに適用される",
         "preserved": "他の資産・未保存原稿・保護画像",
-        "returnTarget": "元のリソース一覧とフィルター"
+        "returnTarget": "元の撮影一覧とフィルター"
       },
       "requiredEvidence": [
         "browser-mock"
@@ -15199,9 +15229,9 @@
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:c3d38ef1484ab8a3:1",
         "apps/manual-studio/index.html:html:button:2dbe11f9581f8d7d:1",
-        "apps/manual-studio/index.html:html:input:9a73abaab37071c2:1",
-        "apps/manual-studio/index.html:html:select:088ecb1e16143200:1",
-        "apps/manual-studio/index.html:html:select:94aca66af11fa924:1",
+        "apps/manual-studio/index.html:html:input:3e5771b9c76a0059:1",
+        "apps/manual-studio/index.html:html:select:b4b17c447e70843f:1",
+        "apps/manual-studio/index.html:html:select:cf3dfa943c9201c7:1",
         "apps/manual-studio/index.html:html:button:47720e32c4413204:1",
         "apps/manual-studio/src/resourceBrowser.ts:event:dragstart:d949e107b63827e9:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:02f93f87fe42be8d:1",
@@ -15227,7 +15257,7 @@
         "visible": "検索・使用箇所と対象画像が一致する",
         "stored": "資産変更は対象だけに適用される",
         "preserved": "他の資産・未保存原稿・保護画像",
-        "returnTarget": "元のリソース一覧とフィルター"
+        "returnTarget": "元の撮影一覧とフィルター"
       },
       "requiredEvidence": [
         "browser-mock"
@@ -16924,7 +16954,7 @@
         "visible": "中止・異常終了・保存失敗の理由とコピー保存先を表示",
         "stored": "成功時は別コピーを編集。失敗再試行は同じコピーのみ更新",
         "preserved": "元画像・原稿・失敗時の完成編集結果を保持。コピーを重複作成しない",
-        "returnTarget": "元のリソース一覧"
+        "returnTarget": "元の撮影一覧"
       },
       "requiredEvidence": [
         "real-desktop"
@@ -17749,7 +17779,7 @@
       "feature": "P06",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:input:9a73abaab37071c2:1",
+        "apps/manual-studio/index.html:html:input:3e5771b9c76a0059:1",
         "apps/manual-studio/src/resourceBrowser.ts:event:dynamic:93ed37ba38488242:1"
       ],
       "expected": {
@@ -17772,7 +17802,7 @@
       "feature": "P06",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:select:088ecb1e16143200:1",
+        "apps/manual-studio/index.html:html:select:b4b17c447e70843f:1",
         "apps/manual-studio/src/resourceBrowser.ts:event:dynamic:93ed37ba38488242:1"
       ],
       "expected": {
@@ -17795,7 +17825,7 @@
       "feature": "P06",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:select:94aca66af11fa924:1",
+        "apps/manual-studio/index.html:html:select:cf3dfa943c9201c7:1",
         "apps/manual-studio/src/resourceBrowser.ts:event:dynamic:93ed37ba38488242:1"
       ],
       "expected": {
@@ -18533,6 +18563,27 @@
       ],
       "status": "not-run",
       "notes": "原稿上の入口専用。リソース一覧の部分再試行とは別の契約。確認計画をモックし、画像登録と原稿挿入は実バックエンドで検証する。"
+    },
+    {
+      "id": "P04.capture-markits-insert",
+      "feature": "P04",
+      "kind": "success",
+      "entryPoints": [
+        "apps/manual-studio/src/screenshotLibrary.ts:create:button:64b3b9db1b0682f9:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:event:click:57b782cc916579c9:1"
+      ],
+      "evidenceRecord": "capture-list MarkIts edit and insertion",
+      "expected": {
+        "visible": "MarkItsで保存した画像が選択した原稿カーソルへ挿入される",
+        "stored": "MarkIts画像が現在版になり安定した撮影画像参照が原稿に入る",
+        "preserved": "元の撮影原本と以前の画像版、切替後の別原稿を保持する",
+        "returnTarget": "開始した撮影一覧と選択した原稿"
+      },
+      "requiredEvidence": [
+        "real-desktop"
+      ],
+      "status": "not-run",
+      "notes": "This new desktop workflow has not been exercised in this change."
     }
   ]
 }

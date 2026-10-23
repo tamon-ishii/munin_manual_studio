@@ -17,7 +17,7 @@ export interface PanelDef {
 }
 
 export const PANELS: PanelDef[] = [
-  { id: "screenshots", name: "リソース一覧", elementId: "panel-screenshots" },
+  { id: "screenshots", name: "撮影一覧", elementId: "panel-screenshots" },
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
@@ -130,7 +130,7 @@ function loadStoredModel(): Model {
         const restored = Model.fromJson(parsed);
         restored.visitNodes((node) => {
           if (node instanceof TabNode && node.getComponent() === "screenshots") {
-            restored.doAction(Actions.updateNodeAttributes(node.getId(), { name: "リソース一覧" }));
+            restored.doAction(Actions.updateNodeAttributes(node.getId(), { name: "撮影一覧" }));
           }
         });
         // Older layouts included the terminal by default. Preserve the other

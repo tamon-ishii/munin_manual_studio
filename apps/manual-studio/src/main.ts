@@ -145,7 +145,7 @@ function scheduleResourceUsageRefresh(): void {
   if (!resourceLibraryDirty || !element('panel-screenshots').getClientRects().length) return;
   resourceRefreshTimer = setTimeout(() => {
     resourceLibraryDirty = false;
-    void screenshotLibrary.refresh(false).catch(error => { resourceLibraryDirty = true; console.warn('リソース一覧を更新できません', error); });
+    void screenshotLibrary.refresh(false).catch(error => { resourceLibraryDirty = true; console.warn('撮影一覧を更新できません', error); });
   }, 300);
 }
 const expandedFolders = new Set<string>();
@@ -894,7 +894,7 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
     if (result.managedScreenshotId) {
       await screenshotLibrary.editManaged(result.managedScreenshotId, result.revision, editingRoot);
       documentImageEditing = false;
-      status('MarkItsで編集中です。編集終了後に候補を保存します。リソース一覧で比較して採用してください。');
+      status('MarkItsで編集中です。編集終了後に画像を保存します。撮影一覧で履歴を確認できます。');
       return;
     }
     status("MarkItsで画像を編集中です。編集が完了したらMarkItsで「編集終了」または「Manual Studioへ注釈を返す」を押してください。");
@@ -916,7 +916,7 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
         retryDocumentImageEdit = null;
         element('document-image-retry').hidden = true;
         if (editingRoot !== projectRoot) return;
-        status(`編集コピーを保存しました: ${result.relativePath}。元画像と原稿は保持しています。リソース一覧から挿入・差し替えできます。`);
+        status(`編集コピーを保存しました: ${result.relativePath}。元画像と原稿は保持しています。撮影一覧から挿入・差し替えできます。`);
         await milkdown.refreshImages();
         previewScheduler.invalidate(); void renderPreview();
         await refreshWorkspace();
@@ -1238,7 +1238,7 @@ async function openProject(root: string, check = true): Promise<void> {
   if(version!==projectRequestVersion)return;
   // Resource thumbnails and usage scans must not hold the restored editor read-only.
   void screenshotLibrary.refresh().catch(error=>{
-    if(root===projectRoot&&version===projectRequestVersion)console.error('リソース一覧を読み込めません。',error);
+    if(root===projectRoot&&version===projectRequestVersion)console.error('撮影一覧を読み込めません。',error);
   });
   const restoredDocument = documentState as Document | null;
   if (restoredDocument) status(`プロジェクトを開きました。${restoredDocument.page}を編集できます。`);
@@ -2067,7 +2067,7 @@ element("image-save-form").addEventListener("submit", (event) => {
     if(!valid())throw new Error('原稿が変更されました。画像の挿入をやり直してください。');
     await rpc("save-asset", { path: fullAssetPath, data: dataUrl },owner!.root);
     if(pendingImageOwner!==owner){if(owner!.root===projectRoot)status('画像を保存しました。挿入はキャンセルされました。');return;}
-    if(!valid())throw new Error('原稿が変更されました。保存した画像はリソース一覧に残しています。');
+    if(!valid())throw new Error('原稿が変更されました。保存した画像は撮影一覧に残しています。');
     element<HTMLDialogElement>("image-save-dialog").close();
     pendingImageDataUrl = null;
     pendingImageOwner = null;
@@ -2113,8 +2113,8 @@ element('cancel-image-paste').addEventListener('click',()=>{
   status('画像の挿入をキャンセルしました。保存処理の完了を待っています。');
 });
 function allowImagePaste(paste:ImagePaste):boolean {
-  if(paste.cancelled){status('画像の挿入はキャンセルされました。保存した画像はリソース一覧に残しています。');return false;}
-  if(!isInsertionCurrent(paste.origin,insertionState()))throw new Error('原稿が変更されました。保存した画像はリソース一覧に残しています。');
+  if(paste.cancelled){status('画像の挿入はキャンセルされました。保存した画像は撮影一覧に残しています。');return false;}
+  if(!isInsertionCurrent(paste.origin,insertionState()))throw new Error('原稿が変更されました。保存した画像は撮影一覧に残しています。');
   return true;
 }
 async function saveAndInsertImage(dataUrl: string, defaultFileType: string, paste:ImagePaste): Promise<void> {
@@ -2739,19 +2739,19 @@ async function insertScreenshotHere():Promise<void>{
     stage(method==='ai'?'ai':'select');
     const id=method==='ai'?await screenshotAi.create(true):method==='manual'?await screenshotLibrary.recordForInsertion(stage):existing?.id;
     if(!id)return;
-    if(!valid()){status('撮影画像はリソース一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
+    if(!valid()){status('撮影画像は撮影一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
     stage('preview');
     const image=JSON.parse(await rpc('screenshots-image',{id,json:{revision:existing?.revision,latest:!existing}},root)) as {data:string;edit:{id:string};screenshot:{adopted:string|null}};
     if(!valid())return;
     const warning=method==='ai'?screenshotAi.insertionWarning():undefined;
     outcome='error';
     await work(async()=>{
-      if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
+      if(!valid())throw new Error('原稿が変更されました。画像は撮影一覧から挿入してください。');
       stage('adopt');
       if(!existing)await rpc('screenshots-change',{id,json:{adopt:image.edit.id,expected_revision:image.screenshot.adopted}},root);
       stage('reference');
       const markdown=await rpc('screenshots-reference',{id,page},root);
-      if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
+      if(!valid())throw new Error('原稿が変更されました。画像は撮影一覧から挿入してください。');
       stage('insert');
       if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,`\n\n${markdown}\n\n`,0,markdown.length+4);
       updateHistoryButtons();stage('refresh');await screenshotLibrary.refresh();outcome='success';status(`指定位置にスクショを挿入しました。${warning?` ${warning}`:''}`);
@@ -2779,7 +2779,7 @@ function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{
 const recentScreenshotSelections=new Map<string,string>();
 async function chooseExistingScreenshot(root:string,valid:()=>boolean):Promise<{id:string;revision:string}|undefined>{
   const shots=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;name:string;output:string;adopted:string|null;thumbnail:string|null}>};
-  if(root!==projectRoot||!valid()){status('原稿が変更されたため挿入していません。画像はリソース一覧から選び直してください。',true);return;}
+  if(root!==projectRoot||!valid()){status('原稿が変更されたため挿入していません。画像は撮影一覧から選び直してください。',true);return;}
   const {dialog,body}=featureDialog('撮影済み画像を選ぶ');dialog.id='editor-screenshot-existing';
   const available=shots.items.filter(shot=>shot.adopted);
   const selectionKey=`manual-studio-recent-screenshot:${root}`;
@@ -2794,7 +2794,7 @@ async function chooseExistingScreenshot(root:string,valid:()=>boolean):Promise<{
     try{localStorage.removeItem(selectionKey);}catch{/* Storage is optional. */}
     recentId=undefined;
   }
-  if(!available.length){const empty=document.createElement('p');empty.textContent='採用済みの画像がありません。手動撮影・AI撮影、またはリソース一覧のPNG取り込みで画像を用意してください。';body.append(empty);}
+  if(!available.length){const empty=document.createElement('p');empty.textContent='採用済みの画像がありません。手動撮影・AI撮影、または撮影一覧のPNG取り込みで画像を用意してください。';body.append(empty);}
   return new Promise(resolve=>{let selected:{id:string;revision:string}|undefined;
     for(const shot of available){
       const card=document.createElement('section');card.className='card';

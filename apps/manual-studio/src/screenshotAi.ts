@@ -112,7 +112,7 @@ export function setupScreenshotAi(options:Options){
     if(plan.annotate!==false){const annotated=await retryStage('注釈',async()=>{await annotate(captured.screenshot.id,instruction);return true;},root,true);if(annotated===undefined)return;await options.refresh();if(annotated===rawOriginal)options.report(`撮影原本と再撮影手順は保存しました。${insertionWarning}`,true);}
     return root===options.root()?captured.screenshot.id:undefined;
   }
-  document.getElementById('screenshot-ai-create')!.onclick=()=>{void create().catch(error=>options.report(String(error),true));};
+  document.getElementById('screenshot-ai-create')?.addEventListener('click',()=>{void create().catch(error=>options.report(String(error),true));});
   async function annotateExisting(id:string){const root=options.root();const instruction=await askInstruction('撮影画像にAIで注釈');if(!instruction||root!==options.root())return;await retryStage('注釈',()=>annotate(id,instruction),root);}
   return {create,insertionWarning:()=>insertionWarning,annotate:(id:string)=>annotateExisting(id).catch(error=>options.report(String(error),true))};
 }

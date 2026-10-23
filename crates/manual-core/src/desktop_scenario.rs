@@ -738,7 +738,13 @@ fn capture(
             .map_err(|error| error.to_string())?;
     } else {
         let window = selected.wait_native()?;
-        window_capture::capture_window(&window.id, inset, destination, true, None)?;
+        window_capture::capture_window(
+            &window.id,
+            inset,
+            destination,
+            true,
+            Some(&window.id),
+        )?;
     }
     Ok(())
 }

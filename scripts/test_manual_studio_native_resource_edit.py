@@ -119,11 +119,11 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
         ui.find('プロジェクトを開きました。', 'status bar', app.pid, prefix=True)
         registry = json.loads((REPO / 'scripts/fixtures/manual-studio-ui-inventory.json').read_text())
         if not os.environ.get('MUNIN_NATIVE_ORDINARY_ONLY'):
-            ui.click('リソース一覧', owner=app.pid)
+            ui.click('撮影一覧', owner=app.pid)
             for name, sid in shots:
                 ui.click('原稿を編集', owner=app.pid)
                 baseline_pixels = ui.image_pixels(f'Native {name}')
-                ui.click('リソース一覧', owner=app.pid)
+                ui.click('撮影一覧', owner=app.pid)
                 ui.fill('リソースを検索', sid)
                 before = rpc('screenshots-image', {'id': sid})
                 original = rpc('screenshots-image', {'id': sid, 'json': {'original': True}})['data']
@@ -172,7 +172,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 visible_pixels = wait(lambda: count if (count := ui.image_pixels(f'Native {name}')) > baseline_pixels + 20 else None, 'adopted rectangle pixels displayed in referencing manuscript')
                 ui.image_pixels(f'Native {name}', RESULTS / f'{name}-document-image.png')
                 ui.screenshot(app.pid, RESULTS / f'{name}-adopted-document.png')
-                ui.click('リソース一覧', owner=app.pid)
+                ui.click('撮影一覧', owner=app.pid)
                 registry = json.loads((REPO / 'scripts/fixtures/manual-studio-ui-inventory.json').read_text())
                 action = next(a for a in registry['actions'] if a['file'].endswith('screenshotLibrary.ts') and a['kind'] == 'factory' and a['expression'].startswith("button('編集'"))
                 artifacts = [{'path': f'{name}-{suffix}.png', 'sha256': hashlib.sha256((RESULTS / f'{name}-{suffix}.png').read_bytes()).hexdigest()} for suffix in ['markits', 'compare', 'adopted-document', 'document-image']]
@@ -210,7 +210,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                     results.append({'caseId': case['id'], 'entryPoint': entry, 'status': 'passed', 'type': 'real-desktop', 'steps': ui.log[begin:], 'assertions': {'visible': True, 'stored': True, 'preserved': True, 'returnTarget': True}, 'artifacts': [{'path': 'document-editor.png', 'sha256': hashlib.sha256((RESULTS / 'document-editor.png').read_bytes()).hexdigest()}]})
                 print('PASS manuscript image edit: saved marks restored -> candidate saved -> adopted image preserved', flush=True)
                 # Real child failure and import retry must preserve the adopted asset.
-                ui.click('リソース一覧', owner=app.pid)
+                ui.click('撮影一覧', owner=app.pid)
                 ui.fill('リソースを検索', sid)
                 before = rpc('screenshots-image', {'id': sid})
                 begin = len(ui.log)
@@ -275,7 +275,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 def open_ordinary():
                     existing = set((root / 'docs/assets/edited').glob('*.png'))
                     if entry_name == 'resource':
-                        ui.click('リソース一覧', owner=app.pid)
+                        ui.click('撮影一覧', owner=app.pid)
                         ui.fill('リソースを検索', 'ordinary.png')
                         try:
                             ui.find('編集', owner=app.pid, timeout=1)

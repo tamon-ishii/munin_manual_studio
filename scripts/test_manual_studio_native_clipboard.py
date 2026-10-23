@@ -248,7 +248,7 @@ def session():
                 late_pngs = wait(lambda: set(assets.glob('*.png')) - before_late, 'native clipboard produced actual PNG after handshake release')
                 assert len(late_pngs) == 1, 'one late native response saves one retained asset'
                 late_png = next(iter(late_pngs))
-                wait(lambda: any('リソース一覧に残しています' in ui.text(node) and ('キャンセル' in ui.text(node) if action == 'cancel' else '原稿が変更' in ui.text(node)) for node in ui.allnodes(app.pid) if node.get_role_name() == 'status bar'), 'late clipboard result visibly rejected')
+                wait(lambda: any('撮影一覧に残しています' in ui.text(node) and ('キャンセル' in ui.text(node) if action == 'cancel' else '原稿が変更' in ui.text(node)) for node in ui.allnodes(app.pid) if node.get_role_name() == 'status bar'), 'late clipboard result visibly rejected')
                 assert decoded(late_png) == baseline_pixels
                 expected = INITIAL if action == 'cancel' else other_content
                 assert content() == expected

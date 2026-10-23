@@ -422,7 +422,14 @@ fn capture_task(
     let docs = project_path(root, &read_config(root).docs)?;
     let temporary = tempfile::tempdir_in(root).map_err(|error| error.to_string())?;
     let image = super::config::project_path(temporary.path(), &format!("{id}.png"))?;
-    let window = window_capture::capture_window(window_id, inset, &image, true, None)?;
+    let target_window_id = (window_id != "portal").then_some(window_id);
+    let window = window_capture::capture_window(
+        window_id,
+        inset,
+        &image,
+        true,
+        target_window_id,
+    )?;
     super::capture_validation::check_target(root, id, window_id, &window.title)?;
     author::record_screenshot_task(root, selected, &image)?;
     save(

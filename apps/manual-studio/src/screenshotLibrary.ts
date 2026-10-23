@@ -29,7 +29,7 @@ interface Options {
 export function setupScreenshotLibrary(options: Options) {
   const list = document.getElementById('screenshot-library-list')!;
   let generation = 0;
-  let recording: {root: string; id: string; ready?: (id:string)=>void; failed?:()=>void;cancelled?:()=>void;stage?:(stage:string)=>void} | null = null;
+  let recording: {root: string; id: string; ready?: (id:string,revision?:string)=>void; failed?:()=>void;cancelled?:()=>void;stage?:(stage:string)=>void} | null = null;
   let currentShots:Screenshot[]=[];
   const editStates=new Map<string,string>();
   function editState(root:string,id:string,message:string){
@@ -54,7 +54,7 @@ export function setupScreenshotLibrary(options: Options) {
       const card = document.createElement('article'); card.className = 'card screenshot-library-card';card.dataset.screenshotId=shot.id;
       const title = document.createElement('h2'); title.textContent = shot.name || '画像'; card.append(title);resources.decorateShot(card,shot.output);
       if (shot.thumbnail) { const image = document.createElement('img'); image.src = shot.thumbnail; image.alt = title.textContent; image.draggable=Boolean(shot.adopted);image.title='ドラッグして原稿に挿入';card.append(image); }
-      const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${card.querySelector('.resource-usages') ? '' : shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' 再撮影候補あり' : ''}`.trim(); if(usage.textContent)card.append(usage);
+      const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${card.querySelector('.resource-usages') ? '' : shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' 編集候補あり' : ''}`.trim(); if(usage.textContent)card.append(usage);
       const sharedCount = result.items.filter(item => (item.capture_id || item.id) === (shot.capture_id || shot.id)).length;
       if (sharedCount > 1) { const shared = document.createElement('p'); shared.className = 'muted'; shared.textContent = `原本を共有：${sharedCount}画像 ／ 撮影1回`; card.append(shared); }
       const actions = document.createElement('div'); actions.className = 'actions screenshot-primary-actions'; card.append(actions);
@@ -104,7 +104,38 @@ export function setupScreenshotLibrary(options: Options) {
         } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; }
       }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)));
       editButton.classList.add('primary');
-      actions.replaceChildren(editButton, copyButton, insertButton, recaptureButton);
+      const createInsertButton = document.createElement('button');
+      createInsertButton.type = 'button';
+      createInsertButton.textContent = 'MarkIts画像を作って挿入';
+      createInsertButton.disabled = shot.protected || !native || pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile));
+      createInsertButton.addEventListener('click', () => { void options.work(async () => {
+        if (root !== options.root() || !await options.chooseDestination()) return;
+        const page = options.page();
+        if (!page) throw new Error('挿入する原稿を開いてください。');
+        editState(root,shot.id,'MarkItsで編集しています。保存後、画像を更新して原稿へ挿入します。');
+        await editManaged(shot.id,versions.value,root,(id,revision)=>{
+          void options.work(async()=>{
+            if(root!==options.root()||page!==options.page()){
+              progress.textContent='MarkIts画像は保存されました。原稿が切り替わったため挿入しませんでした。';
+              await refresh();
+              return;
+            }
+            if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。');
+            const update:{adopt:string;expected_revision?:string}={adopt:revision};
+            if(shot.adopted)update.expected_revision=shot.adopted;
+            await options.request('screenshots-change',{id,json:update},root);
+            if(root!==options.root()||page!==options.page())return;
+            const markdown=await options.request('screenshots-reference',{id,page},root);
+            if(root===options.root()&&page===options.page()){
+              options.insert(markdown);
+              editState(root,id,'MarkIts画像を更新し、原稿へ挿入しました。');
+              progress.textContent='MarkIts画像を更新して原稿へ挿入しました。';
+            }
+            await refresh();
+          });
+        });
+      }); });
+      actions.replaceChildren(createInsertButton, editButton, copyButton, insertButton, recaptureButton);
       const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで注釈';aiEdit.disabled=shot.protected||!shot.edits.length;
       aiEdit.onclick=()=>{if(root===options.root())void options.annotateScreenshot(shot.id);};actions.append(aiEdit);
       const adoptSelected = async (): Promise<boolean> => {
@@ -159,7 +190,7 @@ export function setupScreenshotLibrary(options: Options) {
       if (root === options.root()) {
         const count = (status: string) => run.items.filter(item => item.status === status).length;
         const interrupted = count('cancelled') > 0 || count('pending') > 0;
-        recaptureStatus.textContent = `再撮影${interrupted ? 'を中断しました' : 'が完了しました'}。成功 ${count('succeeded')}件・失敗 ${count('failed')}件・未完了 ${count('cancelled') + count('pending')}件・対象外 ${count('skipped')}件。成功した画像は候補として保存しました。比較して採用してください。`;
+        recaptureStatus.textContent = `再撮影${interrupted ? 'を中断しました' : 'が完了しました'}。成功 ${count('succeeded')}件・失敗 ${count('failed')}件・未完了 ${count('cancelled') + count('pending')}件・対象外 ${count('skipped')}件。成功したMarkIts画像を更新しました。`;
         const reasons=[...new Set(run.items.filter(item=>item.status==='failed').map(item=>item.reason).filter(Boolean))];
         if(reasons.length)recaptureStatus.textContent+=` 失敗の理由：${reasons.join(' ／ ')}`;
         await refresh();
@@ -177,7 +208,7 @@ export function setupScreenshotLibrary(options: Options) {
     if (root !== options.root()) return;
     const ready = plan.items.filter(item => item.status === 'pending').length;
     if (!ready) { recaptureStatus.textContent = '再撮影できる画像がありません。撮影手順と保護状態を確認してください。'; return; }
-    if (!await confirmAction(`撮影: ${plan.capture_count ?? ready}回 ／ 注釈画像: ${ready}件、対象外: ${plan.items.length - ready}件\n同じ原本は1回だけ撮影し、各画像の注釈・クロップを適用します。採用済みの画像は保持されます。`)) return;
+    if (!await confirmAction(`撮影: ${plan.capture_count ?? ready}回 ／ 注釈画像: ${ready}件、対象外: ${plan.items.length - ready}件\n同じ原本は1回だけ撮影し、各画像の注釈・クロップを再適用します。成功すると既存の文書参照先を更新し、旧版は履歴に残します。`)) return;
     const run = await executeRecapture(json, root);
     if (!run || root !== options.root()) return;
     const failures = run.items.filter(item => item.status === 'failed');
@@ -193,7 +224,7 @@ export function setupScreenshotLibrary(options: Options) {
   let pending: Pending[] = [];
   try { pending = JSON.parse(localStorage.getItem(pendingKey) || '[]'); } catch { /* No saved sessions. */ }
   const watching = new Set<string>();
-  const handoffCallbacks=new Map<string,(id:string)=>void>();
+  const handoffCallbacks=new Map<string,(id:string,revision?:string)=>void>();
   const handoffProgress=new Map<string,(stage:string)=>void>();
   function updateControls() {
     const root = options.root();
@@ -203,7 +234,7 @@ export function setupScreenshotLibrary(options: Options) {
     document.getElementById('screenshot-library-retry')!.hidden = !pending.some(session => session.root === root && !watching.has(session.completionFile));
   }
   function persist() { localStorage.setItem(pendingKey, JSON.stringify(pending)); updateControls(); }
-  async function watch(session: Pending,ready?: (id:string)=>void,stage?: (stage:string)=>void) {
+  async function watch(session: Pending,ready?: (id:string,revision?:string)=>void,stage?: (stage:string)=>void) {
     if(stage)handoffProgress.set(session.completionFile,stage);
     if(ready)handoffCallbacks.set(session.completionFile,ready);
     if (!pending.some(item => item.completionFile === session.completionFile)) { pending.push(session); persist(); }
@@ -219,7 +250,7 @@ export function setupScreenshotLibrary(options: Options) {
         if(session.root===options.root())await invoke('restore_manual_studio').catch(error=>console.warn('画面に戻れません',error));
         importStarted=performance.now();
         const imported=await invoke<string>('import_library_capture', { root: session.root, id: session.id, revision: session.revision || null, imageFile: session.annotationFile });
-        const details=JSON.parse(imported||'{}') as {timings?:Array<{stage:string;duration_ms:number}>};
+        const details=JSON.parse(imported||'{}') as {revision?:string;timings?:Array<{stage:string;duration_ms:number}>};
         const durations=details.timings?.length?details.timings:[{stage:'import',duration_ms:performance.now()-importStarted}];
         // Timing persistence does not delay insertion or invalidate a saved edit.
         void options.request('operation-timings-record',{json:{operation:'markits-import',outcome:'success',stages:durations}},session.root).catch(error=>console.warn('処理時間を記録できません',error));
@@ -229,13 +260,13 @@ export function setupScreenshotLibrary(options: Options) {
         updateControls();
         const complete=handoffCallbacks.get(session.completionFile);handoffCallbacks.delete(session.completionFile);
         if (session.root === options.root()) {
-          editState(session.root,session.id,'編集内容を候補として保存しました。「履歴・管理」で比較し、採用できます。');progress.textContent = '編集内容を画像一覧へ保存しました。';
+          editState(session.root,session.id,'編集内容を候補として保存しました。「履歴・管理」で比較し、採用できます。');progress.textContent = 'MarkIts画像を撮影一覧へ保存しました。';
           // Insertion refreshes the library after saving the document. Do not
           // delay its preview with a full library scan and editor image reload.
           if (!complete) await refresh();
           await invoke('restore_manual_studio').catch(error=>console.warn('画面に戻れません',error));
         }
-        complete?.(session.id);
+        complete?.(session.id,details.revision);
       } catch (error) {
         if(importStarted!==undefined)void options.request('operation-timings-record',{json:{operation:'markits-import',outcome:'error',stages:[{stage:'import',duration_ms:performance.now()-importStarted}]}},session.root).catch(error=>console.warn('処理時間を記録できません',error));
         watching.delete(session.completionFile);
@@ -272,7 +303,7 @@ export function setupScreenshotLibrary(options: Options) {
   }
   if (native) void listen('manual-studio-screenshot-cancelled', () => { const owner=recording; recording=null; updateControls(); progress.textContent='撮影をキャンセルしました。'; owner?.stage?.('cancelled'); owner?.cancelled?.(); });
   if (native) void listen<string>('manual-studio-screenshot-failed', event => { failRecording(event.payload); });
-  async function startRecording(ready?: (id:string)=>void,started?:()=>void,cancelled?:()=>void,failed?:()=>void,stage?:(stage:string)=>void) {
+  async function startRecording(ready?: (id:string,revision?:string)=>void,started?:()=>void,cancelled?:()=>void,failed?:()=>void,stage?:(stage:string)=>void) {
     if (!native) throw new Error('操作の記録はデスクトップ版で利用できます。');
     if(recording)throw new Error('操作の記録が進行中です。撮影を完了してから開始してください。');
     const root = options.root(); if (!root) throw new Error('プロジェクトを開いてください。');
@@ -318,7 +349,7 @@ export function setupScreenshotLibrary(options: Options) {
         const stageListener=(event:Event)=>{const code=(event as CustomEvent<string>).detail;stageStatus.textContent=stageLabels[code]||'編集結果を確認してください。';};
         dialog.addEventListener('capture-stage',stageListener);
         const retry=document.createElement('button');retry.type='button';retry.textContent='編集結果を再確認';retry.onclick=()=>{for(const session of pending.filter(item=>item.root===root))void watch(session);};
-        const note=document.createElement('p');note.className='muted';note.textContent='閉じると挿入を取り消します。記録は撮影用の操作ウィンドウから完了でき、画像はリソース一覧に保存されます。';body.append(help,capture,retry,note);
+        const note=document.createElement('p');note.className='muted';note.textContent='閉じると挿入を取り消します。記録は撮影用の操作ウィンドウから完了でき、画像は撮影一覧に保存されます。';body.append(help,capture,retry,note);
         dialog.addEventListener('close',()=>{if(!completed){if(recording?.root===root)recording.ready=undefined;for(const session of pending.filter(item=>item.root===root)){handoffCallbacks.delete(session.completionFile);handoffProgress.delete(session.completionFile);}resolve(undefined);}},{once:true});
       },()=>{completed=true;waiting?.close();resolve(undefined);},()=>{stage?.('error');waiting?.close();resolve(undefined);},code=>{stage?.(code);if(code==='cancelled'){waiting?.close();return;}waiting?.dispatchEvent(new CustomEvent('capture-stage',{detail:code}));}).catch(reject);
     });
@@ -335,11 +366,11 @@ export function setupScreenshotLibrary(options: Options) {
   });
   document.getElementById('screenshot-library-refresh')!.addEventListener('click', () => { void options.work(refresh); });
   updateControls();
-  async function editManaged(id:string,revision?:string,root=options.root()) {
+  async function editManaged(id:string,revision?:string,root=options.root(),complete?:(id:string,revision?:string)=>void) {
     if(root!==options.root())throw new Error('プロジェクトが切り替わりました。画像を選び直してください。');
     if(pending.some(session=>session.root===root&&session.id===id&&watching.has(session.completionFile)))throw new Error('この画像はMarkItsで編集中です。編集を完了してください。');
     const result=await invoke<Handoff>('edit_library_screenshot',{root,id,revision:revision||null});
-    await watch({...result,root,id});
+    await watch({...result,root,id},complete);
   }
   return { refresh,recordForInsertion,editManaged,recapture:(id:string,root=options.root())=>recapture({id},root) };
 }
