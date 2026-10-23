@@ -145,8 +145,7 @@ def session():
                 assert markits != app.pid and ui.owned(markits)
                 ui.screenshot(markits, RESULTS / 'markits.png')
                 ui.click('編集終了（Manual Studioへ返す）', owner=markits)
-                ui.find('スクショを確認して挿入', 'dialog', app.pid, timeout=60)
-                assert content() == INITIAL
+                wait(lambda: 'screenshot:ref' in content(), 'captured screenshot inserted without confirmation')
 
             assert content() == INITIAL
             cursor()
@@ -160,11 +159,13 @@ def session():
             first = json.loads(subprocess.check_output([str(BIN / 'manualctl'), '--request', json.dumps({'root': str(root), 'action': 'screenshots-list'})], text=True))
             assert len(first['items']) == 1 and first['items'][0]['adopted'], 'captured and edited image must persist before insertion'
             first_id = first['items'][0]['id']
-            ui.click('閉じる', owner=app.pid)
-            assert content() == INITIAL
             assert editor.get_component_iface().grab_focus()
-            wait(lambda: Atspi.Text.get_caret_offset(editor) == CURSOR, 'preview cancellation preserved the original source caret')
-            ui.log.append({'action': 'cancel preview and retain captured image and original cursor'})
+            chord(ord('z'))
+            wait(lambda: content() == INITIAL, 'Undo restores the original manuscript after direct insertion')
+            chord(ord('s'))
+            wait(lambda: (root / 'docs/index.md').read_text() == INITIAL, 'save manuscript after Undo')
+            cursor()
+            ui.log.append({'action': 'insert without confirmation, then Undo while retaining captured image'})
 
             begin()
             target = ui.find('Save fixture', 'push button', app.pid)
@@ -187,7 +188,6 @@ def session():
             (RESULTS / 'failure-control.json').write_text(json.dumps({'message': failure_message, 'targetPid': target_pid, 'screenshotIdsAfterFailure': [first_id], 'sourceAfterFailure': content(), 'caretAfterFailure': Atspi.Text.get_caret_offset(editor)}, ensure_ascii=False, indent=2))
 
             begin(); capture()
-            ui.click('この位置に挿入', owner=app.pid)
             inserted = wait(lambda: text if 'screenshot:ref' in (text := content()) else None, 'source screenshot inserted')
             assert inserted.startswith(INITIAL[:CURSOR]) and inserted.endswith(INITIAL[CURSOR:])
             assert inserted.count('<!-- screenshot:ref id=') == 1
@@ -226,15 +226,15 @@ def session():
             ui.log.append({'action': 'cancel insertion, switch actual manuscript, complete real GTK/MarkIts capture, preserve both files and library image, return original manuscript/cursor'})
             ui.screenshot(app.pid, RESULTS / 'final.png')
             assert identity() == initial, 'Source/build changed during verification'
-            proof = {'initial': INITIAL, 'cursor': CURSOR, 'previewCancelledScreenshot': first_id, 'failure': failure_message, 'insertedScreenshot': shot_id, 'inserted': inserted, 'savedAfterUndo': (root / 'docs/index.md').read_text(), 'otherManuscriptAfterLateCapture': (root / 'docs/other.md').read_text(), 'screenshotIdsAfterLateCapture': [item['id'] for item in cancelled_late_shots], 'steps': ui.log}
+            proof = {'initial': INITIAL, 'cursor': CURSOR, 'undoneScreenshot': first_id, 'failure': failure_message, 'insertedScreenshot': shot_id, 'inserted': inserted, 'savedAfterUndo': (root / 'docs/index.md').read_text(), 'otherManuscriptAfterLateCapture': (root / 'docs/other.md').read_text(), 'screenshotIdsAfterLateCapture': [item['id'] for item in cancelled_late_shots], 'steps': ui.log}
             (RESULTS / 'storage-proof.json').write_text(json.dumps(proof, ensure_ascii=False, indent=2))
             registry = json.loads((REPO / 'scripts/fixtures/manual-studio-ui-inventory.json').read_text())
             case = next(case for case in registry['cases'] if case['id'] == 'P04.editor-manual')
             artifacts = [{'path': name, 'sha256': hashlib.sha256((RESULTS / name).read_bytes()).hexdigest()} for name in ('markits.png', 'final.png', 'storage-proof.json', 'failure-control.json')]
             records = [{'caseId': case['id'], 'entryPoint': entry, 'type': 'real-desktop', 'status': 'passed', 'steps': ui.log, 'assertions': dict.fromkeys(('visible', 'stored', 'preserved', 'returnTarget'), True), 'artifacts': artifacts} for entry in case['entryPoints']]
             if '--probe' not in sys.argv:
-                (RESULTS / 'result.json').write_text(json.dumps({**initial, 'executedAt': started, 'completedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'type': 'real-desktop', 'scope': 'isolated X11 editor manual capture, actual GTK target and MarkIts, preview cancel, target-terminated capture failure, Studio return, fresh recording from same cursor, source insertion/save/physical Undo, cancelled late capture after real manuscript switch and original cursor return', 'results': records}, ensure_ascii=False, indent=2))
-            print('PASS actual manual capture: same source cursor -> preview cancel -> target loss/failure -> fresh recording -> MarkIts -> save -> physical Undo', flush=True)
+                (RESULTS / 'result.json').write_text(json.dumps({**initial, 'executedAt': started, 'completedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'type': 'real-desktop', 'scope': 'isolated X11 editor manual capture, actual GTK target and MarkIts, direct insertion and Undo, target-terminated capture failure, Studio return, fresh recording from same cursor, source insertion/save/physical Undo, cancelled late capture after real manuscript switch and original cursor return', 'results': records}, ensure_ascii=False, indent=2))
+            print('PASS actual manual capture: same source cursor -> direct insertion and Undo -> target loss/failure -> fresh recording -> MarkIts -> save -> physical Undo', flush=True)
         except BaseException:
             if app and 'ui' in locals():
                 try:

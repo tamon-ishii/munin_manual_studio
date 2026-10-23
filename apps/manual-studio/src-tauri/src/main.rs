@@ -252,7 +252,7 @@ async fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("recording-control.html".into()),
     )
     .title("Munin Manual Studio — 撮影")
-    .inner_size(380.0, 150.0)
+    .inner_size(380.0, 350.0)
     .min_inner_size(1.0, 1.0)
     // GTK locks an unresizable WebView at its initial minimum (200px).
     // Allow the content-driven resize to shrink the native popup.
@@ -762,12 +762,8 @@ fn operation_recording_running(state: State<'_, recorder::RecorderState>) -> Res
     recorder::is_running(state.inner())
 }
 
-#[tauri::command]
-async fn finish_operation_recording(
-    app: tauri::AppHandle,
-    state: State<'_, recorder::RecorderState>,
-) -> Result<recorder::RecordingResult, String> {
-    let control_bounds = app
+fn recording_control_bounds(app: &tauri::AppHandle) -> Option<(f64, f64, f64, f64)> {
+    app
         .get_webview_window("recording-control")
         .and_then(|window| {
             let position = window.outer_position().ok()?;
@@ -782,7 +778,20 @@ async fn finish_operation_recording(
                 size.width as f64 / scale,
                 size.height as f64 / scale,
             ))
-        });
+        })
+}
+
+#[tauri::command]
+fn operation_recording_history(app: tauri::AppHandle, state: State<'_, recorder::RecorderState>) -> Result<recorder::RecordingHistory, String> {
+    recorder::history(state.inner(), recording_control_bounds(&app))
+}
+
+#[tauri::command]
+async fn finish_operation_recording(
+    app: tauri::AppHandle,
+    state: State<'_, recorder::RecorderState>,
+) -> Result<recorder::RecordingResult, String> {
+    let control_bounds = recording_control_bounds(&app);
     // Hidden WebKit views can suspend timers and IPC continuations. Keep
     // capture preparation and both success/error recovery in the native host.
     hide_recording_control(app.clone())?;
@@ -1318,6 +1327,7 @@ fn main() {
             choose_working_directory,
             start_operation_recording,
             operation_recording_running,
+            operation_recording_history,
             finish_operation_recording,
             import_markits_annotation,
             markits_annotation_ready,

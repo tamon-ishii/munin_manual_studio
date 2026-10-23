@@ -241,7 +241,7 @@ try {
   await nativePage.locator('[data-capture-stage]').getByText('編集結果を保存中',{exact:true}).waitFor();
   assert.equal(await nativePage.locator('#capture-operation-progress').getAttribute('data-stage'),'import');
   await nativePage.evaluate(()=>{__libraryMock.holdImports=false;__libraryMock.release();});
-  await nativePage.locator('#editor-screenshot-preview').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'この位置に挿入',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('指定位置にスクショを挿入しました。')&&document.body.getAttribute('aria-busy')==='false');
+  assert.equal(await nativePage.locator('#editor-screenshot-preview').count(),0);await nativePage.waitForFunction(()=>document.querySelector('#status').textContent.includes('指定位置にスクショを挿入しました。')&&document.body.getAttribute('aria-busy')==='false');
   const previewCalls=await nativePage.evaluate(()=>{
     const calls=__libraryMock.calls;
     const imported=calls.findLastIndex(call=>call.command==='import_library_capture');
@@ -287,5 +287,5 @@ try {
   await nativePage.evaluate(()=>{__libraryMock.holdAnnotations=false;});await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('候補として保存'));assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isEnabled(),true);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.filter(call=>call.command==='edit_library_screenshot').length),2);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.some(call=>call.command==='restore_manual_studio')),true);
   await nativePage.close();
   assert.deepEqual(errors,[]);
-  console.log('Independent screenshot import, immutable original, Markdown insertion, reference protection, recapture eligibility and editor manual capture failure/retry/preview/cursor insertion/Undo without AI checks passed.');
+  console.log('Independent screenshot import, immutable original, Markdown insertion, reference protection, recapture eligibility and editor manual capture failure/retry/direct cursor insertion/Undo without AI checks passed.');
 } finally {await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

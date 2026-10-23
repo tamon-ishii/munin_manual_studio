@@ -394,25 +394,26 @@ try {
   records.find(record => record.caseId === 'P03.resource-drop-rich').steps.push('hold actual screenshot reference in a long rich manuscript', 'verify rich contenteditable is false and typing cannot change manuscript while pending', 'verify document tab is disabled while pending', 'scroll the readonly editor with mouse wheel while waiting', 'retain original document position instead of reusing viewport coordinates', 'save inserted reference and Undo, then save restored trailing paragraphs');
   await page.getByRole('button', { name: 'Markdownソース', exact: true }).click();
   await editor.fill(initial); await saveContent(initial); await reset();
-  async function existingPreview() {
+  async function insertExistingScreenshot() {
     await page.locator('#editor-screenshot-ai').click();
     await page.locator('#editor-screenshot-method').getByRole('button', { name: '撮影済み画像を選ぶ', exact: true }).click();
     await page.locator('#editor-screenshot-existing').locator(`[data-screenshot-id="${screenshot.id}"]`).click();
-    await page.locator('#editor-screenshot-preview').waitFor();
   }
-  await existingPreview(); await page.locator('#editor-screenshot-preview').getByRole('button', { name: '閉じる', exact: true }).click();
+  await page.locator('#editor-screenshot-ai').click();
+  await page.locator('#editor-screenshot-method').getByRole('button', { name: '撮影済み画像を選ぶ', exact: true }).click();
+  await page.locator('#editor-screenshot-existing').getByRole('button', { name: '閉じる', exact: true }).click();
   assert.equal(await editor.inputValue(), initial); assert.equal(await editor.evaluate(node => node.selectionStart), cursor);
-  failReference = true; await existingPreview(); await page.locator('#editor-screenshot-preview').getByRole('button', { name: 'この位置に挿入', exact: true }).click();
+  failReference = true; await insertExistingScreenshot();
   await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Fixture reference unavailable') && document.body.getAttribute('aria-busy') === 'false');
   assert.equal(await editor.inputValue(), initial); failReference = false;
-  await existingPreview(); await page.locator('#editor-screenshot-preview').getByRole('button', { name: 'この位置に挿入', exact: true }).click();
+  await insertExistingScreenshot();
   await page.waitForFunction(() => document.querySelector('#status').textContent.includes('指定位置にスクショを挿入しました。') && document.body.getAttribute('aria-busy') === 'false');
   const existingInserted = await editor.inputValue(); assertReference(existingInserted, screenshot.output); assert.ok(existingInserted.startsWith(initial.slice(0, cursor))); assert.ok(existingInserted.endsWith(initial.slice(cursor)));
   assert.equal((existingInserted.match(/<!-- screenshot:ref id=/g) || []).length, 1); await saveContent(existingInserted);
   await editor.press('Control+z'); assert.equal(await editor.inputValue(), initial); await saveContent(initial);
   assert.equal(JSON.parse(await rpc('screenshots-list')).items.find(shot => shot.id === screenshot.id).adopted, screenshot.adopted);
   assert.equal(JSON.parse(await rpc('screenshots-image', { id: screenshot.id, json: { original: true } })).data, originalScreenshot);
-  records.push({ entry: 'editor existing screenshot insertion', caseId: 'P04.editor-existing', steps: ['start from same source cursor', 'choose actual adopted screenshot', 'close preview and preserve manuscript/cursor', 'reopen and inject reference failure', 'retain adopted revision and manuscript', 'reopen same screenshot and insert without recapture', 'verify selected screenshot asset path and save one reference in actual manuscript', 'Undo and save original manuscript', 'preserve adopted revision and immutable original PNG'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
+  records.push({ entry: 'editor existing screenshot insertion', caseId: 'P04.editor-existing', steps: ['start from same source cursor', 'choose actual adopted screenshot', 'close image selection and preserve manuscript/cursor', 'reopen and inject reference failure', 'retain adopted revision and manuscript', 'select same screenshot and insert immediately without confirmation or recapture', 'verify selected screenshot asset path and save one reference in actual manuscript', 'Undo and save original manuscript', 'preserve adopted revision and immutable original PNG'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
   await reset(); holdExistingList = true;
   const pendingList = new Promise(resolve => existingListStarted = resolve);
   await page.locator('#editor-screenshot-ai').click();

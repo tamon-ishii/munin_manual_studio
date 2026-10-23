@@ -2743,14 +2743,7 @@ async function insertScreenshotHere():Promise<void>{
     stage('preview');
     const image=JSON.parse(await rpc('screenshots-image',{id,json:{revision:existing?.revision,latest:!existing}},root)) as {data:string;edit:{id:string};screenshot:{adopted:string|null}};
     if(!valid())return;
-    stage('review');
-    const {dialog,body}=featureDialog('スクショを確認して挿入');dialog.id='editor-screenshot-preview';
-    if(method==='ai'&&screenshotAi.insertionWarning()){const warning=document.createElement('p');warning.className='error';warning.setAttribute('role','alert');warning.textContent=screenshotAi.insertionWarning()!;body.append(warning);}
-    const note=document.createElement('p');note.textContent=`${page} の指定位置に挿入します。閉じた場合も撮影画像と手順はリソース一覧に残ります。`;
-    const preview=document.createElement('img');preview.src=image.data;preview.alt='挿入するスクリーンショットの候補';preview.style.maxWidth='100%';preview.style.maxHeight='50vh';preview.style.objectFit='contain';
-    const insert=document.createElement('button');insert.type='button';insert.className='primary';insert.dataset.uiIcon='image';insert.textContent='この位置に挿入';body.append(note,preview,insert);
-    const accepted=await new Promise<boolean>(resolve=>{let answer=false;insert.onclick=()=>{answer=true;dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
-    if(!accepted){if(!existing){stage('refresh');await screenshotLibrary.refresh();}return;}
+    const warning=method==='ai'?screenshotAi.insertionWarning():undefined;
     outcome='error';
     await work(async()=>{
       if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
@@ -2761,7 +2754,7 @@ async function insertScreenshotHere():Promise<void>{
       if(!valid())throw new Error('原稿が変更されました。画像はリソース一覧から挿入してください。');
       stage('insert');
       if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,`\n\n${markdown}\n\n`,0,markdown.length+4);
-      updateHistoryButtons();stage('refresh');await screenshotLibrary.refresh();outcome='success';status('指定位置にスクショを挿入しました。');
+      updateHistoryButtons();stage('refresh');await screenshotLibrary.refresh();outcome='success';status(`指定位置にスクショを挿入しました。${warning?` ${warning}`:''}`);
     });
   } catch(error) {outcome='error';throw error;}
   finally {

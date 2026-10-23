@@ -221,18 +221,18 @@ Manual Studio SHALL distinguish finding categories and severity from the finding
 - **AND** unchanged context can be expanded without changing the adoption choices.
 
 ### Requirement: Offer screenshot insertion methods in the editor
-The editor SHALL provide one screenshot insertion entry with manual capture, AI instruction and existing adopted screenshot choices. Each method SHALL preserve the captured document and cursor, preview before insertion, preserve selected prose and support Undo. Manual capture and existing image selection SHALL NOT require AI settings or AI calls.
+The editor SHALL provide one screenshot insertion entry with manual capture, AI instruction and existing adopted screenshot choices. Each method SHALL preserve the captured document and cursor, insert directly without a final confirmation dialog, preserve selected prose and support Undo. Manual capture and existing image selection SHALL NOT require AI settings or AI calls.
 
 #### Scenario: Capture manually while editing
 - **WHEN** the user chooses manual capture, selects a registered app, records operations and saves the capture in MarkIts
-- **THEN** the editor offers a preview and insertion at the original cursor without visiting the resource library or calling AI.
+- **THEN** the editor inserts the screenshot immediately at the original cursor without visiting the resource library or calling AI.
 
 #### Scenario: Choose an existing screenshot
 - **WHEN** the user chooses a saved screenshot
-- **THEN** the adopted version is previewed and inserted without adopting another candidate.
+- **THEN** the adopted version is inserted immediately without adopting another candidate.
 
 #### Scenario: Cancel screenshot insertion
-- **WHEN** the user cancels method selection, recording selection or candidate preview
+- **WHEN** the user cancels method selection, recording selection or existing image selection
 - **THEN** the manuscript remains unchanged and previously captured resources remain available.
 
 ### Requirement: Open existing document folders without redundant nesting

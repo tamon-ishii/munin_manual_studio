@@ -6610,40 +6610,6 @@
       "reviewNote": "Reviewed against test_manual_studio_ai_assistance.mjs: explicit review entry/reopen, stale batch rejection, no-AI batch application, editable replacement enablement and processing-time disablement."
     },
     {
-      "id": "apps/manual-studio/src/main.ts:create:button:a54f3517d8599595:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 2710,
-      "kind": "create:button",
-      "expression": "insert=document.createElement('button')",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "保存と再読込の本文が一致する",
-      "returnTarget": "開始した原稿と選択位置",
-      "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/main.ts:handler:007764b1d265e5d3:1",
-      "file": "apps/manual-studio/src/main.ts",
-      "line": 2711,
-      "kind": "handler",
-      "expression": "insert.onclick=()=>{answer=true;dialog.close();}",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "保存と再読込の本文が一致する",
-      "returnTarget": "開始した原稿と選択位置",
-      "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
       "id": "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
       "file": "apps/manual-studio/src/main.ts",
       "line": 2733,
@@ -14092,8 +14058,6 @@
         "apps/manual-studio/src/main.ts:event:click:4c1b55958f493df8:1",
         "apps/manual-studio/src/main.ts:create:button:07ed5dfa84565d0d:1",
         "apps/manual-studio/src/main.ts:event:click:24c6b4770f9d242b:1",
-        "apps/manual-studio/src/main.ts:create:button:a54f3517d8599595:1",
-        "apps/manual-studio/src/main.ts:handler:007764b1d265e5d3:1",
         "apps/manual-studio/src/main.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/main.ts:handler:34f4ca7254f8f38b:1",
         "apps/manual-studio/src/main.ts:loop-controls:a96583c5dcde3063:1",
@@ -14335,8 +14299,6 @@
         "apps/manual-studio/src/main.ts:event:click:4c1b55958f493df8:1",
         "apps/manual-studio/src/main.ts:create:button:07ed5dfa84565d0d:1",
         "apps/manual-studio/src/main.ts:event:click:24c6b4770f9d242b:1",
-        "apps/manual-studio/src/main.ts:create:button:a54f3517d8599595:1",
-        "apps/manual-studio/src/main.ts:handler:007764b1d265e5d3:1",
         "apps/manual-studio/src/main.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/main.ts:handler:34f4ca7254f8f38b:1",
         "apps/manual-studio/src/main.ts:loop-controls:a96583c5dcde3063:1",
@@ -14578,8 +14540,6 @@
         "apps/manual-studio/src/main.ts:event:click:4c1b55958f493df8:1",
         "apps/manual-studio/src/main.ts:create:button:07ed5dfa84565d0d:1",
         "apps/manual-studio/src/main.ts:event:click:24c6b4770f9d242b:1",
-        "apps/manual-studio/src/main.ts:create:button:a54f3517d8599595:1",
-        "apps/manual-studio/src/main.ts:handler:007764b1d265e5d3:1",
         "apps/manual-studio/src/main.ts:create:button:0cd3653d8136ca98:1",
         "apps/manual-studio/src/main.ts:handler:34f4ca7254f8f38b:1",
         "apps/manual-studio/src/main.ts:loop-controls:a96583c5dcde3063:1",
@@ -17261,9 +17221,9 @@
       ],
       "evidenceRecord": "editor AI screenshot insertion using deterministic local service",
       "expected": {
-        "visible": "編集画面の元カーソルからAI撮影候補を確認し、選択済みの本文を置換せず相対参照を一度だけ挿入する",
+        "visible": "編集画面の元カーソルへAI撮影結果を確認ダイアログなしで挿入し、選択済みの本文を置換せず相対参照を一度だけ挿入する",
         "stored": "撮影候補と注釈を実バックエンドへ保存し、参照を実原稿へ保存する",
-        "preserved": "プレビュー取消、撮影失敗と同じ指示/recipeでの撮影再試行で本文とカーソル、候補/原本PNGを保持する。実ツリーで別原稿へ切り替えた後の遅い撮影結果は両原稿に挿入しない",
+        "preserved": "挿入後のUndo、撮影失敗と同じ指示/recipeでの撮影再試行で本文とカーソル、候補/原本PNGを保持する。実ツリーで別原稿へ切り替えた後の遅い撮影結果は両原稿に挿入しない",
         "returnTarget": "開始したソース原稿とカーソル"
       },
       "requiredEvidence": [
@@ -17283,9 +17243,9 @@
       ],
       "evidenceRecord": "editor manual screenshot capture",
       "expected": {
-        "visible": "同じソースカーソルから実GTKアプリを撮影しMarkItsの候補を確認して一度だけ挿入する",
-        "stored": "プレビュー取消後も最初の撮影画像を保存し、撮影対象消失の失敗時に画像を追加せず、新規記録で撮影した画像の相対参照を実原稿へ保存する",
-        "preserved": "撮影方法/プレビュー/記録挿入待機の取消と撮影対象消失時に元本文とカーソルを保持する。新規記録からの再試行とUndo後も撮影画像を保持。実ツリーで別原稿へ切り替えた後の実GTK/MarkIts撮影結果は一覧にだけ保存し、両原稿を変更しない",
+        "visible": "同じソースカーソルから実GTKアプリを撮影しMarkItsで編集を終えると確認ダイアログなしで一度だけ挿入する",
+        "stored": "挿入後のUndoでも最初の撮影画像を保存し、撮影対象消失の失敗時に画像を追加せず、新規記録で撮影した画像の相対参照を実原稿へ保存する",
+        "preserved": "撮影方法/記録挿入待機の取消と撮影対象消失時に元本文とカーソルを保持する。新規記録からの再試行とUndo後も撮影画像を保持。実ツリーで別原稿へ切り替えた後の実GTK/MarkIts撮影結果は一覧にだけ保存し、両原稿を変更しない",
         "returnTarget": "開始したソース原稿とカーソル"
       },
       "requiredEvidence": [
@@ -17306,9 +17266,9 @@
       ],
       "evidenceRecord": "editor existing screenshot insertion",
       "expected": {
-        "visible": "撮影済み画像の選択/プレビューから元カーソルへ一度だけ挿入",
+        "visible": "撮影済み画像を選択すると確認ダイアログなしで元カーソルへ一度だけ挿入",
         "stored": "採用済み版の相対参照を実原稿へ保存しUndo後も元本文を保存",
-        "preserved": "プレビュー取消/参照失敗時の本文とカーソル、採用版、原本PNGを保持",
+        "preserved": "画像選択取消/参照失敗時の本文とカーソル、採用版、原本PNGを保持",
         "returnTarget": "開始したソース原稿とカーソル"
       },
       "requiredEvidence": [

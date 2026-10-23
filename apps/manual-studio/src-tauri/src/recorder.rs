@@ -811,6 +811,60 @@ pub fn is_running(state: &RecorderState) -> Result<bool, String> {
         .is_none())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingHistory {
+    items: Vec<RecordingHistoryItem>,
+    total: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordingHistoryItem {
+    sequence: usize,
+    elapsed_ms: u64,
+    label: String,
+}
+
+pub fn history(state: &RecorderState, control: Option<(f64, f64, f64, f64)>) -> Result<RecordingHistory, String> {
+    let lock = state.0.lock().map_err(|error| error.to_string())?;
+    let Some(session) = lock.session.as_ref() else {
+        return Ok(RecordingHistory { items: Vec::new(), total: 0 });
+    };
+    let bytes = fs::read(&session.event_file).map_err(|error| error.to_string())?;
+    // The helper flushes each JSON line. Ignore a final line still being written.
+    let end = bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |index| index + 1);
+    let events = bytes[..end].split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_slice::<RecordedEvent>)
+        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(history_items(&events, &session.window, control))
+}
+
+fn history_items(events: &[RecordedEvent], window: &WindowBounds, control: Option<(f64, f64, f64, f64)>) -> RecordingHistory {
+    let mut grouped: Vec<RecordedEvent> = Vec::new();
+    for event in events {
+        if let (RecordedEvent::Click { x, y, .. }, Some((left, top, width, height))) = (event, control) {
+            if *x >= left && *x < left + width && *y >= top && *y < top + height { continue; }
+        }
+        if let (RecordedEvent::Text { value, .. }, Some(RecordedEvent::Text { value: previous, .. })) = (event, grouped.last_mut()) {
+            previous.push_str(value);
+        } else {
+            grouped.push(event.clone());
+        }
+    }
+    let total = grouped.len();
+    let items = grouped.iter().enumerate().skip(total.saturating_sub(100)).map(|(index, event)| {
+        let elapsed_ms = match event {
+            RecordedEvent::Click { elapsed_ms, .. } | RecordedEvent::Text { elapsed_ms, .. }
+            | RecordedEvent::Key { elapsed_ms, .. } | RecordedEvent::Scroll { elapsed_ms, .. } => *elapsed_ms,
+        };
+        let text = events_to_text(std::slice::from_ref(event), window);
+        RecordingHistoryItem { sequence: index + 1, elapsed_ms, label: text.strip_prefix("1. ").unwrap_or(&text).to_owned() }
+    }).collect();
+    RecordingHistory { items, total }
+}
+
 #[cfg(test)]
 pub fn finish(state: &RecorderState) -> Result<RecordingResult, String> {
     finish_excluding_control(state, None)
@@ -1329,6 +1383,54 @@ pub fn cleanup_completed_capture(image_file: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recording_history_lists_operations_and_ignores_partial_lines() {
+        use super::*;
+        let state = RecorderState::default();
+        let root = tempfile::tempdir().unwrap();
+        let event_file = root.path().join("events.jsonl");
+        let events = vec![
+            RecordedEvent::Click { elapsed_ms: 1000, x: 20.0, y: 30.0, target: Some(manual_core::semantic_target::Target { role: "button".into(), name: "保存".into(), reveals: None }), visual: None },
+            RecordedEvent::Text { elapsed_ms: 2000, value: "あ".into() },
+            RecordedEvent::Text { elapsed_ms: 2100, value: "い".into() },
+            RecordedEvent::Key { elapsed_ms: 3000, value: "Enter".into() },
+            RecordedEvent::Scroll { elapsed_ms: 4000, x: 20.0, y: 30.0, dx: 0, dy: -3 },
+            RecordedEvent::Click { elapsed_ms: 5000, x: 105.0, y: 105.0, target: None, visual: None },
+        ];
+        let mut data = events.iter().map(|event| serde_json::to_string(event).unwrap() + "\n").collect::<String>();
+        data.push_str("{\"kind\":\"click\"");
+        fs::write(&event_file, data).unwrap();
+        state.0.lock().unwrap().session = Some(Session {
+            recorder: None, app_child: None, event_file, root: root.path().into(),
+            program: "fixture".into(), args: vec![], working_directory: root.path().into(), window_title: "Fixture".into(),
+            window: WindowBounds { id: "fixture".into(), x: 0, y: 0, width: 100, height: 100 },
+            task_id: "fixture".into(), markits_program: "".into(),
+        });
+        let result = history(&state, Some((100.0, 100.0, 30.0, 30.0))).unwrap();
+        assert_eq!(result.total, 4);
+        assert_eq!(result.items[0].label, "「保存」（button）をクリック");
+        assert_eq!(result.items[1].label, "テキスト入力: あい");
+        assert_eq!(result.items[2].label, "キー入力: Enter");
+        assert_eq!(result.items[3].label, "スクロール: 横 0・縦 -3");
+        assert_eq!(result.items[3].sequence, 4);
+        assert_eq!(result.items[3].elapsed_ms, 4000);
+        cancel(&state).unwrap();
+        assert_eq!(history(&state, None).unwrap().total, 0);
+    }
+
+    #[test]
+    fn recording_history_bounds_the_visible_tail_and_preserves_numbering() {
+        use super::*;
+        let window = WindowBounds { id: "fixture".into(), x: 10, y: 20, width: 100, height: 100 };
+        let events = (0..120).map(|index| RecordedEvent::Click { elapsed_ms: index, x: 30.0, y: 40.0, target: None, visual: None }).collect::<Vec<_>>();
+        let result = history_items(&events, &window, None);
+        assert_eq!(result.total, 120);
+        assert_eq!(result.items.len(), 100);
+        assert_eq!(result.items[0].sequence, 21);
+        assert_eq!(result.items[99].sequence, 120);
+        assert_eq!(result.items[0].label, "クリック: (20, 20)");
+    }
+
     #[test]
     fn cancellation_removes_the_session_and_is_idempotent() {
         let state = super::RecorderState::default();
