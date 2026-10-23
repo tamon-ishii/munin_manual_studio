@@ -60,10 +60,12 @@ try {
   assert.equal(count('resources-thumbnail'),thumbnails,'unchanged thumbnail survives list refresh');
   // Even a same-path, same-size external write invalidates the metadata revision.
   await writeFile(path.join(root,'docs/assets/a.png'),png);
+  const updatedThumbnail=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='resources-thumbnail');
   await page.locator('#resource-management-menu > summary').click();
   await page.locator('#screenshot-library-refresh').click();
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await page.waitForFunction(()=>[...document.querySelectorAll('#screenshot-library-list img')].some(img=>img.complete&&img.naturalWidth>0));
+  await updatedThumbnail;
   assert.equal(count('resources-thumbnail'),thumbnails+1,'same-path external write invalidates the thumbnail revision');
   console.log('performance: cache checks passed');
   await page.locator('[data-tab="editor"]').click();
