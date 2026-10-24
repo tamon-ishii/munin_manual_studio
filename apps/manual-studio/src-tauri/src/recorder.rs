@@ -268,11 +268,15 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
     let snapshot = Arc::new(Mutex::new((Instant::now(), Vec::new())));
     if let Some(id) = semantic_window {
         let snapshot = Arc::clone(&snapshot);
-        thread::spawn(move || loop {
+        let depth = std::env::var("MUNIN_UI_CAPTURE_DEPTH").ok().and_then(|value|value.parse().ok()).unwrap_or(markits::ui_elements::DEFAULT_CAPTURE_DEPTH);
+        thread::spawn(move || {
+          let _depth = markits::ui_elements::capture_depth_scope(depth);
+          loop {
             let observed_at = Instant::now();
             let elements = manual_core::semantic_target::observe_window(&id).unwrap_or_default();
             if let Ok(mut cache) = snapshot.lock() { *cache = (observed_at, elements); }
             thread::sleep(Duration::from_millis(200));
+          }
         });
     }
     let started = Instant::now();
@@ -478,7 +482,8 @@ pub fn start(
         return Err("起動アプリと指示IDを入力してください。".into());
     }
     let root_path = PathBuf::from(&root).canonicalize().map_err(|_| "プロジェクトフォルダーが見つかりません。")?;
-    let working_directory = if working_directory.trim().is_empty() { root_path.clone() } else {
+    let browser_url = crate::browser_launch_url(&program)?.map(str::to_owned);
+    let working_directory = if browser_url.is_some() || working_directory.trim().is_empty() { root_path.clone() } else {
         let configured = PathBuf::from(&working_directory);
         let configured = if configured.is_absolute() { configured } else { root_path.join(configured) };
         let configured = configured.canonicalize().map_err(|_| format!("作業フォルダが見つかりません: {}", configured.display()))?;
@@ -493,14 +498,21 @@ pub fn start(
         .iter()
         .filter_map(|window| window["id"].as_str().map(str::to_owned))
         .collect();
-    let (executable, args) = manual_core::platform::application_command_in(&working_directory, &program, &args)?;
+    let (executable, args) = if let Some(url) = &browser_url {
+        (crate::default_browser_executable(url)?, vec![url.clone()])
+    } else {
+        manual_core::platform::application_command_in(&working_directory, &program, &args)?
+    };
     let program = executable.to_string_lossy().into_owned();
-    let mut app = Command::new(&executable)
+    let mut app = if let Some(url) = &browser_url {
+        crate::open_browser_url(url)?;
+        None
+    } else { Some(Command::new(&executable)
         .args(&args)
         .current_dir(&working_directory)
         .stdin(Stdio::null())
         .spawn()
-        .map_err(|error| format!("アプリを起動できません: {error}"))?;
+        .map_err(|error| format!("アプリを起動できません: {error}"))?) };
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut reused_window = false;
     let window_result = (|| -> Result<(WindowBounds, String), String> {
@@ -517,7 +529,7 @@ pub fn start(
                 launched_app_window_ids(
                     &crate::native_worker::window_processes()?,
                     &executable,
-                    app.id(),
+                    app.as_ref().map_or(0, Child::id),
                 )
             } else {
                 HashSet::new()
@@ -546,9 +558,21 @@ pub fn start(
                     format!("「{window_title}」ウィンドウが30秒以内に見つかりませんでした。")
                 });
             }
-            if let Some(status) = app
-                .try_wait()
+            if browser_url.is_some() {
+                if let Some(found) = select_existing_app_window(&windows, &crate::native_worker::window_processes()?, &program) {
+                    reused_window = true;
+                    return Ok((WindowBounds {
+                        id: found["id"].as_str().unwrap_or_default().into(),
+                        x: found["x"].as_i64().unwrap_or(0) as i32,
+                        y: found["y"].as_i64().unwrap_or(0) as i32,
+                        width: found["width"].as_u64().unwrap_or(0) as u32,
+                        height: found["height"].as_u64().unwrap_or(0) as u32,
+                    }, found["title"].as_str().unwrap_or_default().into()));
+                }
+            }
+            if let Some(status) = app.as_mut().map(Child::try_wait).transpose()
                 .map_err(|error| format!("起動アプリの状態を確認できません: {error}"))?
+                .flatten()
             {
                 if status.success() {
                     let processes = crate::native_worker::window_processes()?;
@@ -582,14 +606,14 @@ pub fn start(
     let (window, window_title) = match window_result {
         Ok(result) => result,
         Err(error) => {
-            stop_child(app);
+            if let Some(app) = app { stop_child(app); }
             return Err(error);
         }
     };
     let nonce = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(value) => value.as_nanos(),
         Err(error) => {
-            stop_child(app);
+            if let Some(app) = app { stop_child(app); }
             return Err(error.to_string());
         }
     };
@@ -600,16 +624,17 @@ pub fn start(
     let recorder = match std::env::current_exe() {
         Ok(path) => path,
         Err(error) => {
-            stop_child(app);
+            if let Some(app) = app { stop_child(app); }
             return Err(error.to_string());
         }
     };
     let recorder_log = event_file.with_extension("log");
     let stderr = match File::create(&recorder_log) {
         Ok(file) => file,
-        Err(error) => { stop_child(app); return Err(error.to_string()); }
+        Err(error) => { if let Some(app) = app { stop_child(app); } return Err(error.to_string()); }
     };
     let child = match Command::new(recorder)
+        .env("MUNIN_UI_CAPTURE_DEPTH", manual_core::capture_settings::read(&root_path)?.max_depth.to_string())
         .arg("--manual-studio-record-input")
         .arg(&event_file)
         .env("MUNIN_RECORDING_WINDOW", serde_json::to_string(&markits::ui_elements::DetectedUiElement {
@@ -629,7 +654,7 @@ pub fn start(
     {
         Ok(child) => child,
         Err(error) => {
-            stop_child(app);
+            if let Some(app) = app { stop_child(app); }
             return Err(format!("入力記録プロセスを起動できません: {error}"));
         }
     };
@@ -645,21 +670,21 @@ pub fn start(
         Ok(lock) => lock,
         Err(error) => {
             stop_child(child);
-            stop_child(app);
+            if let Some(app) = app { stop_child(app); }
             return Err(error.to_string());
         }
     };
     if lock.session.is_some() {
         drop(lock);
         stop_child(child);
-        stop_child(app);
+        if let Some(app) = app { stop_child(app); }
         return Err("別の操作記録が先に開始されました。".into());
     }
-    let app_child = if reused_window {
-        reap_child_in_background(app);
+    let app_child = if reused_window || browser_url.is_some() {
+        if let Some(app) = app { reap_child_in_background(app); }
         None
     } else {
-        Some(app)
+        app
     };
     lock.session = Some(Session {
         recorder: Some(child),
@@ -771,7 +796,12 @@ fn select_existing_app_window<'a>(
             if process_executable != executable {
                 return None;
             }
-            let id = window.window_id.as_deref()?.parse::<u64>().ok()?;
+            let raw_id = window.window_id.as_deref()?;
+            let id = if let Some(hex) = raw_id.strip_prefix("0x") {
+                u64::from_str_radix(hex, 16).ok()?
+            } else {
+                raw_id.parse::<u64>().ok()?
+            };
             Some(format!("0x{id:x}"))
         })
         .collect();
@@ -809,6 +839,15 @@ pub fn is_running(state: &RecorderState) -> Result<bool, String> {
         .try_wait()
         .map_err(|e| e.to_string())?
         .is_none())
+}
+
+pub fn capture_settings(state: &RecorderState, max_depth: Option<usize>) -> Result<manual_core::capture_settings::CaptureSettings, String> {
+    let root = state.0.lock().map_err(|error|error.to_string())?.session.as_ref()
+        .ok_or("操作記録がありません。")?.root.clone();
+    match max_depth {
+        Some(depth) => manual_core::capture_settings::save(&root, &json!({"max_depth":depth})),
+        None => manual_core::capture_settings::read(&root),
+    }
 }
 
 #[derive(Serialize)]
@@ -898,7 +937,7 @@ pub fn finish_excluding_control(
         });
     }
     let mut scenario = build_scenario(&session, &events);
-    let observed = super::native_worker::observe_window(&session.window.id).unwrap_or_default();
+    let observed = super::native_worker::observe_window(&session.root, &session.window.id).unwrap_or_default();
     let headings: Vec<_> = observed.iter().filter(|element| element.role == "heading")
         .filter_map(|element| {
             let target = manual_core::semantic_target::Target {
@@ -931,6 +970,7 @@ pub fn finish_excluding_control(
     let completion_path = handoff_dir.join(format!("{}-{nonce}.done", session.task_id));
     // Attach accessibility data from the selected app only; avoid scanning unrelated windows.
     crate::native_worker::capture_window(
+        &session.root,
         &session.window.id,
         &screenshot_path,
         session.app_child.is_some(),
@@ -1407,6 +1447,11 @@ mod tests {
             task_id: "fixture".into(), markits_program: "".into(),
         });
         let result = history(&state, Some((100.0, 100.0, 30.0, 30.0))).unwrap();
+        assert_eq!(capture_settings(&state, None).unwrap().max_depth, 64);
+        assert_eq!(capture_settings(&state, Some(80)).unwrap().max_depth, 80);
+        assert_eq!(manual_core::capture_settings::read(root.path()).unwrap().max_depth, 80);
+        assert!(capture_settings(&state, Some(129)).is_err());
+        assert!(state.0.lock().unwrap().session.is_some());
         assert_eq!(result.total, 4);
         assert_eq!(result.items[0].label, "「保存」（button）をクリック");
         assert_eq!(result.items[1].label, "テキスト入力: あい");
@@ -1415,6 +1460,7 @@ mod tests {
         assert_eq!(result.items[3].sequence, 4);
         assert_eq!(result.items[3].elapsed_ms, 4000);
         cancel(&state).unwrap();
+        assert!(capture_settings(&state, None).is_err());
         assert_eq!(history(&state, None).unwrap().total, 0);
     }
 
@@ -1991,7 +2037,7 @@ mod tests {
             json!({"id":"0x10","title":"Existing app","width":800,"height":600}),
             json!({"id":"0x20","title":"Other app","width":1400,"height":900}),
         ];
-        let detected = vec![markits::ui_elements::DetectedUiElement {
+        let mut detected = vec![markits::ui_elements::DetectedUiElement {
             role: "window".into(),
             name: Some("Existing app".into()),
             window_id: Some("16".into()),
@@ -2004,6 +2050,13 @@ mod tests {
         assert_eq!(
             select_existing_app_window(&windows, &detected, executable.to_str().unwrap()).unwrap()
                 ["id"],
+            "0x10"
+        );
+        // Windows/macOS ownership enumeration returns hexadecimal IDs; X11
+        // accessibility enumeration may return decimal IDs for the same window.
+        detected[0].window_id = Some("0x10".into());
+        assert_eq!(
+            select_existing_app_window(&windows, &detected, executable.to_str().unwrap()).unwrap()["id"],
             "0x10"
         );
         assert!(select_existing_app_window(

@@ -7,6 +7,7 @@ pub mod author;
 pub mod builder;
 mod capture_lifecycle;
 pub mod capture_source;
+pub mod capture_settings;
 pub mod capture_validation;
 pub mod config;
 mod operation_settings;
@@ -67,6 +68,7 @@ fn crop_margin(crop: bool, margin: Option<&str>) -> Result<Option<u32>, String> 
 }
 
 pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
+    let _depth = markits::ui_elements::capture_depth_scope(capture_settings::read(root)?.max_depth);
     if matches!(action, "scan" | "generate-task" | "generate-page" | "generate-review" | "generation-input" | "generation-history" | "generation-history-entry" | "generate-page-captures" | "update-task" | "generate-text-all" | "generate-diagram-all" | "generate-api" | "approve" | "record" | "record-screenshot" | "record-diagram" | "page-tasks" | "impact-plan" | "generate-impacted" | "execution-begin" | "execution-checkpoint" | "execution-finish" | "execution-resume" | "execution-rollback") {
         return Err(format!("AIタグ機能は廃止されました: {action}"));
     }
@@ -798,6 +800,7 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         .and_then(serde_json::Value::as_str)
         .ok_or("Action is required")?;
     let project = Path::new(root);
+    let _depth = markits::ui_elements::capture_depth_scope(capture_settings::read(project)?.max_depth);
     let options = &request["options"];
     let id = || options["id"].as_str().ok_or("実行IDを指定してください。");
     let page = || options["page"].as_str().ok_or("原稿を指定してください。");
@@ -833,6 +836,8 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         return result.map(|v| v.to_string());
     }
     match action {
+        "capture-settings-read" => return serde_json::to_string(&capture_settings::read(project)?).map_err(|e|e.to_string()),
+        "capture-settings-save" => return serde_json::to_string(&capture_settings::save(project, &options["json"])?).map_err(|e|e.to_string()),
         "workspace-paths-read" => return Ok(operation_settings::paths(project).to_string()),
         "workspace-paths-save" => return operation_settings::save_paths(project, &options["json"]).map(|v|v.to_string()),
         "operation-timings-read" => return operation_settings::history(project).map(|v|v.to_string()),

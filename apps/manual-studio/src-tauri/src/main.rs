@@ -166,8 +166,13 @@ struct LaunchedApplication {
 }
 
 #[tauri::command]
-fn test_launch_application(program: String, args: Vec<String>, root: Option<String>, working_directory: Option<String>) -> Result<LaunchedApplication, String> {
+fn test_launch_application(program: String, args: Vec<String>, root: Option<String>, working_directory: Option<String>) -> Result<Option<LaunchedApplication>, String> {
     if program.trim().is_empty() { return Err("アプリのパスを指定してください。".into()); }
+    if let Some(url) = browser_launch_url(&program)? {
+        open_browser_url(url)?;
+        // The default browser may reuse an existing process, so there is no launch identity.
+        return Ok(None);
+    }
     let directory = resolve_working_directory(root.as_deref(), working_directory.as_deref())?;
     let launch_root = directory.clone().unwrap_or(std::env::current_dir().map_err(|e| e.to_string())?);
     let (executable, args) = manual_core::platform::application_command_in(&launch_root, &program, &args)?;
@@ -177,7 +182,75 @@ fn test_launch_application(program: String, args: Vec<String>, root: Option<Stri
     let mut child = command.spawn().map_err(|e| format!("アプリを起動できません: {e}"))?;
     let pid = child.id();
     std::thread::spawn(move || { let _ = child.wait(); });
-    Ok(LaunchedApplication { pid, host_pid: std::process::id(), program: executable.to_string_lossy().into_owned() })
+    Ok(Some(LaunchedApplication { pid, host_pid: std::process::id(), program: executable.to_string_lossy().into_owned() }))
+}
+
+fn default_browser_executable(url: &str) -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "shlwapi")]
+        unsafe extern "system" {
+            fn AssocQueryStringW(flags: u32, kind: u32, association: *const u16,
+                extra: *const u16, output: *mut u16, length: *mut u32) -> i32;
+        }
+        let scheme = url::Url::parse(url).map_err(|e| e.to_string())?.scheme().to_owned();
+        let association: Vec<u16> = scheme.encode_utf16().chain(Some(0)).collect();
+        let mut buffer = vec![0u16; 32768];
+        let mut length = buffer.len() as u32;
+        let result = unsafe {
+            AssocQueryStringW(0x1000, 2, association.as_ptr(), std::ptr::null(), buffer.as_mut_ptr(), &mut length)
+        };
+        if result != 0 || length <= 1 || length as usize > buffer.len() {
+            return Err(format!("標準ブラウザの実行ファイルを確認できません（Windowsエラー: {result:#x}）。"));
+        }
+        use std::os::windows::ffi::OsStringExt;
+        Ok(PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length as usize - 1])))
+    }
+    #[cfg(not(target_os = "windows"))]
+    { let _ = url; Err("URLからの操作記録はWindows版で利用できます。".into()) }
+}
+
+fn open_browser_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "shell32")]
+        unsafe extern "system" {
+            fn ShellExecuteW(
+                window: *mut std::ffi::c_void,
+                operation: *const u16,
+                file: *const u16,
+                parameters: *const u16,
+                directory: *const u16,
+                show: i32,
+            ) -> *mut std::ffi::c_void;
+        }
+        let operation: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+        let target: Vec<u16> = std::ffi::OsStr::new(url).encode_wide().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(std::ptr::null_mut(), operation.as_ptr(), target.as_ptr(),
+                std::ptr::null(), std::ptr::null(), 1)
+        } as isize;
+        if result <= 32 {
+            return Err(format!("標準ブラウザでページを開けません（Windowsエラー: {result}）。"));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    open::that(url).map_err(|error| format!("ページを開けません: {error}"))
+}
+
+fn browser_launch_url(program: &str) -> Result<Option<&str>, String> {
+    let program = program.trim();
+    let scheme = program.split(':').next().unwrap_or_default();
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return Ok(None);
+    }
+    let parsed = url::Url::parse(program).map_err(|error| format!("URLが不正です: {error}"))?;
+    if parsed.host_str().is_none() {
+        return Err("URLのホストを指定してください。".into());
+    }
+    Ok(Some(program))
 }
 
 fn resolve_working_directory(root: Option<&str>, working_directory: Option<&str>) -> Result<Option<PathBuf>, String> {
@@ -252,7 +325,7 @@ async fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("recording-control.html".into()),
     )
     .title("Munin Manual Studio — 撮影")
-    .inner_size(380.0, 350.0)
+    .inner_size(380.0, 410.0)
     .min_inner_size(1.0, 1.0)
     // GTK locks an unresizable WebView at its initial minimum (200px).
     // Allow the content-driven resize to shrink the native popup.
@@ -784,6 +857,11 @@ fn recording_control_bounds(app: &tauri::AppHandle) -> Option<(f64, f64, f64, f6
 #[tauri::command]
 fn operation_recording_history(app: tauri::AppHandle, state: State<'_, recorder::RecorderState>) -> Result<recorder::RecordingHistory, String> {
     recorder::history(state.inner(), recording_control_bounds(&app))
+}
+
+#[tauri::command]
+fn operation_recording_capture_settings(state: State<'_, recorder::RecorderState>, max_depth: Option<usize>) -> Result<manual_core::capture_settings::CaptureSettings, String> {
+    recorder::capture_settings(state.inner(), max_depth)
 }
 
 #[tauri::command]
@@ -1328,6 +1406,7 @@ fn main() {
             start_operation_recording,
             operation_recording_running,
             operation_recording_history,
+            operation_recording_capture_settings,
             finish_operation_recording,
             import_markits_annotation,
             markits_annotation_ready,
@@ -1349,6 +1428,47 @@ fn main() {
 #[cfg(test)]
 mod application_profile_tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires an open YouTube browser window"]
+    fn youtube_uimap_survives_capture_and_markits_reopen() {
+        use base64::Engine;
+        let window = manual_core::window_capture::list_windows().unwrap().into_iter()
+            .find(|window| window.title.contains("YouTube")).expect("Open YouTube in a browser");
+        let root = tempfile::tempdir().unwrap();
+        let capture = root.path().join("youtube.png");
+        manual_core::window_capture::platform_capture_window(&window.id, 0, &capture, false, Some(&window.id)).unwrap();
+        let bytes = fs::read(&capture).unwrap();
+        let loaded = markits_desktop_lib::metadata::load_image_with_metadata(&bytes).unwrap();
+        let controls = loaded.ui_elements.unwrap();
+        assert!(controls.iter().any(|element| element.role == "button"));
+        let saved = manual_core::screenshots::register(root.path(), &serde_json::json!({
+            "source":base64::engine::general_purpose::STANDARD.encode(&bytes)
+        })).unwrap();
+        let handoff = prepare_library_screenshot(root.path().to_string_lossy().into_owned(),
+            saved["screenshot"]["id"].as_str().unwrap().into(), None).unwrap();
+        let reopened = markits_desktop_lib::metadata::load_image_with_metadata(
+            &fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(reopened.ui_elements.as_ref().unwrap().len(), controls.len());
+        eprintln!("YouTube: {} UI elements preserved through capture, MarkIts loading and library reopen", controls.len());
+    }
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires a configured Windows default browser"]
+    fn configured_default_browser_is_an_executable() {
+        let browser = default_browser_executable("https://www.youtube.com/").unwrap();
+        assert!(browser.is_file(), "{}", browser.display());
+    }
+    #[test]
+    fn browser_urls_preserve_query_and_fragment_without_parsing_command_arguments() {
+        let url = "https://example.com/page?q=a&next=b#section";
+        assert_eq!(browser_launch_url(&format!("  {url}  ")).unwrap(), Some(url));
+        assert_eq!(browser_launch_url("HTTP://localhost:8080").unwrap(), Some("HTTP://localhost:8080"));
+        assert!(browser_launch_url("https://").is_err());
+        for command in [r"C:\Program Files\app.exe", "uv run app.py", "ftp://example.com"] {
+            assert_eq!(browser_launch_url(command).unwrap(), None);
+        }
+    }
     #[test]
     fn library_completion_is_retryable_and_keeps_adopted_and_original_pixels() {
         use base64::Engine;

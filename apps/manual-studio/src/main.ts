@@ -3,7 +3,7 @@ import { setupFileMove, type FileMoveResult } from './fileMove';
 import { PreviewScheduler } from './previewScheduler';
 import { DocumentPersistence } from './documentPersistence';
 import {OperationTiming,stageLabels,operationProgress} from './operationTimings';
-import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
+import {showWorkspacePaths,showOperationTimings,showCaptureSettings} from './workspaceSettings';
 import {setupEditorContextMenu} from './editorContextMenu';
 import {applyReviewCorrections} from './reviewCorrections';
 import {setupScreenshotAi} from './screenshotAi';
@@ -892,9 +892,17 @@ async function handleEditDocumentImage(imageSource: string, _img: HTMLImageEleme
       page: documentState?.page || null,
     });
     if (result.managedScreenshotId) {
-      await screenshotLibrary.editManaged(result.managedScreenshotId, result.revision, editingRoot);
+      await screenshotLibrary.editManaged(result.managedScreenshotId, result.revision, editingRoot,(id,revision)=>{
+        void work(async()=>{
+          if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。');
+          await rpc('screenshots-change',{id,json:{adopt:revision,expected_revision:result.revision}},editingRoot);
+          if(editingRoot!==projectRoot)return;
+          await screenshotLibrary.refresh();
+          status('MarkItsの編集内容を画像に反映しました。');
+        });
+      });
       documentImageEditing = false;
-      status('MarkItsで編集中です。編集終了後に画像を保存します。撮影一覧で履歴を確認できます。');
+      status('MarkItsで編集中です。編集終了で画像に反映します。');
       return;
     }
     status("MarkItsで画像を編集中です。編集が完了したらMarkItsで「編集終了」または「Manual Studioへ注釈を返す」を押してください。");
@@ -1346,6 +1354,10 @@ element("open-existing-workspace").addEventListener("click", () => {
   element<HTMLDialogElement>("workspace-dialog").showModal();
   input("project-root").focus();
 });
+element('screenshot-ui-settings').addEventListener('click',()=>{
+  if(!projectRoot){status('プロジェクトを開いてください。',true);return;}
+  void showCaptureSettings({root:()=>projectRoot,request:rpc}).catch(error=>status(String(error),true));
+});
 element("cancel-open-workspace").addEventListener("click", () => element<HTMLDialogElement>("workspace-dialog").close());
 element("workspace-name").addEventListener("click", () => {
   if (document.getElementById("workspace-history-dialog")) return;
@@ -1358,6 +1370,7 @@ element("workspace-name").addEventListener("click", () => {
         changed:async root=>{if(root===projectRoot)await work(()=>openProject(root,false));},
       }).catch(error=>status(String(error),true));}},
       {label:'撮影・挿入の処理時間',run:()=>{void showOperationTimings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}},
+      {label:'撮影のUI探索設定',run:()=>{void showCaptureSettings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}},
     ] : []);
   });
 });
@@ -1465,7 +1478,7 @@ function updateEditorEmptyState(): void {
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
   element('panel-editor').classList.toggle('editor-is-empty', empty);
-  for (const id of ['reader-review','selection-ai','generate-ai-image','save-page','editor-screenshot-ai']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  for (const id of ['reader-review','selection-ai','generate-ai-image','save-page','editor-screenshot-ai','editor-screenshot-options']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
@@ -1691,7 +1704,7 @@ function renderLaunchCommands(): void {
     const program = document.createElement("input"); program.value = command.program; program.placeholder = "例: uv run start_manual_studio.py"; program.dataset.launchProgram = String(index);
     const browse = document.createElement("button"); browse.type = "button"; browse.textContent = "選択"; browse.dataset.launchBrowse = String(index);
     programWrap.append(program, browse); programLabel.append(programWrap);
-    const programHint = document.createElement('small'); programHint.className = 'muted'; programHint.textContent = '引数もまとめて入力できます。スペースを含むパスや引数は引用符（"）で囲んでください。下の起動引数は末尾に追加されます。'; programLabel.append(programHint);
+    const programHint = document.createElement('small'); programHint.className = 'muted'; programHint.textContent = 'HTTP/HTTPSのURLは標準ブラウザで開きます（起動引数・作業フォルダは使用しません）。アプリは引数もまとめて入力できます。スペースを含むパスや引数は引用符（"）で囲んでください。下の起動引数は末尾に追加されます。'; programLabel.append(programHint);
     const workingDirectoryLabel = document.createElement("label"); workingDirectoryLabel.className = "launch-working-directory-field"; workingDirectoryLabel.textContent = "作業フォルダ（省略時はプロジェクト）";
     const workingDirectoryWrap = document.createElement("div"); workingDirectoryWrap.className = "app-picker-row";
     const workingDirectory = document.createElement("input"); workingDirectory.value = command.workingDirectory || ""; workingDirectory.placeholder = "例: /home/user/my-app"; workingDirectory.dataset.launchWorkingDirectory = String(index);
@@ -2716,7 +2729,7 @@ const screenshotAi=setupScreenshotAi({root:()=>projectRoot,applications:()=>laun
 
 
 let captureInsertionRunning=false;
-async function insertScreenshotHere():Promise<void>{
+async function insertScreenshotHere(directMethod?:'manual'):Promise<void>{
   if(busy||!documentState||activeImageTab||captureInsertionRunning)return;
   captureInsertionRunning=true;
   setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),true);
@@ -2733,7 +2746,7 @@ async function insertScreenshotHere():Promise<void>{
     await documentPersistence.wait();
     if(!valid())throw new Error('原稿が変更されました。挿入位置を選び直してください。');
     stage('select');
-    const method=await chooseScreenshotMethod();
+    const method=directMethod||await chooseScreenshotMethod();
     if(!method||!valid())return;
     const existing=method==='existing'?await chooseExistingScreenshot(root,valid):undefined;
     stage(method==='ai'?'ai':'select');
@@ -2764,7 +2777,8 @@ async function insertScreenshotHere():Promise<void>{
   }
 }
 
-element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));});
+element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere('manual').catch(error=>status(String(error),true));});
+element('editor-screenshot-options').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));});
 
 function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{
   const {dialog,body}=featureDialog('スクリーンショットを挿入');dialog.id='editor-screenshot-method';

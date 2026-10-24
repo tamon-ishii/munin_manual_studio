@@ -5,6 +5,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 const capture=document.getElementById('capture-now') as HTMLButtonElement;
 const cancel=document.getElementById('capture-cancel') as HTMLButtonElement;
 const error=document.getElementById('capture-error')!;
+const depth=document.getElementById('capture-depth') as HTMLInputElement;
+const settingsRetry=document.getElementById('capture-settings-retry') as HTMLButtonElement;
+let settingsReady=false;
 let running=false;
 let stopped=false;
 let historyTimer:ReturnType<typeof setTimeout>|undefined;
@@ -43,6 +46,16 @@ async function refreshHistory():Promise<void>{
 }
 window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(historyTimer);});
 void refreshHistory();
+async function loadSettings():Promise<void>{
+  capture.disabled=depth.disabled=true;settingsRetry.hidden=true;
+  try{
+    const settings=await invoke<{max_depth:number}>('operation_recording_capture_settings');
+    depth.value=String(settings.max_depth);settingsReady=true;error.textContent='';
+    if(!running)capture.disabled=depth.disabled=false;
+  }catch(failure){error.textContent=`UI探索設定を読み込めません: ${String(failure)}`;settingsRetry.hidden=false;}
+}
+settingsRetry.addEventListener('click',()=>{void loadSettings();});
+void loadSettings();
 async function cancelRecording():Promise<void>{
   if(running)return;
   running=true;capture.disabled=cancel.disabled=true;
@@ -53,7 +66,12 @@ async function cancelRecording():Promise<void>{
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();void cancelRecording();}},true);
 cancel.addEventListener('click',()=>{void cancelRecording();});
 capture.addEventListener('click',()=>{void(async()=>{
-  if(running)return;running=true;capture.disabled=cancel.disabled=true;capture.textContent='撮影してMarkItsを起動中…';
+  if(running||!settingsReady)return;
+  if(!depth.reportValidity())return;
+  running=true;capture.disabled=cancel.disabled=depth.disabled=true;
+  try{await invoke('operation_recording_capture_settings',{maxDepth:Number(depth.value)});}
+  catch(failure){error.textContent=`UI探索設定を保存できません: ${String(failure)}`;running=false;capture.disabled=cancel.disabled=depth.disabled=false;return;}
+  error.textContent='';capture.textContent='撮影してMarkItsを起動中…';
   try{await emitTo('main','manual-studio-screenshot-requested');await invoke('finish_operation_recording');}
   catch(failure){error.textContent=`撮影に失敗しました: ${String(failure)}`;await invoke('show_recording_control_again').catch(()=>{});await emitTo('main','manual-studio-screenshot-failed',String(failure)).catch(()=>{});running=false;capture.hidden=true;cancel.disabled=false;cancel.textContent='閉じてMunin Manual Studioに戻る';}
 })();});

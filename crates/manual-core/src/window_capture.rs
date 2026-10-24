@@ -41,33 +41,11 @@ pub(crate) fn save_image_with_uimap(
 
     // Attempt UI element detection and embed image element metadata via MarkIts
     let detected = if let Some(window_id) = target_window_id {
-        let decimal_id = u64::from_str_radix(window_id.trim_start_matches("0x"), 16)
-            .ok()
-            .map(|id| id.to_string());
-        let windows = markits::ui_elements::capture_desktop_windows(0, 0);
-        // Prefer the exact ID: several maximized windows can share the same bounds.
-        let target = windows
-            .iter()
-            .find(|window| {
-                decimal_id
-                    .as_deref()
-                    .is_some_and(|id| window.window_id.as_deref() == Some(id))
-            })
-            .or_else(|| {
-                windows.iter().find(|window| {
-                    bounds.is_some_and(|(x, y, width, height)| {
-                        (window.x - x).abs() < 3.0
-                            && (window.y - y).abs() < 3.0
-                            && (window.width - width).abs() < 3.0
-                            && (window.height - height).abs() < 3.0
-                    })
-                })
-            });
-        target
-            .map(|window| {
-                markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, window)
-            })
-            .unwrap_or_default()
+        // Accessibility uses platform-specific identities (e.g. hwnd:0x... on
+        // Windows). Share the exact-window lookup used for operation recording;
+        // geometry matching fails on browser frames and can select another app.
+        let target = crate::semantic_target::window_context(window_id)?;
+        markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &target)
     } else if include_uimap {
         markits::ui_elements::capture_desktop_detailed_elements(0, 0, bounds)
     } else {
@@ -1098,6 +1076,83 @@ fn scale_capture_elements(elements: &mut [markits::ui_elements::DetectedUiElemen
 #[cfg(test)]
 mod capture_scale_tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires an open Chromium browser web page"]
+    fn browser_page_buttons_are_detected_beyond_browser_toolbar() {
+        use xa11y::{App, AppExt, Role};
+        let window = list_windows().unwrap().into_iter().find(|window|
+            window.title.contains("Google Chrome") || window.title.contains("Microsoft") && window.title.contains("Edge")
+        ).expect("Open a web page in Chrome or Edge");
+        let context = crate::semantic_target::window_context(&window.id).unwrap();
+        let app = App::by_pid(context.pid.unwrap(), std::time::Duration::ZERO).unwrap();
+        let root = app.as_element().children().unwrap().into_iter()
+            .find(|element| element.stable_id == context.window_id).unwrap();
+        let mut queue = std::collections::VecDeque::from([(root, 0usize, false)]);
+        let mut visited = 0;
+        let mut buttons = Vec::new();
+        while let Some((element, depth, in_page)) = queue.pop_front() {
+            visited += 1;
+            if visited > 10000 || depth > 64 { break; }
+            let in_page = in_page || element.role == Role::WebArea;
+            if in_page && element.role == Role::Button {
+                if let (Some(name), Some(bounds)) = (&element.name, element.bounds) {
+                    if bounds.width > 4 && bounds.height > 4
+                        && bounds.x as f64 + bounds.width as f64 > context.x
+                        && (bounds.x as f64) < context.x + context.width
+                        && bounds.y as f64 + bounds.height as f64 > context.y
+                        && (bounds.y as f64) < context.y + context.height {
+                        buttons.push((name.trim().to_owned(), bounds, depth));
+                    }
+                }
+            }
+            if let Ok(children) = element.children() {
+                queue.extend(children.into_iter().map(|child| (child, depth + 1, in_page)));
+            }
+        }
+        eprintln!("Browser accessibility: {visited} nodes, {} page buttons, button depths {:?}",
+            buttons.len(), buttons.iter().map(|(_,_,depth)| depth).collect::<Vec<_>>());
+        assert!(!buttons.is_empty(), "Browser accessibility exposes no page buttons");
+        let root = tempfile::tempdir().unwrap();
+        crate::capture_settings::save(root.path(), &serde_json::json!({"max_depth":16})).unwrap();
+        {
+            let _depth = markits::ui_elements::capture_depth_scope(crate::capture_settings::read(root.path()).unwrap().max_depth);
+            let shallow = markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &context);
+            assert!(!buttons.iter().filter(|(_,_,depth)| *depth > 16).any(|(name,bounds,_)|
+                shallow.iter().any(|item| item.role == "button" && item.name.as_ref() == Some(name)
+                    && (item.x - bounds.x as f64).abs() < 2.0 && (item.y - bounds.y as f64).abs() < 2.0)));
+        }
+        crate::capture_settings::save(root.path(), &serde_json::json!({"max_depth":64})).unwrap();
+        let _depth = markits::ui_elements::capture_depth_scope(crate::capture_settings::read(root.path()).unwrap().max_depth);
+        let detected = markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &context);
+        let found = buttons.iter().filter(|(name,bounds,_)| detected.iter().any(|item|
+            item.role == "button" && item.name.as_ref() == Some(name)
+                && (item.x - bounds.x as f64).abs() < 2.0 && (item.y - bounds.y as f64).abs() < 2.0
+        )).count();
+        eprintln!("Detected {found}/{} page buttons", buttons.len());
+        assert_eq!(found, buttons.len(), "Capture must include web page buttons, not just browser chrome");
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("browser.png");
+        platform_capture_window(&window.id, 0, &output, false, Some(&window.id)).unwrap();
+        let captured = markits::raster::extract_png_uimap(&std::fs::read(output).unwrap()).unwrap();
+        assert!(buttons.iter().all(|(name,_,_)| captured.iter().any(|item|
+            item.role == "button" && item.name == *name)),
+            "Web page buttons must also be embedded in the captured PNG for MarkIts");
+    }
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires an open YouTube browser window"]
+    fn youtube_capture_retains_accessible_controls() {
+        let window = list_windows().unwrap().into_iter()
+            .find(|window| window.title.contains("YouTube")).expect("Open YouTube in a browser");
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("youtube.png");
+        platform_capture_window(&window.id, 0, &output, false, Some(&window.id)).unwrap();
+        let bytes = std::fs::read(output).unwrap();
+        let controls = markits::raster::extract_png_uimap(&bytes).unwrap_or_default();
+        assert!(controls.iter().any(|element| element.role == "button"),
+            "YouTube capture must retain browser/page controls, got {} elements", controls.len());
+    }
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     #[test]
     fn native_window_ids_can_be_joined_to_their_processes() {

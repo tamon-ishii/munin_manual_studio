@@ -13,10 +13,11 @@ pub const FLAG: &str = "--manual-studio-native-worker";
 enum Operation {
     Request(serde_json::Value),
     WindowProcesses,
-    ObserveWindow(String),
+    ObserveWindow { window: String, depth: usize },
     #[cfg(target_os = "linux")]
     ActivateWindow(String),
     Capture {
+        depth: usize,
         window: String,
         destination: PathBuf,
         close_after_capture: bool,
@@ -115,11 +116,13 @@ pub fn window_processes() -> Result<Vec<markits::ui_elements::DetectedUiElement>
 }
 
 pub fn capture_window(
+    root: &Path,
     window: &str,
     destination: &Path,
     close_after_capture: bool,
 ) -> Result<(), String> {
     execute(Operation::Capture {
+        depth: manual_core::capture_settings::read(root)?.max_depth,
         window: window.into(),
         destination: destination.into(),
         close_after_capture,
@@ -151,8 +154,8 @@ pub fn requires_hiding(action: &str) -> bool {
     )
 }
 
-pub fn observe_window(id: &str) -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
-    let value = execute(Operation::ObserveWindow(id.to_string()))?;
+pub fn observe_window(root: &Path, id: &str) -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
+    let value = execute(Operation::ObserveWindow { window: id.into(), depth: manual_core::capture_settings::read(root)?.max_depth })?;
     serde_json::from_str(&value).map_err(|error| error.to_string())
 }
 
@@ -165,8 +168,11 @@ pub fn run(dir: &Path) -> Result<(), String> {
         #[cfg(target_os = "linux")]
         Operation::ActivateWindow(id) => manual_core::window_capture::activate_window(&id)
             .and_then(|window| serde_json::to_string(&window).map_err(|error| error.to_string())),
-        Operation::ObserveWindow(id) => manual_core::semantic_target::observe_window(&id)
-            .and_then(|elements| serde_json::to_string(&elements).map_err(|error| error.to_string())),
+        Operation::ObserveWindow { window, depth } => {
+            let _depth = markits::ui_elements::capture_depth_scope(depth);
+            manual_core::semantic_target::observe_window(&window)
+                .and_then(|elements| serde_json::to_string(&elements).map_err(|error| error.to_string()))
+        },
         Operation::WindowProcesses => {
             #[cfg(target_os = "linux")]
             let windows = markits::ui_elements::capture_desktop_windows(0, 0);
@@ -187,10 +193,13 @@ pub fn run(dir: &Path) -> Result<(), String> {
             serde_json::to_string(&windows).map_err(|e| e.to_string())
         }
         Operation::Capture {
+            depth,
             window,
             destination,
             close_after_capture,
-        } => manual_core::window_capture::capture_window(
+        } => {
+            let _depth = markits::ui_elements::capture_depth_scope(depth);
+            manual_core::window_capture::capture_window(
             &window,
             0,
             &destination,
@@ -202,7 +211,8 @@ pub fn run(dir: &Path) -> Result<(), String> {
                 let _ = manual_core::window_capture::close_window(&window);
             }
             String::new()
-        }),
+        })
+        },
     };
     fs::write(
         dir.join("response.json"),

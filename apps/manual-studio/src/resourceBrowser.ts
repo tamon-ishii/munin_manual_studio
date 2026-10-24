@@ -88,6 +88,8 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
     const summary=document.createElement('div');summary.className='resource-item-summary';summary.append(title);
     const info=card.querySelector<HTMLElement>(':scope>.resource-card-info');if(info)summary.append(info);
     const usage=document.createElement('p');usage.className='resource-item-usage';usage.textContent=usageCount?`使用中 ${usageCount}箇所`:'未使用';summary.append(usage);
+    const deleteButton=card.querySelector<HTMLButtonElement>('[data-screenshot-delete]');
+    if(deleteButton)summary.append(deleteButton);
     const menu=document.createElement('details');menu.className='resource-item-menu';menu.open=state?.open||false;
     const trigger=document.createElement('summary');trigger.textContent='操作';trigger.setAttribute('aria-label',`${title.textContent}の操作`);menu.append(trigger);
     const body=document.createElement('div');body.className='resource-item-operations';
@@ -134,7 +136,7 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
       const swap=document.createElement('button');swap.type='button';swap.textContent='差し替えと影響確認';swap.disabled=Boolean(resource.missing)||!/\.(png|jpe?g)$/i.test(resource.path);swap.onclick=()=>{if(root===options.root())void replace(resource,root);};management.append(swap);card.append(management);compactCard(card,resource.usages.length);list.append(card);
     }
     const displayed=list.querySelectorAll('.screenshot-library-card').length;count.textContent=`${displayed} / ${Math.max(items.length,displayed)}件`;
-    if(!displayed){list.textContent=items.length?'条件に合うリソースがありません。':'撮影・画像の取り込み・AI作画でリソースを追加できます。';}
+    if(!displayed){list.textContent=items.length?'条件に合う撮影画像がありません。':'撮影または画像の取り込みで撮影一覧に追加できます。';}
   }
   return {
     setItems(next:Resource[]){observer?.disconnect();observer=null;queue.length=0;resourceEpoch++;items=next;byPath=new Map(next.map(item=>[item.path,item]));thumbnails.retain(next.filter(item=>!item.missing).map(item=>thumbnailKey(options.root(),item.path)));},

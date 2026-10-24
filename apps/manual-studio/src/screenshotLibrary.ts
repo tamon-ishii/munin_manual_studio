@@ -45,7 +45,10 @@ export function setupScreenshotLibrary(options: Options) {
     const resourceResult=JSON.parse(await options.request('resources-list',{},root)) as {items:Resource[];screenshots?:{items:Screenshot[]}};
     const result=resourceResult.screenshots||JSON.parse(await options.request('screenshots-list',{},root)) as {items:Screenshot[]};
     if (root !== options.root() || version !== generation) return;
-    currentShots=result.items||[];resources.setItems(resourceResult.items||[]);render(root);if(refreshAssets)await options.refreshAssets?.(root);
+    currentShots=result.items||[];
+    const screenshotIds=new Set(currentShots.map(shot=>shot.id));
+    resources.setItems((resourceResult.items||[]).filter(item=>Boolean(item.screenshot_id&&screenshotIds.has(item.screenshot_id))));
+    render(root);if(refreshAssets)await options.refreshAssets?.(root);
   }
   function render(root:string){
     const result={items:currentShots};resources.captureViews(list);list.replaceChildren();
@@ -99,8 +102,17 @@ export function setupScreenshotLibrary(options: Options) {
         if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。');
         editState(root,shot.id,'MarkItsを起動しています…');
         try {
-          await editManaged(shot.id, versions.value, root);
-          editState(root,shot.id,'MarkItsで編集中です。「編集終了（Manual Studioへ返す）」で候補を保存します。');
+          const apply=versions.value===shot.adopted;
+          await editManaged(shot.id, versions.value, root,apply?(id,revision)=>{
+            void options.work(async()=>{
+              if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。');
+              await options.request('screenshots-change',{id,json:{adopt:revision,expected_revision:shot.adopted}},root);
+              if(root!==options.root())return;
+              editState(root,id,'編集内容を反映しました。');
+              await refresh();
+            });
+          }:undefined);
+          editState(root,shot.id,apply?'MarkItsで編集中です。編集終了で画像に反映します。':'MarkItsで編集中です。編集終了で候補を保存します。');
         } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; }
       }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)));
       editButton.classList.add('primary');
@@ -154,7 +166,9 @@ export function setupScreenshotLibrary(options: Options) {
         await showImageComparison(images, '画像の比較・採用前の確認', true, { label: alreadyAdopted ? '採用済みの版です' : '選択版を採用', disabled: shot.protected || alreadyAdopted, run: adoptSelected });
       }, false, true);
       button('選択版を採用', async () => { await adoptSelected(); }, shot.protected, true);
-      button('削除', async () => { if (await confirmAction('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true);
+      const deleteButton=button('削除', async () => { if (await confirmAction('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true);
+      deleteButton.dataset.screenshotDelete='true';
+      deleteButton.title=shot.protected?'保護を解除してから削除してください。':shot.usage.length?'使用中です。使用文書から参照を削除してください。':'この撮影画像を削除';
       if (shot.edits.some(edit => edit.flattened)) { const warning = document.createElement("p"); warning.textContent = "平坦化画像からの取り込みです。失われた画素や注釈の編集状態は復元できません。"; card.append(warning); }
       resources.compactCard(card,shot.usage.length);list.append(card);
     }

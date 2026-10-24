@@ -38,6 +38,24 @@ export async function showWorkspacePaths(options:Options):Promise<void>{
  };
  fields.docs.focus();
 }
+export async function showCaptureSettings(options:Pick<Options,'root'|'request'>):Promise<void>{
+ const root=options.root();
+ const settings=JSON.parse(await options.request('capture-settings-read',{},root)) as {max_depth:number};
+ if(root!==options.root())return;
+ const {dialog,body}=featureDialog('撮影のUI探索設定');dialog.id='capture-settings-dialog';
+ const label=document.createElement('label');label.textContent='UI探索の最大階層';
+ const depth=document.createElement('input');depth.type='number';depth.min='1';depth.max='128';depth.step='1';depth.required=true;depth.value=String(settings.max_depth);depth.setAttribute('aria-label','UI探索の最大階層');label.append(depth);
+ const note=document.createElement('p');note.className='muted';note.textContent='1〜128階層（初期値64）。Webページのボタンが取得できない場合は増やしてください。深くするほど取得に時間がかかる場合があります。このプロジェクトの次回の撮影・再撮影から適用します。';
+ const form=document.createElement('form');const error=document.createElement('p');error.role='alert';
+ const save=document.createElement('button');save.type='submit';save.className='primary';save.textContent='保存';
+ const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
+ const actions=document.createElement('div');actions.className='actions';actions.append(cancel,save);form.append(label,note,error,actions);body.append(form);
+ form.onsubmit=event=>{event.preventDefault();if(!form.reportValidity())return;save.disabled=true;void(async()=>{try{
+  if(root!==options.root())throw new Error('プロジェクトが切り替わりました。開き直してください。');
+  await options.request('capture-settings-save',{json:{max_depth:Number(depth.value)}},root);dialog.close();
+ }catch(reason){error.textContent=String(reason);}finally{save.disabled=false;}})();};
+ depth.focus();
+}
 export async function showOperationTimings(options:Pick<Options,'root'|'request'>):Promise<void>{
  const root=options.root();const result=JSON.parse(await options.request('operation-timings-read',{},root)) as {items:TimingRecord[]};
  if(root!==options.root())return;

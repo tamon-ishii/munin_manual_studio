@@ -152,7 +152,7 @@ mod tests {
 }
 
 /// Observe only the selected native window, using the same geometry as recording.
-fn window_context(id: &str) -> Result<DetectedUiElement, String> {
+pub(crate) fn window_context(id: &str) -> Result<DetectedUiElement, String> {
     let window = super::window_capture::list_windows()?
         .into_iter()
         .find(|window| window.id == id)

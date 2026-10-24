@@ -16,7 +16,7 @@ try {
   server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
   for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   const rpc=async(action,options={})=>{const response=await fetch(`${base}/__manual/rpc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({root,action,options})});const result=await response.json();if(result.error)throw new Error(result.error);return result.output;};
-  browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage({viewport:{width:1000,height:720}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  browser=await chromium.launch({channel:process.env.MUNIN_TEST_BROWSER || 'chrome',headless:true});const page=await browser.newPage({viewport:{width:1000,height:720}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(`${base}/?root=${encodeURIComponent(root)}`);
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await page.locator('[data-tab=screenshots]').click();
@@ -229,14 +229,15 @@ try {
   await nativePage.locator('[data-tab=editor]').click();await nativePage.getByRole('button',{name:'Markdownソース',exact:true}).click();const nativeEditor=nativePage.locator('#markdown-editor');const manuscript=await nativeEditor.inputValue();
   await nativeEditor.fill(manuscript+'\nUnsaved capture insertion.\n');
   await nativePage.locator('#editor-screenshot-ai').click();
-  await nativePage.locator('#editor-screenshot-method').waitFor();
-  await nativePage.locator('#editor-screenshot-method').getByRole('button',{name:'閉じる',exact:true}).click();
+  await nativePage.getByRole('heading',{name:'撮影するアプリ',exact:true}).waitFor();
+  assert.equal(await nativePage.locator('#editor-screenshot-method').count(),0);
+  await nativePage.getByRole('button',{name:'キャンセル',exact:true}).click();
   assert.equal(await nativeEditor.inputValue(),manuscript+'\nUnsaved capture insertion.\n','opening capture preserves unsaved prose');
   await nativeEditor.fill(manuscript);
-  await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'キャンセル',exact:true}).click();assert.equal(await nativeEditor.inputValue(),manuscript);
-  await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();assert.equal(await nativePage.locator('#editor-screenshot-method').count(),0);await nativePage.getByRole('button',{name:'キャンセル',exact:true}).click();assert.equal(await nativeEditor.inputValue(),manuscript);
+  await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();assert.equal(await nativePage.locator('#editor-screenshot-method').count(),0);await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await nativePage.evaluate(()=>{__libraryMock.failFinish=true;});await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();await nativePage.waitForFunction(()=>!document.querySelector('#editor-screenshot-recording')&&document.querySelector('#screenshot-library-record').hidden===false);assert.equal(await nativeEditor.inputValue(),manuscript);assert.equal(await nativeEditor.evaluate(el=>el.selectionStart),10);
-  await nativePage.evaluate(()=>{__libraryMock.failFinish=false;__libraryMock.holdImports=true;delete __libraryMock.release;});await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();await nativePage.getByRole('button',{name:'手動で撮影',exact:true}).click();await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();
+  await nativePage.evaluate(()=>{__libraryMock.failFinish=false;__libraryMock.holdImports=true;delete __libraryMock.release;});await nativeEditor.evaluate(el=>{el.focus();el.setSelectionRange(10,10);});await nativePage.locator('#editor-screenshot-ai').click();assert.equal(await nativePage.locator('#editor-screenshot-method').count(),0);await nativePage.getByRole('button',{name:'記録を開始',exact:true}).click();await nativePage.locator('#editor-screenshot-recording').waitFor();await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');await nativePage.getByRole('button',{name:'撮影する',exact:true}).click();
   await nativePage.waitForFunction(()=>typeof __libraryMock.release==='function');
   await nativePage.locator('[data-capture-stage]').getByText('編集結果を保存中',{exact:true}).waitFor();
   assert.equal(await nativePage.locator('#capture-operation-progress').getAttribute('data-stage'),'import');

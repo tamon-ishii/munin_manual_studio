@@ -10,13 +10,22 @@ try {
     try { if((await fetch(base)).ok)break; } catch {}
     await new Promise(resolve=>setTimeout(resolve,100));
   }
-  browser=await chromium.launch({channel:'chrome',headless:true});
-  const page=await browser.newPage({viewport:{width:380,height:350}});
+  browser=await chromium.launch({channel:process.env.MUNIN_TEST_BROWSER || 'chrome',headless:true});
+  const page=await browser.newPage({viewport:{width:380,height:410}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
     window.historyFixture={total:0,items:[]};window.historyFailure=false;window.commands=[];
-    window.__TAURI_INTERNALS__={invoke:async command=>{
+    window.depthFixture=96;window.settingsFailure=false;window.commandCalls=[];
+    window.__TAURI_INTERNALS__={invoke:async (command,args)=>{
       window.commands.push(command);
+      window.commandCalls.push({command,args});
+      if(command==='operation_recording_capture_settings'){
+        if(args?.maxDepth!==undefined){
+          if(window.settingsFailure)throw Error('settings save failed');
+          window.depthFixture=args.maxDepth;
+        }
+        return {max_depth:window.depthFixture};
+      }
       if(command==='operation_recording_history'){
         if(window.historyFailure)throw Error('temporary read failure');
         return window.historyFixture;
@@ -25,6 +34,8 @@ try {
   });
   await page.goto(`${base}/recording-control.html`);
   await page.waitForFunction(()=>window.commands.includes('operation_recording_history'));
+  await page.waitForFunction(()=>!document.querySelector('#capture-depth').disabled);
+  assert.equal(await page.getByRole('spinbutton',{name:'UI探索の最大階層'}).inputValue(),'96');
   assert.equal(await page.locator('#capture-history-empty').isVisible(),true);
   assert.equal(await page.locator('#capture-history').isVisible(),false);
   await page.evaluate(()=>{window.historyFixture={total:4,items:[
@@ -41,7 +52,7 @@ try {
   const bounds=await page.locator('#capture-history-panel').boundingBox();
   const button=await page.locator('#capture-now').boundingBox();
   assert.ok(bounds.y>=button.y+button.height,'history is below the capture controls');
-  assert.ok(bounds.y+bounds.height<=350,'history fits the native popup');
+  assert.ok(bounds.y+bounds.height<=410,'history and exploration settings fit the native popup');
   await page.evaluate(()=>{window.historyFixture={total:120,items:Array.from({length:100},(_,i)=>({sequence:i+21,elapsedMs:i*1000,label:`操作 ${i+21}`}))};});
   await page.waitForFunction(()=>document.querySelectorAll('#capture-history li').length===100);
   assert.equal(await page.locator('#capture-history-note').isVisible(),true);
@@ -55,7 +66,25 @@ try {
   assert.equal(await page.locator('#capture-history li').count(),100,'read failure retains the visible history');
   await page.evaluate(()=>{window.historyFailure=false;});
   await page.waitForFunction(()=>document.querySelector('#capture-history-status').textContent==='');
+  await page.locator('#capture-depth').fill('129');
+  await page.locator('#capture-now').click();
+  assert.equal(await page.evaluate(()=>window.commands.includes('finish_operation_recording')),false);
+  await page.locator('#capture-depth').fill('80');
+  await page.evaluate(()=>{window.settingsFailure=true;});
+  await page.locator('#capture-now').click();
+  await page.waitForFunction(()=>document.querySelector('#capture-error').textContent.includes('保存できません'));
+  assert.equal(await page.locator('#capture-now').isEnabled(),true);
+  assert.equal(await page.evaluate(()=>window.commands.includes('finish_operation_recording')),false);
+  await page.evaluate(()=>{window.settingsFailure=false;});
+  await page.locator('#capture-now').click();
+  await page.waitForFunction(()=>window.commands.includes('finish_operation_recording'));
+  assert.equal(await page.evaluate(()=>window.depthFixture),80);
+  const calls=await page.evaluate(()=>window.commandCalls);
+  const finish=calls.findIndex(call=>call.command==='finish_operation_recording');
+  assert.ok(calls.slice(0,finish).some(call=>call.command==='operation_recording_capture_settings'&&call.args?.maxDepth===80),'selected depth is saved before capture starts');
   await page.screenshot({path:'/tmp/munin-recording-history.png'});
+  await page.reload();
+  await page.waitForFunction(()=>!document.querySelector('#capture-now').disabled);
   await page.keyboard.press('Escape');
   await page.waitForFunction(()=>window.commands.includes('cancel_operation_recording'));
   await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));

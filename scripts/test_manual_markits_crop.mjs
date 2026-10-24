@@ -6,9 +6,9 @@ const base='http://127.0.0.1:5174';let server,browser;
 try {
  server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
  for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
- browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage();
+ browser=await chromium.launch({channel:process.env.MUNIN_TEST_BROWSER || 'chrome',headless:true});const page=await browser.newPage();
  const ids=['viewport','canvas-container','svg-layer','handles-layer','snap-guide-layer','inspector-content','layer-list','layer-count','empty-state','editor-crop-overlay','crop-box','crop-size-badge','crop-mask-top','crop-mask-bottom','crop-mask-left','crop-mask-right','crop-preset-select'];
- await page.route('**/crop-test',route=>route.fulfill({contentType:'text/html',body:`<html><body>${ids.map(id=>id==='crop-preset-select'?`<select id="${id}"></select>`:`<div id="${id}"></div>`).join('')}<img id="bg-image"><button id="btn-revert-crop"></button><script type="module">import {AnnotationEditor} from '/@fs/${path.resolve('crates/markits/apps/desktop/src/editor.ts')}';window.editor=new AnnotationEditor(async()=>'<svg></svg>');</script></body></html>`}));
+ await page.route('**/crop-test',route=>route.fulfill({contentType:'text/html',body:`<html><body>${ids.map(id=>id==='crop-preset-select'?`<select id="${id}"></select>`:`<div id="${id}"></div>`).join('')}<img id="bg-image"><button id="btn-revert-crop"></button><script type="module">import {AnnotationEditor} from '/@fs/${path.resolve('crates/markits/apps/desktop/src/editor.ts').split(path.sep).join('/')}';window.editor=new AnnotationEditor(async()=>'<svg></svg>');</script></body></html>`}));
  await page.goto(`${base}/crop-test`);await page.waitForFunction(()=>window.editor);
  const result=await page.evaluate(async()=>{
   const full=document.createElement('canvas');full.width=80;full.height=60;const ctx=full.getContext('2d');ctx.fillStyle='red';ctx.fillRect(0,0,80,60);ctx.fillStyle='blue';ctx.fillRect(0,0,10,10);const original=full.toDataURL();
