@@ -139,7 +139,9 @@ def session():
 
             def capture():
                 ui.click('スクリーンショットを実行', owner=app.pid)
-                canvas = ui.find('Background Canvas', 'image', app.pid, timeout=35)
+                # Native capture workers allow up to 65 seconds before returning
+                # an error; keep the UI wait longer so their result is observable.
+                canvas = ui.find('Background Canvas', 'image', app.pid, timeout=90)
                 markits = ui.window_pid(canvas.get_process_id())
                 assert markits != app.pid and ui.owned(markits)
                 ui.screenshot(markits, RESULTS / 'markits.png')
@@ -235,6 +237,12 @@ def session():
             print('PASS actual manual capture: same source cursor -> direct insertion and Undo -> target loss/failure -> fresh recording -> MarkIts -> save -> physical Undo', flush=True)
         except BaseException:
             if app and 'ui' in locals():
+                (RESULTS / 'session-debug.json').write_text(json.dumps({
+                    'appReturnCode': app.poll(),
+                    'steps': ui.log,
+                    'processes': subprocess.check_output(['ps', '-eo', 'pid,ppid,stat,args'], text=True),
+                    'captureFiles': {str(file.relative_to(root)): file.read_text(errors='replace') for file in root.rglob('*') if file.is_file() and file.suffix in ('.log', '.json')},
+                }, ensure_ascii=False, indent=2))
                 try:
                     (RESULTS / 'failure-ui.json').write_text(json.dumps(ui.dump(), ensure_ascii=False, indent=2))
                     ui.screenshot(app.pid, RESULTS / 'failure.png')
