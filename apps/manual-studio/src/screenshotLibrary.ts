@@ -47,7 +47,7 @@ export function setupScreenshotLibrary(options: Options) {
     if (root !== options.root() || version !== generation) return;
     currentShots=result.items||[];
     const screenshotIds=new Set(currentShots.map(shot=>shot.id));
-    resources.setItems((resourceResult.items||[]).filter(item=>!item.screenshot_id||screenshotIds.has(item.screenshot_id)));
+    resources.setItems((resourceResult.items||[]).filter(item=>Boolean(item.screenshot_id&&screenshotIds.has(item.screenshot_id))));
     render(root);if(refreshAssets)await options.refreshAssets?.(root);
   }
   function render(root:string){

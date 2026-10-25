@@ -7961,8 +7961,7 @@
       "cases": [
         "P06.success",
         "P06.cancel",
-        "P06.failure-retry",
-        "P06.control-replace"
+        "P06.failure-retry"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
@@ -7980,8 +7979,7 @@
       "cases": [
         "P06.success",
         "P06.cancel",
-        "P06.failure-retry",
-        "P06.control-replace"
+        "P06.failure-retry"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
@@ -7999,8 +7997,7 @@
       "cases": [
         "P06.success",
         "P06.cancel",
-        "P06.failure-retry",
-        "P06.control-replace"
+        "P06.failure-retry"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
@@ -8018,8 +8015,7 @@
       "cases": [
         "P06.success",
         "P06.cancel",
-        "P06.failure-retry",
-        "P06.control-replace"
+        "P06.failure-retry"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
@@ -8103,10 +8099,9 @@
       "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
       "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
       "cases": [
-        "P03.imported-card",
-        "P11.generated-card"
+        "P03.success"
       ],
-      "reviewStatus": "reviewed",
+      "reviewStatus": "needs-entry-specific-review",
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
     },
     {
@@ -8122,8 +8117,7 @@
       "cases": [
         "P05.success",
         "P05.cancel",
-        "P05.failure-retry",
-        "P05.ordinary-resource"
+        "P05.failure-retry"
       ],
       "reviewStatus": "reviewed"
     },
@@ -8225,8 +8219,7 @@
       "cases": [
         "P07.success",
         "P07.cancel",
-        "P07.failure-retry",
-        "P07.control-restore"
+        "P07.failure-retry"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
@@ -8261,8 +8254,7 @@
       "cases": [
         "P06.success",
         "P06.cancel",
-        "P06.failure-retry",
-        "P06.control-replace"
+        "P06.failure-retry"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "Actual dedicated image-control browser run with real temporary manualctl project and persisted file checks."
@@ -11137,7 +11129,6 @@
       "result": "完成した編集結果を同じコピーへ再保存。新しいコピーや原稿変更を作らない",
       "returnTarget": "保存を開始した画像と原稿。別プロジェクトには表示を反映しない",
       "cases": [
-        "P05.ordinary-resource",
         "P05.ordinary-manuscript"
       ],
       "reviewStatus": "reviewed"
@@ -11153,7 +11144,6 @@
       "result": "完成した編集結果を同じコピーへ再保存。新しいコピーや原稿変更を作らない",
       "returnTarget": "保存を開始した画像と原稿。別プロジェクトには表示を反映しない",
       "cases": [
-        "P05.ordinary-resource",
         "P05.ordinary-manuscript"
       ],
       "reviewStatus": "reviewed"
@@ -14877,7 +14867,8 @@
         "apps/manual-studio/src/main.ts:event:dynamic:d684acadefb026a2:1",
         "apps/manual-studio/src/main.ts:event:dragend:ecbf3b8a60c67b1a:1",
         "apps/manual-studio/src/main.ts:event:drop:ea1805444f124194:1",
-        "apps/manual-studio/src/main.ts:event:dragleave:c3619d1adaf179bb:1"
+        "apps/manual-studio/src/main.ts:event:dragleave:c3619d1adaf179bb:1",
+        "apps/manual-studio/src/resourceBrowser.ts:factory:72d57980957d98fd:1"
       ],
       "expected": {
         "visible": "選んだ画像が指定した原稿位置に表示される",
@@ -17130,26 +17121,6 @@
       ]
     },
     {
-      "id": "P05.ordinary-resource",
-      "feature": "P05",
-      "entryPoints": [
-        "apps/manual-studio/src/resourceBrowser.ts:factory:4f5f736358baff6a:1",
-        "apps/manual-studio/index.html:html:button:3544ca7c8b5008a5:1",
-        "apps/manual-studio/src/main.ts:event:click:63476d969a350e8f:1"
-      ],
-      "expected": {
-        "visible": "中止・異常終了・保存失敗の理由とコピー保存先を表示",
-        "stored": "成功時は別コピーを編集。失敗再試行は同じコピーのみ更新",
-        "preserved": "元画像・原稿・失敗時の完成編集結果を保持。コピーを重複作成しない",
-        "returnTarget": "元の撮影一覧"
-      },
-      "requiredEvidence": [
-        "real-desktop"
-      ],
-      "status": "not-run",
-      "script": "scripts/test_manual_studio_native_resource_edit.py"
-    },
-    {
       "id": "P05.ordinary-manuscript",
       "feature": "P05",
       "entryPoints": [
@@ -17262,46 +17233,6 @@
         "scripts/test_manual_studio_insertion_contracts.mjs"
       ],
       "notes": "ブラウザーupload chooserと実バックエンド。画像ブロックを上部Undoで取消し、独立した待機pasteを失わないことを検査する。本文の物理Ctrl+Zはrich-paste/rich-dropの別ケースで検証する。実OSファイルchooser全体の証拠ではない。"
-    },
-    {
-      "id": "P03.imported-card",
-      "feature": "P03",
-      "entryPoints": [
-        "apps/manual-studio/src/resourceBrowser.ts:factory:72d57980957d98fd:1"
-      ],
-      "evidenceRecord": "imported resource card",
-      "expected": {
-        "visible": "同じ原稿/カーソルに一度だけ挿入し、別原稿の指定見出しにも挿入できる",
-        "stored": "相対画像参照を実原稿へ保存し、Undo後の元本文も再読込で一致する",
-        "preserved": "挿入先取消/読み込み失敗時の本文/カーソル、作画候補と指示、原本PNGと生成履歴を保持",
-        "returnTarget": "元の原稿/カーソル、指定した別原稿、取消時は開始したリソース/作画画面"
-      },
-      "requiredEvidence": [
-        "real-backend"
-      ],
-      "existingChecks": [
-        "scripts/test_manual_studio_managed_insertion.mjs"
-      ]
-    },
-    {
-      "id": "P11.generated-card",
-      "feature": "P11",
-      "entryPoints": [
-        "apps/manual-studio/src/resourceBrowser.ts:factory:72d57980957d98fd:1"
-      ],
-      "evidenceRecord": "generated resource card",
-      "expected": {
-        "visible": "同じ原稿/カーソルに一度だけ挿入し、別原稿の指定見出しにも挿入できる",
-        "stored": "相対画像参照を実原稿へ保存し、Undo後の元本文も再読込で一致する",
-        "preserved": "挿入先取消/読み込み失敗時の本文/カーソル、作画候補と指示、原本PNGと生成履歴を保持",
-        "returnTarget": "元の原稿/カーソル、指定した別原稿、取消時は開始したリソース/作画画面"
-      },
-      "requiredEvidence": [
-        "real-backend"
-      ],
-      "existingChecks": [
-        "scripts/test_manual_studio_managed_insertion.mjs"
-      ]
     },
     {
       "id": "P04.screenshot-card",
@@ -18063,54 +17994,6 @@
         "scripts/test_manual_studio_image_control_contracts.mjs"
       ],
       "evidenceRecord": "P06.control-usage-link",
-      "notes": "Actual browser gesture and temporary real manualctl backend files; no real OS claim."
-    },
-    {
-      "id": "P06.control-replace",
-      "feature": "P06",
-      "kind": "success",
-      "entryPoints": [
-        "apps/manual-studio/src/resourceBrowser.ts:create:select:c4af4a4e001ca649:1",
-        "apps/manual-studio/src/resourceBrowser.ts:handler:28192a8241485407:1",
-        "apps/manual-studio/src/resourceBrowser.ts:create:button:8931da7db82615de:1",
-        "apps/manual-studio/src/resourceBrowser.ts:handler:c9df01fe6681edbf:1",
-        "apps/manual-studio/src/resourceBrowser.ts:handler:124ba8d2368f6720:1"
-      ],
-      "expected": {
-        "visible": "impact preview and candidate image shown",
-        "stored": "target image bytes replaced and replacement ledger saved",
-        "preserved": "original PNG backup and manuscript reference",
-        "returnTarget": "resource card after replacement"
-      },
-      "requiredEvidence": [
-        "real-backend"
-      ],
-      "existingChecks": [
-        "scripts/test_manual_studio_image_control_contracts.mjs"
-      ],
-      "evidenceRecord": "P06.control-replace",
-      "notes": "Actual browser gesture and temporary real manualctl backend files; no real OS claim."
-    },
-    {
-      "id": "P07.control-restore",
-      "feature": "P07",
-      "kind": "success",
-      "entryPoints": [
-        "apps/manual-studio/src/resourceBrowser.ts:handler:9533d90a35b62c7e:1"
-      ],
-      "expected": {
-        "visible": "restore action available after replacement",
-        "stored": "replacement record marked restored",
-        "preserved": "original PNG restored exactly and manuscript unchanged",
-        "returnTarget": "resource card without active replacement"
-      },
-      "requiredEvidence": [
-        "real-backend"
-      ],
-      "existingChecks": [
-        "scripts/test_manual_studio_image_control_contracts.mjs"
-      ],
-      "evidenceRecord": "P07.control-restore",
       "notes": "Actual browser gesture and temporary real manualctl backend files; no real OS claim."
     },
     {

@@ -9,7 +9,7 @@ const integrityCases = ["P02.integrity-conflict-project-cancel", "P13.integrity-
 const authorSettingsCases = ['P02.brief-persistence', 'P02.editor-manual-save', 'P13.toolbar-visibility'];
 const imageControlCases = [
   'P06.control-search', 'P06.control-kind', 'P06.control-usage', 'P06.control-compact-menu',
-  'P06.control-refresh', 'P06.control-usage-link', 'P06.control-replace', 'P07.control-restore',
+  'P06.control-refresh', 'P06.control-usage-link',
   'P07.control-zoom', 'P07.control-fit', 'P07.control-adopt-callback', 'P07.control-escape', 'P07.control-close'
 ];
 const miscControlCases = [
@@ -74,7 +74,7 @@ steps.push(
   { group: 'ui', name: 'entry-specific integrity evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', integrityCases.join(','), '--report', 'ui-coverage-results/integrity/result.json', '--require-complete', '--output', 'ui-coverage-results/integrity-gate.json'], timeoutMs: 60_000 },
   { group: 'ui', name: 'file, clipboard, drop and rich image insertion contracts', command: process.execPath, args: ['scripts/test_manual_studio_insertion_contracts.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'managed, generated, library and rich/source drag insertion contracts', command: process.execPath, args: ['scripts/test_manual_studio_managed_insertion.mjs'], timeoutMs: 180_000 },
-  { group: 'ui', name: 'entry-specific managed insertion evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', 'P03.imported-card,P11.generated-card,P04.screenshot-card,P11.editor-dialog,P03.resource-drop-source,P03.resource-drop-rich,P03.tree-drop-source,P03.tree-drop-rich,P04.editor-existing', '--report', 'ui-coverage-results/managed-insertion/result.json', '--require-complete', '--output', 'ui-coverage-results/managed-insertion-gate.json'], timeoutMs: 60_000 },
+  { group: 'ui', name: 'entry-specific managed insertion evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', 'P04.screenshot-card,P11.editor-dialog,P03.resource-drop-source,P03.resource-drop-rich,P03.tree-drop-source,P03.tree-drop-rich,P04.editor-existing', '--report', 'ui-coverage-results/managed-insertion/result.json', '--require-complete', '--output', 'ui-coverage-results/managed-insertion-gate.json'], timeoutMs: 60_000 },
   { group: 'ui', name: 'entry-specific insertion evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', 'P03.source-file,P03.source-clipboard,P03.document-clipboard,P03.source-drop,P03.rich-upload,P03.rich-paste,P03.rich-drop', '--report', 'ui-coverage-results/insertion/result.json', '--require-complete', '--output', 'ui-coverage-results/insertion-gate.json'], timeoutMs: 60_000 },
   { group: 'ui', name: 'author settings and explicit manuscript save contracts', command: process.execPath, args: ['scripts/test_manual_studio_author_settings_contracts.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'entry-specific author settings evidence gate', command: process.execPath, args: ['scripts/check_manual_studio_coverage.mjs', '--cases', authorSettingsCases.join(','), '--report', 'ui-coverage-results/author-settings/result.json', '--require-complete', '--output', 'ui-coverage-results/author-settings-gate.json'], timeoutMs: 60_000 },

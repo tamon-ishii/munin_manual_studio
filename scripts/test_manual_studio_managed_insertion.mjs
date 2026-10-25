@@ -17,8 +17,6 @@ const initial = '# Insertion\n\nBefore text.\n\nAfter text.\n';
 const other = '# Other\n\nOther body.\n';
 const cursor = initial.indexOf('After');
 const routes = [
-  { id: 'P03.imported-card', record: 'imported resource card', kind: 'imported' },
-  { id: 'P11.generated-card', record: 'generated resource card', kind: 'generated' },
   { id: 'P04.screenshot-card', record: 'screenshot resource card', kind: 'screenshot' },
   { id: 'P11.editor-dialog', record: 'editor image generation dialog', kind: 'drawing', opener: 'generate-ai-image' },
 ];
@@ -28,6 +26,7 @@ const records = [], pageErrors = [];
 try {
   await mkdir(path.join(root, 'docs/assets'), { recursive: true });
   await writeFile(path.join(root, 'docs/index.md'), initial);
+  await writeFile(path.join(root,'docs/tree-target.md'),other);
   for (const route of routes) await writeFile(path.join(root, `docs/${route.id}.md`), other);
   await writeFile(path.join(root, 'manual_setting.json'), JSON.stringify({ docs: 'docs', assets: 'docs/assets', targets: ['docs'], connection_type: 'none' }));
   const png = await readFile('apps/manual-studio/src-tauri/icons/icon.png');
@@ -248,7 +247,7 @@ try {
     console.log(`PASS ${route.record}: cancel, failed destination retry, original cursor, alternate manuscript, save, Undo, asset/history retention`);
   }
   const payloads = new Map();
-  for (const kind of ['imported', 'generated', 'screenshot']) {
+  for (const kind of ['screenshot']) {
     await reset(); await page.locator('[data-tab=screenshots]').click();
     const asset = kind === 'imported' ? 'docs/assets/imported.png' : kind === 'generated' ? generated.path : screenshot.output;
     const image = page.locator(`[data-resource-path="${asset}"]`).locator('img').first();
@@ -280,7 +279,7 @@ try {
   assert.ok(lateDrop.startsWith(initial.slice(0, cursor))); assert.ok(lateDrop.endsWith(initial.slice(cursor)));
   await saveContent(lateDrop); await editor.press('Control+z'); assert.equal(await editor.inputValue(), initial); await saveContent(initial);
   for (const [asset, hash] of assetHashes) assert.equal(fingerprint(await readFile(path.join(root, asset))), hash);
-  records.push({ entry: 'source resource drag insertion', caseId: 'P03.resource-drop-source', steps: ['collect actual card drag payload for imported/generated/screenshot assets', 'end drag without drop and retain manuscript', 'drop each kind at the shared source cursor', 'verify selected asset path in each actual reference', 'save actual references and Undo each insertion', 'fail screenshot reference and retain manuscript', 'retry same payload without duplicate reference', 'hold real reference response', 'verify source readonly and navigation disabled while waiting', 'move readonly source selection and insert at original drop cursor', 'save and Undo delayed insertion', 'verify all original asset bytes'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
+  records.push({ entry: 'source resource drag insertion', caseId: 'P03.resource-drop-source', steps: ['collect actual card drag payload for registered screenshot assets', 'end drag without drop and retain manuscript', 'drop each kind at the shared source cursor', 'verify selected asset path in each actual reference', 'save actual references and Undo each insertion', 'fail screenshot reference and retain manuscript', 'retry same payload without duplicate reference', 'hold real reference response', 'verify source readonly and navigation disabled while waiting', 'move readonly source selection and insert at original drop cursor', 'save and Undo delayed insertion', 'verify all original asset bytes'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
   await reset(); await page.getByRole('button', { name: 'Milkdown編集', exact: true }).click();
   async function dropRich(payload) {
     const paragraph = page.locator('.ProseMirror p').filter({ hasText: 'After text.' });
@@ -288,7 +287,7 @@ try {
     await paragraph.evaluate((node, payload) => { const rect = node.getBoundingClientRect(); const data = new DataTransfer(); data.setData('application/x-munin-image', payload); node.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true, clientX: rect.x + 2, clientY: rect.y + rect.height / 2 })); }, payload);
   }
   const richInitial = await editor.inputValue();
-  for (const kind of ['imported', 'generated', 'screenshot']) {
+  for (const kind of ['screenshot']) {
     await page.locator('[data-tab=screenshots]').click();
     await page.locator(`[data-resource-path="${JSON.parse(payloads.get(kind)).path}"] img`).first().evaluate(image => {
       const data = new DataTransfer(); image.dispatchEvent(new DragEvent('dragstart', { dataTransfer: data, bubbles: true }));
@@ -313,7 +312,7 @@ try {
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   assert.equal((await editor.inputValue()).trim(), richInitial.trim()); await saveContent(await editor.inputValue());
   for (const [asset, hash] of assetHashes) assert.equal(fingerprint(await readFile(path.join(root, asset))), hash);
-  records.push({ entry: 'rich resource drag insertion', caseId: 'P03.resource-drop-rich', steps: ['use actual imported/generated/screenshot resource payloads', 'drop each kind at rich paragraph before After text', 'verify same semantic cursor, selected asset path, and one image', 'save actual manuscript for each image kind', 'native ProseMirror Undo restores original prose', 'fail reference and preserve rich document', 'retry same screenshot payload without duplicate reference', 'save retry, Undo and save restored manuscript', 'preserve all asset bytes'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
+  records.push({ entry: 'rich resource drag insertion', caseId: 'P03.resource-drop-rich', steps: ['use actual registered screenshot resource payloads', 'drop each kind at rich paragraph before After text', 'verify same semantic cursor, selected asset path, and one image', 'save actual manuscript for each image kind', 'native ProseMirror Undo restores original prose', 'fail reference and preserve rich document', 'retry same screenshot payload without duplicate reference', 'save retry, Undo and save restored manuscript', 'preserve all asset bytes'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
   // The workspace tree has its own dragstart handler and carries no screenshot id.
   await page.getByRole('button', { name: 'Markdownソース', exact: true }).click();
   for (const mode of ['source', 'rich']) {
@@ -351,7 +350,7 @@ try {
     await page.waitForFunction(() => document.querySelector('#status').textContent.includes('同じプロジェクト'));
     assert.equal((await editor.inputValue()).trim(), initial.trim());
     for (const alternate of [false, true]) {
-      if (alternate) { await openDocument('P03.imported-card.md'); if (mode === 'rich' && await page.getByRole('button', { name: 'Milkdown編集', exact: true }).count()) await page.getByRole('button', { name: 'Milkdown編集', exact: true }).click(); }
+      if (alternate) { await openDocument('tree-target.md'); if (mode === 'rich' && await page.getByRole('button', { name: 'Milkdown編集', exact: true }).count()) await page.getByRole('button', { name: 'Milkdown編集', exact: true }).click(); }
       const before = await editor.inputValue(); await treeDrop(payload, alternate); await idle();
       const value = await editor.inputValue(); assertReference(value, 'docs/assets/imported.png'); assert.equal((value.match(/!\[/g) || []).length, 1);
       if (!alternate) assert.ok(value.indexOf('Before text.') < value.indexOf('![') && value.indexOf('![') < value.indexOf('After text.'));
@@ -418,7 +417,7 @@ try {
   if(!await page.locator('#editor-screenshot-options').isVisible())await page.locator('#editor-more > summary').click();await page.locator('#editor-screenshot-options').click();
   await page.locator('#editor-screenshot-method').getByRole('button', { name: '撮影済み画像を選ぶ', exact: true }).click();
   await Promise.race([pendingList, new Promise((_, reject) => { const timer = setTimeout(() => reject(Error('Existing screenshot list did not start')), 10000); timer.unref(); })]);
-  await openDocument('P03.imported-card.md'); assert.equal(await editor.inputValue(), other);
+  await openDocument('tree-target.md'); assert.equal(await editor.inputValue(), other);
   await openDocument('index.md'); assert.equal(await editor.inputValue(), initial);
   await editor.evaluate(node => { node.focus(); node.setSelectionRange(0, 0); });
   const listResponse = page.waitForResponse(response => response.url().includes('/__manual/rpc') && response.request().postDataJSON()?.action === 'screenshots-list');
@@ -438,7 +437,7 @@ try {
     assert.equal(testCase.evidenceRecord, record.entry);
     return testCase.entryPoints.map(entryPoint => ({ caseId: record.caseId, entryPoint, type: 'real-backend', status: 'passed', steps: record.steps, assertions: record.assertions, artifacts }));
   });
-  assert.equal(records.length, 9, 'all nine current explicit routes must execute');
+  assert.equal(records.length, 7, 'all seven current explicit routes must execute');
   await writeFile(`${resultDirectory}/result.json`, JSON.stringify({ ...await finishVerification(start), type: 'real-backend', scope: 'explicit source-editor resource/drawing/library and card drag insertion routes; local deterministic image API fixture, injected destination transport failures; no real provider or OS capture/drag/clipboard proof', records, results }, null, 2));
   console.log(`Managed insertion contracts passed ${records.length} explicit routes; real files and immutable assets verified.`);
 } finally {

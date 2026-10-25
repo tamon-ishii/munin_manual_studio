@@ -13,10 +13,12 @@ try {
   await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',assets:'docs/assets',targets:['docs'],connection_type:'none'}));
   await writeFile(path.join(root,'docs/index.md'),'# Performance\n\nOriginal text\n');
   await writeFile(path.join(root,'docs/links.md'),'[Performance](index.md)\n');
-  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aCxoAAAAASUVORK5CYII=','base64');
+  const png=await readFile('crates/markits/apps/desktop/src-tauri/icons/32x32.png');
   await writeFile(path.join(root,'docs/assets/a.png'),png);
   server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','apps/manual-studio/vite.config.ts','--port','5185','--strictPort'],{stdio:'ignore'});
   for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
+  const rpc=async(action,options={})=>{const response=await fetch(base+'/__manual/rpc',{method:'POST',headers:{'Content-Type':'application/json',origin:'http://127.0.0.1:5174'},body:JSON.stringify({root,action,options})});const value=await response.json();if(value.error)throw Error(value.error);return JSON.parse(value.output);};
+  const capture=await rpc('screenshots-register',{json:{name:'Performance image',source:png.toString('base64')}});
   browser=await chromium.launch({channel:'chrome',headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:960}});
   page.setDefaultTimeout(30_000);console.log('performance: browser started');
@@ -52,21 +54,16 @@ try {
   await page.locator('[data-tab="screenshots"]').click();
   await page.waitForFunction(()=>[...document.querySelectorAll('#screenshot-library-list img')].some(img=>img.complete&&img.naturalWidth>0));
   assert.equal(count('screenshots-list'),0,'combined resource response avoids duplicate screenshot listing');
-  const thumbnails=count('resources-thumbnail');assert.ok(thumbnails>0);
-  await page.locator('#resource-management-menu > summary').click();
-  await page.locator('#screenshot-library-refresh').click();
+  const thumbnail=await page.locator('#screenshot-library-list img').first().getAttribute('src');
+  assert.equal(count('resources-thumbnail'),0,'registered images include their thumbnails in the bundled response');
+  await page.locator('#resource-management-menu > summary').click();await page.locator('#screenshot-library-refresh').click();
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  await page.waitForFunction(()=>[...document.querySelectorAll('#screenshot-library-list img')].some(img=>img.complete&&img.naturalWidth>0));
-  assert.equal(count('resources-thumbnail'),thumbnails,'unchanged thumbnail survives list refresh');
-  // Even a same-path, same-size external write invalidates the metadata revision.
-  await writeFile(path.join(root,'docs/assets/a.png'),png);
-  const updatedThumbnail=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='resources-thumbnail');
-  await page.locator('#resource-management-menu > summary').click();
-  await page.locator('#screenshot-library-refresh').click();
-  await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  await page.waitForFunction(()=>[...document.querySelectorAll('#screenshot-library-list img')].some(img=>img.complete&&img.naturalWidth>0));
-  await updatedThumbnail;
-  assert.equal(count('resources-thumbnail'),thumbnails+1,'same-path external write invalidates the thumbnail revision');
+  assert.equal(await page.locator('#screenshot-library-list img').first().getAttribute('src'),thumbnail);
+  const replacement=await readFile('apps/manual-studio/src-tauri/icons/icon.png');
+  await rpc('screenshots-register',{json:{id:capture.screenshot.id,source:replacement.toString('base64'),adopt:true}});
+  await page.locator('#resource-management-menu > summary').click();await page.locator('#screenshot-library-refresh').click();
+  await page.waitForFunction(old=>document.querySelector('#screenshot-library-list img')?.src!==old,thumbnail);
+  assert.equal(count('resources-thumbnail'),0,'updated registered thumbnail is bundled too');
   console.log('performance: cache checks passed');
   await page.locator('[data-tab="editor"]').click();
   assert.equal(await page.locator('#save-state').isVisible(),false);

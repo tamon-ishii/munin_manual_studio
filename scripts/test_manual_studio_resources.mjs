@@ -30,29 +30,9 @@ try{
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=index.md`);await idle();
   await page.locator('[data-tab=screenshots]').click();
-  await page.locator('[data-resource-kind=generated]').first().waitFor();
-  assert.equal(await page.locator('[data-resource-kind=generated]').count(),1);
-  assert.equal(await page.locator('[data-resource-kind=screenshot]').count(),1);
-  assert.equal(await page.locator('[data-resource-kind=imported]').count(),2);
-  await page.locator('#resource-kind').selectOption('generated');assert.equal(await page.locator('.screenshot-library-card').count(),1);
-  await page.locator('#resource-kind').selectOption('all');await page.locator('#resource-usage').selectOption('used');assert.equal(await page.locator('.screenshot-library-card').count(),1);
-  await page.locator('#resource-search').fill('other.md');assert.equal(await page.locator('.screenshot-library-card').count(),1);
-  await page.locator('#resource-search').fill('no match');assert.match(await page.locator('#screenshot-library-list').textContent(),/条件に合う/);
-  await page.locator('#resource-search').fill('');await page.locator('#resource-usage').selectOption('all');
-  const imported=page.locator('[data-resource-path="docs/assets/imported.png"]');
-  await imported.locator('.resource-item-menu>summary').click();
-  await imported.getByRole('button',{name:'docs/index.md:3',exact:true}).click();await idle();
-  assert.equal(await page.locator('#markdown-editor').isVisible(),true);assert.equal(await page.locator('#markdown-editor').evaluate(el=>el.value.slice(el.selectionStart,el.selectionEnd)),'![Imported](assets/imported.png)');
-  await page.locator('[data-tab=screenshots]').click();if(!await imported.locator('.screenshot-management').evaluate(node=>node.open))await imported.locator('.screenshot-management>summary').click();await imported.getByRole('button',{name:'差し替えと影響確認',exact:true}).click();
-  const replacement=page.locator('[data-resource-replacement]');assert.match(await replacement.textContent(),/docs\/index.md:3/);assert.match(await replacement.textContent(),/docs\/other.md:3/);
-  await replacement.getByRole('combobox',{name:'差し替え先の画像'}).selectOption(first.path);await replacement.getByRole('button',{name:'docs/other.md:3',exact:true}).click();await idle();assert.equal(await replacement.isVisible(),true,'usage navigation retains replacement choices');assert.equal(await replacement.getByRole('combobox',{name:'差し替え先の画像'}).inputValue(),first.path);assert.equal(await page.locator('#markdown-editor').evaluate(el=>el.value.slice(el.selectionStart,el.selectionEnd)),'![Another use](assets/imported.png)');
-  await page.locator('[data-tab=screenshots]').click();
-await replacement.getByRole('button',{name:'影響箇所を確認して差し替える',exact:true}).click();await idle();
-  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),initial,'replacement keeps manuscript intact');
-  if(!await imported.locator('.screenshot-management').evaluate(node=>node.open))await imported.locator('.screenshot-management>summary').click();await imported.getByRole('button',{name:'前回の差し替えを戻す',exact:true}).waitFor();
-  await imported.getByRole('button',{name:'前回の差し替えを戻す',exact:true}).click();await idle();
-  assert.equal(JSON.parse(await rpc('resources-detail',{asset:'docs/assets/imported.png'})).replacements.length,0,'restored record is no longer offered');
-  assert.deepEqual(await readFile(path.join(root,'docs/assets/imported.png')),png);
+  await page.locator('.screenshot-library-card').first().waitFor();assert.equal(await page.locator('.screenshot-library-card').count(),1);
+  assert.equal(await page.locator('[data-resource-kind=generated]').count(),0);
+  assert.equal(await page.locator('[data-resource-kind=imported]').count(),0);
   await page.locator('[data-tab=publish]').click();await page.locator('#quality-check').click();await idle();
   const quality=page.locator('#publish-result .quality-issue').filter({hasText:'missing.md'});
   await quality.getByRole('button',{name:/該当箇所を開く/}).click();await idle();
@@ -60,7 +40,13 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await page.locator('[data-tab=screenshots]').click();
   const dragPayload=async(card)=>card.locator('img').first().evaluate(image=>{const data=new DataTransfer();image.dispatchEvent(new DragEvent('dragstart',{dataTransfer:data,bubbles:true}));return data.getData('application/x-munin-image');});
   const drop=async(payload)=>page.locator('#markdown-editor').evaluate((editor,payload)=>{const data=new DataTransfer();data.setData('application/x-munin-image',payload);editor.setSelectionRange(editor.value.length,editor.value.length);editor.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));},payload);
-  const importedPayload=await dragPayload(imported);assert.equal(JSON.parse(importedPayload).path,'docs/assets/imported.png');
+  async function treePayload(asset){
+    await page.getByRole('tab',{name:'ファイルツリー',exact:true}).click();
+    await page.locator('#tree-search').fill(asset.split('/').at(-1));
+    const payload=await page.locator('[data-image="'+asset+'"]').evaluate(node=>{const data=new DataTransfer();node.dispatchEvent(new DragEvent('dragstart',{dataTransfer:data,bubbles:true}));node.dispatchEvent(new DragEvent('dragend',{dataTransfer:data,bubbles:true}));return data.getData('application/x-munin-image');});
+    await page.locator('#tree-search').fill('');return payload;
+  }
+  const importedPayload=await treePayload('docs/assets/imported.png');assert.equal(JSON.parse(importedPayload).path,'docs/assets/imported.png');
   await page.locator('[data-tab=editor]').evaluate((button,payload)=>{const data=new DataTransfer();data.setData('application/x-munin-image',payload);button.dispatchEvent(new DragEvent('dragover',{dataTransfer:data,bubbles:true,cancelable:true}));},importedPayload);
   await page.locator('#markdown-editor').waitFor({state:'visible'});await drop(importedPayload);
   assert.match(await page.locator('#markdown-editor').inputValue(),/!\[imported.png\]\(<assets\/imported.png>\)/);
@@ -118,7 +104,7 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await figureImage.hover();await page.locator('.milkdown-image-action-overlay').getByRole('button',{name:'画像の表示設定',exact:true}).click();
   assert.equal(await page.locator('dialog[data-image-presentation=true]').getByRole('textbox',{name:'画像のキャプション'}).inputValue(),caption);await page.locator('dialog[data-image-presentation=true] .panel-header button').click();
   const beforeImageReplacement=await page.locator('#markdown-editor').inputValue();
-  const generatedPayload=await dragPayload(page.locator(`[data-resource-path="${first.path}"]`));
+  const generatedPayload=await treePayload(first.path);
   await figureImage.evaluate((image,payload)=>{const transfer=new DataTransfer();transfer.setData('application/x-munin-image',payload);const box=image.getBoundingClientRect();image.dispatchEvent(new DragEvent('drop',{dataTransfer:transfer,bubbles:true,cancelable:true,clientX:box.x+box.width/2,clientY:box.y+box.height/2}));},generatedPayload);
   await page.waitForFunction(path=>document.querySelector('#markdown-editor').value.includes(path),first.path.replace('docs/',''));
   const afterReplacement=await page.locator('#markdown-editor').inputValue();assert.match(afterReplacement,/data-width="80"/);assert.match(afterReplacement,/data-align="right"/);assert.match(afterReplacement,/alt="Imported"/);assert.match(afterReplacement,/説明 &lt;安全&gt; &amp; &quot;引用&quot;/);
@@ -228,5 +214,5 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
   assert.equal(JSON.parse(await rpc('image-generation-settings')).provider,'agy','independent image AI remains selectable with manuscript AI unset');
   assert.equal(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')).connection_type,'none');
-  assert.deepEqual(errors,[]);console.log('Unified resource filters, usage jumps, replacement impact, durable image history, reference edits, comparison, capability status, retry, cancellation, replacement restoration, quality navigation, interrupted-job recovery and resource drag/drop, image presentation and image replacement passed.');
+  assert.deepEqual(errors,[]);console.log('Registered-only screenshot list, tree and screenshot insertion, durable generation history, capability status, retry, cancellation, quality navigation, interrupted-job recovery, image presentation and image replacement passed.');
 }finally{await browser?.close();server?.kill();api?.closeAllConnections();await new Promise(resolve=>api?api.close(resolve):resolve());await rm(root,{recursive:true,force:true});}

@@ -203,7 +203,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 assert len(candidate['screenshot']['edits']) == len(before['screenshot']['edits']) + 1
                 assert rpc('screenshots-image', {'id': sid, 'json': {'original': True}})['data'] == original
                 assert (root / 'docs/index.md').read_text() == manuscript, 'return/adoption unexpectedly changed manuscript'
-                (RESULTS / 'document-editor-check.json').write_text(json.dumps({'status': 'passed', 'entry': 'manuscript image edit', 'steps': ui.log[begin:], 'assertions': {'savedMarksRestored': True, 'candidateSaved': True, 'adoptedPreserved': True, 'originalPreserved': True, 'manuscriptPreserved': True}}, ensure_ascii=False, indent=2))
+                (RESULTS / 'document-editor-check.json').write_text(json.dumps({'status': 'passed', 'entry': 'manuscript image edit', 'steps': ui.log[begin:], 'assertions': {'savedMarksRestored': True, 'candidateSaved': True, 'adoptedUpdated': True, 'originalPreserved': True, 'manuscriptPreserved': True}}, ensure_ascii=False, indent=2))
                 registry = json.loads((REPO / 'scripts/fixtures/manual-studio-ui-inventory.json').read_text())
                 case = next(case for case in registry['cases'] if case['id'] == 'P05.manuscript-managed')
                 for entry in case['entryPoints']:
@@ -270,7 +270,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 print('PASS early child exit and import failure: preserve -> reopen -> retry -> no duplicate candidates', flush=True)
         # Ordinary image editing has separate-copy semantics from both entries.
         if not os.environ.get('MUNIN_NATIVE_RESOURCE_ONLY'):
-            for entry_name in ['resource', 'manuscript']:
+            for entry_name in ['manuscript']:
                 begin = len(ui.log)
                 def open_ordinary():
                     existing = set((root / 'docs/assets/edited').glob('*.png'))

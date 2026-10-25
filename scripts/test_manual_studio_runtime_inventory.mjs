@@ -61,7 +61,7 @@ try {
  await page.locator('[data-tab=screenshots]').click();await snapshot('empty-resources');
  shots=[{id:'fixture-shot',name:'Fixture shot',output:'docs/assets/shot.png',adopted:'r1',protected:false,edits:[{id:'r1',created_at:'old',flattened:false},{id:'r2',created_at:'new',flattened:false,requires_review:true}],usage:['docs/index.md'],thumbnail:png,recipe:{steps:[]}}];
  resources=[{path:'docs/assets/shot.png',name:'Fixture shot',kind:'screenshot',screenshot_id:'fixture-shot',usages:[]},{path:'docs/assets/ordinary.png',name:'ordinary.png',kind:'imported',usages:[]},{path:'docs/assets/generated.png',name:'Generated',kind:'generated',generation:{id:'gen',path:'docs/assets/generated.png',prompt:'Fixture drawing',created_at:'now'},usages:[]}];
- if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();await page.waitForFunction(()=>document.querySelectorAll('.resource-list-item').length===3);await snapshot('image-kinds-and-candidate');
+ if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();await page.waitForFunction(()=>document.querySelectorAll('.resource-list-item').length===1);await snapshot('image-kinds-and-candidate');
  for(const menu of await page.locator('.resource-item-menu>summary').all())await menu.click();
  for(const menu of await page.locator('.screenshot-management>summary').all())await menu.click();
  await snapshot('expanded-image-operations');

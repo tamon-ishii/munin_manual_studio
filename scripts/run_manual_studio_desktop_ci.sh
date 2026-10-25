@@ -12,4 +12,4 @@ for munin_attempt in $(seq 1 30); do
   sleep 0.1
 done
 npm run manual:check-desktop
-node scripts/check_manual_studio_coverage.mjs --cases P05.resource-array,P05.resource-elements,P05.manuscript-managed,P05.resource-exit-import-retry,P05.ordinary-resource,P05.ordinary-manuscript --report native-workflow-results/result.json --require-complete --output ui-coverage-results/native-gate.json
+node scripts/check_manual_studio_coverage.mjs --cases P05.resource-array,P05.resource-elements,P05.manuscript-managed,P05.resource-exit-import-retry,P05.ordinary-manuscript --report native-workflow-results/result.json --require-complete --output ui-coverage-results/native-gate.json
