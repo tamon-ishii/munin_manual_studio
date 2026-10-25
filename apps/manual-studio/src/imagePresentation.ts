@@ -1,15 +1,16 @@
-export interface ImagePresentation {src:string;alt:string;caption:string;width:number;align:'left'|'center'|'right';configured:boolean}
+export interface ImagePresentation {src:string;alt:string;caption:string;width:number|null;align:'left'|'center'|'right';configured:boolean}
 export interface DocumentImage extends ImagePresentation {start:number;end:number;raw:string}
 const escape=(value:string)=>value.replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 export function parseFigure(value:string):ImagePresentation|undefined {
   const document=new DOMParser().parseFromString(value,'text/html');const figure=document.querySelector('figure[data-munin-image]');const image=figure?.querySelector('img');
   if(!figure||!image)return;
-  const width=Number(figure.getAttribute('data-width')||100);const alignment=figure.getAttribute('data-align');
-  return {src:image.getAttribute('src')||'',alt:image.getAttribute('alt')||'',caption:figure.querySelector('figcaption')?.textContent||'',width:Number.isFinite(width)?Math.max(1,Math.min(100,width)):100,align:alignment==='left'||alignment==='right'?alignment:'center',configured:true};
+  const width=figure.hasAttribute('data-width')?Number(figure.getAttribute('data-width')):null;const alignment=figure.getAttribute('data-align');
+  return {src:image.getAttribute('src')||'',alt:image.getAttribute('alt')||'',caption:figure.querySelector('figcaption')?.textContent||'',width:width===null?null:Number.isFinite(width)?Math.max(1,Math.min(100,width)):100,align:alignment==='left'||alignment==='right'?alignment:'center',configured:true};
 }
 export function renderFigure(image:ImagePresentation):string {
+  if(!image.configured)return `<img src="${escape(image.src)}" alt="${escape(image.alt)}">`;
   const margin=image.align==='left'?'0 auto 0 0':image.align==='right'?'0 0 0 auto':'0 auto';
-  return `<figure data-munin-image="true" data-width="${image.width}" data-align="${image.align}" style="width:${image.width}%;max-width:100%;margin:${margin};text-align:${image.align}"><img src="${escape(image.src)}" alt="${escape(image.alt)}" style="width:100%;height:auto">${image.caption?`<figcaption>${escape(image.caption)}</figcaption>`:''}</figure>`;
+  return `<figure data-munin-image="true" ${image.width===null?'':`data-width="${image.width}" `}data-align="${image.align}" style="width:${image.width===null?'fit-content':`${image.width}%`};max-width:100%;margin:${margin};text-align:${image.align}"><img src="${escape(image.src)}" alt="${escape(image.alt)}" style="${image.width===null?'max-width:100%':'width:100%'};height:auto">${image.caption?`<figcaption>${escape(image.caption)}</figcaption>`:''}</figure>`;
 }
 export function documentImages(source:string):DocumentImage[] {
   const ignored:Array<[number,number]>=[];let fence:{start:number;char:string;length:number}|undefined;let offset=0;
@@ -22,8 +23,8 @@ export function documentImages(source:string):DocumentImage[] {
     // An inline code span on the same line is an example, not an image.
     const before=source.slice(source.lastIndexOf('\n',start-1)+1,start);if((before.match(/(?<!\\)`/g)||[]).length%2)continue;
     let image=parseFigure(match[0]);
-    if(!image&&match[0].startsWith('!'))image={src:(match[2]||match[3]||'').replace(/\\([()\\])/g,'$1'),alt:match[1].replace(/\\([\[\]\\])/g,'$1'),caption:match[4]||'',width:100,align:'center',configured:false};
-    if(!image&&/^<img/i.test(match[0])){const img=new DOMParser().parseFromString(match[0],'text/html').querySelector('img');if(img)image={src:img.getAttribute('src')||'',alt:img.getAttribute('alt')||'',caption:img.getAttribute('title')||'',width:100,align:'center',configured:false};}
+    if(!image&&match[0].startsWith('!'))image={src:(match[2]||match[3]||'').replace(/\\([()\\])/g,'$1'),alt:match[1].replace(/\\([\[\]\\])/g,'$1'),caption:match[4]||'',width:null,align:'center',configured:false};
+    if(!image&&/^<img/i.test(match[0])){const img=new DOMParser().parseFromString(match[0],'text/html').querySelector('img');if(img)image={src:img.getAttribute('src')||'',alt:img.getAttribute('alt')||'',caption:img.getAttribute('title')||'',width:null,align:'center',configured:false};}
     if(image)images.push({...image,start,end:start+match[0].length,raw:match[0]});
   }
   return images;

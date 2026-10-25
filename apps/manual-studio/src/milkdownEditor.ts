@@ -16,6 +16,7 @@ import { type Editor, editorViewCtx, editorViewOptionsCtx, serializerCtx, parser
 import { imageSchema, clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
 import { undo, redo, closeHistory } from '@milkdown/kit/prose/history';
 import { Plugin } from '@milkdown/kit/prose/state';
+import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose, $remark, replaceAll, callCommand, insert } from '@milkdown/kit/utils';
 type ImageAstNode={type:string;value?:string;children?:ImageAstNode[];muninPresentation?:ImagePresentation};
 const imagePresentationPlugin=$remark('munin-image-presentation',()=>()=>function transform(node:ImageAstNode){
@@ -252,9 +253,9 @@ export function setupMilkdownEditor(
         if (image) {
           image.dataset.originalSrc = String(node.attrs.src);
           if(dom instanceof HTMLElement&&node.type.name==='image-block'){
-            const configured=Boolean(node.attrs.presentation);dom.style.width=configured?`${node.attrs.displayWidth}%`:'';
+            const configured=Boolean(node.attrs.presentation);dom.style.width=configured?(node.attrs.displayWidth===null?'fit-content':`${node.attrs.displayWidth}%`):'';
             dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';
-            if(configured){image.style.width='100%';image.style.height='auto';image.addEventListener('load',()=>{image.style.height='auto';},{once:true});}
+            if(configured){image.style.width=node.attrs.displayWidth===null?'auto':'100%';image.style.maxWidth='100%';image.style.height='auto';image.addEventListener('load',()=>{image.style.height='auto';},{once:true});}
           }
           images.push({ image, source: String(node.attrs.src) });
         }
@@ -299,6 +300,18 @@ export function setupMilkdownEditor(
   const observer = new MutationObserver(updateReadonly);
   observer.observe(source, { attributes: true, attributeFilter: ['disabled', 'readonly'] });
   const bridge = $prose(ctx => new Plugin({
+    props: { decorations(state) {
+      const hidden:Decoration[]=[];
+      const isReference=(node:typeof state.doc)=>node.type.name==='html'&&/^\s*<!--\s*(?:screenshot:ref\s+id=[a-z0-9-]+|\/screenshot:ref)\s*-->\s*$/.test(String(node.attrs.value));
+      state.doc.descendants((node,pos)=>{
+        if(node.type.name==='paragraph'&&node.childCount>0){
+          let referencesOnly=true;node.forEach(child=>{if(!isReference(child))referencesOnly=false;});
+          if(referencesOnly){hidden.push(Decoration.node(pos,pos+node.nodeSize,{class:'screenshot-reference-hidden'}));return false;}
+        }
+        if(isReference(node))hidden.push(Decoration.node(pos,pos+node.nodeSize,{class:'screenshot-reference-hidden'}));
+      });
+      return DecorationSet.create(state.doc,hidden);
+    } },
     view: () => ({ update(view, previous) {
       // Async rich-editor transactions must not overwrite newer source edits.
       if (syncing || sourceMode) return;
@@ -346,7 +359,7 @@ export function setupMilkdownEditor(
   function applyImageStyles(){if(!ready||!instance)return;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.state.doc.descendants((node,pos)=>{
     if(node.type.name!=='image-block')return;const dom=view.nodeDOM(pos);if(!(dom instanceof HTMLElement))return;
     const image=dom.querySelector('img');if(image)image.alt=String(node.attrs.alt||'');
-    const configured=Boolean(node.attrs.presentation);dom.dataset.imagePresentation=String(configured);dom.style.width=configured?`${node.attrs.displayWidth}%`:'';
+    const configured=Boolean(node.attrs.presentation);dom.dataset.imagePresentation=String(configured);dom.style.width=configured?(node.attrs.displayWidth===null?'fit-content':`${node.attrs.displayWidth}%`):'';
     dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';dom.style.textAlign=configured?node.attrs.alignment:'';
   });});}
   function fitToolbarMenus() {
@@ -448,7 +461,7 @@ export function setupMilkdownEditor(
     ctx.update(editorViewOptionsCtx, previous => ({ ...previous, editable: () => !source.disabled && !source.readOnly, attributes: { role: 'textbox', 'aria-label': 'Markdown原稿', 'aria-multiline': 'true' } }));
     ctx.update(imageBlockSchema.key, previous => ctx => {
       const schema = previous(ctx);
-      return { ...schema, attrs: { ...schema.attrs, alt: { default: '', validate: 'string' }, displayWidth:{default:100},alignment:{default:'center'},presentation:{default:false} },
+      return { ...schema, attrs: { ...schema.attrs, alt: { default: '', validate: 'string' }, displayWidth:{default:null},alignment:{default:'center'},presentation:{default:false} },
         parseMarkdown: { ...schema.parseMarkdown, match:node=>schema.parseMarkdown.match(node), runner: (state, node, type) => {
           const figure=(node.muninPresentation as ImagePresentation|undefined)||(node.type==='html'?parseFigure(String(node.value||'')):undefined);
           state.addNode(type, figure?{src:figure.src,caption:figure.caption,alt:figure.alt,ratio:1,displayWidth:figure.width,alignment:figure.align,presentation:true}:{ src: String(node.url ?? ''), caption: String(node.title ?? ''), alt: String(node.alt ?? ''), ratio: 1 });

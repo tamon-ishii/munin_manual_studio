@@ -835,15 +835,19 @@ function showImagePresentation(image?:HTMLImageElement){
   if(!selected){status('画像にカーソルを合わせるか、画像記法を選択してください。',true);return;}
   const root=projectRoot,page=documentState.page,expected=editor.value;
   const {dialog,body}=featureDialog('画像の表示設定');dialog.dataset.imagePresentation='true';
-  const widthLabel=document.createElement('label');widthLabel.textContent='表示幅（本文に対する％）';const width=document.createElement('input');width.type='number';width.min='1';width.max='100';width.value=String(selected.width);width.setAttribute('aria-label','表示幅（％）');widthLabel.append(width);
+  const widthLabel=document.createElement('label');widthLabel.textContent='表示幅（本文に対する％）';const width=document.createElement('input');width.type='number';width.min='1';width.max='100';width.value=selected.width===null?'':String(selected.width);width.placeholder='指定なし';width.setAttribute('aria-label','表示幅（％）');widthLabel.append(width);
   const alignLabel=document.createElement('label');alignLabel.textContent='配置';const align=document.createElement('select');for(const [value,label] of [['left','左寄せ'],['center','中央寄せ'],['right','右寄せ']])align.add(new Option(label,value));align.value=selected.align;align.setAttribute('aria-label','画像の配置');alignLabel.append(align);
   const captionLabel=document.createElement('label');captionLabel.textContent='キャプション';const caption=document.createElement('input');caption.value=selected.caption;caption.setAttribute('aria-label','画像のキャプション');captionLabel.append(caption);
-  const help=document.createElement('p');help.textContent='画像の下に説明を表示します。表示幅と配置はプレビュー・公開にも反映されます。';
+  const widthControls=document.createElement('div');widthControls.className='image-presentation-width';
+  const noWidth=document.createElement('button');noWidth.type='button';noWidth.textContent='指定なし';
+  noWidth.onclick=()=>{width.value='';feedback.textContent='表示幅を指定なしにしました。「表示設定を適用」で反映します。';};
+  widthControls.append(widthLabel,noWidth);
+  const help=document.createElement('p');help.textContent='「指定なし」で表示幅の指定を解除できます。配置とキャプションは引き続き設定できます。';
   const feedback=document.createElement('p');feedback.role='status';const apply=document.createElement('button');apply.type='button';apply.className='primary';apply.textContent='表示設定を適用';
-  apply.onclick=()=>{try{if(root!==projectRoot||documentState?.page!==page)throw new Error('原稿が切り替わりました。');const value=Number(width.value);if(!Number.isInteger(value)||value<1||value>100)throw new Error('表示幅は1〜100の整数で指定してください。');
+  apply.onclick=()=>{try{if(root!==projectRoot||documentState?.page!==page)throw new Error('原稿が切り替わりました。');const value=width.value===''?null:Number(width.value);if(width.validity.badInput||(value!==null&&(!Number.isInteger(value)||value<1||value>100)))throw new Error('表示幅は空欄、または1〜100の整数で指定してください。');
     const raw=renderFigure({...selected,width:value,align:align.value as DocumentImage['align'],caption:caption.value,configured:true});const before=expected.slice(0,selected.start),after=expected.slice(selected.end);const gapBefore=before&&!before.endsWith('\n\n')?(before.endsWith('\n')?'\n':'\n\n'):'';const gapAfter=after&&!after.startsWith('\n\n')?(after.startsWith('\n')?'\n':'\n\n'):'';changeImageMarkdown(before+gapBefore+raw+gapAfter+after,expected);dialog.close();void milkdown.refreshImages();status('画像の表示設定を更新しました。');
   }catch(error){feedback.textContent=String(error);}};
-  body.append(widthLabel,alignLabel,captionLabel,help,feedback,apply);
+  body.append(widthControls,alignLabel,captionLabel,help,feedback,apply);
 }
 element('image-presentation').addEventListener('click',()=>showImagePresentation());
 async function recaptureDocumentImage(imageSource:string):Promise<void>{
