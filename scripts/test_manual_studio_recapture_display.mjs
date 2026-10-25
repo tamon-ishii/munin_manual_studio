@@ -33,7 +33,7 @@ try {
      }
      await new Promise(resolve=>setTimeout(resolve,50));
    }
-   throw new Error(`Displayed image did not update to ${expected.join(',')}`);
+   throw new Error(`Displayed image did not update to ${expected.join(',')}; ${JSON.stringify(await page.locator('#panel-editor').evaluate(node=>({view:node.dataset.editorView,visible:!!node.getClientRects().length,frameVisible:!!document.querySelector('#markdown-preview').getClientRects().length,status:document.querySelector('#status').textContent})))}`);
  }
  await color(preview,[255,0,0]);
  const original=await readFile(path.join(root,'docs/index.md'),'utf8');

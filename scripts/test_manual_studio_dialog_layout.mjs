@@ -54,7 +54,7 @@ try {
   });
   const libraryBox=await page.locator('#panel-screenshots').boundingBox();const editorBox=await page.locator('#panel-editor').boundingBox();
   assert.ok(libraryBox.width>150&&libraryBox.x+libraryBox.width<=editorBox.x+4,'resource library opens alongside the editor for drag/drop');
-  assert.equal(await page.locator('.screenshot-primary-actions button').count(),15,'five primary actions per image, including AI editing');
+  assert.equal(await page.locator('.screenshot-primary-actions button').count(),18,'six primary actions per image, including AI annotation');
   assert.equal(await page.locator('.screenshot-management[open]').count(),0,'management begins collapsed');
   assert.equal(await page.locator('.resource-item-menu[open]').count(),0);
   assert.equal(await page.locator('.screenshot-primary-actions button:visible').count(),0);

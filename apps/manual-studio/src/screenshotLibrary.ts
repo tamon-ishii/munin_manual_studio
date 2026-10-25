@@ -44,11 +44,16 @@ export function setupScreenshotLibrary(options: Options) {
     if (!root) { list.textContent = 'プロジェクトを開いてください。'; return; }
     const resourceResult=JSON.parse(await options.request('resources-list',{},root)) as {items:Resource[];screenshots?:{items:Screenshot[]}};
     const result=resourceResult.screenshots||JSON.parse(await options.request('screenshots-list',{},root)) as {items:Screenshot[]};
-    if (root !== options.root() || version !== generation) return;
-    currentShots=result.items||[];
-    const screenshotIds=new Set(currentShots.map(shot=>shot.id));
-    resources.setItems((resourceResult.items||[]).filter(item=>Boolean(item.screenshot_id&&screenshotIds.has(item.screenshot_id))));
-    render(root);if(refreshAssets)await options.refreshAssets?.(root);
+    if (root !== options.root()) return;
+    if(version === generation){
+      currentShots=result.items||[];
+      const screenshotIds=new Set(currentShots.map(shot=>shot.id));
+      resources.setItems((resourceResult.items||[]).filter(item=>Boolean(item.screenshot_id&&screenshotIds.has(item.screenshot_id))));
+      render(root);
+    }
+    // A usage-only refresh can supersede this list request after adoption.
+    // It must not cancel the pending refresh of the displayed image pixels.
+    if(refreshAssets)await options.refreshAssets?.(root);
   }
   function render(root:string){
     const result={items:currentShots};resources.captureViews(list);list.replaceChildren();
