@@ -158,6 +158,5 @@ export function setupImageGeneration(options:Options) {
     });
   }
   document.getElementById('generate-ai-image')!.addEventListener('click',()=>{void open();});
-  document.getElementById('resource-generate-image')?.addEventListener('click',()=>{void open();});
   return {open};
 }

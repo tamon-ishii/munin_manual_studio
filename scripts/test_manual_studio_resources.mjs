@@ -70,7 +70,7 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await page.locator('[data-tab=editor]').click();await drop(capturedPayload);await idle();assert.match(await page.locator('#markdown-editor').inputValue(),/<!-- screenshot:ref id=/);
   await page.locator('#markdown-editor').press('Control+z');await page.waitForFunction(expected=>document.querySelector('#markdown-editor').value===expected,initial);await page.locator('#markdown-editor').press('Control+s');await idle();
   await page.locator('[data-tab=screenshots]').click();
-  await page.locator('#resource-generate-image').click();await idle();let drawing=page.locator('[data-ai-image]');
+  await page.locator('#generate-ai-image').click();await idle();let drawing=page.locator('[data-ai-image]');
   assert.equal(await drawing.locator('.generated-stack-item').count(),1,'history is restored on open');
   await drawing.getByRole('combobox',{name:'生成方法',exact:true}).selectOption('codex');assert.match(await drawing.locator('.image-connection-status').textContent(),/CLIが見つかりません/);
   await drawing.getByRole('combobox',{name:'生成方法',exact:true}).selectOption('api');await drawing.locator('details>summary').click();await drawing.locator('input[type=password]').fill('fixture-key');
@@ -137,7 +137,7 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   assert.equal(JSON.parse(await rpc('resources-detail',{asset:'docs/assets/imported.png'})).usages.length,2,'configured HTML images remain tracked');
   await page.reload();await idle();await page.locator('#milkdown-editor [data-image-presentation=true] img').first().waitFor();
   assert.equal(await page.locator('#milkdown-editor [data-image-presentation=true]').first().evaluate(el=>el.style.width),'80%','presentation survives save/reload');
-  await page.locator('[data-tab=screenshots]').click();await page.locator('#resource-generate-image').click();await idle();drawing=page.locator('[data-ai-image]');
+  await page.locator('[data-tab=screenshots]').click();await page.locator('#generate-ai-image').click();await idle();drawing=page.locator('[data-ai-image]');
   // A missing history image must retain its prompt, hide the previous preview,
   // and prevent insertion. Late previews must not replace a newer selection.
   let releasePreview,previewStarted;
@@ -199,7 +199,7 @@ await replacement.getByRole('button',{name:'影響箇所を確認して差し替
   await page.waitForFunction(()=>document.querySelector('#image-ai-save-state').textContent==='保存済み');
   assert.deepEqual(JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8')),manuscriptBefore,'image settings never overwrite manuscript settings');
   assert.doesNotMatch(await readFile(path.join(root,'.munin/image-generation.json'),'utf8'),/fixture-key/);
-  await page.locator('[data-close-dialog=panel-settings]').click();await page.locator('#resource-generate-image').click();await idle();drawing=page.locator('[data-ai-image]');
+  await page.locator('[data-close-dialog=panel-settings]').click();await page.locator('#generate-ai-image').click();await idle();drawing=page.locator('[data-ai-image]');
   await drawing.getByRole('textbox',{name:'画像の指示',exact:true}).fill('Independent image AI');
   await drawing.getByRole('button',{name:'画像を生成',exact:true}).click();await idle();assert.match(await drawing.locator('.image-generation-status').textContent(),/画像を保存/);
   assert.equal(JSON.parse(bodies.at(-1).raw).model,'separate-image-model','image settings key is available during this session');

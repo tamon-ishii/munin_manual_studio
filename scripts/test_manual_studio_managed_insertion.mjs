@@ -21,7 +21,6 @@ const routes = [
   { id: 'P11.generated-card', record: 'generated resource card', kind: 'generated' },
   { id: 'P04.screenshot-card', record: 'screenshot resource card', kind: 'screenshot' },
   { id: 'P11.editor-dialog', record: 'editor image generation dialog', kind: 'drawing', opener: 'generate-ai-image' },
-  { id: 'P11.resource-dialog', record: 'resource image generation dialog', kind: 'drawing', opener: 'resource-generate-image' },
 ];
 let failGeneration = false;
 let server, browser, api, failRead = '', failReference = false, holdReference = false, referenceStarted, releaseReference, holdExistingList = false, existingListStarted, releaseExistingList;
@@ -439,7 +438,7 @@ try {
     assert.equal(testCase.evidenceRecord, record.entry);
     return testCase.entryPoints.map(entryPoint => ({ caseId: record.caseId, entryPoint, type: 'real-backend', status: 'passed', steps: record.steps, assertions: record.assertions, artifacts }));
   });
-  assert.equal(records.length, 10, 'all ten explicit routes must execute');
+  assert.equal(records.length, 9, 'all nine current explicit routes must execute');
   await writeFile(`${resultDirectory}/result.json`, JSON.stringify({ ...await finishVerification(start), type: 'real-backend', scope: 'explicit source-editor resource/drawing/library and card drag insertion routes; local deterministic image API fixture, injected destination transport failures; no real provider or OS capture/drag/clipboard proof', records, results }, null, 2));
   console.log(`Managed insertion contracts passed ${records.length} explicit routes; real files and immutable assets verified.`);
 } finally {

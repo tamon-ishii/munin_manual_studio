@@ -4026,8 +4026,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4062,8 +4061,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4098,8 +4096,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4134,8 +4131,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4150,8 +4146,7 @@
       "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
       "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
       "cases": [
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
@@ -4289,8 +4284,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4308,8 +4302,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4412,8 +4405,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4448,8 +4440,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4467,8 +4458,7 @@
         "P11.success",
         "P11.cancel",
         "P11.failure-retry",
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed"
     },
@@ -4483,8 +4473,7 @@
       "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
       "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
       "cases": [
-        "P11.editor-dialog",
-        "P11.resource-dialog"
+        "P11.editor-dialog"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
@@ -4535,22 +4524,6 @@
       "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
       "cases": [
         "P11.editor-dialog"
-      ],
-      "reviewStatus": "reviewed",
-      "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
-    },
-    {
-      "id": "apps/manual-studio/src/imageGeneration.ts:event:click:5906d17003780cf3:1",
-      "file": "apps/manual-studio/src/imageGeneration.ts",
-      "line": 161,
-      "kind": "event:click",
-      "expression": "document.getElementById('resource-generate-image')?.addEventListener('click',()=>{void open();})",
-      "feature": "P11",
-      "spec": "openspec/specs/ai-image-generation/spec.md",
-      "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
-      "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
-      "cases": [
-        "P11.resource-dialog"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
@@ -17369,38 +17342,6 @@
         "apps/manual-studio/src/imageGeneration.ts:handler:c2df4e9d7ef38aa7:1"
       ],
       "evidenceRecord": "editor image generation dialog",
-      "expected": {
-        "visible": "独立した作画起動文脈から新規生成/履歴選択し、挿入先で取消/再試行した後に同じ位置へ一度だけ挿入する",
-        "stored": "決定的ローカル画像APIと実バックエンドでPNGを生成し、選択した画像の相対参照とUndo後の本文を実原稿へ保存する",
-        "preserved": "生成失敗→再試行と挿入先取消時に指示・候補・元カーソルを保持し、別原稿の読込失敗後は選び直して同じ候補を使う。元PNG/履歴を保持する",
-        "returnTarget": "元の原稿/カーソル、指定した別原稿、取消時は開始したリソース/作画画面"
-      },
-      "requiredEvidence": [
-        "real-backend"
-      ],
-      "existingChecks": [
-        "scripts/test_manual_studio_managed_insertion.mjs"
-      ],
-      "notes": "新規生成と既存履歴の選択を検査する。API接続診断、生成中断、比較、元画像修正、指示再利用の別操作を検証済みとは扱わない。実OSドラッグと外部AI providerの証拠ではない。"
-    },
-    {
-      "id": "P11.resource-dialog",
-      "feature": "P11",
-      "entryPoints": [
-        "apps/manual-studio/src/imageGeneration.ts:factory:ede55a702ae091f7:1",
-        "apps/manual-studio/src/imageGeneration.ts:handler:8f03e9e3a84376a6:1",
-        "apps/manual-studio/src/imageGeneration.ts:event:click:5906d17003780cf3:1",
-        "apps/manual-studio/src/imageGeneration.ts:create:textarea:ffbc258b1ce0dd2b:1",
-        "apps/manual-studio/src/imageGeneration.ts:create:summary:a76412d5cfa8f09e:1",
-        "apps/manual-studio/src/imageGeneration.ts:factory:2b5452b86999750c:1",
-        "apps/manual-studio/src/imageGeneration.ts:factory:94157afb1043a559:1",
-        "apps/manual-studio/src/imageGeneration.ts:handler:805e4204d354db65:1",
-        "apps/manual-studio/src/imageGeneration.ts:handler:cb35a4de239921d0:1",
-        "apps/manual-studio/src/imageGeneration.ts:create:button:c3e4e8fe5c4bd7fb:1",
-        "apps/manual-studio/src/imageGeneration.ts:handler:c76ed6bdcc1056a8:1",
-        "apps/manual-studio/src/imageGeneration.ts:handler:c2df4e9d7ef38aa7:1"
-      ],
-      "evidenceRecord": "resource image generation dialog",
       "expected": {
         "visible": "独立した作画起動文脈から新規生成/履歴選択し、挿入先で取消/再試行した後に同じ位置へ一度だけ挿入する",
         "stored": "決定的ローカル画像APIと実バックエンドでPNGを生成し、選択した画像の相対参照とUndo後の本文を実原稿へ保存する",
