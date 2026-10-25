@@ -395,11 +395,11 @@ try {
   await page.getByRole('button', { name: 'Markdownソース', exact: true }).click();
   await editor.fill(initial); await saveContent(initial); await reset();
   async function insertExistingScreenshot() {
-    await page.locator('#editor-screenshot-ai').click();
+    if(!await page.locator('#editor-screenshot-options').isVisible())await page.locator('#editor-more > summary').click();await page.locator('#editor-screenshot-options').click();
     await page.locator('#editor-screenshot-method').getByRole('button', { name: '撮影済み画像を選ぶ', exact: true }).click();
     await page.locator('#editor-screenshot-existing').locator(`[data-screenshot-id="${screenshot.id}"]`).click();
   }
-  await page.locator('#editor-screenshot-ai').click();
+  if(!await page.locator('#editor-screenshot-options').isVisible())await page.locator('#editor-more > summary').click();await page.locator('#editor-screenshot-options').click();
   await page.locator('#editor-screenshot-method').getByRole('button', { name: '撮影済み画像を選ぶ', exact: true }).click();
   await page.locator('#editor-screenshot-existing').getByRole('button', { name: '閉じる', exact: true }).click();
   assert.equal(await editor.inputValue(), initial); assert.equal(await editor.evaluate(node => node.selectionStart), cursor);
@@ -416,7 +416,7 @@ try {
   records.push({ entry: 'editor existing screenshot insertion', caseId: 'P04.editor-existing', steps: ['start from same source cursor', 'choose actual adopted screenshot', 'close image selection and preserve manuscript/cursor', 'reopen and inject reference failure', 'retain adopted revision and manuscript', 'select same screenshot and insert immediately without confirmation or recapture', 'verify selected screenshot asset path and save one reference in actual manuscript', 'Undo and save original manuscript', 'preserve adopted revision and immutable original PNG'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
   await reset(); holdExistingList = true;
   const pendingList = new Promise(resolve => existingListStarted = resolve);
-  await page.locator('#editor-screenshot-ai').click();
+  if(!await page.locator('#editor-screenshot-options').isVisible())await page.locator('#editor-more > summary').click();await page.locator('#editor-screenshot-options').click();
   await page.locator('#editor-screenshot-method').getByRole('button', { name: '撮影済み画像を選ぶ', exact: true }).click();
   await Promise.race([pendingList, new Promise((_, reject) => { const timer = setTimeout(() => reject(Error('Existing screenshot list did not start')), 10000); timer.unref(); })]);
   await openDocument('P03.imported-card.md'); assert.equal(await editor.inputValue(), other);

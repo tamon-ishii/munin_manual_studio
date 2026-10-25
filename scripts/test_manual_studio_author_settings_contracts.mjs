@@ -61,7 +61,7 @@ try{
    assert.ok(await button.getAttribute('aria-label'));
    assert.equal(await button.getAttribute('title'),`${await button.getAttribute('aria-label')} (Ctrl/Cmd+Shift+Pで順に切替)`);
  }
- assert.equal(await page.locator('#editor-screenshot-ai').textContent(),'スクリーンショット');
+ assert.equal(await page.locator('#editor-screenshot-ai').textContent(),'撮影');
  assert.equal(await page.locator('#resource-generate-image').textContent(),'AI作画');
  for(const view of ['edit','preview','split']){
    await page.locator(`#panel-editor button[data-editor-view="${view}"]`).click();

@@ -664,11 +664,11 @@
       "reviewStatus": "reviewed"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
+      "id": "apps/manual-studio/index.html:html:button:e4dca39349fae51a:1",
       "file": "apps/manual-studio/index.html",
       "line": 14,
       "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"editor-screenshot-ai\" data-ui-icon=\"camera\" title=\"手動撮影・AI撮影・撮影済み画像から選んでカーソル位置に挿入\">",
+      "expression": "<button type=\"button\" id=\"editor-screenshot-ai\" data-ui-icon=\"camera\" title=\"画面を撮影してカーソル位置に挿入\">",
       "feature": "P04",
       "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
       "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
@@ -677,9 +677,7 @@
         "P04.success",
         "P04.cancel",
         "P04.failure-retry",
-        "P04.editor-existing",
-        "P04.editor-manual",
-        "P04.editor-ai"
+        "P04.editor-manual"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
@@ -1182,11 +1180,11 @@
       "reviewBasis": "Dedicated contract test exercising real browser controls and backend/mock persistence."
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:8daaa437e6aea7d2:1",
+      "id": "apps/manual-studio/index.html:html:button:e11bbdc940102ab7:1",
       "file": "apps/manual-studio/index.html",
-      "line": 74,
+      "line": 76,
       "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"screenshot-ai-create\" data-ui-icon=\"sparkle\">",
+      "expression": "<button type=\"button\" id=\"screenshot-ui-settings\" data-ui-icon=\"settings\">",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -1233,20 +1231,21 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
+      "id": "apps/manual-studio/index.html:html:button:79296a0967f23223:1",
       "file": "apps/manual-studio/index.html",
-      "line": 75,
+      "line": 14,
       "kind": "html:button",
-      "expression": "<button type=\"button\" id=\"resource-generate-image\" data-ui-icon=\"sparkle\">",
-      "feature": "P02",
-      "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
-      "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
+      "expression": "<button type=\"button\" id=\"editor-screenshot-options\" data-ui-icon=\"library\">",
+      "feature": "P04",
+      "spec": "openspec/specs/screenshot-library/spec.md",
+      "result": "Select existing screenshot or AI capture from the editor menu",
+      "returnTarget": "Original manuscript and selection",
       "cases": [
-        "P02.success",
-        "P02.cancel",
-        "P02.failure-retry",
-        "P11.resource-dialog"
+        "P04.success",
+        "P04.cancel",
+        "P04.failure-retry",
+        "P04.editor-existing",
+        "P04.editor-ai"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
@@ -4952,11 +4951,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:handler:ee2a0339b98641b5:1",
+      "id": "apps/manual-studio/src/main.ts:handler:d06afe66e1527040:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 852,
+      "line": 847,
       "kind": "handler",
-      "expression": "apply.onclick=()=>{try{if(root!==projectRoot||documentState?.page!==page)throw new Error('原稿が切り替わりました。');const value=Number(width.value);if(!Number.isInteger(value)||value<1||value>100)throw new Error('表示幅は1〜100の整数で指定してください。'); const raw=renderFigure({...selected,width:value,align:align.value as DocumentImage['align'],caption:caption.value,configured:true});const before=expected.slice(0,selected.start),after=expected.slice(selected.end);const gapBefore=before&&!before.endsWith('\\n\\n')?(before.endsWith('\\n')?'\\n':'\\n\\n'):'';const gapAfter=after&&!after.startsWith('\\n\\n')?(after.startsWith('\\n')?'\\n':'\\n\\n'):'';changeImageMarkdown(before+gapBefore+raw+gapAfter+after,expected);dialog.close();void milkdown.refreshImages();status('画像の表示設定を更新しました。'); }catch(error){feedback.textContent=String(error);}}",
+      "expression": "apply.onclick=()=>{try{if(root!==projectRoot||documentState?.page!==page)throw new Error('原稿が切り替わりました。');const value=width.value===''?null:Number(width.value);if(width.validity.badInput||(value!==null&&(!Number.isInteger(value)||value<1||value>100)))throw new Error('表示幅は空欄、または1〜100の整数で指定してください。'); const raw=renderFigure({...selected,width:value,align:align.value as DocumentImage['align'],caption:caption.value,configured:true});const before=expected.slice(0,selected.start),after=expected.slice(selected.end);const gapBefore=before&&!before.endsWith('\\n\\n')?(before.endsWith('\\n')?'\\n':'\\n\\n'):'';const gapAfter=after&&!after.startsWith('\\n\\n')?(after.startsWith('\\n')?'\\n':'\\n\\n'):'';changeImageMarkdown(before+gapBefore+raw+gapAfter+after,expected);dialog.close();void milkdown.refreshImages();status('画像の表示設定を更新しました。'); }catch(error){feedback.textContent=String(error);}}",
       "feature": "P02",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "保存と再読込の本文が一致する",
@@ -5071,11 +5070,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:531cf434ff791bbd:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:1e688b8d1a865b1c:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1344,
+      "line": 1366,
       "kind": "event:click",
-      "expression": "element(\"workspace-name\").addEventListener(\"click\", () => { if (document.getElementById(\"workspace-history-dialog\")) return; void work(async () => { const history = await loadWorkspaceHistory(native); const request=rpc; showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)), projectRoot ? [ {label:'原稿・画像の保存先',run:()=>{void showWorkspacePaths({root:()=>projectRoot,request, prepare:async()=>{if(busy)throw new Error('処理が終わってから変更してください。');await savedBeforeOperation();return confirmAllDocumentTabs();}, changed:async root=>{if(root===projectRoot)await work(()=>openProject(root,false));}, }).catch(error=>status(String(error),true));}}, {label:'撮影・挿入の処理時間',run:()=>{void showOperationTimings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}}, ] : []); }); })",
+      "expression": "element(\"workspace-name\").addEventListener(\"click\", () => { if (document.getElementById(\"workspace-history-dialog\")) return; void work(async () => { const history = await loadWorkspaceHistory(native); const request=rpc; showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)), projectRoot ? [ {label:'原稿・画像の保存先',run:()=>{void showWorkspacePaths({root:()=>projectRoot,request, prepare:async()=>{if(busy)throw new Error('処理が終わってから変更してください。');await savedBeforeOperation();return confirmAllDocumentTabs();}, changed:async root=>{if(root===projectRoot)await work(()=>openProject(root,false));}, }).catch(error=>status(String(error),true));}}, {label:'撮影・挿入の処理時間',run:()=>{void showOperationTimings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}}, {label:'撮影のUI探索設定',run:()=>{void showCaptureSettings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}}, ] : []); }); })",
       "feature": "P01",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "設定は選択したプロジェクトに保存される",
@@ -6610,11 +6609,11 @@
       "reviewNote": "Reviewed against test_manual_studio_ai_assistance.mjs: explicit review entry/reopen, stale batch rejection, no-AI batch application, editable replacement enablement and processing-time disablement."
     },
     {
-      "id": "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
+      "id": "apps/manual-studio/src/main.ts:event:click:9077b2f6c6fbd4ff:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 2733,
+      "line": 2784,
       "kind": "event:click",
-      "expression": "element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));})",
+      "expression": "element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere('manual').catch(error=>status(String(error),true));})",
       "feature": "P04",
       "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
       "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
@@ -6623,9 +6622,7 @@
         "P04.success",
         "P04.cancel",
         "P04.failure-retry",
-        "P04.editor-existing",
-        "P04.editor-manual",
-        "P04.editor-ai"
+        "P04.editor-manual"
       ],
       "reviewStatus": "reviewed",
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
@@ -8740,28 +8737,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/screenshotAi.ts:handler:3f9c1158c1a77cd8:1",
-      "file": "apps/manual-studio/src/screenshotAi.ts",
-      "line": 115,
-      "kind": "handler",
-      "expression": "document.getElementById('screenshot-ai-create')!.onclick=()=>{void create().catch(error=>options.report(String(error),true));}",
-      "feature": "P04",
-      "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
-      "result": "原本・手順・候補を保存する",
-      "returnTarget": "撮影開始位置と候補確認",
-      "cases": [
-        "P04.success",
-        "P04.cancel",
-        "P04.failure-retry"
-      ],
-      "reviewStatus": "needs-entry-specific-review"
-    },
-    {
-      "id": "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
+      "id": "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:e3a608fb9a3bc8f9:1",
       "file": "apps/manual-studio/src/screenshotLibrary.ts",
-      "line": 52,
+      "line": 55,
       "kind": "loop-controls",
-      "expression": "for (const shot of result.items) { if(!resources.matchesShot(shot.output,{path:shot.output||'',name:shot.name,kind:shot.recipe?'screenshot':'imported',usages:shot.usage.map(page=>({page,line:1,start:0,end:0,snippet:''}))}))continue; const card = document.createElement('article'); card.className = 'card screenshot-library-card';card.dataset.screenshotId=shot.id; const title = document.createElement('h2'); title.textContent = shot.name || '画像'; card.append(title);resources.decorateShot(card,shot.output); if (shot.thumbnail) { const image = document.createElement('img'); image.src = shot.thumbnail; image.alt = title.textContent; image.draggable=Boolean(shot.adopted);image.title='ドラッグして原稿に挿入';card.append(image); } const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${card.querySelector('.resource-usages') ? '' : shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' 編集候補あり' : ''}`.trim(); if(usage.textContent)card.append(usage); const sharedCount = result.items.filter(item => (item.capture_id || item.id) === (shot.capture_id || shot.id)).length; if (sharedCount > 1) { const shared = document.createElement('p'); shared.className = 'muted'; shared.textContent = `原本を共有：${sharedCount}画像 ／ 撮影1回`; card.append(shared); } const actions = document.createElement('div'); actions.className = 'actions screenshot-primary-actions'; card.append(actions); const management = document.createElement('details'); management.className = 'screenshot-management'; const managementTitle = document.createElement('summary'); managementTitle.textContent = '履歴・管理'; const managementActions = document.createElement('div'); managementActions.className = 'actions'; management.append(managementTitle, managementActions); card.append(management); function button(label: string, run: () => Promise<void>, disabled = false, secondary = false) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', () => { void options.work(async () => { if (root !== options.root()) return; await run(); if (root === options.root()) await refresh(); }); }); (secondary ? managementActions : actions).append(button); return button; } const insertButton = button('文書に挿入', async () => { if (!await options.chooseDestination()) return; const page = options.page(); if (!page) { progress.textContent = '先に挿入先の原稿を開いてください。'; throw new Error('挿入する原稿を開いてください。'); } const markdown = await options.request('screenshots-reference', { id: shot.id, page }, root); if (root === options.root() && page === options.page()) options.insert(markdown); }, !shot.adopted); button('共有関係', async () => { const items=(JSON.parse(await options.request('screenshots-list',{},root)) as {items:Screenshot[]}).items; const group=items.filter(item=>(item.capture_id||item.id)===(shot.capture_id||shot.id)); const {body}=featureDialog('共有原本と使用原稿');const source=document.createElement('p');source.textContent=`原本1枚 → 派生画像${group.length}枚 ／ 再撮影1回`;body.append(source); for(const item of group){const card=document.createElement('article');card.className='card';const title=document.createElement('h2');title.textContent=item.name||item.id;card.append(title);const usage=document.createElement('p');usage.textContent=item.usage.length?`使用原稿: ${item.usage.join('、')}`:'未使用';card.append(usage);body.append(card);} }, false, true); button('注釈テンプレートを保存',async()=>{const name=await requestText('テンプレート名');if(!name?.trim())return;await options.request('screenshots-change',{id:shot.id,json:{save_template:name.trim(),revision:versions.value}},root);progress.textContent='注釈テンプレートを保存しました。';},false,true); button('注釈テンプレートを適用',async()=>{ const templates=JSON.parse(await options.request('screenshots-templates',{},root)) as {items:Array<{id:string;name:string}>}; const {dialog,body}=featureDialog('注釈テンプレート');const select=document.createElement('select');select.setAttribute('aria-label','注釈テンプレート');for(const template of templates.items)select.add(new Option(template.name,template.id)); const message=document.createElement('p');message.role='status';if(!templates.items.length)message.textContent='画像の「履歴・管理」からテンプレートを保存してください。'; const apply=document.createElement('button');apply.type='button';apply.textContent='候補として適用';apply.disabled=!templates.items.length; apply.onclick=()=>{void options.work(async()=>{if(root!==options.root())return;try{await options.request('screenshots-change',{id:shot.id,json:{apply_template:select.value,revision:versions.value}},root);dialog.close();progress.textContent='注釈を候補として適用しました。MarkItsで再編集し、確認後に採用できます。';await refresh();}catch(error){message.textContent=String(error);}});}; const remove=document.createElement('button');remove.type='button';remove.textContent='テンプレートを削除';remove.disabled=!templates.items.length;remove.onclick=()=>{void options.work(async()=>{if(root!==options.root()||!await confirmAction('テンプレートを削除しますか？作成済み画像は保持されます。'))return;await options.request('screenshots-change',{id:shot.id,json:{delete_template:select.value}},root);select.selectedOptions[0]?.remove();apply.disabled=remove.disabled=!select.options.length;});};body.append(select,message,apply,remove); },shot.protected,true); button('名前を変更', async () => { const name = await requestText('名前（省略可）', shot.name); if (name !== null) await options.request('screenshots-change', { id: shot.id, json: { name } }, root); }, false, true); button(shot.protected ? '保護を解除' : '画像を保護', async () => { await options.request('screenshots-change', { id: shot.id, json: { protected: !shot.protected } }, root); }, false, true); const recaptureButton = button('再撮影', async () => { await recapture({ id: shot.id }, root); }, shot.protected || !shot.recipe); const versions = document.createElement('select'); versions.setAttribute('aria-label', '画像の編集版'); for (const edit of [...shot.edits].reverse()) versions.add(new Option(`${edit.id === shot.adopted ? '採用済み' : '候補'} ${edit.created_at}`, edit.id)); managementActions.append(versions); const copyButton = button('コピー', async () => { await options.request('screenshots-change', { id: shot.id, json: { copy: true, revision: versions.value } }, root); if (root === options.root()) progress.textContent = 'コピーを作成しました。「編集」で注釈を変更できます。'; }); const editStatus=document.createElement('p');editStatus.role='status';editStatus.className='screenshot-edit-status';editStatus.textContent=editStates.get(JSON.stringify([root,shot.id]))||'';card.append(editStatus); const editButton = button('編集', async () => { if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。'); editState(root,shot.id,'MarkItsを起動しています…'); try { await editManaged(shot.id, versions.value, root); editState(root,shot.id,'MarkItsで編集中です。「編集終了（Manual Studioへ返す）」で候補を保存します。'); } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; } }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile))); editButton.classList.add('primary'); const createInsertButton = document.createElement('button'); createInsertButton.type = 'button'; createInsertButton.textContent = 'MarkIts画像を作って挿入'; createInsertButton.disabled = shot.protected || !native || pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)); createInsertButton.addEventListener('click', () => { void options.work(async () => { if (root !== options.root() || !await options.chooseDestination()) return; const page = options.page(); if (!page) throw new Error('挿入する原稿を開いてください。'); editState(root,shot.id,'MarkItsで編集しています。保存後、画像を更新して原稿へ挿入します。'); await editManaged(shot.id,versions.value,root,(id,revision)=>{ void options.work(async()=>{ if(root!==options.root()||page!==options.page()){ progress.textContent='MarkIts画像は保存されました。原稿が切り替わったため挿入しませんでした。'; await refresh(); return; } if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。'); const update:{adopt:string;expected_revision?:string}={adopt:revision}; if(shot.adopted)update.expected_revision=shot.adopted; await options.request('screenshots-change',{id,json:update},root); if(root!==options.root()||page!==options.page())return; const markdown=await options.request('screenshots-reference',{id,page},root); if(root===options.root()&&page===options.page()){ options.insert(markdown); editState(root,id,'MarkIts画像を更新し、原稿へ挿入しました。'); progress.textContent='MarkIts画像を更新して原稿へ挿入しました。'; } await refresh(); }); }); }); }); actions.replaceChildren(createInsertButton, editButton, copyButton, insertButton, recaptureButton); const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで注釈';aiEdit.disabled=shot.protected||!shot.edits.length; aiEdit.onclick=()=>{if(root===options.root())void options.annotateScreenshot(shot.id);};actions.append(aiEdit); const adoptSelected = async (): Promise<boolean> => { if (!await confirmAction(`${shot.usage.length} 文書で使用する画像を選択版へ更新しますか？\\n再撮影候補の場合、寸法と注釈の位置を比較し、必要ならMarkItsで再編集してください。`)) return false; await options.request('screenshots-change', { id: shot.id, json: { adopt: versions.value, expected_revision: shot.adopted } }, root); return true; }; button('選択版を表示', async () => { const loaded = JSON.parse(await options.request('screenshots-image', { id: shot.id, json: { revision: versions.value } }, root)); if (root !== options.root()) return; const selectedId = versions.value; const images = [{label:'選択版',src:loaded.data,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===selectedId)?.scene)}]; if (shot.thumbnail) images.unshift({label:'採用済み',src:shot.thumbnail,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===shot.adopted)?.scene)}); const alreadyAdopted = selectedId === shot.adopted; // Comparison closes without touching the card; adoption is offered here so no panel round-trip is needed. await showImageComparison(images, '画像の比較・採用前の確認', true, { label: alreadyAdopted ? '採用済みの版です' : '選択版を採用', disabled: shot.protected || alreadyAdopted, run: adoptSelected }); }, false, true); button('選択版を採用', async () => { await adoptSelected(); }, shot.protected, true); button('削除', async () => { if (await confirmAction('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true); if (shot.edits.some(edit => edit.flattened)) { const warning = document.createElement(\"p\"); warning.textContent = \"平坦化画像からの取り込みです。失われた画素や注釈の編集状態は復元できません。\"; card.append(warning); } resources.compactCard(card,shot.usage.length);list.append(card); }",
+      "expression": "for (const shot of result.items) { if(!resources.matchesShot(shot.output,{path:shot.output||'',name:shot.name,kind:shot.recipe?'screenshot':'imported',usages:shot.usage.map(page=>({page,line:1,start:0,end:0,snippet:''}))}))continue; const card = document.createElement('article'); card.className = 'card screenshot-library-card';card.dataset.screenshotId=shot.id; const title = document.createElement('h2'); title.textContent = shot.name || '画像'; card.append(title);resources.decorateShot(card,shot.output); if (shot.thumbnail) { const image = document.createElement('img'); image.src = shot.thumbnail; image.alt = title.textContent; image.draggable=Boolean(shot.adopted);image.title='ドラッグして原稿に挿入';card.append(image); } const usage = document.createElement('p'); usage.className = 'muted'; usage.textContent = `${card.querySelector('.resource-usages') ? '' : shot.usage.length ? `使用: ${shot.usage.join('、')}` : '未使用'}${shot.protected ? ' 保護中' : ''}${shot.edits.some(edit => edit.requires_review && edit.id !== shot.adopted) ? ' 編集候補あり' : ''}`.trim(); if(usage.textContent)card.append(usage); const sharedCount = result.items.filter(item => (item.capture_id || item.id) === (shot.capture_id || shot.id)).length; if (sharedCount > 1) { const shared = document.createElement('p'); shared.className = 'muted'; shared.textContent = `原本を共有：${sharedCount}画像 ／ 撮影1回`; card.append(shared); } const actions = document.createElement('div'); actions.className = 'actions screenshot-primary-actions'; card.append(actions); const management = document.createElement('details'); management.className = 'screenshot-management'; const managementTitle = document.createElement('summary'); managementTitle.textContent = '履歴・管理'; const managementActions = document.createElement('div'); managementActions.className = 'actions'; management.append(managementTitle, managementActions); card.append(management); function button(label: string, run: () => Promise<void>, disabled = false, secondary = false) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', () => { void options.work(async () => { if (root !== options.root()) return; await run(); if (root === options.root()) await refresh(); }); }); (secondary ? managementActions : actions).append(button); return button; } const insertButton = button('文書に挿入', async () => { if (!await options.chooseDestination()) return; const page = options.page(); if (!page) { progress.textContent = '先に挿入先の原稿を開いてください。'; throw new Error('挿入する原稿を開いてください。'); } const markdown = await options.request('screenshots-reference', { id: shot.id, page }, root); if (root === options.root() && page === options.page()) options.insert(markdown); }, !shot.adopted); button('共有関係', async () => { const items=(JSON.parse(await options.request('screenshots-list',{},root)) as {items:Screenshot[]}).items; const group=items.filter(item=>(item.capture_id||item.id)===(shot.capture_id||shot.id)); const {body}=featureDialog('共有原本と使用原稿');const source=document.createElement('p');source.textContent=`原本1枚 → 派生画像${group.length}枚 ／ 再撮影1回`;body.append(source); for(const item of group){const card=document.createElement('article');card.className='card';const title=document.createElement('h2');title.textContent=item.name||item.id;card.append(title);const usage=document.createElement('p');usage.textContent=item.usage.length?`使用原稿: ${item.usage.join('、')}`:'未使用';card.append(usage);body.append(card);} }, false, true); button('注釈テンプレートを保存',async()=>{const name=await requestText('テンプレート名');if(!name?.trim())return;await options.request('screenshots-change',{id:shot.id,json:{save_template:name.trim(),revision:versions.value}},root);progress.textContent='注釈テンプレートを保存しました。';},false,true); button('注釈テンプレートを適用',async()=>{ const templates=JSON.parse(await options.request('screenshots-templates',{},root)) as {items:Array<{id:string;name:string}>}; const {dialog,body}=featureDialog('注釈テンプレート');const select=document.createElement('select');select.setAttribute('aria-label','注釈テンプレート');for(const template of templates.items)select.add(new Option(template.name,template.id)); const message=document.createElement('p');message.role='status';if(!templates.items.length)message.textContent='画像の「履歴・管理」からテンプレートを保存してください。'; const apply=document.createElement('button');apply.type='button';apply.textContent='候補として適用';apply.disabled=!templates.items.length; apply.onclick=()=>{void options.work(async()=>{if(root!==options.root())return;try{await options.request('screenshots-change',{id:shot.id,json:{apply_template:select.value,revision:versions.value}},root);dialog.close();progress.textContent='注釈を候補として適用しました。MarkItsで再編集し、確認後に採用できます。';await refresh();}catch(error){message.textContent=String(error);}});}; const remove=document.createElement('button');remove.type='button';remove.textContent='テンプレートを削除';remove.disabled=!templates.items.length;remove.onclick=()=>{void options.work(async()=>{if(root!==options.root()||!await confirmAction('テンプレートを削除しますか？作成済み画像は保持されます。'))return;await options.request('screenshots-change',{id:shot.id,json:{delete_template:select.value}},root);select.selectedOptions[0]?.remove();apply.disabled=remove.disabled=!select.options.length;});};body.append(select,message,apply,remove); },shot.protected,true); button('名前を変更', async () => { const name = await requestText('名前（省略可）', shot.name); if (name !== null) await options.request('screenshots-change', { id: shot.id, json: { name } }, root); }, false, true); button(shot.protected ? '保護を解除' : '画像を保護', async () => { await options.request('screenshots-change', { id: shot.id, json: { protected: !shot.protected } }, root); }, false, true); const recaptureButton = button('再撮影', async () => { await recapture({ id: shot.id }, root); }, shot.protected || !shot.recipe); const versions = document.createElement('select'); versions.setAttribute('aria-label', '画像の編集版'); for (const edit of [...shot.edits].reverse()) versions.add(new Option(`${edit.id === shot.adopted ? '採用済み' : '候補'} ${edit.created_at}`, edit.id)); managementActions.append(versions); const copyButton = button('コピー', async () => { await options.request('screenshots-change', { id: shot.id, json: { copy: true, revision: versions.value } }, root); if (root === options.root()) progress.textContent = 'コピーを作成しました。「編集」で注釈を変更できます。'; }); const editStatus=document.createElement('p');editStatus.role='status';editStatus.className='screenshot-edit-status';editStatus.textContent=editStates.get(JSON.stringify([root,shot.id]))||'';card.append(editStatus); const editButton = button('編集', async () => { if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。'); editState(root,shot.id,'MarkItsを起動しています…'); try { const apply=versions.value===shot.adopted; await editManaged(shot.id, versions.value, root,apply?(id,revision)=>{ void options.work(async()=>{ if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。'); await options.request('screenshots-change',{id,json:{adopt:revision,expected_revision:shot.adopted}},root); if(root!==options.root())return; editState(root,id,'編集内容を反映しました。'); await refresh(); }); }:undefined); editState(root,shot.id,apply?'MarkItsで編集中です。編集終了で画像に反映します。':'MarkItsで編集中です。編集終了で候補を保存します。'); } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; } }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile))); editButton.classList.add('primary'); const createInsertButton = document.createElement('button'); createInsertButton.type = 'button'; createInsertButton.textContent = 'MarkIts画像を作って挿入'; createInsertButton.disabled = shot.protected || !native || pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)); createInsertButton.addEventListener('click', () => { void options.work(async () => { if (root !== options.root() || !await options.chooseDestination()) return; const page = options.page(); if (!page) throw new Error('挿入する原稿を開いてください。'); editState(root,shot.id,'MarkItsで編集しています。保存後、画像を更新して原稿へ挿入します。'); await editManaged(shot.id,versions.value,root,(id,revision)=>{ void options.work(async()=>{ if(root!==options.root()||page!==options.page()){ progress.textContent='MarkIts画像は保存されました。原稿が切り替わったため挿入しませんでした。'; await refresh(); return; } if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。'); const update:{adopt:string;expected_revision?:string}={adopt:revision}; if(shot.adopted)update.expected_revision=shot.adopted; await options.request('screenshots-change',{id,json:update},root); if(root!==options.root()||page!==options.page())return; const markdown=await options.request('screenshots-reference',{id,page},root); if(root===options.root()&&page===options.page()){ options.insert(markdown); editState(root,id,'MarkIts画像を更新し、原稿へ挿入しました。'); progress.textContent='MarkIts画像を更新して原稿へ挿入しました。'; } await refresh(); }); }); }); }); actions.replaceChildren(createInsertButton, editButton, copyButton, insertButton, recaptureButton); const aiEdit=document.createElement('button');aiEdit.type='button';aiEdit.textContent='AIで注釈';aiEdit.disabled=shot.protected||!shot.edits.length; aiEdit.onclick=()=>{if(root===options.root())void options.annotateScreenshot(shot.id);};actions.append(aiEdit); const adoptSelected = async (): Promise<boolean> => { if (!await confirmAction(`${shot.usage.length} 文書で使用する画像を選択版へ更新しますか？\\n再撮影候補の場合、寸法と注釈の位置を比較し、必要ならMarkItsで再編集してください。`)) return false; await options.request('screenshots-change', { id: shot.id, json: { adopt: versions.value, expected_revision: shot.adopted } }, root); return true; }; button('選択版を表示', async () => { const loaded = JSON.parse(await options.request('screenshots-image', { id: shot.id, json: { revision: versions.value } }, root)); if (root !== options.root()) return; const selectedId = versions.value; const images = [{label:'選択版',src:loaded.data,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===selectedId)?.scene)}]; if (shot.thumbnail) images.unshift({label:'採用済み',src:shot.thumbnail,sceneCount:sceneCount(shot.edits.find(edit=>edit.id===shot.adopted)?.scene)}); const alreadyAdopted = selectedId === shot.adopted; // Comparison closes without touching the card; adoption is offered here so no panel round-trip is needed. await showImageComparison(images, '画像の比較・採用前の確認', true, { label: alreadyAdopted ? '採用済みの版です' : '選択版を採用', disabled: shot.protected || alreadyAdopted, run: adoptSelected }); }, false, true); button('選択版を採用', async () => { await adoptSelected(); }, shot.protected, true); const deleteButton=button('削除', async () => { if (await confirmAction('この画像を管理領域から削除しますか？')) await options.request('screenshots-change', { id: shot.id, json: { delete: true } }, root); }, shot.protected || shot.usage.length > 0, true); deleteButton.dataset.screenshotDelete='true'; deleteButton.title=shot.protected?'保護を解除してから削除してください。':shot.usage.length?'使用中です。使用文書から参照を削除してください。':'この撮影画像を削除'; if (shot.edits.some(edit => edit.flattened)) { const warning = document.createElement(\"p\"); warning.textContent = \"平坦化画像からの取り込みです。失われた画素や注釈の編集状態は復元できません。\"; card.append(warning); } resources.compactCard(card,shot.usage.length);list.append(card); }",
       "feature": "P03",
       "spec": "openspec/specs/manual-authoring/spec.md",
       "result": "相対参照・説明・管理関連を保存する",
@@ -9064,11 +9044,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/screenshotLibrary.ts:factory:1f1142176b479033:1",
+      "id": "apps/manual-studio/src/screenshotLibrary.ts:factory:8e9476ac975b76b5:1",
       "file": "apps/manual-studio/src/screenshotLibrary.ts",
-      "line": 98,
+      "line": 101,
       "kind": "factory",
-      "expression": "button('編集', async () => { if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。'); editState(root,shot.id,'MarkItsを起動しています…'); try { await editManaged(shot.id, versions.value, root); editState(root,shot.id,'MarkItsで編集中です。「編集終了（Manual Studioへ返す）」で候補を保存します。'); } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; } }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)))",
+      "expression": "button('編集', async () => { if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。'); editState(root,shot.id,'MarkItsを起動しています…'); try { const apply=versions.value===shot.adopted; await editManaged(shot.id, versions.value, root,apply?(id,revision)=>{ void options.work(async()=>{ if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。'); await options.request('screenshots-change',{id,json:{adopt:revision,expected_revision:shot.adopted}},root); if(root!==options.root())return; editState(root,id,'編集内容を反映しました。'); await refresh(); }); }:undefined); editState(root,shot.id,apply?'MarkItsで編集中です。編集終了で画像に反映します。':'MarkItsで編集中です。編集終了で候補を保存します。'); } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; } }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)))",
       "feature": "P05",
       "spec": "openspec/specs/resource-library/spec.md",
       "result": "途中終了・取り込み失敗時は原本と採用版を保持。再確認で候補を1版だけ保存する。",
@@ -10950,11 +10930,11 @@
       "reviewStatus": "needs-entry-specific-review"
     },
     {
-      "id": "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
+      "id": "apps/manual-studio/src/main.ts:binding-loop:e3051fe08b0b930f:1",
       "file": "apps/manual-studio/src/main.ts",
-      "line": 1685,
+      "line": 1702,
       "kind": "binding-loop",
-      "expression": "launchCommands.forEach((command, index) => { const row = document.createElement(\"div\"); row.className = \"launch-command-row\"; const nameLabel = document.createElement(\"label\"); nameLabel.textContent = \"表示名（省略可）\"; const name = document.createElement(\"input\"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name); const programLabel = document.createElement(\"label\"); programLabel.className = \"launch-program-field\"; programLabel.textContent = \"起動パス\"; const programWrap = document.createElement(\"div\"); programWrap.className = \"app-picker-row\"; const program = document.createElement(\"input\"); program.value = command.program; program.placeholder = \"例: uv run start_manual_studio.py\"; program.dataset.launchProgram = String(index); const browse = document.createElement(\"button\"); browse.type = \"button\"; browse.textContent = \"選択\"; browse.dataset.launchBrowse = String(index); programWrap.append(program, browse); programLabel.append(programWrap); const programHint = document.createElement('small'); programHint.className = 'muted'; programHint.textContent = '引数もまとめて入力できます。スペースを含むパスや引数は引用符（\"）で囲んでください。下の起動引数は末尾に追加されます。'; programLabel.append(programHint); const workingDirectoryLabel = document.createElement(\"label\"); workingDirectoryLabel.className = \"launch-working-directory-field\"; workingDirectoryLabel.textContent = \"作業フォルダ（省略時はプロジェクト）\"; const workingDirectoryWrap = document.createElement(\"div\"); workingDirectoryWrap.className = \"app-picker-row\"; const workingDirectory = document.createElement(\"input\"); workingDirectory.value = command.workingDirectory || \"\"; workingDirectory.placeholder = \"例: /home/user/my-app\"; workingDirectory.dataset.launchWorkingDirectory = String(index); const browseWorkingDirectory = document.createElement(\"button\"); browseWorkingDirectory.type = \"button\"; browseWorkingDirectory.textContent = \"選択\"; browseWorkingDirectory.dataset.launchWorkingDirectoryBrowse = String(index); workingDirectoryWrap.append(workingDirectory, browseWorkingDirectory); workingDirectoryLabel.append(workingDirectoryWrap); const argsLabel = document.createElement(\"label\"); argsLabel.textContent = \"起動引数（1行に1つ）\"; const args = document.createElement(\"textarea\"); args.rows = 2; args.value = command.args.join(\"\\n\"); args.dataset.launchArgs = String(index); argsLabel.append(args); name.addEventListener(\"input\", () => { command.name = name.value; }); program.addEventListener(\"input\", () => { command.program = program.value; }); workingDirectory.addEventListener(\"input\", () => { command.workingDirectory = workingDirectory.value; }); args.addEventListener(\"input\", () => { command.args = args.value.split(\"\\n\").filter(value => value.length > 0); }); const remove = document.createElement(\"button\"); remove.type = \"button\"; remove.textContent = \"削除\"; remove.dataset.launchRemove = String(index); const test = document.createElement(\"button\"); test.type = \"button\"; test.textContent = \"起動確認\"; test.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"起動確認はデスクトップ版で利用できます。\"); await invoke(\"test_launch_application\", { program: program.value, args: args.value.split(\"\\n\").filter(value => value.length > 0), root: projectRoot || undefined, workingDirectory: workingDirectory.value.trim() || undefined }); status(\"対象アプリを起動しました。\"); }); }); const actions = document.createElement(\"div\"); actions.className = \"actions launch-row-actions\"; actions.append(test, remove); row.append(nameLabel, programLabel, workingDirectoryLabel, argsLabel, actions); list.append(row); })",
+      "expression": "launchCommands.forEach((command, index) => { const row = document.createElement(\"div\"); row.className = \"launch-command-row\"; const nameLabel = document.createElement(\"label\"); nameLabel.textContent = \"表示名（省略可）\"; const name = document.createElement(\"input\"); name.value = command.name; name.dataset.launchName = String(index); nameLabel.append(name); const programLabel = document.createElement(\"label\"); programLabel.className = \"launch-program-field\"; programLabel.textContent = \"起動パス\"; const programWrap = document.createElement(\"div\"); programWrap.className = \"app-picker-row\"; const program = document.createElement(\"input\"); program.value = command.program; program.placeholder = \"例: uv run start_manual_studio.py\"; program.dataset.launchProgram = String(index); const browse = document.createElement(\"button\"); browse.type = \"button\"; browse.textContent = \"選択\"; browse.dataset.launchBrowse = String(index); programWrap.append(program, browse); programLabel.append(programWrap); const programHint = document.createElement('small'); programHint.className = 'muted'; programHint.textContent = 'HTTP/HTTPSのURLは標準ブラウザで開きます（起動引数・作業フォルダは使用しません）。アプリは引数もまとめて入力できます。スペースを含むパスや引数は引用符（\"）で囲んでください。下の起動引数は末尾に追加されます。'; programLabel.append(programHint); const workingDirectoryLabel = document.createElement(\"label\"); workingDirectoryLabel.className = \"launch-working-directory-field\"; workingDirectoryLabel.textContent = \"作業フォルダ（省略時はプロジェクト）\"; const workingDirectoryWrap = document.createElement(\"div\"); workingDirectoryWrap.className = \"app-picker-row\"; const workingDirectory = document.createElement(\"input\"); workingDirectory.value = command.workingDirectory || \"\"; workingDirectory.placeholder = \"例: /home/user/my-app\"; workingDirectory.dataset.launchWorkingDirectory = String(index); const browseWorkingDirectory = document.createElement(\"button\"); browseWorkingDirectory.type = \"button\"; browseWorkingDirectory.textContent = \"選択\"; browseWorkingDirectory.dataset.launchWorkingDirectoryBrowse = String(index); workingDirectoryWrap.append(workingDirectory, browseWorkingDirectory); workingDirectoryLabel.append(workingDirectoryWrap); const argsLabel = document.createElement(\"label\"); argsLabel.textContent = \"起動引数（1行に1つ）\"; const args = document.createElement(\"textarea\"); args.rows = 2; args.value = command.args.join(\"\\n\"); args.dataset.launchArgs = String(index); argsLabel.append(args); name.addEventListener(\"input\", () => { command.name = name.value; }); program.addEventListener(\"input\", () => { command.program = program.value; }); workingDirectory.addEventListener(\"input\", () => { command.workingDirectory = workingDirectory.value; }); args.addEventListener(\"input\", () => { command.args = args.value.split(\"\\n\").filter(value => value.length > 0); }); const remove = document.createElement(\"button\"); remove.type = \"button\"; remove.textContent = \"削除\"; remove.dataset.launchRemove = String(index); const test = document.createElement(\"button\"); test.type = \"button\"; test.textContent = \"起動確認\"; test.addEventListener(\"click\", () => { void work(async () => { if (!native) throw new Error(\"起動確認はデスクトップ版で利用できます。\"); await invoke(\"test_launch_application\", { program: program.value, args: args.value.split(\"\\n\").filter(value => value.length > 0), root: projectRoot || undefined, workingDirectory: workingDirectory.value.trim() || undefined }); status(\"対象アプリを起動しました。\"); }); }); const actions = document.createElement(\"div\"); actions.className = \"actions launch-row-actions\"; actions.append(test, remove); row.append(nameLabel, programLabel, workingDirectoryLabel, argsLabel, actions); list.append(row); })",
       "feature": "P13",
       "spec": "openspec/specs/application-launch-settings/spec.md",
       "result": "端末/プロジェクト/接続先の所有範囲に保存する",
@@ -13475,11 +13455,11 @@
       "reviewBasis": "managed-insertionの明示8ケースだけで、同じ原稿/意味上のカーソル、取消、失敗再試行、別原稿、実保存/再読込、Undo、原画像/履歴/採用版保持を確認。source/richの新規drag挿入を含む。OS操作・手動/AI撮影・画像置換・全providerは別検査。"
     },
     {
-      "id": "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
+      "id": "apps/manual-studio/src/recordingControl.ts:event:click:4beb2cfd3766aa1f:1",
       "file": "apps/manual-studio/src/recordingControl.ts",
-      "line": 18,
+      "line": 68,
       "kind": "event:click",
-      "expression": "capture.addEventListener('click',()=>{void(async()=>{ if(running)return;running=true;capture.disabled=cancel.disabled=true;capture.textContent='撮影してMarkItsを起動中…'; try{await emitTo('main','manual-studio-screenshot-requested');await invoke('finish_operation_recording');} catch(failure){error.textContent=`撮影に失敗しました: ${String(failure)}`;await invoke('show_recording_control_again').catch(()=>{});await emitTo('main','manual-studio-screenshot-failed',String(failure)).catch(()=>{});running=false;capture.hidden=true;cancel.disabled=false;cancel.textContent='閉じてMunin Manual Studioに戻る';} })();})",
+      "expression": "capture.addEventListener('click',()=>{void(async()=>{ if(running||!settingsReady)return; if(!depth.reportValidity())return; running=true;capture.disabled=cancel.disabled=depth.disabled=true; try{await invoke('operation_recording_capture_settings',{maxDepth:Number(depth.value)});} catch(failure){error.textContent=`UI探索設定を保存できません: ${String(failure)}`;running=false;capture.disabled=cancel.disabled=depth.disabled=false;return;} error.textContent='';capture.textContent='撮影してMarkItsを起動中…'; try{await emitTo('main','manual-studio-screenshot-requested');await invoke('finish_operation_recording');} catch(failure){error.textContent=`撮影に失敗しました: ${String(failure)}`;await invoke('show_recording_control_again').catch(()=>{});await emitTo('main','manual-studio-screenshot-failed',String(failure)).catch(()=>{});running=false;capture.hidden=true;cancel.disabled=false;cancel.textContent='閉じてMunin Manual Studioに戻る';} })();})",
       "feature": "P04",
       "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
       "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
@@ -13798,6 +13778,219 @@
         "P04.capture-markits-insert"
       ],
       "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/recording-control.html:html:input:aadd491add24957b:1",
+      "file": "apps/manual-studio/recording-control.html",
+      "line": 4,
+      "kind": "html:input",
+      "expression": "<input id=\"capture-depth\" type=\"number\" min=\"1\" max=\"128\" step=\"1\" value=\"64\" required aria-label=\"UI探索の最大階層\" />",
+      "feature": "P04",
+      "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
+      "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
+      "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
+      "cases": [
+        "P04.success",
+        "P04.cancel",
+        "P04.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/recording-control.html:html:button:305e0b26a5e6c526:1",
+      "file": "apps/manual-studio/recording-control.html",
+      "line": 4,
+      "kind": "html:button",
+      "expression": "<button id=\"capture-settings-retry\" type=\"button\" hidden>",
+      "feature": "P04",
+      "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
+      "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
+      "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
+      "cases": [
+        "P04.success",
+        "P04.cancel",
+        "P04.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:create:button:cd6f77ec265c5938:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 842,
+      "kind": "create:button",
+      "expression": "noWidth=document.createElement('button')",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:handler:0f39479cded3641a:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 843,
+      "kind": "handler",
+      "expression": "noWidth.onclick=()=>{width.value='';feedback.textContent='表示幅を指定なしにしました。「表示設定を適用」で反映します。';}",
+      "feature": "P02",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "保存と再読込の本文が一致する",
+      "returnTarget": "開始した原稿と選択位置",
+      "cases": [
+        "P02.success",
+        "P02.cancel",
+        "P02.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:22c16b6c5d971b99:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 1361,
+      "kind": "event:click",
+      "expression": "element('screenshot-ui-settings').addEventListener('click',()=>{ if(!projectRoot){status('プロジェクトを開いてください。',true);return;} void showCaptureSettings({root:()=>projectRoot,request:rpc}).catch(error=>status(String(error),true)); })",
+      "feature": "P01",
+      "spec": "openspec/specs/manual-authoring/spec.md",
+      "result": "設定は選択したプロジェクトに保存される",
+      "returnTarget": "開始したプロジェクトの原稿",
+      "cases": [
+        "P01.success",
+        "P01.cancel",
+        "P01.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/main.ts:event:click:283535d86c15130d:1",
+      "file": "apps/manual-studio/src/main.ts",
+      "line": 2785,
+      "kind": "event:click",
+      "expression": "element('editor-screenshot-options').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));})",
+      "feature": "P04",
+      "spec": "openspec/specs/screenshot-library/spec.md",
+      "result": "Select existing screenshot or AI capture from the editor menu",
+      "returnTarget": "Original manuscript and selection",
+      "cases": [
+        "P04.success",
+        "P04.cancel",
+        "P04.failure-retry",
+        "P04.editor-existing",
+        "P04.editor-ai"
+      ],
+      "reviewStatus": "reviewed"
+    },
+    {
+      "id": "apps/manual-studio/src/recordingControl.ts:event:click:00d0a92240870c65:1",
+      "file": "apps/manual-studio/src/recordingControl.ts",
+      "line": 57,
+      "kind": "event:click",
+      "expression": "settingsRetry.addEventListener('click',()=>{void loadSettings();})",
+      "feature": "P04",
+      "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
+      "result": "取消/失敗時は原稿と元画像を保持。明示挿入時に相対参照を保存しUndoで本文を復元",
+      "returnTarget": "開始した原稿/カーソル、選んだ別原稿、取消時の開始画面",
+      "cases": [
+        "P04.success",
+        "P04.cancel",
+        "P04.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/screenshotAi.ts:event:click:e2350bec4eb8c938:1",
+      "file": "apps/manual-studio/src/screenshotAi.ts",
+      "line": 115,
+      "kind": "event:click",
+      "expression": "document.getElementById('screenshot-ai-create')?.addEventListener('click',()=>{void create().catch(error=>options.report(String(error),true));})",
+      "feature": "P04",
+      "spec": "openspec/specs/ai-screenshot-authoring/spec.md",
+      "result": "原本・手順・候補を保存する",
+      "returnTarget": "撮影開始位置と候補確認",
+      "cases": [
+        "P04.success",
+        "P04.cancel",
+        "P04.failure-retry"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceSettings.ts:create:input:7e14fbee502bd71f:1",
+      "file": "apps/manual-studio/src/workspaceSettings.ts",
+      "line": 47,
+      "kind": "create:input",
+      "expression": "depth=document.createElement('input')",
+      "feature": "P21",
+      "spec": "docs/specs/workspace-storage.md",
+      "result": "設定・記録の確認と所有者を保持した保存",
+      "returnTarget": "開始した原稿またはプロジェクト",
+      "cases": [
+        "P21.contracts"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceSettings.ts:create:button:a4c47b1b68033d29:2",
+      "file": "apps/manual-studio/src/workspaceSettings.ts",
+      "line": 50,
+      "kind": "create:button",
+      "expression": "save=document.createElement('button')",
+      "feature": "P21",
+      "spec": "docs/specs/workspace-storage.md",
+      "result": "設定・記録の確認と所有者を保持した保存",
+      "returnTarget": "開始した原稿またはプロジェクト",
+      "cases": [
+        "P21.contracts"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceSettings.ts:create:button:c84cdd44fbe16dca:2",
+      "file": "apps/manual-studio/src/workspaceSettings.ts",
+      "line": 51,
+      "kind": "create:button",
+      "expression": "cancel=document.createElement('button')",
+      "feature": "P21",
+      "spec": "docs/specs/workspace-storage.md",
+      "result": "設定・記録の確認と所有者を保持した保存",
+      "returnTarget": "開始した原稿またはプロジェクト",
+      "cases": [
+        "P21.contracts"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceSettings.ts:handler:7a6088bc37be955f:2",
+      "file": "apps/manual-studio/src/workspaceSettings.ts",
+      "line": 51,
+      "kind": "handler",
+      "expression": "cancel.onclick=()=>dialog.close()",
+      "feature": "P21",
+      "spec": "docs/specs/workspace-storage.md",
+      "result": "設定・記録の確認と所有者を保持した保存",
+      "returnTarget": "開始した原稿またはプロジェクト",
+      "cases": [
+        "P21.contracts"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
+    },
+    {
+      "id": "apps/manual-studio/src/workspaceSettings.ts:handler:94863be63ffaa8ba:1",
+      "file": "apps/manual-studio/src/workspaceSettings.ts",
+      "line": 53,
+      "kind": "handler",
+      "expression": "form.onsubmit=event=>{event.preventDefault();if(!form.reportValidity())return;save.disabled=true;void(async()=>{try{ if(root!==options.root())throw new Error('プロジェクトが切り替わりました。開き直してください。'); await options.request('capture-settings-save',{json:{max_depth:Number(depth.value)}},root);dialog.close(); }catch(reason){error.textContent=String(reason);}finally{save.disabled=false;}})();}",
+      "feature": "P21",
+      "spec": "docs/specs/workspace-storage.md",
+      "result": "設定・記録の確認と所有者を保持した保存",
+      "returnTarget": "開始した原稿またはプロジェクト",
+      "cases": [
+        "P21.contracts"
+      ],
+      "reviewStatus": "needs-entry-specific-review"
     }
   ],
   "cases": [
@@ -13811,9 +14004,10 @@
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
-        "apps/manual-studio/src/main.ts:event:click:531cf434ff791bbd:1",
+        "apps/manual-studio/src/main.ts:event:click:1e688b8d1a865b1c:1",
         "apps/manual-studio/src/main.ts:event:submit:cc7623e78547325e:1",
         "apps/manual-studio/src/main.ts:event:click:7b6f231ed0065601:1",
+        "apps/manual-studio/src/main.ts:event:click:22c16b6c5d971b99:1",
         "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
         "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
         "apps/manual-studio/src/main.ts:event:contextmenu:ccf01cd872a66b17:1",
@@ -13857,9 +14051,10 @@
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
-        "apps/manual-studio/src/main.ts:event:click:531cf434ff791bbd:1",
+        "apps/manual-studio/src/main.ts:event:click:1e688b8d1a865b1c:1",
         "apps/manual-studio/src/main.ts:event:submit:cc7623e78547325e:1",
         "apps/manual-studio/src/main.ts:event:click:7b6f231ed0065601:1",
+        "apps/manual-studio/src/main.ts:event:click:22c16b6c5d971b99:1",
         "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
         "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
         "apps/manual-studio/src/main.ts:event:contextmenu:ccf01cd872a66b17:1",
@@ -13903,9 +14098,10 @@
         "apps/manual-studio/index.html:html:button:b8f24d13d88bdaa9:1",
         "apps/manual-studio/src/main.ts:event:click:ddbc027d2a0b745e:1",
         "apps/manual-studio/src/main.ts:event:click:b579cefecd203b40:1",
-        "apps/manual-studio/src/main.ts:event:click:531cf434ff791bbd:1",
+        "apps/manual-studio/src/main.ts:event:click:1e688b8d1a865b1c:1",
         "apps/manual-studio/src/main.ts:event:submit:cc7623e78547325e:1",
         "apps/manual-studio/src/main.ts:event:click:7b6f231ed0065601:1",
+        "apps/manual-studio/src/main.ts:event:click:22c16b6c5d971b99:1",
         "apps/manual-studio/src/main.ts:event:click:0b9c62ddacd6979b:1",
         "apps/manual-studio/src/main.ts:event:keydown:176094711fbc2419:1",
         "apps/manual-studio/src/main.ts:event:contextmenu:ccf01cd872a66b17:1",
@@ -13988,8 +14184,7 @@
         "apps/manual-studio/index.html:html:button:7a46bb85968f0603:1",
         "apps/manual-studio/index.html:html:button:260a0cf0c72949e3:1",
         "apps/manual-studio/index.html:html:textarea:165a77c9f6f5e4e8:1",
-        "apps/manual-studio/index.html:html:button:8daaa437e6aea7d2:1",
-        "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
+        "apps/manual-studio/index.html:html:button:e11bbdc940102ab7:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:3",
         "apps/manual-studio/index.html:html:button:0c860bdc09a00af9:1",
         "apps/manual-studio/index.html:html:button:178ab219bd01d50e:1",
@@ -14018,10 +14213,12 @@
         "apps/manual-studio/src/main.ts:create:button:1ab6d6d0d20ed1b0:1",
         "apps/manual-studio/src/main.ts:handler:c3e1c62f599ba311:1",
         "apps/manual-studio/src/main.ts:create:input:229faac02e9702fe:1",
+        "apps/manual-studio/src/main.ts:create:button:cd6f77ec265c5938:1",
+        "apps/manual-studio/src/main.ts:handler:0f39479cded3641a:1",
         "apps/manual-studio/src/main.ts:create:select:7d487735e8030016:1",
         "apps/manual-studio/src/main.ts:create:input:a0a5e0eded9038fb:1",
         "apps/manual-studio/src/main.ts:create:button:19487002d798c079:1",
-        "apps/manual-studio/src/main.ts:handler:ee2a0339b98641b5:1",
+        "apps/manual-studio/src/main.ts:handler:d06afe66e1527040:1",
         "apps/manual-studio/src/main.ts:event:click:c13fad671eb26f0a:1",
         "apps/manual-studio/src/main.ts:event:click:cbc8c9b2c823830d:1",
         "apps/manual-studio/src/main.ts:event:keydown:14463ac8643f00da:1",
@@ -14229,8 +14426,7 @@
         "apps/manual-studio/index.html:html:button:7a46bb85968f0603:1",
         "apps/manual-studio/index.html:html:button:260a0cf0c72949e3:1",
         "apps/manual-studio/index.html:html:textarea:165a77c9f6f5e4e8:1",
-        "apps/manual-studio/index.html:html:button:8daaa437e6aea7d2:1",
-        "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
+        "apps/manual-studio/index.html:html:button:e11bbdc940102ab7:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:3",
         "apps/manual-studio/index.html:html:button:0c860bdc09a00af9:1",
         "apps/manual-studio/index.html:html:button:178ab219bd01d50e:1",
@@ -14259,10 +14455,12 @@
         "apps/manual-studio/src/main.ts:create:button:1ab6d6d0d20ed1b0:1",
         "apps/manual-studio/src/main.ts:handler:c3e1c62f599ba311:1",
         "apps/manual-studio/src/main.ts:create:input:229faac02e9702fe:1",
+        "apps/manual-studio/src/main.ts:create:button:cd6f77ec265c5938:1",
+        "apps/manual-studio/src/main.ts:handler:0f39479cded3641a:1",
         "apps/manual-studio/src/main.ts:create:select:7d487735e8030016:1",
         "apps/manual-studio/src/main.ts:create:input:a0a5e0eded9038fb:1",
         "apps/manual-studio/src/main.ts:create:button:19487002d798c079:1",
-        "apps/manual-studio/src/main.ts:handler:ee2a0339b98641b5:1",
+        "apps/manual-studio/src/main.ts:handler:d06afe66e1527040:1",
         "apps/manual-studio/src/main.ts:event:click:c13fad671eb26f0a:1",
         "apps/manual-studio/src/main.ts:event:click:cbc8c9b2c823830d:1",
         "apps/manual-studio/src/main.ts:event:keydown:14463ac8643f00da:1",
@@ -14470,8 +14668,7 @@
         "apps/manual-studio/index.html:html:button:7a46bb85968f0603:1",
         "apps/manual-studio/index.html:html:button:260a0cf0c72949e3:1",
         "apps/manual-studio/index.html:html:textarea:165a77c9f6f5e4e8:1",
-        "apps/manual-studio/index.html:html:button:8daaa437e6aea7d2:1",
-        "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
+        "apps/manual-studio/index.html:html:button:e11bbdc940102ab7:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:3",
         "apps/manual-studio/index.html:html:button:0c860bdc09a00af9:1",
         "apps/manual-studio/index.html:html:button:178ab219bd01d50e:1",
@@ -14500,10 +14697,12 @@
         "apps/manual-studio/src/main.ts:create:button:1ab6d6d0d20ed1b0:1",
         "apps/manual-studio/src/main.ts:handler:c3e1c62f599ba311:1",
         "apps/manual-studio/src/main.ts:create:input:229faac02e9702fe:1",
+        "apps/manual-studio/src/main.ts:create:button:cd6f77ec265c5938:1",
+        "apps/manual-studio/src/main.ts:handler:0f39479cded3641a:1",
         "apps/manual-studio/src/main.ts:create:select:7d487735e8030016:1",
         "apps/manual-studio/src/main.ts:create:input:a0a5e0eded9038fb:1",
         "apps/manual-studio/src/main.ts:create:button:19487002d798c079:1",
-        "apps/manual-studio/src/main.ts:handler:ee2a0339b98641b5:1",
+        "apps/manual-studio/src/main.ts:handler:d06afe66e1527040:1",
         "apps/manual-studio/src/main.ts:event:click:c13fad671eb26f0a:1",
         "apps/manual-studio/src/main.ts:event:click:cbc8c9b2c823830d:1",
         "apps/manual-studio/src/main.ts:event:keydown:14463ac8643f00da:1",
@@ -14684,7 +14883,7 @@
         "apps/manual-studio/src/main.ts:event:input:d3096fb11bc7f2dc:1",
         "apps/manual-studio/src/main.ts:event:input:b56f782293e20bb2:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:60d5d16cca81b3bd:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:e3a608fb9a3bc8f9:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:1779852d0b3cd7bd:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:handler:b03ebe488b2d0155:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:c84cdd44fbe16dca:1",
@@ -14746,7 +14945,7 @@
         "apps/manual-studio/src/main.ts:event:input:d3096fb11bc7f2dc:1",
         "apps/manual-studio/src/main.ts:event:input:b56f782293e20bb2:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:60d5d16cca81b3bd:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:e3a608fb9a3bc8f9:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:1779852d0b3cd7bd:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:handler:b03ebe488b2d0155:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:c84cdd44fbe16dca:1",
@@ -14808,7 +15007,7 @@
         "apps/manual-studio/src/main.ts:event:input:d3096fb11bc7f2dc:1",
         "apps/manual-studio/src/main.ts:event:input:b56f782293e20bb2:1",
         "apps/manual-studio/src/resourceBrowser.ts:loop-controls:60d5d16cca81b3bd:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:931d21c6f83d7801:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:loop-controls:e3a608fb9a3bc8f9:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:1779852d0b3cd7bd:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:handler:b03ebe488b2d0155:1",
         "apps/manual-studio/src/screenshotWorkflow.ts:create:button:c84cdd44fbe16dca:1",
@@ -14853,13 +15052,11 @@
       "feature": "P04",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
         "apps/manual-studio/index.html:html:button:ddf5d8f5d796bcc7:1",
         "apps/manual-studio/index.html:html:button:9d794288308358f9:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:4",
         "apps/manual-studio/index.html:html:input:2026d91a7b3dfbb7:1",
         "apps/manual-studio/index.html:html:button:dffd1c98d825dd05:1",
-        "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
         "apps/manual-studio/src/main.ts:loop-controls:4bd5fa6fb4f159d0:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:570847ccefa74ca4:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:8d950f483c59b9c7:1",
@@ -14887,16 +15084,23 @@
         "apps/manual-studio/src/screenshotAi.ts:create:select:5791b9aa8456a6fe:2",
         "apps/manual-studio/src/screenshotAi.ts:event:input:e7fe0487a1030a9e:1",
         "apps/manual-studio/src/screenshotAi.ts:handler:1dc9a819f98a40bf:1",
-        "apps/manual-studio/src/screenshotAi.ts:handler:3f9c1158c1a77cd8:1",
+        "apps/manual-studio/src/screenshotAi.ts:event:click:e2350bec4eb8c938:1",
         "apps/manual-studio/src/screenshotAi.ts:create:input:aee62e72e164536c:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:8caceee069117511:1",
         "apps/manual-studio/src/screenshotAi.ts:handler:4476b793b1dc049f:1",
         "apps/manual-studio/recording-control.html:html:button:4c18f8e99fba612c:1",
+        "apps/manual-studio/recording-control.html:html:input:aadd491add24957b:1",
+        "apps/manual-studio/recording-control.html:html:button:305e0b26a5e6c526:1",
         "apps/manual-studio/recording-control.html:html:button:e858670661cbf8b2:1",
         "apps/manual-studio/src/recordingControl.ts:event:keydown:5485a89e0932726c:1",
         "apps/manual-studio/src/recordingControl.ts:event:click:a3d081af1599368a:1",
-        "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
-        "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1"
+        "apps/manual-studio/src/recordingControl.ts:event:click:4beb2cfd3766aa1f:1",
+        "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1",
+        "apps/manual-studio/src/recordingControl.ts:event:click:00d0a92240870c65:1",
+        "apps/manual-studio/index.html:html:button:e4dca39349fae51a:1",
+        "apps/manual-studio/src/main.ts:event:click:9077b2f6c6fbd4ff:1",
+        "apps/manual-studio/index.html:html:button:79296a0967f23223:1",
+        "apps/manual-studio/src/main.ts:event:click:283535d86c15130d:1"
       ],
       "expected": {
         "visible": "対象アプリと撮影候補を確認できる",
@@ -14920,13 +15124,11 @@
       "feature": "P04",
       "kind": "cancel",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
         "apps/manual-studio/index.html:html:button:ddf5d8f5d796bcc7:1",
         "apps/manual-studio/index.html:html:button:9d794288308358f9:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:4",
         "apps/manual-studio/index.html:html:input:2026d91a7b3dfbb7:1",
         "apps/manual-studio/index.html:html:button:dffd1c98d825dd05:1",
-        "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
         "apps/manual-studio/src/main.ts:loop-controls:4bd5fa6fb4f159d0:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:570847ccefa74ca4:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:8d950f483c59b9c7:1",
@@ -14954,16 +15156,23 @@
         "apps/manual-studio/src/screenshotAi.ts:create:select:5791b9aa8456a6fe:2",
         "apps/manual-studio/src/screenshotAi.ts:event:input:e7fe0487a1030a9e:1",
         "apps/manual-studio/src/screenshotAi.ts:handler:1dc9a819f98a40bf:1",
-        "apps/manual-studio/src/screenshotAi.ts:handler:3f9c1158c1a77cd8:1",
+        "apps/manual-studio/src/screenshotAi.ts:event:click:e2350bec4eb8c938:1",
         "apps/manual-studio/src/screenshotAi.ts:create:input:aee62e72e164536c:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:8caceee069117511:1",
         "apps/manual-studio/src/screenshotAi.ts:handler:4476b793b1dc049f:1",
         "apps/manual-studio/recording-control.html:html:button:4c18f8e99fba612c:1",
+        "apps/manual-studio/recording-control.html:html:input:aadd491add24957b:1",
+        "apps/manual-studio/recording-control.html:html:button:305e0b26a5e6c526:1",
         "apps/manual-studio/recording-control.html:html:button:e858670661cbf8b2:1",
         "apps/manual-studio/src/recordingControl.ts:event:keydown:5485a89e0932726c:1",
         "apps/manual-studio/src/recordingControl.ts:event:click:a3d081af1599368a:1",
-        "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
-        "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1"
+        "apps/manual-studio/src/recordingControl.ts:event:click:4beb2cfd3766aa1f:1",
+        "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1",
+        "apps/manual-studio/src/recordingControl.ts:event:click:00d0a92240870c65:1",
+        "apps/manual-studio/index.html:html:button:e4dca39349fae51a:1",
+        "apps/manual-studio/src/main.ts:event:click:9077b2f6c6fbd4ff:1",
+        "apps/manual-studio/index.html:html:button:79296a0967f23223:1",
+        "apps/manual-studio/src/main.ts:event:click:283535d86c15130d:1"
       ],
       "expected": {
         "visible": "対象アプリと撮影候補を確認できる",
@@ -14987,13 +15196,11 @@
       "feature": "P04",
       "kind": "failure-retry",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
         "apps/manual-studio/index.html:html:button:ddf5d8f5d796bcc7:1",
         "apps/manual-studio/index.html:html:button:9d794288308358f9:1",
         "apps/manual-studio/index.html:html:summary:ffbaafa6f1041afb:4",
         "apps/manual-studio/index.html:html:input:2026d91a7b3dfbb7:1",
         "apps/manual-studio/index.html:html:button:dffd1c98d825dd05:1",
-        "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1",
         "apps/manual-studio/src/main.ts:loop-controls:4bd5fa6fb4f159d0:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:570847ccefa74ca4:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:8d950f483c59b9c7:1",
@@ -15021,16 +15228,23 @@
         "apps/manual-studio/src/screenshotAi.ts:create:select:5791b9aa8456a6fe:2",
         "apps/manual-studio/src/screenshotAi.ts:event:input:e7fe0487a1030a9e:1",
         "apps/manual-studio/src/screenshotAi.ts:handler:1dc9a819f98a40bf:1",
-        "apps/manual-studio/src/screenshotAi.ts:handler:3f9c1158c1a77cd8:1",
+        "apps/manual-studio/src/screenshotAi.ts:event:click:e2350bec4eb8c938:1",
         "apps/manual-studio/src/screenshotAi.ts:create:input:aee62e72e164536c:1",
         "apps/manual-studio/src/screenshotAi.ts:create:button:8caceee069117511:1",
         "apps/manual-studio/src/screenshotAi.ts:handler:4476b793b1dc049f:1",
         "apps/manual-studio/recording-control.html:html:button:4c18f8e99fba612c:1",
+        "apps/manual-studio/recording-control.html:html:input:aadd491add24957b:1",
+        "apps/manual-studio/recording-control.html:html:button:305e0b26a5e6c526:1",
         "apps/manual-studio/recording-control.html:html:button:e858670661cbf8b2:1",
         "apps/manual-studio/src/recordingControl.ts:event:keydown:5485a89e0932726c:1",
         "apps/manual-studio/src/recordingControl.ts:event:click:a3d081af1599368a:1",
-        "apps/manual-studio/src/recordingControl.ts:event:click:d6c0df6e3284999f:1",
-        "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1"
+        "apps/manual-studio/src/recordingControl.ts:event:click:4beb2cfd3766aa1f:1",
+        "apps/manual-studio/src/recordingControl.ts:event:mousedown:124da6ba94b6e43c:1",
+        "apps/manual-studio/src/recordingControl.ts:event:click:00d0a92240870c65:1",
+        "apps/manual-studio/index.html:html:button:e4dca39349fae51a:1",
+        "apps/manual-studio/src/main.ts:event:click:9077b2f6c6fbd4ff:1",
+        "apps/manual-studio/index.html:html:button:79296a0967f23223:1",
+        "apps/manual-studio/src/main.ts:event:click:283535d86c15130d:1"
       ],
       "expected": {
         "visible": "対象アプリと撮影候補を確認できる",
@@ -15056,7 +15270,7 @@
       "entryPoints": [
         "apps/manual-studio/src/resourceBrowser.ts:factory:4f5f736358baff6a:1",
         "apps/manual-studio/src/screenshotLibrary.ts:factory:71f4a99440913a96:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:factory:1f1142176b479033:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:factory:8e9476ac975b76b5:1",
         "apps/manual-studio/src/screenshotLibrary.ts:handler:77befa9f66d1db36:1"
       ],
       "expected": {
@@ -15083,7 +15297,7 @@
       "entryPoints": [
         "apps/manual-studio/src/resourceBrowser.ts:factory:4f5f736358baff6a:1",
         "apps/manual-studio/src/screenshotLibrary.ts:factory:71f4a99440913a96:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:factory:1f1142176b479033:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:factory:8e9476ac975b76b5:1",
         "apps/manual-studio/src/screenshotLibrary.ts:handler:77befa9f66d1db36:1"
       ],
       "expected": {
@@ -15110,7 +15324,7 @@
       "entryPoints": [
         "apps/manual-studio/src/resourceBrowser.ts:factory:4f5f736358baff6a:1",
         "apps/manual-studio/src/screenshotLibrary.ts:factory:71f4a99440913a96:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:factory:1f1142176b479033:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:factory:8e9476ac975b76b5:1",
         "apps/manual-studio/src/screenshotLibrary.ts:handler:77befa9f66d1db36:1"
       ],
       "expected": {
@@ -16195,7 +16409,7 @@
         "apps/manual-studio/src/main.ts:binding-loop:3e85cc864ddd4742:1",
         "apps/manual-studio/src/main.ts:binding-loop:45163c073e6a9e6f:1",
         "apps/manual-studio/src/main.ts:binding-loop:d39921c346ccbecf:1",
-        "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
+        "apps/manual-studio/src/main.ts:binding-loop:e3051fe08b0b930f:1",
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
@@ -16289,7 +16503,7 @@
         "apps/manual-studio/src/main.ts:binding-loop:3e85cc864ddd4742:1",
         "apps/manual-studio/src/main.ts:binding-loop:45163c073e6a9e6f:1",
         "apps/manual-studio/src/main.ts:binding-loop:d39921c346ccbecf:1",
-        "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
+        "apps/manual-studio/src/main.ts:binding-loop:e3051fe08b0b930f:1",
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
@@ -16383,7 +16597,7 @@
         "apps/manual-studio/src/main.ts:binding-loop:3e85cc864ddd4742:1",
         "apps/manual-studio/src/main.ts:binding-loop:45163c073e6a9e6f:1",
         "apps/manual-studio/src/main.ts:binding-loop:d39921c346ccbecf:1",
-        "apps/manual-studio/src/main.ts:binding-loop:6b20280e68b4e464:1",
+        "apps/manual-studio/src/main.ts:binding-loop:e3051fe08b0b930f:1",
         "apps/manual-studio/src/main.ts:binding-loop:a8cdde9bce1eb6dc:1",
         "apps/manual-studio/src/main.ts:binding-loop:99eda931aea9890c:1",
         "apps/manual-studio/src/windowLayout.tsx:binding-loop:896dd3dc1297a89a:1",
@@ -16860,7 +17074,7 @@
       "feature": "P05",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/src/screenshotLibrary.ts:factory:1f1142176b479033:1"
+        "apps/manual-studio/src/screenshotLibrary.ts:factory:8e9476ac975b76b5:1"
       ],
       "requiredEvidence": [
         "real-desktop"
@@ -16881,7 +17095,7 @@
       "feature": "P05",
       "kind": "success",
       "entryPoints": [
-        "apps/manual-studio/src/screenshotLibrary.ts:factory:1f1142176b479033:1"
+        "apps/manual-studio/src/screenshotLibrary.ts:factory:8e9476ac975b76b5:1"
       ],
       "requiredEvidence": [
         "real-desktop"
@@ -16925,7 +17139,7 @@
       "kind": "failure-retry",
       "entryPoints": [
         "apps/manual-studio/index.html:html:button:47720e32c4413204:1",
-        "apps/manual-studio/src/screenshotLibrary.ts:factory:1f1142176b479033:1",
+        "apps/manual-studio/src/screenshotLibrary.ts:factory:8e9476ac975b76b5:1",
         "apps/manual-studio/src/screenshotLibrary.ts:event:click:65ee1b860f25af5d:1"
       ],
       "requiredEvidence": [
@@ -17175,7 +17389,6 @@
       "entryPoints": [
         "apps/manual-studio/src/imageGeneration.ts:factory:ede55a702ae091f7:1",
         "apps/manual-studio/src/imageGeneration.ts:handler:8f03e9e3a84376a6:1",
-        "apps/manual-studio/index.html:html:button:d3aad069bc47f8c9:1",
         "apps/manual-studio/src/imageGeneration.ts:event:click:5906d17003780cf3:1",
         "apps/manual-studio/src/imageGeneration.ts:create:textarea:ffbc258b1ce0dd2b:1",
         "apps/manual-studio/src/imageGeneration.ts:create:summary:a76412d5cfa8f09e:1",
@@ -17246,8 +17459,8 @@
       "id": "P04.editor-ai",
       "feature": "P04",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
-        "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1"
+        "apps/manual-studio/index.html:html:button:79296a0967f23223:1",
+        "apps/manual-studio/src/main.ts:event:click:283535d86c15130d:1"
       ],
       "evidenceRecord": "editor AI screenshot insertion using deterministic local service",
       "expected": {
@@ -17268,8 +17481,8 @@
       "id": "P04.editor-manual",
       "feature": "P04",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
-        "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1"
+        "apps/manual-studio/index.html:html:button:e4dca39349fae51a:1",
+        "apps/manual-studio/src/main.ts:event:click:9077b2f6c6fbd4ff:1"
       ],
       "evidenceRecord": "editor manual screenshot capture",
       "expected": {
@@ -17291,8 +17504,8 @@
       "id": "P04.editor-existing",
       "feature": "P04",
       "entryPoints": [
-        "apps/manual-studio/index.html:html:button:ea1649ecac806d6f:1",
-        "apps/manual-studio/src/main.ts:event:click:35c5ac30e439f6cf:1"
+        "apps/manual-studio/index.html:html:button:79296a0967f23223:1",
+        "apps/manual-studio/src/main.ts:event:click:283535d86c15130d:1"
       ],
       "evidenceRecord": "editor existing screenshot insertion",
       "expected": {
@@ -18527,7 +18740,12 @@
       "id": "P21.contracts",
       "feature": "P21",
       "entryPoints": [
-        "apps/manual-studio/src/workspaceSettings.ts:create:summary:a76412d5cfa8f09e:1"
+        "apps/manual-studio/src/workspaceSettings.ts:create:summary:a76412d5cfa8f09e:1",
+        "apps/manual-studio/src/workspaceSettings.ts:create:button:a4c47b1b68033d29:2",
+        "apps/manual-studio/src/workspaceSettings.ts:create:button:c84cdd44fbe16dca:2",
+        "apps/manual-studio/src/workspaceSettings.ts:handler:94863be63ffaa8ba:1",
+        "apps/manual-studio/src/workspaceSettings.ts:handler:7a6088bc37be955f:2",
+        "apps/manual-studio/src/workspaceSettings.ts:create:input:7e14fbee502bd71f:1"
       ],
       "expected": {
         "visible": "フォルダー名メニューから設定・記録を表示",

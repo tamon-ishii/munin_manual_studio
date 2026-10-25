@@ -9,7 +9,7 @@ const root=process.cwd(),temp=await mkdtemp(path.join(os.tmpdir(),'munin-ci-gate
 const html='apps/manual-studio/index.html',original=fingerprint(await readFile(html));
 try{
  for(const relative of sourcePaths){await mkdir(path.dirname(path.join(temp,relative)),{recursive:true});await cp(path.join(root,relative),path.join(temp,relative),{recursive:true});}
- await symlink(path.join(root,'node_modules'),path.join(temp,'node_modules'),'dir');
+ await symlink(path.join(root,'node_modules'),path.join(temp,'node_modules'),process.platform==='win32'?'junction':'dir');
  await writeFile(path.join(temp,html),(await readFile(path.join(temp,html),'utf8'))+'\n<button id="CI_UNREGISTERED_FAULT">Fault</button>\n');
  const result=await new Promise((resolve,reject)=>{let output='';const child=spawn(process.execPath,['scripts/check_manual_studio.mjs','--group','unit'],{cwd:temp});const timeout=setTimeout(()=>{child.kill();reject(Error('CI fault runner timeout'));},60000);child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);child.on('error',reject);child.on('close',code=>{clearTimeout(timeout);resolve({code,output});});});
  assert.notEqual(result.code,0);assert.match(result.output,/unregistered operation/);assert.match(result.output,/stopped at the first failed stage/);assert.doesNotMatch(result.output,/\[run\] AI credentials checks/,'runner must not continue after coverage rejection');assert.equal(fingerprint(await readFile(html)),original);
