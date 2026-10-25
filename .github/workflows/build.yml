@@ -11,6 +11,10 @@ on:
         description: Optional JSON matrix include entries for targeted verification
         type: string
         default: ''
+      linux_native_only:
+        description: Run Linux desktop diagnostics only; do not package or publish
+        type: boolean
+        default: false
       windows_native_smoke:
         description: Run real Windows recording and MarkIts window checks
         type: boolean
@@ -25,7 +29,7 @@ on:
         default: false
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.ref }}
+  group: build-${{ github.workflow }}-${{ github.ref }}${{ inputs.linux_native_only && '-native-probe' || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -176,7 +180,7 @@ jobs:
           npx playwright-core install --with-deps chrome
           python -m pip install mkdocs-material
       - name: Check UI, generation, capture, and integrated workflows
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !inputs.linux_native_only
         run: |
           npm run manual:build-verification
           npm run manual:check -- --group unit
@@ -184,7 +188,11 @@ jobs:
           npm run manual:check-generation
           npm run manual:check-capture
           npm run manual:check -- --group smoke
+      - name: Build verified binaries for Linux desktop diagnostics
+        if: runner.os == 'Linux' && inputs.linux_native_only
+        run: npm run manual:build-verification
       - name: Build Manual Studio and CLI
+        if: '!inputs.linux_native_only'
         run: cargo build --locked --release --target ${{ matrix.target }} -p manual-studio -p manual-core
       - name: Prepare required Linux desktop workflow
         if: runner.os == 'Linux'
@@ -205,17 +213,19 @@ jobs:
             native-manual-capture-results/
           if-no-files-found: warn
       - name: Package applications
+        if: '!inputs.linux_native_only'
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: python scripts/package_release.py --target ${{ matrix.target }} --platform ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
+        if: '!inputs.linux_native_only'
         with:
           name: manual-studio-${{ matrix.platform }}
           path: release/*.zip
           if-no-files-found: error
 
   release:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' && !inputs.linux_native_only
     needs: build
     runs-on: ubuntu-latest
     permissions:
