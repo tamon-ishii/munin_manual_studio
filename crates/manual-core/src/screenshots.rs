@@ -1756,12 +1756,17 @@ mod lifecycle_tests {
             }
         })
         .unwrap();
+        let results = run["items"].as_array().unwrap();
+        let succeeded = results.iter().find(|item| item["id"] == a).unwrap();
+        let failed = results.iter().find(|item| item["id"] == b).unwrap();
+        assert_eq!(succeeded["status"], "succeeded");
+        assert_eq!(failed["status"], "failed");
         assert_eq!(
             image(root.path(), a, None, false).unwrap()["data"],
             image(
                 root.path(),
                 a,
-                Some(run["items"][0]["revision"].as_str().unwrap()),
+                Some(succeeded["revision"].as_str().unwrap()),
                 false
             )
             .unwrap()["data"]
