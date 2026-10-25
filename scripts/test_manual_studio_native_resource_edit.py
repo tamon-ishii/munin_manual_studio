@@ -124,7 +124,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 ui.click('原稿を編集', owner=app.pid)
                 baseline_pixels = ui.image_pixels(f'Native {name}')
                 ui.click('撮影一覧', owner=app.pid)
-                ui.fill('リソースを検索', sid)
+                ui.fill('撮影を検索', sid)
                 before = rpc('screenshots-image', {'id': sid})
                 original = rpc('screenshots-image', {'id': sid, 'json': {'original': True}})['data']
                 assert before['edit']['ui'] == (elements if name == 'array' else {'elements': elements})
@@ -143,11 +143,11 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 candidate = wait(lambda: (d if len(d['screenshot']['edits']) == len(before['screenshot']['edits']) + 1 else None) if (d := rpc('screenshots-image', {'id': sid})) else None, 'candidate saved')
                 newest = rpc('screenshots-image', {'id': sid, 'json': {'revision': candidate['screenshot']['edits'][-1]['id']}})
                 assert len(newest['edit']['scene']['annotations']) == 2
-                assert candidate['screenshot']['adopted'] == before['screenshot']['adopted']
-                assert candidate['data'] == before['data']
-                saved_status = ui.find('編集内容を候補として保存しました。', 'status bar', app.pid, prefix=True, showing=False)
+                candidate = wait(lambda: (d if d['screenshot']['adopted'] == newest['edit']['id'] else None) if (d := rpc('screenshots-image', {'id': sid})) else None, 'edited image adopted automatically')
+                assert candidate['data'] == newest['data']
+                saved_status = ui.find('編集内容を反映しました。', 'status bar', app.pid, prefix=True, showing=False)
                 saved_status.get_component_iface().scroll_to(Atspi.ScrollType.ANYWHERE)
-                ui.find('編集内容を候補として保存しました。', 'status bar', app.pid, prefix=True)
+                ui.find('編集内容を反映しました。', 'status bar', app.pid, prefix=True)
                 ui.front(app.pid)
                 ui.click('履歴・管理', 'unknown', app.pid)
                 ui.click('選択版を表示', owner=app.pid)
@@ -198,8 +198,8 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 candidate = wait(lambda: (d if len(d['screenshot']['edits']) == len(before['screenshot']['edits']) + 1 else None) if (d := rpc('screenshots-image', {'id': sid})) else None, 'manuscript edit candidate saved')
                 newest = rpc('screenshots-image', {'id': sid, 'json': {'revision': candidate['screenshot']['edits'][-1]['id']}})
                 assert len(newest['edit']['scene']['annotations']) == 3
-                assert candidate['screenshot']['adopted'] == before['screenshot']['adopted']
-                assert candidate['data'] == before['data']
+                candidate = wait(lambda: (d if d['screenshot']['adopted'] == newest['edit']['id'] else None) if (d := rpc('screenshots-image', {'id': sid})) else None, 'edited image adopted automatically')
+                assert candidate['data'] == newest['data']
                 assert len(candidate['screenshot']['edits']) == len(before['screenshot']['edits']) + 1
                 assert rpc('screenshots-image', {'id': sid, 'json': {'original': True}})['data'] == original
                 assert (root / 'docs/index.md').read_text() == manuscript, 'return/adoption unexpectedly changed manuscript'
@@ -211,7 +211,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 print('PASS manuscript image edit: saved marks restored -> candidate saved -> adopted image preserved', flush=True)
                 # Real child failure and import retry must preserve the adopted asset.
                 ui.click('撮影一覧', owner=app.pid)
-                ui.fill('リソースを検索', sid)
+                ui.fill('撮影を検索', sid)
                 before = rpc('screenshots-image', {'id': sid})
                 begin = len(ui.log)
                 ui.click('編集', owner=app.pid)
@@ -254,8 +254,8 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                 ui.log.append({'action': 'remove import fault'})
                 ui.click('編集結果を再確認', owner=app.pid)
                 retried = wait(lambda: (d if len(d['screenshot']['edits']) == len(before['screenshot']['edits']) + 1 else None) if (d := rpc('screenshots-image', {'id': sid})) else None, 'retry saves one candidate')
-                assert retried['screenshot']['adopted'] == before['screenshot']['adopted']
-                assert retried['data'] == before['data']
+                retried = wait(lambda: (d if d['screenshot']['adopted'] == d['screenshot']['edits'][-1]['id'] else None) if (d := rpc('screenshots-image', {'id': sid})) else None, 'retried edit adopted automatically')
+                assert retried['data'] != before['data']
                 newest = rpc('screenshots-image', {'id': sid, 'json': {'revision': retried['screenshot']['edits'][-1]['id']}})
                 assert len(newest['edit']['scene']['annotations']) == 4
                 wait(lambda: not any(ui.text(node) == '編集結果を再確認' and node.get_state_set().contains(Atspi.StateType.SHOWING) for node in ui.allnodes(app.pid)), 'successful retry clears retry control')
@@ -276,7 +276,7 @@ with tempfile.TemporaryDirectory(prefix='munin-resource-edit-native-') as tempor
                     existing = set((root / 'docs/assets/edited').glob('*.png'))
                     if entry_name == 'resource':
                         ui.click('撮影一覧', owner=app.pid)
-                        ui.fill('リソースを検索', 'ordinary.png')
+                        ui.fill('撮影を検索', 'ordinary.png')
                         try:
                             ui.find('編集', owner=app.pid, timeout=1)
                         except RuntimeError:

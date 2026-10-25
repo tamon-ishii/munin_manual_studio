@@ -132,8 +132,7 @@ def session():
 
             def begin():
                 cursor()
-                ui.click('スクリーンショット', owner=app.pid)
-                ui.click('手動で撮影', owner=app.pid)
+                ui.click('撮影', owner=app.pid)
                 ui.click('記録を開始', owner=app.pid)
                 ui.find('スクリーンショットを実行', owner=app.pid)
                 assert content() == INITIAL
@@ -149,8 +148,7 @@ def session():
 
             assert content() == INITIAL
             cursor()
-            ui.click('スクリーンショット', owner=app.pid)
-            ui.click('手動で撮影', owner=app.pid)
+            ui.click('撮影', owner=app.pid)
             ui.click('キャンセル', owner=app.pid)
             assert content() == INITIAL
             assert editor.get_component_iface().grab_focus()

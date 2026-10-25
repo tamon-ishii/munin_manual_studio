@@ -1386,7 +1386,7 @@
       "expression": "<button type=\"button\" id=\"screenshot-library-retry\" hidden>",
       "feature": "P06",
       "spec": "openspec/specs/resource-library/spec.md",
-      "result": "途中終了・取り込み失敗時は原本と採用版を保持。再確認で候補を1版だけ保存する。",
+      "result": "Save and adopt the MarkIts edit; cancellation or failure preserves the current adopted image and original manuscript.",
       "returnTarget": "撮影一覧の対象画像と再確認操作",
       "cases": [
         "P06.success",
@@ -7271,7 +7271,7 @@
       "expression": "editBtn = document.createElement('button')",
       "feature": "P05",
       "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "管理画像の原本と保存注釈を復元して候補を1版追加。採用版と原稿は保持する。通常画像のコピー契約は未検証。",
+      "result": "Save and adopt the MarkIts edit; cancellation or failure preserves the current adopted image and original manuscript.",
       "returnTarget": "開始した原稿を保持し、撮影一覧で候補を比較して明示的に採用",
       "cases": [
         "P02.success",
@@ -7324,7 +7324,7 @@
       "expression": "editBtn.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); if (activeImg && activeSource && onEditImage) { onEditImage(activeSource, activeImg); } })",
       "feature": "P05",
       "spec": "openspec/specs/manual-authoring/spec.md",
-      "result": "管理画像の原本と保存注釈を復元して候補を1版追加。採用版と原稿は保持する。通常画像のコピー契約は未検証。",
+      "result": "Save and adopt the MarkIts edit; cancellation or failure preserves the current adopted image and original manuscript.",
       "returnTarget": "開始した原稿を保持し、撮影一覧で候補を比較して明示的に採用",
       "cases": [
         "P02.success",
@@ -9024,7 +9024,7 @@
       "expression": "button('編集', async () => { if (!native) throw new Error('MarkIts編集はデスクトップ版で利用できます。'); editState(root,shot.id,'MarkItsを起動しています…'); try { const apply=versions.value===shot.adopted; await editManaged(shot.id, versions.value, root,apply?(id,revision)=>{ void options.work(async()=>{ if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。'); await options.request('screenshots-change',{id,json:{adopt:revision,expected_revision:shot.adopted}},root); if(root!==options.root())return; editState(root,id,'編集内容を反映しました。'); await refresh(); }); }:undefined); editState(root,shot.id,apply?'MarkItsで編集中です。編集終了で画像に反映します。':'MarkItsで編集中です。編集終了で候補を保存します。'); } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; } }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)))",
       "feature": "P05",
       "spec": "openspec/specs/resource-library/spec.md",
-      "result": "途中終了・取り込み失敗時は原本と採用版を保持。再確認で候補を1版だけ保存する。",
+      "result": "Save and adopt the MarkIts edit; cancellation or failure preserves the current adopted image and original manuscript.",
       "returnTarget": "撮影一覧の対象画像と再確認操作",
       "cases": [
         "P05.success",
@@ -9164,7 +9164,7 @@
       "expression": "document.getElementById('screenshot-library-retry')!.addEventListener('click', () => { if (native) for (const session of pending) void watch(session); })",
       "feature": "P08",
       "spec": "openspec/specs/screenshot-library/spec.md",
-      "result": "途中終了・取り込み失敗時は原本と採用版を保持。再確認で候補を1版だけ保存する。",
+      "result": "Save and adopt the MarkIts edit; cancellation or failure preserves the current adopted image and original manuscript.",
       "returnTarget": "撮影一覧の対象画像と再確認操作",
       "cases": [
         "P08.success",
@@ -17054,8 +17054,8 @@
       ],
       "expected": {
         "visible": "Existing rectangle and array UI elements restored; additional rectangle visible; comparison and adopted image in document",
-        "stored": "Exactly one candidate saved; selected candidate explicitly adopted and output bytes match rendered data",
-        "preserved": "Original SHA256, manuscript text and adopted image until adoption are unchanged",
+        "stored": "Completing MarkIts editing adopts the saved revision and updates the referenced image; retry saves and applies one revision.",
+        "preserved": "The immutable original and manuscript text remain unchanged; cancellation and failed imports retain the adopted image.",
         "returnTarget": "Studio resource card and referencing manuscript"
       },
       "status": "not-run",
@@ -17075,8 +17075,8 @@
       ],
       "expected": {
         "visible": "Existing rectangle and elements UI elements restored; additional rectangle visible; comparison and adopted image in document",
-        "stored": "Exactly one candidate saved; selected candidate explicitly adopted and output bytes match rendered data",
-        "preserved": "Original SHA256, manuscript text and adopted image until adoption are unchanged",
+        "stored": "Completing MarkIts editing adopts the saved revision and updates the referenced image; retry saves and applies one revision.",
+        "preserved": "The immutable original and manuscript text remain unchanged; cancellation and failed imports retain the adopted image.",
         "returnTarget": "Studio resource card and referencing manuscript"
       },
       "status": "not-run",
@@ -17097,8 +17097,8 @@
       ],
       "expected": {
         "visible": "Manuscript hover edit opens real MarkIts with two saved rectangles; third rectangle can be added",
-        "stored": "Exactly one new candidate is saved on editing completion",
-        "preserved": "Original bytes, adopted PNG and manuscript text remain unchanged",
+        "stored": "Completing MarkIts editing adopts the saved revision and updates the referenced image; retry saves and applies one revision.",
+        "preserved": "The immutable original and manuscript text remain unchanged; cancellation and failed imports retain the adopted image.",
         "returnTarget": "Studio manuscript remains available; candidate is available in resource library"
       },
       "status": "not-run",
@@ -17120,8 +17120,8 @@
       ],
       "expected": {
         "visible": "Closing real MarkIts cancels and restores Studio; killed child and protected-asset import failure show feedback; reopen restores saved rectangles",
-        "stored": "Retry adds exactly one candidate; repeated reconfirm does not add duplicates",
-        "preserved": "Adopted PNG, original bytes and manuscript unchanged on both failures and retry",
+        "stored": "Completing MarkIts editing adopts the saved revision and updates the referenced image; retry saves and applies one revision.",
+        "preserved": "The immutable original and manuscript text remain unchanged; cancellation and failed imports retain the adopted image.",
         "returnTarget": "Studio resource card and retry control"
       },
       "status": "not-run",
