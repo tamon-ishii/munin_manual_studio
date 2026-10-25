@@ -67,7 +67,8 @@ try {
  await snapshot('expanded-image-operations');
  shots[0].protected=true;if(!await page.locator('#screenshot-library-refresh').isVisible())await page.locator('#resource-management-menu>summary').click();await page.locator('#screenshot-library-refresh').click();await page.waitForFunction(()=>document.querySelector('.screenshot-library-card').textContent.includes('保護中'));await snapshot('protected-image');
   await page.locator('[data-tab=editor]').click();
- await page.locator('#editor-screenshot-ai').click();await snapshot('screenshot-methods');
+ if(!await page.locator('#editor-screenshot-options').isVisible())await page.locator('#editor-more>summary').click();
+ await page.locator('#editor-screenshot-options').click();await snapshot('screenshot-methods');
  await page.locator('dialog[open]').getByRole('button',{name:'閉じる',exact:true}).click();
  await page.locator('#selection-ai').click();await snapshot('AI-not-configured');
  const open=page.locator('dialog[open]');if(await open.count())await open.getByRole('button',{name:'閉じる',exact:true}).click();

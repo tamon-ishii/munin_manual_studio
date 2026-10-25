@@ -56,7 +56,7 @@ try{
   await dialog.getByRole('button',{name:'Gitで履歴管理を始める'}).click();
   await page.locator('dialog[data-confirm-action]').getByRole('button',{name:'Gitを初期化',exact:true}).click();await idle();
   await dialog.getByText(/まだこの原稿の履歴はありません/).waitFor();
-  assert.equal(execFileSync('git',['rev-parse','--show-toplevel'],{cwd:other,encoding:'utf8'}).trim(),other);
+  assert.equal(path.resolve(execFileSync('git',['rev-parse','--show-toplevel'],{cwd:other,encoding:'utf8'}).trim()),path.resolve(other));
   assert.deepEqual(errors,[]);
   await recordManuscriptContracts(verification,page,reportDir,['P19'],['commit only current manuscript and preserve unrelated staged file','refresh history and select old version for read-only comparison','restore reviewed version and return to editor for normal Undo','reject externally changed manuscript without altering draft','open non-Git project, initialize after confirmation and display empty history'],{manuscript:await readFile(path.join(root,'docs/index.md'),'utf8'),staged:git('diff','--cached','--name-only'),newRepository:execFileSync('git',['rev-parse','--show-toplevel'],{cwd:other,encoding:'utf8'}).trim()});
   console.log('Manuscript Git browser: explicit per-file commit, unrelated staged preservation, read-only comparison, restore/save/Undo, external-conflict protection, non-Git setup and empty history passed.');
