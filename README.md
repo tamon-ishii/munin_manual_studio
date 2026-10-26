@@ -1,3 +1,17 @@
+<!-- screenshot:ref id=shot-a486f943-dfc1-46f4-abd7-83ee74cd3255 -->
+
+![スクリーンショット](docs/assets/screenshots/shot-a486f943-dfc1-46f4-abd7-83ee74cd3255.png)
+
+<!-- /screenshot:ref -->
+
+<!-- screenshot:ref id=shot-9b30b776-aa4a-42ee-a9dd-e028287f77a0 -->
+
+<figure data-munin-image="true" data-align="center" style="width:fit-content;max-width:100%;margin:0 auto;text-align:center"><img src="docs/assets/screenshots/shot-9b30b776-aa4a-42ee-a9dd-e028287f77a0.png" alt="スクリーンショット" style="max-width:100%;height:auto"></figure>
+
+<br />
+
+<!-- /screenshot:ref -->
+
 # Munin Manual Studio
 
 Munin Manual StudioはAIとの連携を目指したマークダウンエディタです。
