@@ -44,8 +44,12 @@ pub(crate) fn save_image_with_uimap(
         // Accessibility uses platform-specific identities (e.g. hwnd:0x... on
         // Windows). Share the exact-window lookup used for operation recording;
         // geometry matching fails on browser frames and can select another app.
+        eprintln!("native capture: resolving accessibility window");
         let target = crate::semantic_target::window_context(window_id)?;
-        markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &target)
+        eprintln!("native capture: reading accessibility elements");
+        let elements = markits::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &target);
+        eprintln!("native capture: accessibility elements read");
+        elements
     } else if include_uimap {
         markits::ui_elements::capture_desktop_detailed_elements(0, 0, bounds)
     } else {
@@ -63,6 +67,7 @@ pub(crate) fn save_image_with_uimap(
     } else {
         png_bytes
     };
+    eprintln!("native capture: writing PNG");
     std::fs::write(destination, final_bytes).map_err(|error| error.to_string())
 }
 

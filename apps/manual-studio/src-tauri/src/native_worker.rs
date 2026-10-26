@@ -95,7 +95,11 @@ fn run_child(command: &mut Command, timeout: Duration, log: &Path) -> Result<(),
                 let _ = child.wait();
                 return Err(match other {
                     Err(e) => format!("撮影プロセスの状態を確認できません: {e}"),
-                    _ => "撮影処理が時間内に完了しませんでした。Manual Studioへ戻ります。".into(),
+                    _ => {
+                        let bytes = fs::read(log).unwrap_or_default();
+                        let tail = &bytes[bytes.len().saturating_sub(4096)..];
+                        format!("撮影処理が時間内に完了しませんでした。Manual Studioへ戻ります。\n{}", String::from_utf8_lossy(tail))
+                    },
                 });
             }
         }
@@ -199,6 +203,7 @@ pub fn run(dir: &Path) -> Result<(), String> {
             close_after_capture,
         } => {
             let _depth = markits::ui_elements::capture_depth_scope(depth);
+            eprintln!("native capture: reading window pixels and UI metadata");
             manual_core::window_capture::capture_window(
             &window,
             0,
@@ -207,9 +212,12 @@ pub fn run(dir: &Path) -> Result<(), String> {
             Some(&window),
         )
         .map(|_| {
+            eprintln!("native capture: image saved");
             if close_after_capture {
+                eprintln!("native capture: closing captured window");
                 let _ = manual_core::window_capture::close_window(&window);
             }
+            eprintln!("native capture: complete");
             String::new()
         })
         },
@@ -240,16 +248,20 @@ mod tests {
     }
     #[test]
     fn stuck_worker_is_terminated_and_host_can_continue() {
+        let directory = tempfile::tempdir().unwrap();
+        let log = directory.path().join("stderr.log");
+        fs::write(&log, "native capture: reading accessibility elements").unwrap();
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "exec sleep 30"]);
         let started = Instant::now();
-        assert!(run_child(
+        let error = run_child(
             &mut command,
             Duration::from_millis(40),
-            Path::new("/nonexistent/log")
+            &log
         )
-        .unwrap_err()
-        .contains("時間内"));
+        .unwrap_err();
+        assert!(error.contains("時間内"));
+        assert!(error.contains("native capture: reading accessibility elements"));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 }
