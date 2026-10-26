@@ -812,6 +812,7 @@ async fn start_operation_recording(
     window_title: String,
     task_id: String,
     markits_program: String,
+    window_id: Option<String>,
 ) -> Result<String, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -824,6 +825,7 @@ async fn start_operation_recording(
             window_title,
             task_id,
             markits_program,
+            window_id,
         )
     })
     .await

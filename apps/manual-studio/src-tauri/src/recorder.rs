@@ -460,6 +460,7 @@ pub fn start(
     window_title: String,
     task_id: String,
     markits_program: String,
+    window_id: Option<String>,
 ) -> Result<String, String> {
     #[cfg(target_os = "linux")]
     if std::env::var("WAYLAND_DISPLAY").is_ok()
@@ -478,7 +479,7 @@ pub fn start(
         inner.starting = true;
         StartReservation(Arc::clone(&state.0))
     };
-    if program.trim().is_empty() || task_id.trim().is_empty() {
+    if (window_id.is_none() && program.trim().is_empty()) || task_id.trim().is_empty() {
         return Err("起動アプリと指示IDを入力してください。".into());
     }
     let root_path = PathBuf::from(&root).canonicalize().map_err(|_| "プロジェクトフォルダーが見つかりません。")?;
@@ -498,13 +499,15 @@ pub fn start(
         .iter()
         .filter_map(|window| window["id"].as_str().map(str::to_owned))
         .collect();
-    let (executable, args) = if let Some(url) = &browser_url {
+    let (executable, args) = if window_id.is_some() {
+        (PathBuf::new(), vec![])
+    } else if let Some(url) = &browser_url {
         (crate::default_browser_executable(url)?, vec![url.clone()])
     } else {
         manual_core::platform::application_command_in(&working_directory, &program, &args)?
     };
     let program = executable.to_string_lossy().into_owned();
-    let mut app = if let Some(url) = &browser_url {
+    let mut app = if window_id.is_some() { None } else if let Some(url) = &browser_url {
         crate::open_browser_url(url)?;
         None
     } else { Some(Command::new(&executable)
@@ -516,6 +519,20 @@ pub fn start(
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut reused_window = false;
     let window_result = (|| -> Result<(WindowBounds, String), String> {
+        if let Some(id) = &window_id {
+            let found = before_windows.iter().find(|window| window["id"].as_str() == Some(id.as_str()))
+                .ok_or("選択したウィンドウが見つかりません。一覧を更新して選び直してください。")?;
+            let title = found["title"].as_str().filter(|title| !title.trim().is_empty())
+                .ok_or("選択したウィンドウのタイトルを取得できません。")?;
+            reused_window = true;
+            return Ok((WindowBounds {
+                id: id.clone(),
+                x: found["x"].as_i64().unwrap_or(0) as i32,
+                y: found["y"].as_i64().unwrap_or(0) as i32,
+                width: found["width"].as_u64().unwrap_or(0) as u32,
+                height: found["height"].as_u64().unwrap_or(0) as u32,
+            }, title.to_owned()));
+        }
         loop {
             let raw = match crate::native_worker::request(
                 json!({"root": root.clone(), "action": "list-windows"}),
@@ -702,7 +719,7 @@ pub fn start(
     lock.starting = false;
     drop(lock);
     drop(reservation);
-    Ok("対象アプリを起動しました。操作後 Ctrl+Shift+F10 で記録を終了します。Ctrl+Shift+F9 で一時停止できます。".into())
+    Ok("対象ウィンドウの操作記録を開始しました。操作後 Ctrl+Shift+F10 で記録を終了します。Ctrl+Shift+F9 で一時停止できます。".into())
 }
 
 fn select_launched_window<'a>(
@@ -1059,10 +1076,11 @@ fn read_events(path: &Path) -> Result<Vec<RecordedEvent>, String> {
 }
 
 fn build_scenario(session: &Session, events: &[RecordedEvent]) -> Value {
-    let mut steps = vec![
-        json!({"launch": {"program": session.program, "args": session.args, "workingDirectory": session.working_directory}}),
-        json!({"window": session.window_title}),
-    ];
+    let mut steps = Vec::new();
+    if !session.program.is_empty() {
+        steps.push(json!({"launch": {"program": session.program, "args": session.args, "workingDirectory": session.working_directory}}));
+    }
+    steps.push(json!({"window": session.window_title}));
     let mut text_buffer = String::new();
     let flush_text = |steps: &mut Vec<Value>, text: &mut String| {
         if !text.is_empty() {
@@ -1842,6 +1860,23 @@ mod tests {
         cleanup_completed_capture(image.to_str().unwrap()).unwrap();
         assert!(!image.exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn existing_window_recipe_saves_title_without_launching_an_app() {
+        let session = Session {
+            recorder: None, app_child: None,
+            event_file: PathBuf::new(), root: PathBuf::new(),
+            program: String::new(), args: vec![], working_directory: PathBuf::new(),
+            window_title: "編集中の文書 — Demo".into(),
+            window: WindowBounds { id: "1".into(), x: 0, y: 0, width: 400, height: 300 },
+            task_id: "existing-shot".into(), markits_program: String::new(),
+        };
+        let scenario = build_scenario(&session, &[]);
+        assert_eq!(scenario["window"], "編集中の文書 — Demo");
+        assert_eq!(scenario["steps"][0]["window"], scenario["window"]);
+        assert_eq!(scenario["steps"][1]["screenshot"]["task"], "existing-shot");
+        assert!(scenario["steps"].as_array().unwrap().iter().all(|step| step.get("launch").is_none()));
     }
 
     #[cfg(target_os = "linux")]

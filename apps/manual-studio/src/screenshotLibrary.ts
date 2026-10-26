@@ -119,12 +119,12 @@ export function setupScreenshotLibrary(options: Options) {
           }:undefined);
           editState(root,shot.id,apply?'MarkItsで編集中です。編集終了で画像に反映します。':'MarkItsで編集中です。編集終了で候補を保存します。');
         } catch(error) { editState(root,shot.id,`MarkItsを開けませんでした。${String(error)} 再度「編集」で試せます。`); throw error; }
-      }, shot.protected||pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile)));
+      }, shot.protected);
       editButton.classList.add('primary');
       const createInsertButton = document.createElement('button');
       createInsertButton.type = 'button';
       createInsertButton.textContent = 'MarkIts画像を作って挿入';
-      createInsertButton.disabled = shot.protected || !native || pending.some(session=>session.root===root&&session.id===shot.id&&watching.has(session.completionFile));
+      createInsertButton.disabled = shot.protected || !native;
       createInsertButton.addEventListener('click', () => { void options.work(async () => {
         if (root !== options.root() || !await options.chooseDestination()) return;
         const page = options.page();
@@ -260,9 +260,11 @@ export function setupScreenshotLibrary(options: Options) {
     if (watching.has(session.completionFile)) return;
     watching.add(session.completionFile); updateControls();
     const poll = async () => {
+      if (!watching.has(session.completionFile)) return;
       let importStarted:number|undefined;
       try {
         const scene = await invoke<string | null>('markits_annotation_ready', { ...session });
+        if (!watching.has(session.completionFile)) return;
         if (scene === null) { setTimeout(() => { void poll(); }, 200); return; }
         const notify=handoffProgress.get(session.completionFile);notify?.('import');
         if(session.root===options.root())progress.textContent=stageLabels.import;
@@ -287,10 +289,11 @@ export function setupScreenshotLibrary(options: Options) {
         }
         complete?.(session.id,details.revision);
       } catch (error) {
+        if (!watching.has(session.completionFile)) return;
         if(importStarted!==undefined)void options.request('operation-timings-record',{json:{operation:'markits-import',outcome:'error',stages:[{stage:'import',duration_ms:performance.now()-importStarted}]}},session.root).catch(error=>console.warn('処理時間を記録できません',error));
         watching.delete(session.completionFile);
         const message=String(error);
-        const ended=message.includes('MarkItsの編集を中止しました')||message.includes('MarkItsが編集完了前に終了しました');
+        const ended=/MarkIts(?:\s+Desktop)?\s*(?:の編集を中止しました|が編集完了前に終了しました)/.test(message);
         if(ended){handoffProgress.get(session.completionFile)?.('cancelled');handoffProgress.delete(session.completionFile);pending=pending.filter(item=>item.completionFile!==session.completionFile);handoffCallbacks.delete(session.completionFile);persist();}
         updateControls();
         if(session.root===options.root()){
@@ -326,23 +329,58 @@ export function setupScreenshotLibrary(options: Options) {
     if (!native) throw new Error('操作の記録はデスクトップ版で利用できます。');
     if(recording)throw new Error('操作の記録が進行中です。撮影を完了してから開始してください。');
     const root = options.root(); if (!root) throw new Error('プロジェクトを開いてください。');
-    const profiles = options.applications(); if (!profiles.length) throw new Error('「撮影するアプリを登録」で撮影するアプリを登録してください。');
+    const profiles = options.applications();
     const dialog = document.createElement('dialog'); dialog.className = 'capture-application-dialog';
     const heading = document.createElement('h2'); heading.textContent = '撮影するアプリ';
     const field = document.createElement('label'); field.textContent = '登録済みアプリ';
     const actions = document.createElement('div'); actions.className = 'actions';
     const select = document.createElement('select'); select.setAttribute('aria-label', '撮影する対象アプリ');
     profiles.forEach((profile, index) => select.add(new Option(profile.name || profile.program, String(index))));
+    const modeField = document.createElement('label'); modeField.textContent = '撮影モード';
+    const mode = document.createElement('select'); mode.setAttribute('aria-label', '撮影モード');
+    mode.add(new Option('登録済みアプリを起動', 'launch')); mode.add(new Option('起動済みウインドウを選択', 'existing')); modeField.append(mode);
+    const windowField = document.createElement('label'); windowField.textContent = '起動済みウインドウ';
+    const windows = document.createElement('select'); windows.setAttribute('aria-label', '撮影するウインドウ');
+    const reload = document.createElement('button'); reload.type = 'button'; reload.textContent = 'ウインドウ一覧を更新';
+    const status = document.createElement('p'); status.role = 'status';
+    windowField.append(windows);
+    let loading = false;
+    const updateMode = () => {
+      const existing = mode.value === 'existing'; field.hidden = existing; windowField.hidden = reload.hidden = !existing;
+      start.disabled = loading || (existing ? !windows.value : !profiles.length);
+    };
+    const loadWindows = async () => {
+      loading = true; updateMode(); status.textContent = 'ウインドウ一覧を読み込んでいます…';
+      try {
+        const previous = windows.value;
+        const items = JSON.parse(await options.request('list-windows', {}, root)) as Array<{id:string;title:string}>;
+        windows.replaceChildren();
+        for (const item of items) if(item.title?.trim()) windows.add(new Option(item.title, item.id));
+        if ([...windows.options].some(option => option.value === previous)) windows.value = previous;
+        status.textContent = windows.options.length ? '選択したウインドウのタイトルを撮影シナリオに保存します。' : '対象のウインドウを開いて一覧を更新してください。';
+      } catch(error) { windows.replaceChildren(); status.textContent = String(error); }
+      finally { loading = false; updateMode(); }
+    };
+    reload.onclick = () => { void loadWindows(); };
+    mode.onchange = () => { updateMode(); if(mode.value === 'existing') void loadWindows(); else status.textContent = profiles.length ? '' : '「撮影するアプリを登録」でアプリを登録してください。'; };
     const start = document.createElement('button'); start.textContent = '記録を開始'; const cancel = document.createElement('button'); cancel.textContent = 'キャンセル';
     cancel.onclick = () => dialog.close();
     start.onclick = () => { void options.work(async () => {
-      const profile = profiles[Number(select.value)]; const id = `shot-${crypto.randomUUID()}`;
+      const existing = mode.value === 'existing';
+      const profile = existing ? undefined : profiles[Number(select.value)]; const id = `shot-${crypto.randomUUID()}`;
       if (root !== options.root()) return;
-      await invoke('start_operation_recording', { root, program: profile.program, args: [...profile.args], workingDirectory: profile.workingDirectory || '', windowTitle: '', taskId: id, markitsProgram: '' });
+      if(existing ? !windows.value : !profile) return;
+      start.disabled = true;
+      try {
+        await invoke('start_operation_recording', { root, program: profile?.program || '', args: [...(profile?.args || [])], workingDirectory: profile?.workingDirectory || '', windowTitle: existing ? windows.selectedOptions[0].text : '', windowId: existing ? windows.value : null, taskId: id, markitsProgram: '' });
+      } catch(error) { status.textContent = String(error); throw error; }
+      finally { updateMode(); }
       recording = {root,id,ready,failed,cancelled,stage};stage?.('recording'); updateControls(); dialog.close();started?.(); progress.textContent = '記録中です。操作が終わったら撮影ボタンを押してください。';
       await invoke('show_recording_control');
     }); };
-    field.append(select); actions.append(cancel,start); start.className = "primary"; dialog.append(heading,field,actions); dialog.addEventListener('close',()=>{dialog.remove();if(!recording)cancelled?.();}); document.body.append(dialog); dialog.showModal();
+    field.append(select); actions.append(cancel,start); start.className = "primary"; dialog.append(heading,modeField,field,windowField,reload,status,actions); dialog.addEventListener('close',()=>{dialog.remove();if(!recording)cancelled?.();}); document.body.append(dialog); dialog.showModal();
+    if(!profiles.length) { mode.value = 'existing'; void loadWindows(); }
+    updateMode();
   }
   document.getElementById('screenshot-library-record')!.addEventListener('click',()=>{void options.work(()=>startRecording());});
   async function finishRecording() {
@@ -387,7 +425,37 @@ export function setupScreenshotLibrary(options: Options) {
   updateControls();
   async function editManaged(id:string,revision?:string,root=options.root(),complete?:(id:string,revision?:string)=>void) {
     if(root!==options.root())throw new Error('プロジェクトが切り替わりました。画像を選び直してください。');
-    if(pending.some(session=>session.root===root&&session.id===id&&watching.has(session.completionFile)))throw new Error('この画像はMarkItsで編集中です。編集を完了してください。');
+    const active = pending.filter(session=>session.root===root&&session.id===id&&watching.has(session.completionFile));
+    if(active.length) {
+      const reopen = await new Promise<boolean>(resolve => {
+        const {dialog,body} = featureDialog('MarkItsの編集状態を確認');
+        const note = document.createElement('p');
+        note.textContent = 'この画像には編集中の記録があります。MarkItsが開いている場合は、その画面で編集を完了してください。画面がない場合や応答しない場合は、編集状態を解除して開き直せます。応答しないMarkItsは先に閉じてください。';
+        const detail = document.createElement('p');
+        detail.textContent = '開き直すと保存済みの画像から編集を開始します。未取り込みの編集ファイルは保持しますが、自動では反映しません。';
+        const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'primary'; retry.textContent = '編集状態を解除して開き直す';
+        let restart = false;
+        retry.onclick = () => { restart = true; dialog.close(); };
+        body.append(note,detail,retry);
+        dialog.addEventListener('close',()=>resolve(restart),{once:true});
+      });
+      if(!reopen)return;
+      if(root!==options.root())throw new Error('プロジェクトが切り替わりました。画像を選び直してください。');
+      // Preserve handoff paths for recovery without automatically importing an
+      // abandoned editor's output over a newer editing session after restart.
+      const archiveKey = 'manual-library-recovered-handoffs';
+      let archived: Pending[] = [];
+      try { archived = JSON.parse(localStorage.getItem(archiveKey) || '[]'); } catch { /* Keep current paths below. */ }
+      localStorage.setItem(archiveKey, JSON.stringify([...archived,...active]));
+      for(const session of active) {
+        watching.delete(session.completionFile);
+        handoffCallbacks.delete(session.completionFile);
+        handoffProgress.delete(session.completionFile);
+      }
+      const abandoned = new Set(active.map(session=>session.completionFile));
+      pending = pending.filter(session=>!abandoned.has(session.completionFile));
+      persist();
+    }
     const result=await invoke<Handoff>('edit_library_screenshot',{root,id,revision:revision||null});
     await watch({...result,root,id},complete);
   }
