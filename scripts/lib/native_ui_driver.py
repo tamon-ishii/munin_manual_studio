@@ -78,7 +78,7 @@ class NativeUI:
                 return pid
         raise RuntimeError('No owned window for accessible content')
 
-    def find(self, name, role=None, owner=None, timeout=15, showing=True, prefix=False):
+    def find(self, name, role=None, owner=None, timeout=15, showing=True, prefix=False, enabled=False):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             matches = []
@@ -86,7 +86,7 @@ class NativeUI:
                 try:
                     text = self.text(node)
                     role_matches = (node.get_role_name() in role) if isinstance(role, (tuple, list, set)) else (not role or node.get_role_name() == role)
-                    if (text.startswith(name) if prefix else text == name) and role_matches and (not showing or node.get_state_set().contains(Atspi.StateType.SHOWING)):
+                    if (text.startswith(name) if prefix else text == name) and role_matches and (not showing or node.get_state_set().contains(Atspi.StateType.SHOWING)) and (not enabled or node.get_state_set().contains(Atspi.StateType.ENABLED)):
                         matches.append(node)
                 except Exception:
                     pass
@@ -142,7 +142,7 @@ class NativeUI:
             node.get_component_iface().scroll_to(Atspi.ScrollType.ANYWHERE)
         except Exception:
             pass
-        node = self.find(name, role, owner)
+        node = self.find(name, role, owner, enabled=True)
         pid = node.get_process_id()
         assert node.get_state_set().contains(Atspi.StateType.ENABLED), f'Disabled: {name}'
         assert node.get_action_iface().do_action(0), f'Action failed: {name}'

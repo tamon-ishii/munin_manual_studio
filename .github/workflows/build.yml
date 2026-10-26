@@ -203,6 +203,13 @@ jobs:
       - name: Check Studio button to real MarkIts and adoption
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bash scripts/run_manual_studio_desktop_ci.sh
+      - name: Diagnose manual capture independently of other desktop checks
+        if: always() && runner.os == 'Linux' && inputs.linux_native_only
+        env:
+          GTK_MODULES: atk-bridge
+          NO_AT_BRIDGE: '0'
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+        run: /usr/bin/python3 scripts/test_manual_studio_native_manual_capture.py --probe
       - name: Save UI workflow evidence
         if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -213,6 +220,7 @@ jobs:
             native-workflow-results/
             native-clipboard-results/
             native-manual-capture-results/
+            native-manual-capture-probe-results/
           if-no-files-found: warn
       - name: Package applications
         if: '!inputs.linux_native_only'
