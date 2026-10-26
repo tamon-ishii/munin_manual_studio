@@ -155,7 +155,7 @@ try {
       if(command==='save_launch_commands'){if(!args.root)return Promise.reject(new Error("project required"));profiles[args.root]=args.commands;return Promise.resolve();}
       if(command==='start_operation_recording'){recordedId=args.taskId;recordedRoot=args.root;return Promise.resolve('recording');}
       if(command==='finish_operation_recording'){if(window.__libraryMock.failFinish)return Promise.reject(new Error('simulated capture failure'));shot={ownerRoot:recordedRoot,id:recordedId,name:'',adopted:null,protected:false,edits:[{id:'edit-one',created_at:'now',flattened:false}],usage:[],thumbnail:null,recipe:{steps:[]}};return Promise.resolve({screenshotId:recordedId,sourceFile:'/tmp/source',annotationFile:'/tmp/output',completionFile:'/tmp/complete',markitsStarted:true,message:'edited'});}
-      if(command==='edit_library_screenshot')return window.__libraryMock.failEdit?Promise.reject(new Error('simulated MarkIts startup failure')):Promise.resolve({sourceFile:'/tmp/edit-source',annotationFile:'/tmp/edit-output',completionFile:'/tmp/edit-complete',revision:'edit-one'});
+      if(command==='edit_library_screenshot')return window.__libraryMock.failEdit?Promise.reject(new Error('simulated MarkIts startup failure')):Promise.resolve({sourceFile:'/tmp/edit-source',annotationFile:'/tmp/edit-output',completionFile:`/tmp/edit-complete-${next++}`,revision:'edit-one'});
       if(command==='markits_annotation_ready')return Promise.resolve(window.__libraryMock.holdAnnotations?null:'{"annotations":[]}');
       if(command==='import_library_capture'){imports++;if(imports===1)return Promise.reject(new Error('simulated import failure'));const complete=()=>{shot.adopted='edit-one';shot.thumbnail=png;return JSON.stringify({revision:'edit-one'});};if(window.__libraryMock.holdImports)return new Promise(resolve=>{window.__libraryMock.release=()=>resolve(complete());});return Promise.resolve(complete());}
       if(command==='manual_request'){
@@ -284,8 +284,21 @@ try {
   await nativePage.locator('[data-tab=screenshots]').click();await nativePage.evaluate(()=>{__libraryMock.failEdit=true;});
   if(!await nativePage.locator('.resource-item-menu').evaluate(node=>node.open))await nativePage.locator('.resource-item-menu>summary').click();
   await nativePage.getByRole('button',{name:'編集',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('simulated MarkIts startup failure'));assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isEnabled(),true);
-  await nativePage.evaluate(()=>{__libraryMock.failEdit=false;__libraryMock.holdAnnotations=true;});await nativePage.getByRole('button',{name:'編集',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('MarkItsで編集中'));assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isDisabled(),true,'pending editing cannot launch duplicate editors');
-  await nativePage.evaluate(()=>{__libraryMock.holdAnnotations=false;});await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('編集内容を反映しました')&&document.body.getAttribute('aria-busy')==='false');assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isEnabled(),true);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.filter(call=>call.command==='edit_library_screenshot').length),2);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.some(call=>call.command==='restore_manual_studio')),true);
+  await nativePage.evaluate(()=>{__libraryMock.failEdit=false;__libraryMock.holdAnnotations=true;});await nativePage.getByRole('button',{name:'編集',exact:true}).click();await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('MarkItsで編集中'));
+  assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isEnabled(),true,'pending editing exposes recovery');
+  await nativePage.getByRole('button',{name:'編集',exact:true}).click();
+  const recovery=nativePage.getByRole('dialog').filter({has:nativePage.getByRole('heading',{name:'MarkItsの編集状態を確認',exact:true})});
+  await recovery.waitFor();
+  assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.filter(call=>call.command==='edit_library_screenshot').length),2,'opening recovery cannot launch duplicate editors');
+  await recovery.getByRole('button',{name:'閉じる',exact:true}).click();
+  await nativePage.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
+  assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.filter(call=>call.command==='edit_library_screenshot').length),2,'cancelling recovery keeps the existing editor');
+  await nativePage.getByRole('button',{name:'編集',exact:true}).click();
+  await recovery.getByRole('button',{name:'編集状態を解除して開き直す',exact:true}).click();
+  await nativePage.waitForFunction(()=>__libraryMock.calls.filter(call=>call.command==='edit_library_screenshot').length===3&&document.body.getAttribute('aria-busy')==='false');
+  assert.equal(await nativePage.evaluate(()=>JSON.parse(localStorage.getItem('manual-library-recovered-handoffs')).length),1,'recovery preserves the abandoned handoff');
+  assert.equal(await nativePage.evaluate(()=>JSON.parse(localStorage.getItem('manual-library-handoffs')).length),1,'only the replacement session remains active');
+  await nativePage.evaluate(()=>{__libraryMock.holdAnnotations=false;});await nativePage.waitForFunction(()=>document.querySelector('.screenshot-edit-status')?.textContent.includes('編集内容を反映しました')&&document.body.getAttribute('aria-busy')==='false');assert.equal(await nativePage.getByRole('button',{name:'編集',exact:true}).isEnabled(),true);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.filter(call=>call.command==='edit_library_screenshot').length),3);assert.equal(await nativePage.evaluate(()=>__libraryMock.calls.some(call=>call.command==='restore_manual_studio')),true);
   await nativePage.close();
   assert.deepEqual(errors,[]);
   console.log('Independent screenshot import, immutable original, Markdown insertion, reference protection, recapture eligibility and editor manual capture failure/retry/direct cursor insertion/Undo without AI checks passed.');
