@@ -539,7 +539,7 @@ mod linux {
         thread::sleep(Duration::from_millis(400));
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let result = loop {
-            let frame = capture_visible(&conn, id, inset, destination, include_uimap, target_window_id);
+            let frame = capture_visible(&conn, id, inset);
             if frame.as_ref().is_err_and(|error| error == "Selected window has not finished painting")
                 && std::time::Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(250));
@@ -550,7 +550,20 @@ mod linux {
         if !already_above {
             conn.set_above(id, false);
         }
-        result
+        // Metadata lookup opens another DisplayConnection. Release the X11
+        // connection lock before resolving the exact accessibility window.
+        drop(conn);
+        let (info, picture) = result?;
+        let margin = inset as i32;
+        super::save_image_with_uimap(
+            &picture,
+            Some(((info.x + margin) as f64, (info.y + margin) as f64,
+                picture.width() as f64, picture.height() as f64)),
+            destination,
+            include_uimap,
+            target_window_id,
+        )?;
+        Ok(info)
     }
 
     // A compositor maintains a separate pixmap for each window. Reading it
@@ -668,10 +681,7 @@ mod linux {
         conn: &DisplayConnection,
         id: xlib::Window,
         inset: u32,
-        destination: &Path,
-        include_uimap: bool,
-        target_window_id: Option<&str>,
-    ) -> Result<WindowInfo, String> {
+    ) -> Result<(WindowInfo, image::DynamicImage), String> {
         let info = conn.info(id).ok_or("The selected window is not visible")?;
         let margin = inset as i32;
         let x = info.x + margin;
@@ -701,14 +711,7 @@ mod linux {
             && pixels.chunks_exact(3).all(|pixel| pixel == background) {
             return Err("Selected window has not finished painting".into());
         }
-        super::save_image_with_uimap(
-            &image::DynamicImage::ImageRgb8(picture),
-            Some((x as f64, y as f64, width as f64, height as f64)),
-            destination,
-            include_uimap,
-            target_window_id,
-        )?;
-        Ok(info)
+        Ok((info, image::DynamicImage::ImageRgb8(picture)))
     }
 
     #[cfg(test)]
@@ -812,14 +815,15 @@ mod linux {
             let covering = make_window(0x0000ff);
             unsafe { (conn.api.XSync)(conn.display, xlib::False); }
             std::thread::sleep(std::time::Duration::from_millis(150));
-            let result = super::capture_visible(&conn, target, 0, &image_path, false, None);
+            let result = super::capture_visible(&conn, target, 0);
             unsafe {
                 (conn.api.XDestroyWindow)(conn.display, covering);
                 (conn.api.XDestroyWindow)(conn.display, target);
                 (conn.api.XSync)(conn.display, xlib::False);
             }
             drop(conn);
-            result.unwrap();
+            let (_, picture) = result.unwrap();
+            picture.save(&image_path).unwrap();
             let image = image::open(image_path).unwrap().to_rgb8();
             assert_eq!(image.get_pixel(32, 32).0, [255, 0, 0], "The target must be red even while a blue window covers it");
         }
