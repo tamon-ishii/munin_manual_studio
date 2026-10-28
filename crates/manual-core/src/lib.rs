@@ -5,7 +5,6 @@ pub mod agent;
 pub mod audience;
 pub mod author;
 pub mod builder;
-mod capture_lifecycle;
 pub mod capture_source;
 pub mod capture_settings;
 pub mod capture_validation;

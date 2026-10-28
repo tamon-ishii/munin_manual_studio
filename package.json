@@ -8,6 +8,7 @@
     "manual:build": "npm run manual:build-markits && tsc -p apps/manual-studio/tsconfig.json && vite build --config apps/manual-studio/vite.config.ts",
     "manual:build-markits": "npm --prefix crates/markits/apps/desktop run build",
     "manual:test-workflow": "node scripts/test_manual_studio_workflow.mjs",
+    "manual:test-markits": "node scripts/test_markits_selection.mjs && node scripts/test_markits_recording_ui.mjs",
     "manual:check": "node scripts/check_manual_studio.mjs",
     "manual:check-ui": "node scripts/check_manual_studio.mjs --group ui",
     "manual:check-generation": "node scripts/check_manual_studio.mjs --group generation",

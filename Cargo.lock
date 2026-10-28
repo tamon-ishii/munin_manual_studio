@@ -3260,7 +3260,6 @@ dependencies = [
 name = "manual-core"
 version = "1.5.0"
 dependencies = [
- "ashpd 0.13.13",
  "base64 0.22.1",
  "chrono",
  "image 0.25.10",
@@ -3279,12 +3278,9 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "ureq",
- "url",
  "walkdir",
  "x11-dl",
- "x11rb 0.13.2",
  "xa11y",
- "xcap",
 ]
 
 [[package]]
@@ -3300,7 +3296,6 @@ dependencies = [
  "markits-desktop",
  "open",
  "raw-window-handle",
- "rdev",
  "rfd 0.15.4",
  "serde",
  "serde_json",
@@ -3316,16 +3311,22 @@ dependencies = [
 name = "markits"
 version = "0.7.3"
 dependencies = [
+ "ashpd 0.13.13",
  "base64 0.22.1",
  "clap",
  "image 0.25.10",
+ "rdev",
  "resvg",
  "screenshots",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tokio",
+ "url",
  "x11-dl",
+ "x11rb 0.13.2",
  "xa11y",
+ "xcap",
  "zbus",
 ]
 

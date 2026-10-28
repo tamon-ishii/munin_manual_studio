@@ -1,11 +1,10 @@
-use rdev::{listen, Button, Event, EventType, Key};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
@@ -13,34 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RecordedEvent {
-    Click {
-        elapsed_ms: u64,
-        x: f64,
-        y: f64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        target: Option<manual_core::semantic_target::Target>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        visual: Option<manual_core::visual_target::Target>,
-    },
-    Text {
-        elapsed_ms: u64,
-        value: String,
-    },
-    Key {
-        elapsed_ms: u64,
-        value: String,
-    },
-    Scroll {
-        elapsed_ms: u64,
-        x: f64,
-        y: f64,
-        dx: i64,
-        dy: i64,
-    },
-}
+pub use markits::recording::{RecordedEvent, run_helper};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +53,7 @@ impl Drop for Session {
             stop_child(child);
         }
         let _ = fs::remove_file(&self.event_file);
+        let _ = fs::remove_file(self.event_file.with_extension("pause"));
     }
 }
 
@@ -230,225 +203,6 @@ impl Drop for StartReservation {
             state.starting = false;
         }
     }
-}
-
-pub fn run_helper(path: &Path) -> Result<(), String> {
-    let file = File::create(path).map_err(|error| error.to_string())?;
-    let output = Arc::new(Mutex::new(BufWriter::new(file)));
-    #[cfg(target_os = "linux")]
-    let point_context = std::env::var("MUNIN_RECORDING_WINDOW").ok()
-        .and_then(|context| serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context).ok());
-    let visual_window = std::env::var("MUNIN_RECORDING_WINDOW").ok()
-        .and_then(|context| serde_json::from_str::<markits::ui_elements::DetectedUiElement>(&context).ok())
-        .and_then(|context| context.window_id)
-        .and_then(|id| {
-            #[cfg(target_os = "linux")]
-            { id.parse::<u64>().ok().map(|id| format!("0x{id:x}")) }
-            #[cfg(not(target_os = "linux"))]
-            { Some(id) }
-        });
-    // Keep a pre-click image. Capturing after ButtonPress can record a changed
-    // label or a newly opened menu instead of the control that was clicked.
-    let visual_snapshot = Arc::new(Mutex::new(None));
-    let semantic_window = visual_window.clone();
-    if let Some(id) = visual_window {
-        let cache = Arc::clone(&visual_snapshot);
-        thread::spawn(move || loop {
-            let observed_at = Instant::now();
-            if let Ok(windows) = manual_core::window_capture::list_windows() {
-                if let Some(window) = windows.into_iter().find(|window| window.id == id) {
-                    if let Ok(picture) = manual_core::window_capture::read_window_pixels(&id, None) {
-                        if let Ok(mut cache) = cache.lock() { *cache = Some((observed_at, window, picture)); }
-                    }
-                }
-            }
-            thread::sleep(Duration::from_millis(200));
-        });
-    }
-    let snapshot = Arc::new(Mutex::new((Instant::now(), Vec::new())));
-    if let Some(id) = semantic_window {
-        let snapshot = Arc::clone(&snapshot);
-        let depth = std::env::var("MUNIN_UI_CAPTURE_DEPTH").ok().and_then(|value|value.parse().ok()).unwrap_or(markits::ui_elements::DEFAULT_CAPTURE_DEPTH);
-        thread::spawn(move || {
-          let _depth = markits::ui_elements::capture_depth_scope(depth);
-          loop {
-            let observed_at = Instant::now();
-            let elements = manual_core::semantic_target::observe_window(&id).unwrap_or_default();
-            if let Ok(mut cache) = snapshot.lock() { *cache = (observed_at, elements); }
-            thread::sleep(Duration::from_millis(200));
-          }
-        });
-    }
-    let started = Instant::now();
-    let mut ctrl = false;
-    let mut shift = false;
-    let mut alt = false;
-    let mut meta = false;
-    let mut paused = false;
-    let mut pointer = (0.0, 0.0);
-    let writer = Arc::clone(&output);
-    let callback = move |event: Event| {
-        let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-        let key_state = match event.event_type {
-            EventType::KeyPress(key) => Some((key, true)),
-            EventType::KeyRelease(key) => Some((key, false)),
-            _ => None,
-        };
-        if let Some((key, down)) = key_state {
-            match key {
-                Key::ControlLeft | Key::ControlRight => ctrl = down,
-                Key::ShiftLeft | Key::ShiftRight => shift = down,
-                Key::Alt | Key::AltGr => alt = down,
-                Key::MetaLeft | Key::MetaRight => meta = down,
-                _ => {}
-            }
-            if down && ctrl && shift && key == Key::F10 {
-                std::process::exit(0);
-            }
-            if down && ctrl && shift && key == Key::F9 {
-                paused = !paused;
-                return;
-            }
-            if !down || paused || is_modifier(key) {
-                return;
-            }
-            let chord = [
-                if ctrl { Some("Control") } else { None },
-                if alt { Some("Alt") } else { None },
-                if meta { Some("Meta") } else { None },
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-            let special = key_name(key);
-            let value = if let Some(name) = special {
-                Some(if chord.is_empty() {
-                    name.to_string()
-                } else {
-                    format!("{}+{}", chord.join("+"), name)
-                })
-            } else {
-                event
-                    .name
-                    .as_deref()
-                    .filter(|name| !name.is_empty() && name.chars().all(|c| !c.is_control()))
-                    .map(|name| {
-                        if chord.is_empty() {
-                            name.to_string()
-                        } else {
-                            format!("{}+{}", chord.join("+"), name)
-                        }
-                    })
-            };
-            if let Some(value) = value {
-                let event = if special.is_none() && chord.is_empty() {
-                    RecordedEvent::Text { elapsed_ms, value }
-                } else {
-                    RecordedEvent::Key { elapsed_ms, value }
-                };
-                write_event(&writer, event);
-            }
-            return;
-        }
-        if paused {
-            return;
-        }
-        let recorded = match event.event_type {
-            EventType::MouseMove { x, y } => {
-                pointer = (x, y);
-                None
-            }
-            EventType::ButtonPress(Button::Left) => Some(RecordedEvent::Click {
-                elapsed_ms,
-                x: pointer.0,
-                y: pointer.1,
-                visual: visual_snapshot.lock().ok().and_then(|cache| {
-                    let (observed_at, window, picture) = cache.as_ref()?;
-                    if observed_at.elapsed() > Duration::from_millis(800) { return None; }
-                    manual_core::visual_target::record_snapshot(window, picture, pointer.0, pointer.1).ok()
-                }),
-                target: {
-                    let cached = snapshot.lock().ok().and_then(|cache| {
-                        (cache.0.elapsed() < Duration::from_millis(2200))
-                            .then(|| manual_core::semantic_target::at_point(&cache.1, pointer.0, pointer.1)).flatten()
-                    });
-                    #[cfg(target_os = "linux")]
-                    let cached = cached.or_else(|| point_context.as_ref().and_then(|context| {
-                        let element = markits::ui_elements::desktop_target_at_point(context, pointer.0 as i32, pointer.1 as i32)?;
-                        Some(manual_core::semantic_target::Target { role: element.role, name: element.name?, reveals: None })
-                    }));
-                    cached
-                },
-            }),
-            EventType::Wheel { delta_x, delta_y } => Some(RecordedEvent::Scroll {
-                elapsed_ms,
-                x: pointer.0,
-                y: pointer.1,
-                dx: delta_x,
-                dy: delta_y,
-            }),
-            _ => None,
-        };
-        if let Some(event) = recorded {
-            write_event(&writer, event);
-        }
-    };
-    listen(callback).map_err(|error| format!("入力記録を開始できませんでした: {error:?}"))
-}
-
-fn write_event(writer: &Arc<Mutex<BufWriter<File>>>, event: RecordedEvent) {
-    if let Ok(mut writer) = writer.lock() {
-        if serde_json::to_writer(&mut *writer, &event).is_ok() {
-            let _ = writer.write_all(b"\n");
-            let _ = writer.flush();
-        }
-    }
-}
-
-fn is_modifier(key: Key) -> bool {
-    matches!(
-        key,
-        Key::ControlLeft
-            | Key::ControlRight
-            | Key::ShiftLeft
-            | Key::ShiftRight
-            | Key::Alt
-            | Key::AltGr
-            | Key::MetaLeft
-            | Key::MetaRight
-    )
-}
-
-fn key_name(key: Key) -> Option<&'static str> {
-    Some(match key {
-        Key::Return | Key::KpReturn => "Enter",
-        Key::Escape => "Escape",
-        Key::Tab => "Tab",
-        Key::Backspace => "Backspace",
-        Key::Delete => "Delete",
-        Key::Space => "Space",
-        Key::UpArrow => "Up",
-        Key::DownArrow => "Down",
-        Key::LeftArrow => "Left",
-        Key::RightArrow => "Right",
-        Key::Home => "Home",
-        Key::End => "End",
-        Key::PageUp => "PageUp",
-        Key::PageDown => "PageDown",
-        Key::F1 => "F1",
-        Key::F2 => "F2",
-        Key::F3 => "F3",
-        Key::F4 => "F4",
-        Key::F5 => "F5",
-        Key::F6 => "F6",
-        Key::F7 => "F7",
-        Key::F8 => "F8",
-        Key::F9 => "F9",
-        Key::F10 => "F10",
-        Key::F11 => "F11",
-        Key::F12 => "F12",
-        _ => return None,
-    })
 }
 
 pub fn start(
