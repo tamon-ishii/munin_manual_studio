@@ -1204,6 +1204,8 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 
 .capture-operation-progress{display:flex;justify-content:space-between;gap:12px;flex:none;padding:6px 10px;margin-bottom:6px;border:1px solid var(--border-color);border-radius:6px;background:var(--accent-soft);font-size:12px}
 .capture-operation-progress[hidden]{display:none}
+/* Mode-specific labels must stay hidden despite the shared label flex layout. */
+.capture-application-dialog [hidden]{display:none!important}
 #workspace-paths-dialog label{display:grid;gap:4px;margin-block:12px}
 #operation-timings-dialog details{margin-block:10px}
 #operation-timings-dialog table{width:100%;font-size:12px}
