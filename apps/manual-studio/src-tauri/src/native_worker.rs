@@ -115,25 +115,6 @@ pub fn activate_window(id: &str) -> Result<(), String> {
     execute(Operation::ActivateWindow(id.into())).map(|_| ())
 }
 
-pub fn window_processes() -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
-    serde_json::from_str(&execute(Operation::WindowProcesses)?).map_err(|e| e.to_string())
-}
-
-pub fn capture_window(
-    root: &Path,
-    window: &str,
-    destination: &Path,
-    close_after_capture: bool,
-) -> Result<(), String> {
-    execute(Operation::Capture {
-        depth: manual_core::capture_settings::read(root)?.max_depth,
-        window: window.into(),
-        destination: destination.into(),
-        close_after_capture,
-    })
-    .map(|_| ())
-}
-
 pub fn requires_worker(action: &str) -> bool {
     matches!(
         action,
@@ -156,11 +137,6 @@ pub fn requires_hiding(action: &str) -> bool {
         action,
         "screenshot-ai-capture" | "capture-window" | "recapture" | "capture-source-auto" | "markits-capture"
     )
-}
-
-pub fn observe_window(root: &Path, id: &str) -> Result<Vec<markits::ui_elements::DetectedUiElement>, String> {
-    let value = execute(Operation::ObserveWindow { window: id.into(), depth: manual_core::capture_settings::read(root)?.max_depth })?;
-    serde_json::from_str(&value).map_err(|error| error.to_string())
 }
 
 pub fn run(dir: &Path) -> Result<(), String> {

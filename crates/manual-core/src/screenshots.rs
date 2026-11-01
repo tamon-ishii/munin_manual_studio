@@ -436,10 +436,8 @@ fn register_locked(root: &Path, options: &Value) -> Result<Value, String> {
             }
             entry.created_at = saved.created_at;
         }
-        immutable(
-            &home.join(format!("edits/{revision}.json")),
-            &serde_json::to_vec_pretty(&entry).map_err(|e| e.to_string())?,
-        )?;
+        // The manifest owns the complete edit record. Read old sidecars above
+        // for compatibility, but do not duplicate new records in edits/*.json.
         shot.edits.push(entry);
     }
     if !options["recipe"].is_null() {
@@ -751,6 +749,31 @@ mod tests {
         .write_to(&mut bytes, image::ImageFormat::Png)
         .unwrap();
         data(bytes.get_ref())
+    }
+    #[test]
+    fn edits_reopen_from_manifest_without_duplicate_sidecars() {
+        let root = tempfile::tempdir().unwrap();
+        let first = register(root.path(), &json!({"source":png(1)})).unwrap();
+        let id = first["screenshot"]["id"].as_str().unwrap();
+        let home = directory(root.path(), id).unwrap();
+        // Simulate an older project; its existing sidecar must remain readable.
+        let shot = load(root.path(), id).unwrap();
+        let legacy = home.join(format!("edits/{}.json", shot.edits[0].id));
+        atomic(&legacy, &serde_json::to_vec(&shot.edits[0]).unwrap()).unwrap();
+        let legacy_bytes = fs::read(&legacy).unwrap();
+        let updated = register(root.path(), &json!({
+            "id":id,"source":png(1),"render":png(2),
+            "scene":{"annotations":[{"id":"arrow"}]},"adopt":false
+        })).unwrap();
+        let revision = updated["revision"].as_str().unwrap();
+        assert!(!home.join(format!("edits/{revision}.json")).exists());
+        assert_eq!(fs::read(&legacy).unwrap(), legacy_bytes);
+        let reopened = image(root.path(), id, Some(revision), true).unwrap();
+        assert_eq!(reopened["data"], png(1));
+        assert_eq!(reopened["edit"]["scene"]["annotations"][0]["id"], "arrow");
+        assert_eq!(image(root.path(), id, Some(revision), false).unwrap()["data"], png(2));
+        change(root.path(), id, &json!({"adopt":revision})).unwrap();
+        assert_eq!(fs::read(project_path(root.path(), &shot.output).unwrap()).unwrap(), decode(&png(2)).unwrap());
     }
     #[test]
     fn copied_screenshots_keep_editable_source_and_branch_independently() {

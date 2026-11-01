@@ -25,8 +25,8 @@ import { readAiCredential, saveAiCredential, hasUnassignedAiCredential, assignLe
 import { applyEditorFontSize, isEditorFontSize, setupEditorFontSize } from "./editorFontSize";
 import { setupMilkdownEditor, renderMermaid } from "./milkdownEditor";
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo, listen } from "@tauri-apps/api/event";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { listen } from "@tauri-apps/api/event";
+
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { EditorHistory, type EditorSnapshot } from "./editorHistory";
 import { setupPaneResizers } from "./paneResizers";
@@ -51,7 +51,7 @@ import {setupManuscriptSearch} from './manuscriptSearch';
 import {setupManuscriptGit} from './manuscriptGit';
 import {sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions} from './manuscriptTools';
 
-import type { State, Document, RecordingResult, LaunchCommand } from "./types";
+import type { State, Document, LaunchCommand } from "./types";
 
 const element = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const input = (id: string): HTMLInputElement => element(id);
@@ -76,7 +76,7 @@ setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
 let refreshEditorContextMenu = () => {};
 const params = new URLSearchParams(location.search);
-const recordingControlMode = params.get("recordingControl") === "1";
+
 const detached = params.get("editor") === "1";
 initializeTheme();
 setupEditorFontSize(input("editor-font-size"), size => {
@@ -157,7 +157,7 @@ let busyButtonStates: Map<HTMLButtonElement, boolean> | null = null;
 if (detached) document.body.classList.add("detached");
 
 let layoutManager: WindowLayoutManager | null = null;
-if (!recordingControlMode) {
+{
   try {
     layoutManager = setupWindowLayout();
   } catch (error) {
@@ -821,10 +821,6 @@ const imageAiSettings=setupImageAiSettings({root:()=>projectRoot,request:rpc,pre
 const imageGeneration=setupImageGeneration({prepare:async()=>{await saveAiSettings();await imageAiSettings.flush();},imageKey:(root,url)=>imageAiSettings.key(root,url),sharedKey:root=>root===projectRoot?readAiCredential(root,workspace?.config.endpoint_url||''):'',root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
 
 let documentImageEditing = false;
-let retryDocumentImageEdit: (() => Promise<void>) | null = null;
-element('document-image-retry').addEventListener('click', () => {
-  if (retryDocumentImageEdit) void work(retryDocumentImageEdit);
-});
 function changeImageMarkdown(next:string,expected:string){
   if(editor.value!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');
   if(!milkdown.replaceMarkdownDocument(next,expected)){rememberCurrentSelection();editor.setRangeText(next,0,editor.value.length,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
@@ -851,109 +847,29 @@ function showImagePresentation(image?:HTMLImageElement){
 }
 element('image-presentation').addEventListener('click',()=>showImagePresentation());
 async function recaptureDocumentImage(imageSource:string):Promise<void>{
-  if(busy||!documentState||activeImageTab)return;
-  const root=projectRoot,page=documentState.page;
-  await work(async()=>{
-    const shots=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;output:string}>};
-    if(root!==projectRoot||page!==documentState?.page)return;
-    const docs=workspace?.config.docs.replaceAll('\\','/').replace(/\/$/,'')||'docs';
-    const projectPage=docs==='.'||workspace?.project_entries.some(entry=>entry.path===page)?page:`${docs}/${page}`;
-    const normalized=(path:string)=>{try{return decodeURIComponent(new URL(path.replaceAll('\\','/'),`https://project.invalid/${projectPage}`).href);}catch{return path;}};
-    const shot=shots.items.find(item=>normalized(relativeProjectAsset(item.output,page))===normalized(imageSource));
-    if(!shot)throw new Error('この画像には再撮影用の登録がありません。「スクリーンショット」から撮影した画像を挿入してください。');
-    layoutManager?.focusPanel('screenshots');
-    await screenshotLibrary.recapture(shot.id,root);
-  });
+  await handleEditDocumentImage(imageSource,element<HTMLImageElement>('image-tab-preview'),true);
 }
-async function handleEditDocumentImage(imageSource: string, _img: HTMLImageElement): Promise<void> {
-  if (documentImageEditing) {
-    status(retryDocumentImageEdit ? "保存待ちの画像があります。「画像の編集保存を再試行」で保存してください。" : "他の画像をMarkItsで編集中です。MarkItsの編集を完了してください。", true);
-    return;
-  }
-  if (!native) {
-    status("MarkItsによる画像編集はデスクトップ版（Tauri）でのみ利用できます。", true);
-    return;
-  }
-  if (!projectRoot) {
-    status("プロジェクトが開かれていません。", true);
-    return;
-  }
-  documentImageEditing = true;
-  const editingRoot = projectRoot;
-  try {
-    status("MarkItsを起動しています…");
-    const result = await invoke<{
-      sourceFile: string;
-      annotationFile: string;
-      completionFile: string;
-      targetFile: string;
-      relativePath: string;
-      managedScreenshotId?: string;
-      revision?: string;
-    }>("edit_document_image", {
-      root: editingRoot,
-      relativePath: imageSource,
-      page: documentState?.page || null,
-    });
-    if (result.managedScreenshotId) {
-      await screenshotLibrary.editManaged(result.managedScreenshotId, result.revision, editingRoot,(id,revision)=>{
-        void work(async()=>{
-          if(!revision)throw new Error('MarkIts画像の保存版を取得できませんでした。');
-          await rpc('screenshots-change',{id,json:{adopt:revision,expected_revision:result.revision}},editingRoot);
-          if(editingRoot!==projectRoot)return;
-          await screenshotLibrary.refresh();
-          status('MarkItsの編集内容を画像に反映しました。');
-        });
-      });
-      documentImageEditing = false;
-      status('MarkItsで編集中です。編集終了で画像に反映します。');
-      return;
+async function handleEditDocumentImage(imageSource:string,img:HTMLImageElement,recapture=false):Promise<void>{
+  if(documentImageEditing||!projectRoot)return;
+  if(!native){status('MarkItsはデスクトップ版で利用できます。',true);return;}
+  const root=projectRoot,page=documentState?.page,expected=editor.value;
+  const candidate=milkdown.imageSourceRange(img)||imageAtSelection(expected,editor.selectionStart,editor.selectionEnd);
+  const selected=!activeImageTab&&candidate?.src===imageSource?candidate:undefined;
+  documentImageEditing=true;
+  try{
+    status(recapture?'MarkItsの履歴で再撮影し、完成画像を選んでください。':'選択した画像をMarkItsの編集画面で開いています。保存すると編集結果を取り込みます。');
+    const imported=recapture?await screenshotLibrary.recordForInsertion():await screenshotLibrary.editImage(imageSource,page);
+    if(!imported||root!==projectRoot)return;
+    if(selected&&page===documentState?.page&&editor.value===expected){
+      changeImageMarkdown(replaceDocumentImage(expected,selected,relativeProjectAsset(imported.path,page!)),expected);
+      await milkdown.refreshImages();previewScheduler.invalidate();void renderPreview();
+      status('MarkItsの完成画像へ参照を更新しました。');
+    }else{
+      status('完成画像を取り込みました: '+imported.path+'。リソース一覧から挿入・差し替えできます。');
+      await openImageTab(imported.path);
     }
-    status("MarkItsで画像を編集中です。編集が完了したらMarkItsで「編集終了」または「Manual Studioへ注釈を返す」を押してください。");
-    const checkReady = async () => {
-      try {
-        const ready = await invoke<boolean | null>("document_image_edit_ready", {
-          completionFile: result.completionFile,
-          annotationFile: result.annotationFile,
-        });
-        if (!ready) {
-          window.setTimeout(() => { void checkReady(); }, 600);
-          return;
-        }
-        await invoke("apply_document_image_edit", {
-          targetFile: result.targetFile,
-          annotationFile: result.annotationFile,
-        });
-        documentImageEditing = false;
-        retryDocumentImageEdit = null;
-        element('document-image-retry').hidden = true;
-        if (editingRoot !== projectRoot) return;
-        status(`編集コピーを保存しました: ${result.relativePath}。元画像と原稿は保持しています。撮影一覧から挿入・差し替えできます。`);
-        await milkdown.refreshImages();
-        previewScheduler.invalidate(); void renderPreview();
-        await refreshWorkspace();
-        if (activeImageTab) {
-          void openImageTab(activeImageTab);
-        }
-      } catch (err) {
-        const message = String(err);
-        const ended = message.includes('編集を中止しました') || message.includes('編集完了前に終了しました') || message.includes('保存前に終了しました');
-        if (ended) {
-          documentImageEditing = false;
-          retryDocumentImageEdit = null;
-          element('document-image-retry').hidden = true;
-        } else {
-          retryDocumentImageEdit = checkReady;
-          element('document-image-retry').hidden = false;
-        }
-        status(ended ? message : `画像の編集保存に失敗しました: ${message}。編集結果は保持しています。保存を再試行できます。`, true);
-      }
-    };
-    void checkReady();
-  } catch (err) {
-    documentImageEditing = false;
-    status(`MarkItsの起動に失敗しました: ${String(err)}`, true);
-  }
+  }catch(error){status(String(error),true);}
+  finally{documentImageEditing=false;}
 }
 async function refreshWorkspace(reloadPage = false, refreshResources = true): Promise<void> {
   const root = projectRoot;
@@ -2526,48 +2442,7 @@ element('generate-draft').addEventListener('click',()=>{void createFullDraft().c
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
 setBusy(false);
 updateSaveState();
-if (recordingControlMode) {
-  document.body.classList.add("recording-control-mode");
-  const control = document.createElement("main");
-  control.id = "recording-control";
-  control.innerHTML = '<span data-tauri-drag-region title="ここをドラッグして移動">対象アプリの操作が終わったら　⠿</span><button type="button">スクリーンショットを実行</button><small>撮影後、MarkItsの編集画面が開きます</small>';
-  control.querySelector("span")!.addEventListener("mousedown", (event) => {
-    if (event.button === 0) void getCurrentWindow().startDragging().catch((error) => status(`撮影ウィンドウを移動できません: ${String(error)}`, true));
-  });
-  control.querySelector("button")!.addEventListener("click", async () => {
-    const button = control.querySelector("button")!;
-    button.disabled = true; button.textContent = "撮影してMarkItsを起動中…";
-    try {
-      await emitTo("main", "manual-studio-screenshot-requested");
-      await invoke<RecordingResult>("finish_operation_recording");
-    } catch (error) {
-      await invoke("show_recording_control_again").catch(() => {});
-      const message = `撮影に失敗しました: ${String(error)}`;
-      const notice = document.createElement("span");
-      notice.className = "recording-control-error";
-      notice.textContent = message;
-      notice.title = message;
-      const returnButton = document.createElement("button");
-      returnButton.type = "button";
-      returnButton.className = "recording-control-return";
-      returnButton.textContent = "閉じてMunin Manual Studioに戻る";
-      returnButton.addEventListener("click", () => { void invoke("return_to_manual_studio"); });
-      control.replaceChildren(notice, returnButton);
-      await emitTo("main", "manual-studio-screenshot-failed", message).catch(() => {});
-    }
-  });
-  document.body.append(control);
-  if (native) {
-    void (async () => {
-      await document.fonts.ready;
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const width = Math.min(310, window.innerWidth);
-      const height = Math.ceil(control.getBoundingClientRect().height);
-      await getCurrentWindow().setSize(new LogicalSize(width, height));
-    })().catch((error) => status(`撮影ウィンドウのサイズを調整できません: ${String(error)}`, true));
-  }
-}
-if (!recordingControlMode) {
+{
   const initialRoot = params.get("root") || localStorage.getItem("manual-studio-project");
   if (initialRoot) void work(() => openProject(initialRoot));
 }
@@ -2754,7 +2629,17 @@ async function insertScreenshotHere(directMethod?:'manual'):Promise<void>{
     if(!method||!valid())return;
     const existing=method==='existing'?await chooseExistingScreenshot(root,valid):undefined;
     stage(method==='ai'?'ai':'select');
-    const id=method==='ai'?await screenshotAi.create(true):method==='manual'?await screenshotLibrary.recordForInsertion(stage):existing?.id;
+    if(method==='manual'||existing?.path){
+      const imported=method==='manual'?await screenshotLibrary.recordForInsertion(stage):{path:existing!.path};
+      if(!imported)return;
+      if(!valid()){status('完成画像はリソース一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
+      const markdown='![撮影画像](<'+relativeProjectAsset(imported.path,page)+'>)';
+      stage('insert');
+      if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,'\n\n'+markdown+'\n\n',0,markdown.length+4);
+      updateHistoryButtons();stage('refresh');await screenshotLibrary.refresh();outcome='success';status('MarkItsの完成画像を指定位置に挿入しました。');
+      return;
+    }
+    const id=method==='ai'?await screenshotAi.create(true):existing?.id;
     if(!id)return;
     if(!valid()){status('撮影画像は撮影一覧に保存しました。原稿が変更されたため挿入していません。',true);return;}
     stage('preview');
@@ -2794,45 +2679,21 @@ function chooseScreenshotMethod():Promise<'manual'|'ai'|'existing'|undefined>{
     dialog.addEventListener('close',()=>resolve(selected),{once:true});
   });
 }
-const recentScreenshotSelections=new Map<string,string>();
-async function chooseExistingScreenshot(root:string,valid:()=>boolean):Promise<{id:string;revision:string}|undefined>{
-  const shots=JSON.parse(await rpc('screenshots-list',{},root)) as {items:Array<{id:string;name:string;output:string;adopted:string|null;thumbnail:string|null}>};
-  if(root!==projectRoot||!valid()){status('原稿が変更されたため挿入していません。画像は撮影一覧から選び直してください。',true);return;}
+
+async function chooseExistingScreenshot(root:string,valid:()=>boolean):Promise<{id:string;revision:string;path:string}|undefined>{
+  const result=JSON.parse(await rpc('resources-list',{},root)) as {items:Array<{path:string;name:string;missing?:boolean}>};
+  if(root!==projectRoot||!valid())return;
   const {dialog,body}=featureDialog('撮影済み画像を選ぶ');dialog.id='editor-screenshot-existing';
-  const available=shots.items.filter(shot=>shot.adopted);
-  const selectionKey=`manual-studio-recent-screenshot:${root}`;
-  let recentId=recentScreenshotSelections.get(root);
-  if(!recentId){try{recentId=localStorage.getItem(selectionKey)||undefined;}catch{/* Selection remains available in memory when storage is unavailable. */}}
-  const recentIndex=available.findIndex(shot=>shot.id===recentId);
-  if(recentIndex>=0){
-    const [recent]=available.splice(recentIndex,1);available.unshift(recent);
-    const help=document.createElement('p');help.className='muted';help.textContent='前回選んだ画像を先頭に表示しています。現在の採用版を確認して選べます。';body.append(help);
-  }else if(recentId){
-    recentScreenshotSelections.delete(root);
-    try{localStorage.removeItem(selectionKey);}catch{/* Storage is optional. */}
-    recentId=undefined;
-  }
-  if(!available.length){const empty=document.createElement('p');empty.textContent='採用済みの画像がありません。手動撮影・AI撮影、または撮影一覧のPNG取り込みで画像を用意してください。';body.append(empty);}
-  return new Promise(resolve=>{let selected:{id:string;revision:string}|undefined;
-    for(const shot of available){
-      const card=document.createElement('section');card.className='card';
-      const title=document.createElement('h2');title.textContent=shot.name||shot.output;card.append(title);
-      if(shot.id===recentId){const label=document.createElement('p');label.className='muted';label.textContent='前回選択した画像';card.append(label);}
-      if(shot.thumbnail){const image=document.createElement('img');image.src=shot.thumbnail;image.alt=title.textContent;image.style.maxWidth='100%';image.style.maxHeight='160px';card.append(image);}
-      const button=document.createElement('button');button.type='button';button.textContent='この画像を選ぶ';button.dataset.screenshotId=shot.id;
-      button.onclick=()=>{
-        if(root!==projectRoot||!valid()){dialog.close();return;}
-        selected={id:shot.id,revision:shot.adopted!};
-        recentScreenshotSelections.set(root,shot.id);
-        try{localStorage.setItem(selectionKey,shot.id);}catch{/* Selection remains available in memory. */}
-        dialog.close();
-      };
-      card.append(button);body.append(card);
+  const available=result.items.filter(item=>!item.missing);
+  if(!available.length){const empty=document.createElement('p');empty.textContent='MarkItsで撮影して、完成画像をリソース一覧へ取り込んでください。';body.append(empty);}
+  return new Promise(resolve=>{let selected:{id:string;revision:string;path:string}|undefined;
+    for(const item of available){
+      const button=document.createElement('button');button.type='button';button.textContent=item.name||item.path;
+      button.onclick=()=>{if(root===projectRoot&&valid())selected={id:item.path,revision:'',path:item.path};dialog.close();};body.append(button);
     }
     dialog.addEventListener('close',()=>resolve(selected),{once:true});
   });
 }
-
 function manuscriptPagePath(page:string):string {
   return workspace?.project_entries.some(entry=>!entry.directory&&entry.path===page)?page:`${(workspace?.config.docs||'docs').replace(/\/$/,'')}/${page}`;
 }

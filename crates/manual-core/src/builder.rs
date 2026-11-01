@@ -11,6 +11,17 @@ use super::task::{collect_markdown_files, utc_now};
 
 const SITE_MANIFEST: &str = ".moduleloom-site-files.json";
 
+fn copy_public_asset(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png")) {
+        let bytes = fs::read(source).map_err(|e| e.to_string())?;
+        if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            let public = markits::image_metadata::strip_markits_metadata(&bytes)?;
+            return fs::write(destination, public).map_err(|e| e.to_string());
+        }
+    }
+    fs::copy(source, destination).map(|_| ()).map_err(|e| e.to_string())
+}
+
 fn site_relative_path(path: &str) -> Result<&Path, String> {
     let relative = Path::new(path);
     if path.is_empty()
@@ -297,7 +308,7 @@ fn stage_page_links(
                 let output = docs.join(&destination);
                 fs::create_dir_all(output.parent().ok_or("Invalid asset path")?)
                     .map_err(|e| e.to_string())?;
-                fs::copy(source, output).map_err(|e| e.to_string())?;
+                copy_public_asset(&source, &output)?;
                 destination
             };
         let link = relative_link(&page.destination, &destination);
@@ -464,7 +475,7 @@ fn build_inner(
                 if let Some(parent) = dest.parent() {
                     let _ = fs::create_dir_all(parent);
                 }
-                fs::copy(entry.path(), &dest).map_err(|e| e.to_string())?;
+                copy_public_asset(entry.path(), &dest)?;
             }
         }
     }
@@ -487,7 +498,7 @@ fn build_inner(
                     let _ = fs::create_dir_all(parent);
                 }
                 if !dest.exists() {
-                    fs::copy(entry.path(), &dest).map_err(|e| e.to_string())?;
+                    copy_public_asset(entry.path(), &dest)?;
                 }
             }
         }
@@ -633,6 +644,25 @@ fn build_inner(
 #[cfg(test)]
 mod site_tests {
     use super::*;
+
+    #[test]
+    fn publication_strips_edit_metadata_without_changing_the_project_asset_or_pixels() {
+        let root = tempdir().unwrap();
+        let source = root.path().join("editable.png");
+        let output = root.path().join("public.png");
+        let original = image::DynamicImage::new_rgba8(20, 16);
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        original.write_to(&mut buffer, image::ImageFormat::Png).unwrap();
+        let private = markits::raster::embed_png_text_chunk(buffer.get_ref(), "markits:base_image", "private original").unwrap();
+        let private = markits::raster::embed_png_text_chunk(&private, "markits:ui_elements", "private UI map").unwrap();
+        fs::write(&source, &private).unwrap();
+        copy_public_asset(&source, &output).unwrap();
+        let public = fs::read(&output).unwrap();
+        assert_eq!(fs::read(&source).unwrap(), private);
+        assert!(markits::raster::extract_png_text_chunk(&public, "markits:base_image").is_none());
+        assert!(markits::raster::extract_png_text_chunk(&public, "markits:ui_elements").is_none());
+        assert_eq!(image::load_from_memory(&public).unwrap().to_rgba8(), original.to_rgba8());
+    }
 
     #[test]
     fn canonical_pages_publish_links_from_noncanonical_project_root() {

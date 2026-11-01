@@ -47,7 +47,6 @@ const unitStepCount = steps.length;
 steps.push({group:'ui',name:'manual save and Undo across modes and tabs',command:process.execPath,args:['scripts/test_manual_studio_manual_save.mjs'],timeoutMs:90_000});
 steps.push({group:'ui',name:'GitHub alert contrast across all themes',command:process.execPath,args:['scripts/test_manual_studio_gfm_contrast.mjs'],timeoutMs:60_000});
 steps.push({group:'ui',name:'resource and preview performance regressions',command:process.execPath,args:['scripts/test_manual_studio_performance_ui.mjs'],timeoutMs:120_000});
-steps.push({group:'ui',name:'recording popup live operation history',command:process.execPath,args:['scripts/test_manual_studio_recording_control.mjs'],timeoutMs:60_000});
 steps.push({group:'ui',name:'folder creation through menus and context menus',command:process.execPath,args:['scripts/test_manual_studio_folder_creation.mjs'],timeoutMs:120_000});
 
 
@@ -64,10 +63,7 @@ steps.push(
   { group: 'ui', name: 'preview link browser checks', command: process.execPath, args: ['scripts/test_manual_studio_preview_navigation.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'workspace path settings and timing history', command: process.execPath, args: ['scripts/test_manual_studio_priority_improvements.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'Milkdown and Mermaid browser checks', command: process.execPath, args: ['scripts/test_manual_studio_milkdown.mjs'], timeoutMs: 120_000 },
-  { group: 'capture', name: 'screenshot recapture task progress checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_progress.mjs'], timeoutMs: 120_000 },
-  { group: 'capture', name: 'recapture display refresh checks', command: process.execPath, args: ['scripts/test_manual_studio_recapture_display.mjs'], timeoutMs: 120_000 },
-  { group: 'capture', name: 'MarkIts crop restoration checks', command: process.execPath, args: ['scripts/test_manual_markits_crop.mjs'], timeoutMs: 120_000 },
-  { group: 'capture', name: 'screenshot list excludes unrelated project resources', command: process.execPath, args: ['scripts/test_manual_studio_screenshot_list.mjs'], timeoutMs: 120_000 },
+  { group: 'capture', name: 'MarkIts direct capture, cancellation and insertion ownership', command: process.execPath, args: ['scripts/test_manual_studio_markits_bridge.mjs'], timeoutMs: 60_000 },
   { group: 'ui', name: 'dialog layout at desktop and small viewport sizes', command: process.execPath, args: ['scripts/test_manual_studio_dialog_layout.mjs'], timeoutMs: 90_000 },
   { group: 'ui', name: 'resource and image generation workflows', command: process.execPath, args: ['scripts/test_manual_studio_resources.mjs'], timeoutMs: 180_000 },
   { group: 'ui', name: 'document conflict, settings retry, protected sharing and legacy integrity', command: process.execPath, args: ['scripts/test_manual_studio_integrity_workflows.mjs'], timeoutMs: 120_000 },

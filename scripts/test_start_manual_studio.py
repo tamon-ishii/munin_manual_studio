@@ -85,6 +85,51 @@ class MarkItsRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "recurse-submodules"):
             launcher.prepare_markits_sources()
 
+    def test_windows_build_avoids_the_running_legacy_executable(self):
+        target = self.root / "target"
+        legacy = target / "debug/manual-studio.exe"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"running old app")
+        with patch.object(launcher.sys, "platform", "win32"), patch.object(launcher, "required_tool", side_effect=lambda name: name), patch.object(launcher, "prepare_frontend"), patch.object(launcher.subprocess, "run") as run:
+            binary = launcher.build_application(target)
+        self.assertEqual(binary, target / "debug/manual-studio-launcher.exe")
+        command = run.call_args_list[-1].args[0]
+        self.assertEqual(command[:2], ["cargo", "rustc"])
+        self.assertEqual(command[-3:], ["--", "-o", str(binary)])
+        self.assertIn("--locked", command)
+        self.assertEqual(legacy.read_bytes(), b"running old app")
+
+    def test_windows_runs_private_copies_and_preserves_build_artifacts(self):
+        binary = self.root / "target/debug/manual-studio-launcher.exe"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"new app")
+        cli = binary.parent / "manualctl.exe"
+        cli.write_bytes(b"cli")
+        observed = []
+        def run(command, **kwargs):
+            executable = Path(command[0])
+            observed.append(executable)
+            self.assertNotEqual(executable, binary)
+            self.assertEqual(executable.read_bytes(), b"new app")
+            self.assertEqual((executable.parent / "manualctl.exe").read_bytes(), b"cli")
+            self.assertEqual(kwargs["env"]["PATH"].split(launcher.os.pathsep)[0], str(executable.parent))
+            return subprocess.CompletedProcess(command, 7)
+        with patch.object(launcher.sys, "platform", "win32"), patch.object(launcher.subprocess, "run", side_effect=run):
+            self.assertEqual(launcher.launch(binary), 7)
+        self.assertFalse(observed[0].exists())
+        self.assertEqual(binary.read_bytes(), b"new app")
+        self.assertEqual(cli.read_bytes(), b"cli")
+
+    def test_windows_launcher_artifact_is_reused_without_rebuilding(self):
+        target = self.root / "target"
+        binary = target / "debug/manual-studio-launcher.exe"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"app")
+        binary.chmod(0o755)
+        (binary.parent / "manualctl.exe").write_bytes(b"cli")
+        with patch.object(launcher.sys, "platform", "win32"), patch.object(launcher, "source_is_newer", return_value=False):
+            self.assertEqual(launcher.cached_binary(target), binary)
+
 
 if __name__ == "__main__":
     unittest.main()

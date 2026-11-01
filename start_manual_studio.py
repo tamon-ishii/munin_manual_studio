@@ -105,6 +105,8 @@ def target_directory() -> Path:
 def cached_binary(target: Path) -> Path | None:
     binary_name = "manual-studio.exe" if sys.platform == "win32" else "manual-studio"
     candidates = [target / profile / binary_name for profile in ("debug", "release")]
+    if sys.platform == "win32":
+        candidates.append(target / "debug/manual-studio-launcher.exe")
     candidates = [candidate for candidate in candidates if candidate.is_file() and os.access(candidate, os.X_OK)]
     if not candidates:
         return None
@@ -124,6 +126,13 @@ def build_application(target: Path) -> Path:
     prepare_frontend(npm, markits_frontend)
     subprocess.run([npm, "run", "manual:build"], cwd=PROJECT_ROOT, check=True)
     subprocess.run([cargo, "build", "--locked", "-p", "manual-core", "--bin", "manualctl", "--target-dir", str(target)], cwd=PROJECT_ROOT, check=True)
+    if sys.platform == "win32":
+        # An older running Studio may still hold manual-studio.exe open. Build
+        # to a dedicated artifact that this launcher never executes in place.
+        binary = target / "debug/manual-studio-launcher.exe"
+        subprocess.run([cargo, "rustc", "--locked", "-p", "manual-studio", "--bin", "manual-studio",
+                        "--target-dir", str(target), "--", "-o", str(binary)], cwd=PROJECT_ROOT, check=True)
+        return binary
     subprocess.run([cargo, "build", "--locked", "-p", "manual-studio", "--target-dir", str(target)], cwd=PROJECT_ROOT, check=True)
     binary_name = "manual-studio.exe" if sys.platform == "win32" else "manual-studio"
     return target / "debug" / binary_name
@@ -132,6 +141,22 @@ def build_application(target: Path) -> Path:
 def launch(binary: Path) -> int:
     environment = os.environ.copy()
     environment["PATH"] = str(binary.parent) + os.pathsep + environment.get("PATH", "")
+    if sys.platform == "win32":
+        # Windows locks running executables. Keep Cargo outputs free for the
+        # next rebuild, including the CLI used by the frontend's RPC bridge.
+        # MarkIts children may outlive Studio; their locks must not turn a
+        # successful launch into a cleanup failure.
+        with tempfile.TemporaryDirectory(prefix="munin-runtime-", ignore_cleanup_errors=True) as directory:
+            runtime = Path(directory)
+            executable = runtime / "manual-studio.exe"
+            shutil.copy2(binary, executable)
+            cli = binary.parent / "manualctl.exe"
+            if cli.is_file():
+                shutil.copy2(cli, runtime / cli.name)
+            for library in binary.parent.glob("*.dll"):
+                shutil.copy2(library, runtime / library.name)
+            environment["PATH"] = str(runtime) + os.pathsep + environment["PATH"]
+            return subprocess.run([str(executable)], cwd=PROJECT_ROOT, env=environment, check=False).returncode
     return subprocess.run([str(binary)], cwd=PROJECT_ROOT, env=environment, check=False).returncode
 
 

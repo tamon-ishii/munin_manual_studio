@@ -120,13 +120,6 @@ try {
   assert.match(await page.locator('#markdown-editor').inputValue(),/> \[!NOTE\]/);
   await page.getByRole('combobox',{name:'注釈を挿入',exact:true}).selectOption('WARNING');
   assert.match(await page.locator('#markdown-editor').inputValue(),/> \[!WARNING\]/);
-  const control=await browser.newPage();
-  await control.addInitScript(()=>{window.cancelCommands=[];window.__TAURI_INTERNALS__={invoke:async command=>{window.cancelCommands.push(command);}};});
-  await control.goto(`${base}/recording-control.html`);
-  await control.locator('#capture-cancel').waitFor();
-  await control.keyboard.press('Escape');
-  await control.waitForFunction(()=>window.cancelCommands.includes('cancel_operation_recording'));
-  await control.close();
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({result:'passed',checks:['no hidden preview work','no library refresh on save','one latest preview','one bundled resource request','thumbnail reuse and external-write invalidation'],requests:Object.fromEntries(counts)},null,2));
 } finally {

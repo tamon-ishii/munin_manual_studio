@@ -6,12 +6,13 @@ use std::{
     fs,
     path::PathBuf,
 };
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 
 mod clipboard_paths;
 mod editor_context_menu;
 mod native_worker;
-mod recorder;
+
+mod markits_bridge;
 
 static WORKSPACE_HISTORY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -263,115 +264,6 @@ fn resolve_working_directory(root: Option<&str>, working_directory: Option<&str>
 }
 
 #[derive(Default)]
-struct RecordingControlGuard(std::sync::atomic::AtomicU64);
-fn disarm_recording_escape(app: &tauri::AppHandle) {
-    app.state::<RecordingControlGuard>().0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-}
-#[cfg(target_os = "windows")]
-fn arm_recording_escape(app: &tauri::AppHandle) {
-    use std::sync::atomic::Ordering;
-    let generation = app.state::<RecordingControlGuard>().0.fetch_add(1, Ordering::SeqCst) + 1;
-    let app = app.clone();
-    std::thread::spawn(move || {
-        #[link(name = "user32")]
-        extern "system" { fn GetAsyncKeyState(key: i32) -> i16; }
-        let mut down = unsafe { GetAsyncKeyState(0x1B) } < 0;
-        loop {
-            if app.state::<RecordingControlGuard>().0.load(Ordering::SeqCst) != generation { break; }
-            let Some(window) = app.get_webview_window("recording-control") else { break; };
-            if !window.is_visible().unwrap_or(false) { break; }
-            let pressed = unsafe { GetAsyncKeyState(0x1B) } < 0;
-            if pressed && !down {
-                let owner = app.clone();
-                let _ = app.run_on_main_thread(move || { let _ = cancel_operation_recording(owner.clone(), owner.state::<recorder::RecorderState>()); });
-                break;
-            }
-            down = pressed;
-            std::thread::sleep(std::time::Duration::from_millis(25));
-        }
-    });
-}
-#[cfg(not(target_os = "windows"))]
-fn arm_recording_escape(_app: &tauri::AppHandle) {}
-
-#[tauri::command]
-fn cancel_operation_recording(app: tauri::AppHandle, state: State<'_, recorder::RecorderState>) -> Result<(), String> {
-    disarm_recording_escape(&app);
-    let cancelled = recorder::cancel(state.inner())?;
-    let close = close_recording_control(app.clone());
-    let restore = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
-    if cancelled { let _ = app.emit_to("main", "manual-studio-screenshot-cancelled", ()); }
-    close.and(restore)
-}
-
-#[tauri::command]
-async fn show_recording_control(app: tauri::AppHandle) -> Result<(), String> {
-    // WebView2 creation deadlocks inside synchronous commands on Windows.
-    // Tauri runs async commands off the UI thread, allowing build() to finish.
-    disarm_recording_escape(&app);
-    if let Some(window) = app.get_webview_window("recording-control") {
-        window.show().map_err(|error| error.to_string())?;
-        window.unminimize().map_err(|error| error.to_string())?;
-        window
-            .set_always_on_top(true)
-            .map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        arm_recording_escape(&app);
-        return Ok(());
-    }
-    let window = tauri::WebviewWindowBuilder::new(
-        &app,
-        "recording-control",
-        tauri::WebviewUrl::App("recording-control.html".into()),
-    )
-    .title("Munin Manual Studio — 撮影")
-    .inner_size(380.0, 410.0)
-    .min_inner_size(1.0, 1.0)
-    // GTK locks an unresizable WebView at its initial minimum (200px).
-    // Allow the content-driven resize to shrink the native popup.
-    .resizable(true)
-    .decorations(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .center()
-    .build()
-    .map_err(|error| error.to_string())?;
-    window.show().map_err(|error| error.to_string())?;
-    window.unminimize().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())?;
-    arm_recording_escape(&app);
-    Ok(())
-}
-
-#[tauri::command]
-fn close_recording_control(app: tauri::AppHandle) -> Result<(), String> {
-    disarm_recording_escape(&app);
-    if let Some(window) = app.get_webview_window("recording-control") {
-        window.close().map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn hide_recording_control(app: tauri::AppHandle) -> Result<(), String> {
-    disarm_recording_escape(&app);
-    if let Some(window) = app.get_webview_window("recording-control") {
-        window.hide().map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn show_recording_control_again(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("recording-control") {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        arm_recording_escape(&app);
-    }
-    Ok(())
-}
-
-#[derive(Default)]
 struct HiddenStudioWindows(std::sync::Mutex<Vec<String>>);
 
 #[tauri::command]
@@ -436,20 +328,6 @@ fn restore_manual_studio(
         }
     }
     Ok(())
-}
-
-#[tauri::command]
-fn return_to_manual_studio(
-    app: tauri::AppHandle,
-    state: State<'_, HiddenStudioWindows>,
-) -> Result<(), String> {
-    if let Some(control) = app.get_webview_window("recording-control") {
-        control.close().map_err(|error| error.to_string())?;
-    }
-    if let Some(main) = app.get_webview_window("main") {
-        main.unminimize().map_err(|error| error.to_string())?;
-    }
-    restore_manual_studio(app, state)
 }
 
 #[tauri::command]
@@ -802,535 +680,12 @@ fn open_editor(app: tauri::AppHandle, root: String, page: String) -> Result<(), 
     Ok(())
 }
 
-#[tauri::command]
-async fn start_operation_recording(
-    state: State<'_, recorder::RecorderState>,
-    root: String,
-    program: String,
-    args: Vec<String>,
-    working_directory: String,
-    window_title: String,
-    task_id: String,
-    markits_program: String,
-    window_id: Option<String>,
-) -> Result<String, String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        recorder::start(
-            &state,
-            root,
-            program,
-            args,
-            working_directory,
-            window_title,
-            task_id,
-            markits_program,
-            window_id,
-        )
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-fn operation_recording_running(state: State<'_, recorder::RecorderState>) -> Result<bool, String> {
-    recorder::is_running(state.inner())
-}
-
-fn recording_control_bounds(app: &tauri::AppHandle) -> Option<(f64, f64, f64, f64)> {
-    app
-        .get_webview_window("recording-control")
-        .and_then(|window| {
-            let position = window.outer_position().ok()?;
-            let size = window.outer_size().ok()?;
-            #[cfg(target_os = "macos")]
-            let scale = window.scale_factor().ok()?;
-            #[cfg(not(target_os = "macos"))]
-            let scale = 1.0;
-            Some((
-                position.x as f64 / scale,
-                position.y as f64 / scale,
-                size.width as f64 / scale,
-                size.height as f64 / scale,
-            ))
-        })
-}
-
-#[tauri::command]
-fn operation_recording_history(app: tauri::AppHandle, state: State<'_, recorder::RecorderState>) -> Result<recorder::RecordingHistory, String> {
-    recorder::history(state.inner(), recording_control_bounds(&app))
-}
-
-#[tauri::command]
-fn operation_recording_capture_settings(state: State<'_, recorder::RecorderState>, max_depth: Option<usize>) -> Result<manual_core::capture_settings::CaptureSettings, String> {
-    recorder::capture_settings(state.inner(), max_depth)
-}
-
-#[tauri::command]
-async fn finish_operation_recording(
-    app: tauri::AppHandle,
-    state: State<'_, recorder::RecorderState>,
-) -> Result<recorder::RecordingResult, String> {
-    let control_bounds = recording_control_bounds(&app);
-    // Hidden WebKit views can suspend timers and IPC continuations. Keep
-    // capture preparation and both success/error recovery in the native host.
-    hide_recording_control(app.clone())?;
-    hide_manual_studio(app.clone(), app.state::<HiddenStudioWindows>())?;
-    let state = state.inner().clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        std::thread::sleep(std::time::Duration::from_millis(350));
-        recorder::finish_excluding_control(&state, control_bounds)
-    })
-    .await
-    .map_err(|error| error.to_string())
-    .and_then(|result| result);
-    let result = match result {
-        Ok(result) => result,
-        Err(error) => {
-            let restored = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
-            let _ = show_recording_control_again(app.clone());
-            return Err(match restored {
-                Ok(()) => error,
-                Err(restore_error) => format!("{error}\nMunin Manual Studioの再表示にも失敗しました: {restore_error}"),
-            });
-        }
-    };
-    app.emit_to("main", "manual-studio-screenshot-finished", &result)
-        .map_err(|error| error.to_string())?;
-    close_recording_control(app.clone())?;
-    if !result.markits_started {
-        restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>())?;
-    }
-    if result.markits_started {
-        let completion = PathBuf::from(&result.completion_file);
-        let source = PathBuf::from(&result.source_file);
-        std::thread::spawn(move || {
-            // Hidden WebKit views can suspend JS timers. Restore natively so
-            // an editor crash cannot leave the main window waiting invisibly.
-            loop {
-                if completion.is_file() || completion.with_extension("exit").is_file() {
-                    let _ = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
-                    break;
-                }
-                if !source.is_file() || app.get_webview_window("main").is_none() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-        });
-    }
-    Ok(result)
-}
-
-#[tauri::command]
-async fn clone_operation_scenario_for_task(
-    root: String,
-    input: String,
-    task_id: String,
-) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        recorder::clone_scenario_for_task(root, input, task_id)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn import_markits_annotation() -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(recorder::import_annotation_spec)
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn markits_annotation_ready(
-    source_file: String,
-    annotation_file: String,
-    completion_file: String,
-) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        recorder::annotation_if_complete(&source_file, &annotation_file, &completion_file)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn preserve_markits_capture(
-    root: String,
-    page: String,
-    task_id: String,
-    image_file: String,
-    prompt: String,
-) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        recorder::preserve_annotated_capture(&root, &page, &task_id, &image_file, &prompt)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn import_library_capture(
-    root: String,
-    id: String,
-    revision: Option<String>,
-    image_file: String,
-) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        use base64::Engine;
-        let root = PathBuf::from(root);
-        let mut timings = Vec::new();
-        let started = std::time::Instant::now();
-        let source = manual_core::screenshots::image(&root,&id,revision.as_deref(),true)?;
-        let bytes = fs::read(image_file).map_err(|e|e.to_string())?;
-        timings.push(serde_json::json!({"stage":"source-read","duration_ms":started.elapsed().as_secs_f64()*1000.0}));
-        let started = std::time::Instant::now();
-        let loaded = markits_desktop_lib::metadata::load_image_with_metadata(&bytes).map_err(|e|e.to_string())?;
-        let mut ui = loaded.ui_elements.clone();
-        if let Some(crop) = &loaded.crop_info { if let Some(elements) = &mut ui { for element in elements { element.x += crop.offset_x; element.y += crop.offset_y; } } }
-        let scene = loaded.annotations_json.as_deref().map(serde_json::from_str::<serde_json::Value>).transpose().map_err(|e|e.to_string())?;
-        timings.push(serde_json::json!({"stage":"metadata","duration_ms":started.elapsed().as_secs_f64()*1000.0}));
-        let started = std::time::Instant::now();
-        let mut result = manual_core::screenshots::register(&root,&serde_json::json!({"id":id,"source":source["data"],"render":base64::engine::general_purpose::STANDARD.encode(&bytes),"scene":scene,"crop":loaded.crop_info,"ui":ui,"adopt":source["screenshot"]["adopted"].is_null()}))?;
-        timings.push(serde_json::json!({"stage":"register","duration_ms":started.elapsed().as_secs_f64()*1000.0}));
-        result["timings"] = serde_json::json!(timings);
-        Ok(result.to_string())
-    }).await.map_err(|e|e.to_string())?
-}
-
-fn prepare_library_screenshot(
-    root: String,
-    id: String,
-    revision: Option<String>,
-) -> Result<serde_json::Value, String> {
-    use base64::Engine;
-    let root = PathBuf::from(root);
-    let source = manual_core::screenshots::image(&root, &id, revision.as_deref(), true)?;
-    if source["screenshot"]["protected"] == true {
-        return Err("保護を解除してから編集してください。".into());
-    }
-    let data = source["data"].as_str().ok_or("原本を読めません。")?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data.strip_prefix("data:image/png;base64,").unwrap_or(data))
-        .map_err(|e| e.to_string())?;
-    let edit = &source["edit"];
-    let scene = if edit["scene"].is_null() {
-        serde_json::json!({"canvas":{"width":edit["width"],"height":edit["height"]},"annotations":[]})
-    } else {
-        edit["scene"].clone()
-    };
-    let crop: Option<markits_desktop_lib::metadata::CropInfo> = if edit["crop"].is_null() {
-        None
-    } else {
-        Some(serde_json::from_value(edit["crop"].clone()).map_err(|e| e.to_string())?)
-    };
-    let mut background = bytes.clone();
-    if let Some(crop) = &crop {
-        let render = manual_core::screenshots::image(&root, &id, revision.as_deref(), false)?;
-        let render_data = render["data"].as_str().ok_or("画像を読めません。")?;
-        let render_bytes = base64::engine::general_purpose::STANDARD
-            .decode(
-                render_data
-                    .strip_prefix("data:image/png;base64,")
-                    .unwrap_or(render_data),
-            )
-            .map_err(|e| e.to_string())?;
-        let dimensions = image::load_from_memory(&render_bytes).map_err(|e| e.to_string())?;
-        let original = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-        if crop.offset_x < 0.0
-            || crop.offset_y < 0.0
-            || crop.offset_x as u32
-                + scene["canvas"]["width"]
-                    .as_u64()
-                    .unwrap_or(dimensions.width() as u64) as u32
-                > original.width()
-            || crop.offset_y as u32
-                + scene["canvas"]["height"]
-                    .as_u64()
-                    .unwrap_or(dimensions.height() as u64) as u32
-                > original.height()
-        {
-            return Err("クロップが原本の範囲外です。".into());
-        }
-        let cropped = original.crop_imm(
-            crop.offset_x as u32,
-            crop.offset_y as u32,
-            scene["canvas"]["width"]
-                .as_u64()
-                .unwrap_or(dimensions.width() as u64) as u32,
-            scene["canvas"]["height"]
-                .as_u64()
-                .unwrap_or(dimensions.height() as u64) as u32,
-        );
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        cropped
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|e| e.to_string())?;
-        background = cursor.into_inner();
-    }
-    let ui: Option<Vec<markits_desktop_lib::ui_elements::DetectedUiElement>> =
-        if edit["ui"].is_null() {
-            None
-        } else {
-            let elements = edit["ui"].get("elements").unwrap_or(&edit["ui"]);
-            Some(serde_json::from_value(elements.clone()).map_err(|e| format!("画面要素データを読み込めません: {e}"))?)
-        };
-    let ui = if let Some(crop) = &crop {
-        ui.map(|elements| {
-            markits_desktop_lib::ui_elements::filter_elements_for_crop(
-                &elements,
-                crop.offset_x,
-                crop.offset_y,
-                scene["canvas"]["width"].as_f64().unwrap_or(0.0),
-                scene["canvas"]["height"].as_f64().unwrap_or(0.0),
-            )
-        })
-    } else {
-        ui
-    };
-    let annotated = markits_desktop_lib::metadata::embed_metadata(
-        &background,
-        Some(&scene.to_string()),
-        ui.as_deref(),
-        crop.as_ref(),
-    )
-    .map_err(|e| e.to_string())?;
-    let annotated = markits_desktop_lib::metadata::embed_text_chunk(
-        &annotated,
-        "markits:source_image",
-        &format!(
-            "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(&background)
-        ),
-    )
-    .map_err(|e| e.to_string())?;
-    let annotated =
-        markits_desktop_lib::metadata::embed_text_chunk(&annotated, "markits:base_image", data)
-            .map_err(|e| e.to_string())?;
-    let home = manual_core::config::project_path(
-        &root,
-        &format!(
-            ".munin/screenshots/{id}/sessions/{}",
-            manual_core::screenshots::new_id("session")
-        ),
-    )?;
-    fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-    let input = home.join("input.png");
-    let output = home.join("output.png");
-    let completion = home.join("complete.done");
-    fs::write(&input, annotated).map_err(|e| e.to_string())?;
-    fs::write(home.join("session.json"),serde_json::json!({"version":1,"id":id,"revision":edit["id"],"original":edit["original"],"completion":completion}).to_string()).map_err(|e|e.to_string())?;
-    Ok(
-        serde_json::json!({"sourceFile":input,"annotationFile":output,"completionFile":completion,"revision":edit["id"]}),
-    )
-}
-
-#[tauri::command]
-async fn edit_library_screenshot(
-    root: String,
-    id: String,
-    revision: Option<String>,
-) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let handoff = prepare_library_screenshot(root, id, revision)?;
-        let mut command =
-            std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
-        let mut child = command
-            .arg("--manual-studio-annotate")
-            .arg("--manual-studio-input")
-            .arg(handoff["sourceFile"].as_str().ok_or("Invalid input")?)
-            .arg("--manual-studio-output")
-            .arg(handoff["annotationFile"].as_str().ok_or("Invalid output")?)
-            .arg("--manual-studio-completion")
-            .arg(
-                handoff["completionFile"]
-                    .as_str()
-                    .ok_or("Invalid session")?,
-            )
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        let completion = PathBuf::from(handoff["completionFile"].as_str().ok_or("Invalid session")?);
-        std::thread::spawn(move || {
-            let result = child.wait();
-            if !completion.is_file() && !completion.with_extension("exit").is_file() {
-                let _ = fs::write(completion.with_extension("exit"),format!("MarkItsが編集完了前に終了しました ({result:?})。元画像は保持しています。再度編集できます。"));
-            }
-        });
-        Ok(handoff)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn edit_document_image(
-    root: String,
-    relative_path: String,
-    page: Option<String>,
-) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let root_path = PathBuf::from(&root);
-        let canonical_root = root_path.canonicalize().unwrap_or_else(|_| root_path.clone());
-
-        let full_path = if let Some(ref p) = page {
-            manual_core::preview::resolve_asset_path(&root_path, p, &relative_path)
-                .or_else(|_| manual_core::config::project_path(&root_path, &relative_path))?
-        } else {
-            manual_core::config::project_path(&root_path, &relative_path)?
-        };
-
-        if !full_path.is_file() {
-            return Err(format!("画像ファイルが見つかりません: {relative_path}"));
-        }
-
-        // Managed images must use the original/scene handoff and candidate
-        // adoption flow, even when editing starts in the manuscript.
-        let library = manual_core::screenshots::list(&root_path)?;
-        for shot in library["items"].as_array().into_iter().flatten() {
-            if let Some(output) = shot["output"].as_str() {
-                let managed = manual_core::config::project_path(&root_path, output)?;
-                if managed.canonicalize().ok() == Some(full_path.canonicalize().map_err(|e| e.to_string())?) {
-                    return Ok(serde_json::json!({"managedScreenshotId": shot["id"], "revision": shot["adopted"]}));
-                }
-            }
-        }
-
-        let original_relative = full_path.strip_prefix(&canonical_root)
-            .map_err(|_| "プロジェクト外の画像は編集できません。")?
-            .to_string_lossy().replace('\\', "/");
-        let copied = manual_core::resources::copy(&root_path, &original_relative)?;
-        let copy_relative = copied["path"].as_str().ok_or("編集コピーを作成できませんでした。")?;
-        let target_path = manual_core::config::project_path(&root_path, copy_relative)?;
-        let bytes = fs::read(&full_path).map_err(|e| e.to_string())?;
-        let session_id = manual_core::screenshots::new_id("session");
-        let home = manual_core::config::project_path(
-            &root_path,
-            &format!(".munin/sessions/{session_id}"),
-        )?;
-        fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-        let input = home.join("input.png");
-        let output = home.join("output.png");
-        let completion = home.join("complete.done");
-
-        // MarkIts expects an image input. If source is JPEG/etc, decode and re-encode to PNG so MarkIts loads cleanly.
-        if let Ok(dynamic_image) = image::load_from_memory(&bytes) {
-            dynamic_image
-                .save_with_format(&input, image::ImageFormat::Png)
-                .map_err(|e| e.to_string())?;
-        } else {
-            fs::write(&input, &bytes).map_err(|e| e.to_string())?;
-        }
-
-        let mut command =
-            std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
-        command
-            .arg("--manual-studio-annotate")
-            .arg("--manual-studio-input")
-            .arg(&input)
-            .arg("--manual-studio-output")
-            .arg(&output)
-            .arg("--manual-studio-completion")
-            .arg(&completion);
-        let mut child = command.spawn().map_err(|e| e.to_string())?;
-        let completion_marker = completion.clone();
-        std::thread::spawn(move || {
-            let result = child.wait();
-            let exit_marker = completion_marker.with_extension("exit");
-            if !completion_marker.is_file() && !exit_marker.is_file() {
-                let _ = fs::write(exit_marker, format!("MarkItsが編集完了前に終了しました ({result:?})。元画像は保持しています。再度編集できます。"));
-            }
-        });
-
-        let rel = target_path
-            .strip_prefix(&canonical_root)
-            .unwrap_or(&full_path)
-            .to_string_lossy()
-            .replace('\\', "/");
-
-        Ok(serde_json::json!({
-            "sourceFile": input.to_string_lossy(),
-            "annotationFile": output.to_string_lossy(),
-            "completionFile": completion.to_string_lossy(),
-            "targetFile": target_path.to_string_lossy(),
-            "relativePath": rel,
-        }))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn document_image_edit_ready(
-    completion_file: String,
-    annotation_file: String,
-) -> Result<Option<bool>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let completion = PathBuf::from(&completion_file);
-        let output = PathBuf::from(&annotation_file);
-        if completion.is_file() {
-            if fs::metadata(&output).map(|m| m.len() > 0).unwrap_or(false) {
-                return Ok(Some(true));
-            } else {
-                return Err("MarkItsで画像が保存されませんでした。".into());
-            }
-        }
-        let exit_marker = completion.with_extension("exit");
-        if exit_marker.is_file() {
-            return Err(fs::read_to_string(exit_marker).unwrap_or_else(|_| "MarkItsが保存前に終了しました。".into()));
-        }
-        Ok(None)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn apply_document_image_edit(
-    target_file: String,
-    annotation_file: String,
-) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let target_path = PathBuf::from(&target_file);
-        let annotation_path = PathBuf::from(&annotation_file);
-        if !annotation_path.is_file() {
-            return Err("編集後の画像ファイルが見つかりません。".into());
-        }
-        let ext = target_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        if ext == "jpg" || ext == "jpeg" {
-            let img = image::open(&annotation_path).map_err(|e| e.to_string())?;
-            img.save_with_format(&target_path, image::ImageFormat::Jpeg)
-                .map_err(|e| e.to_string())?;
-        } else if ext == "webp" {
-            let img = image::open(&annotation_path).map_err(|e| e.to_string())?;
-            img.save_with_format(&target_path, image::ImageFormat::WebP)
-                .map_err(|e| e.to_string())?;
-        } else {
-            let output_bytes = fs::read(&annotation_path).map_err(|e| e.to_string())?;
-            fs::write(&target_path, output_bytes).map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn cleanup_markits_capture(image_file: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || recorder::cleanup_completed_capture(&image_file))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
 fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
     let mode = args.next();
-    if mode.as_deref() == Some(std::ffi::OsStr::new("--manual-studio-annotate")) {
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--manual-studio-annotate"))
+        || mode.as_deref() == Some(std::ffi::OsStr::new("--munin-markits")) {
         markits_desktop_lib::run();
         return;
     }
@@ -1351,7 +706,7 @@ fn main() {
             .next()
             .map(PathBuf::from)
             .expect("recorder output path is required");
-        if let Err(error) = recorder::run_helper(&output) {
+        if let Err(error) = markits::recording::run_helper(&output) {
             eprintln!("{error}");
             std::process::exit(2);
         }
@@ -1378,11 +733,15 @@ fn main() {
         context
     };
     tauri::Builder::default()
-        .manage(recorder::RecorderState::default())
         .manage(editor_context_menu::EditorContextMenus::default())
         .manage(HiddenStudioWindows::default())
-        .manage(RecordingControlGuard::default())
         .invoke_handler(tauri::generate_handler![
+            markits_bridge::open_markits,
+            markits_bridge::edit_markits_image,
+            markits_bridge::capture_markits_image,
+            markits_bridge::markits_captures,
+            markits_bridge::import_markits_capture,
+            markits_bridge::import_markits_image,
             manual_request,
             editor_context_menu::set_editor_context_menu_state,
             load_launch_commands,
@@ -1391,37 +750,16 @@ fn main() {
             record_workspace_history,
             save_launch_commands,
             test_launch_application,
-            show_recording_control,
-            cancel_operation_recording,
-            close_recording_control,
-            hide_recording_control,
-            show_recording_control_again,
             hide_manual_studio,
             restore_manual_studio,
-            return_to_manual_studio,
             choose_project,
             choose_image,
             read_clipboard_image,
             paste_clipboard_image,
             choose_application,
             choose_working_directory,
-            start_operation_recording,
-            operation_recording_running,
-            operation_recording_history,
-            operation_recording_capture_settings,
-            finish_operation_recording,
-            import_markits_annotation,
-            markits_annotation_ready,
-            preserve_markits_capture,
-            import_library_capture,
-            edit_library_screenshot,
-            cleanup_markits_capture,
-            clone_operation_scenario_for_task,
             open_editor,
             open_output,
-            edit_document_image,
-            document_image_edit_ready,
-            apply_document_image_edit
         ])
         .run(context)
         .expect("Failed to start Munin Manual Studio");
@@ -1430,30 +768,6 @@ fn main() {
 #[cfg(test)]
 mod application_profile_tests {
     use super::*;
-    #[cfg(target_os = "windows")]
-    #[test]
-    #[ignore = "requires an open YouTube browser window"]
-    fn youtube_uimap_survives_capture_and_markits_reopen() {
-        use base64::Engine;
-        let window = manual_core::window_capture::list_windows().unwrap().into_iter()
-            .find(|window| window.title.contains("YouTube")).expect("Open YouTube in a browser");
-        let root = tempfile::tempdir().unwrap();
-        let capture = root.path().join("youtube.png");
-        manual_core::window_capture::platform_capture_window(&window.id, 0, &capture, false, Some(&window.id)).unwrap();
-        let bytes = fs::read(&capture).unwrap();
-        let loaded = markits_desktop_lib::metadata::load_image_with_metadata(&bytes).unwrap();
-        let controls = loaded.ui_elements.unwrap();
-        assert!(controls.iter().any(|element| element.role == "button"));
-        let saved = manual_core::screenshots::register(root.path(), &serde_json::json!({
-            "source":base64::engine::general_purpose::STANDARD.encode(&bytes)
-        })).unwrap();
-        let handoff = prepare_library_screenshot(root.path().to_string_lossy().into_owned(),
-            saved["screenshot"]["id"].as_str().unwrap().into(), None).unwrap();
-        let reopened = markits_desktop_lib::metadata::load_image_with_metadata(
-            &fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap()).unwrap();
-        assert_eq!(reopened.ui_elements.as_ref().unwrap().len(), controls.len());
-        eprintln!("YouTube: {} UI elements preserved through capture, MarkIts loading and library reopen", controls.len());
-    }
     #[cfg(target_os = "windows")]
     #[test]
     #[ignore = "requires a configured Windows default browser"]
@@ -1470,105 +784,6 @@ mod application_profile_tests {
         for command in [r"C:\Program Files\app.exe", "uv run app.py", "ftp://example.com"] {
             assert_eq!(browser_launch_url(command).unwrap(), None);
         }
-    }
-    #[test]
-    fn library_completion_is_retryable_and_keeps_adopted_and_original_pixels() {
-        use base64::Engine;
-        let root = tempfile::tempdir().unwrap();
-        let original = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(20,16,image::Rgba([10,20,30,255])));
-        let mut buffer = std::io::Cursor::new(Vec::new());
-        original.write_to(&mut buffer,image::ImageFormat::Png).unwrap();
-        let source = base64::engine::general_purpose::STANDARD.encode(buffer.into_inner());
-        let saved = manual_core::screenshots::register(root.path(),&serde_json::json!({"source":source})).unwrap();
-        let id = saved["screenshot"]["id"].as_str().unwrap().to_string();
-        let owner = root.path().to_string_lossy().into_owned();
-        let before = manual_core::screenshots::image(root.path(),&id,None,false).unwrap();
-        let handoff = prepare_library_screenshot(owner.clone(),id.clone(),None).unwrap();
-        // A missing/failed MarkIts output leaves the persistent source and adoption untouched.
-        assert!(tauri::async_runtime::block_on(import_library_capture(owner.clone(),id.clone(),None,"missing-output.png".into())).is_err());
-        for _ in 0..2 {
-            tauri::async_runtime::block_on(import_library_capture(owner.clone(),id.clone(),None,handoff["sourceFile"].as_str().unwrap().into())).unwrap();
-        }
-        let after = manual_core::screenshots::image(root.path(),&id,None,false).unwrap();
-        assert_eq!(after["data"],before["data"]);
-        assert_eq!(after["screenshot"]["adopted"],before["screenshot"]["adopted"]);
-        assert_eq!(after["screenshot"]["edits"].as_array().unwrap().len(),2,"repeated empty-annotation completion saves one candidate");
-        assert_eq!(manual_core::screenshots::image(root.path(),&id,None,true).unwrap()["data"],format!("data:image/png;base64,{source}"));
-    }
-    #[test]
-    fn library_handoff_accepts_wrapped_and_array_ui_elements() {
-        use base64::Engine;
-        let root = tempfile::tempdir().unwrap();
-        let image = image::DynamicImage::new_rgba8(20,16);
-        let mut buffer = std::io::Cursor::new(Vec::new());
-        image.write_to(&mut buffer,image::ImageFormat::Png).unwrap();
-        let source = base64::engine::general_purpose::STANDARD.encode(buffer.into_inner());
-        let elements = serde_json::json!([{"role":"button","name":"Save","x":1.0,"y":2.0,"width":8.0,"height":5.0}]);
-        for ui in [elements.clone(),serde_json::json!({"elements":elements})] {
-            let saved = manual_core::screenshots::register(root.path(),&serde_json::json!({"source":source,"ui":ui})).unwrap();
-            let id = saved["screenshot"]["id"].as_str().unwrap().to_string();
-            let handoff = prepare_library_screenshot(root.path().to_string_lossy().into_owned(),id,None).unwrap();
-            let png = fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap();
-            let metadata = markits_desktop_lib::metadata::extract_ui_elements(&png).unwrap().unwrap();
-            assert_eq!(metadata.len(),1);
-            assert_eq!(metadata[0].name.as_deref(),Some("Save"));
-        }
-    }
-    #[test]
-    fn handoff_reconstructs_raw_crop_scene_and_full_original_after_reload() {
-        use base64::Engine;
-        let root = tempfile::tempdir().unwrap();
-        let original = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-            80,
-            60,
-            image::Rgba([10, 20, 30, 255]),
-        ));
-        let cropped = original.crop_imm(20, 10, 30, 25);
-        let encode = |image: &image::DynamicImage| {
-            let mut bytes = std::io::Cursor::new(Vec::new());
-            image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
-            base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())
-        };
-        let scene = serde_json::json!({"canvas":{"width":30,"height":25},"annotations":[{"type":"rect","target":[3,4,10,5],"style":"primary"}]});
-        let saved=manual_core::screenshots::register(root.path(),&serde_json::json!({"source":encode(&original),"render":encode(&cropped.resize_exact(15,12,image::imageops::FilterType::Nearest)),"scene":scene,"crop":{"is_auto_cropped":false,"offset_x":20.0,"offset_y":10.0,"base_width":80,"base_height":60}})).unwrap();
-        let id = saved["screenshot"]["id"].as_str().unwrap();
-        let copied = manual_core::screenshots::change(root.path(), id, &serde_json::json!({"copy":true})).unwrap();
-        let copy_id = copied["screenshot"]["id"].as_str().unwrap();
-        let handoff =
-            prepare_library_screenshot(root.path().to_string_lossy().into_owned(), copy_id.into(), None)
-                .unwrap();
-        let loaded = markits_desktop_lib::metadata::load_image_with_metadata(
-            &fs::read(handoff["sourceFile"].as_str().unwrap()).unwrap(),
-        )
-        .unwrap();
-        assert_eq!((loaded.width, loaded.height), (30, 25));
-        assert_eq!(
-            (loaded.base_width, loaded.base_height),
-            (Some(80), Some(60))
-        );
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(loaded.annotations_json.as_deref().unwrap())
-                .unwrap(),
-            scene
-        );
-        assert_eq!(loaded.crop_info.unwrap().offset_x, 20.0);
-        assert_eq!(
-            loaded.image_data_url,
-            format!("data:image/png;base64,{}", encode(&cropped))
-        );
-        assert_eq!(
-            manual_core::screenshots::image(root.path(), id, None, true).unwrap()["data"],
-            format!("data:image/png;base64,{}", encode(&original))
-        );
-        let session = std::path::Path::new(handoff["sourceFile"].as_str().unwrap())
-            .parent()
-            .unwrap()
-            .join("session.json");
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&fs::read(session).unwrap()).unwrap()
-                ["revision"],
-            saved["revision"]
-        );
     }
     #[test]
     fn launch_profiles_are_owned_by_each_project() {
@@ -1625,43 +840,4 @@ mod application_profile_tests {
         assert_eq!(restored.id, id);
     }
 
-    #[test]
-    fn document_image_edit_and_apply_flow() {
-        let root = tempfile::tempdir().unwrap();
-        let docs = root.path().join("docs");
-        fs::create_dir_all(&docs).unwrap();
-        let img_path = docs.join("sample.png");
-        let initial_img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(10, 10, image::Rgba([255, 0, 0, 255])));
-        initial_img.save_with_format(&img_path, image::ImageFormat::Png).unwrap();
-
-        let handoff = tauri::async_runtime::block_on(edit_document_image(
-            root.path().to_string_lossy().into_owned(),
-            "docs/sample.png".into(),
-            None,
-        )).unwrap();
-
-        let annotation_file = handoff["annotationFile"].as_str().unwrap();
-        let completion_file = handoff["completionFile"].as_str().unwrap();
-
-        // Simulate MarkIts saving standard edited PNG without MarkIts metadata
-        let edited_img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(20, 20, image::Rgba([0, 255, 0, 255])));
-        edited_img.save_with_format(annotation_file, image::ImageFormat::Png).unwrap();
-        fs::write(completion_file, "saved").unwrap();
-
-        let ready = tauri::async_runtime::block_on(document_image_edit_ready(
-            completion_file.into(),
-            annotation_file.into(),
-        )).unwrap();
-        assert_eq!(ready, Some(true));
-
-        // Apply edit and verify target_file was updated with new pixels
-        let target_file = handoff["targetFile"].as_str().unwrap();
-        tauri::async_runtime::block_on(apply_document_image_edit(
-            target_file.into(),
-            annotation_file.into(),
-        )).unwrap();
-
-        let updated_img = image::open(target_file).unwrap();
-        assert_eq!((updated_img.width(), updated_img.height()), (20, 20));
-    }
 }

@@ -114,7 +114,6 @@ export function setupResourceBrowser(options:Options,rerender:()=>void) {
       button('文書に挿入',()=>options.insertAsset(resource.path));
       button('編集',()=>options.editImage(resource.path),false,Boolean(resource.missing)||!('__TAURI_INTERNALS__' in window)||!/\.(png|jpe?g)$/i.test(resource.path));
       const seed:ImageGenerationEntry=resource.generation||{id:resource.path,path:resource.path,prompt:'',created_at:''};
-      button('AIで修正',()=>options.generateImage(seed,true),true);
       if(resource.generation)button('指示を再利用',()=>options.generateImage(seed,false),true,false);
       const management=document.createElement('details');management.className='screenshot-management';const summary=document.createElement('summary');summary.textContent='履歴・管理';management.append(summary);
       if(resource.generation){const info=document.createElement('p');info.className='muted';info.textContent=`${resource.generation.provider||resource.generation.model} ／ ${resource.generation.created_at}`;const prompt=document.createElement('p');prompt.textContent=resource.generation.prompt;management.append(info,prompt);}
