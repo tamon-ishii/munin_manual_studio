@@ -1,5 +1,5 @@
 import {hasReviewReplacement} from './reviewCorrections';
-import {featureDialog} from './screenshotWorkflow';
+import {featureDialog} from './imageDialogs';
 export interface ReviewFinding {category:'reader'|'proofreading'|'image';severity:string;quote:string;message:string;suggestion:string;replacement?:string|null;image:string;start:number;end:number;}
 export interface ReaderReport {issues:ReviewFinding[];images:Array<{path:string;status:string;reason?:string}>;warnings:string[];}
 export interface ReviewCapabilities {supports_images:boolean;images:number;connection:string;agent:string;note:string;}

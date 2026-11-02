@@ -6,7 +6,6 @@ pub mod audience;
 pub mod author;
 pub mod builder;
 pub mod capture_source;
-pub mod capture_settings;
 pub mod capture_validation;
 pub mod config;
 mod operation_settings;
@@ -25,7 +24,6 @@ mod legacy_ai;
 mod selection_ai;
 mod document_review;
 mod draft_review;
-mod screenshot_ai;
 pub mod platform;
 pub mod preview;
 pub mod pty;
@@ -49,7 +47,9 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use serde::Serialize;
 
-use config::{project_path, read_config, save_settings};
+use config::{project_path, read_config};
+#[cfg(test)]
+use config::save_settings;
 use preview::{get_state, preview_asset, preview_html, preview_page};
 
 fn crop_margin(crop: bool, margin: Option<&str>) -> Result<Option<u32>, String> {
@@ -67,7 +67,6 @@ fn crop_margin(crop: bool, margin: Option<&str>) -> Result<Option<u32>, String> 
 }
 
 pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
-    let _depth = markits::ui_elements::capture_depth_scope(capture_settings::read(root)?.max_depth);
     if matches!(action, "scan" | "generate-task" | "generate-page" | "generate-review" | "generation-input" | "generation-history" | "generation-history-entry" | "generate-page-captures" | "update-task" | "generate-text-all" | "generate-diagram-all" | "generate-api" | "approve" | "record" | "record-screenshot" | "record-diagram" | "page-tasks" | "impact-plan" | "generate-impacted" | "execution-begin" | "execution-checkpoint" | "execution-finish" | "execution-resume" | "execution-rollback") {
         return Err(format!("AIタグ機能は廃止されました: {action}"));
     }
@@ -98,10 +97,6 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
 
 fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
     let allowed = [
-        "screenshot-ai-application",
-        "screenshot-ai-plan",
-        "screenshot-ai-capture",
-        "screenshot-ai-annotate",
         "document-review",
         "document-review-capabilities",
         "draft-propose",
@@ -335,7 +330,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "resources-replace" => Ok(resources::replace(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?)?.to_string()),
         "image-generation-history" => Ok(image_generation::history(root)?.to_string()),
         "image-generation-cancel" => Ok(image_generation::cancel(root, id_opt.ok_or("作画の実行IDを指定してください。")?)?.to_string()),
-        "image-generation-capabilities" => Ok(image_generation::capabilities(&serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?).to_string()),
+        "image-generation-capabilities" => Ok(image_generation::capabilities(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?).to_string()),
         "image-generation-settings" => Ok(image_generation::settings(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
         "image-generate" => Ok(image_generation::generate(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
         "screenshots-templates" => Ok(screenshots::templates(root)?.to_string()),
@@ -509,7 +504,9 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let connection_type = connection_type_opt.or(Some(&cfg.connection_type));
             let endpoint_url = endpoint_url_opt.or(Some(&cfg.endpoint_url));
             let assets = assets_opt.or(Some(&cfg.assets));
-            save_settings(
+            let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?;
+            let cli_models: Option<std::collections::BTreeMap<String,String>> = options.get("cli_models").map(|models|serde_json::from_value(models.clone())).transpose().map_err(|e|e.to_string())?;
+            config::save_settings_with_cli_models(
                 root,
                 docs,
                 output,
@@ -522,13 +519,10 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                 connection_type,
                 endpoint_url,
                 assets,
+                cli_models.as_ref(),
             )?;
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
-        }
-        "screenshot-ai-application" | "screenshot-ai-plan" | "screenshot-ai-capture" | "screenshot-ai-annotate" => {
-            let options:serde_json::Value=serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
-            match action {"screenshot-ai-application"=>screenshot_ai::application(root,&options),"screenshot-ai-plan"=>screenshot_ai::plan(root,&options),"screenshot-ai-capture"=>screenshot_ai::capture(root,&options),_=>screenshot_ai::annotate(root,&options)}
         }
         "document-review" => document_review::review(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "document-review-capabilities" => document_review::capabilities(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
@@ -799,7 +793,6 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         .and_then(serde_json::Value::as_str)
         .ok_or("Action is required")?;
     let project = Path::new(root);
-    let _depth = markits::ui_elements::capture_depth_scope(capture_settings::read(project)?.max_depth);
     let options = &request["options"];
     let id = || options["id"].as_str().ok_or("実行IDを指定してください。");
     let page = || options["page"].as_str().ok_or("原稿を指定してください。");
@@ -835,8 +828,6 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         return result.map(|v| v.to_string());
     }
     match action {
-        "capture-settings-read" => return serde_json::to_string(&capture_settings::read(project)?).map_err(|e|e.to_string()),
-        "capture-settings-save" => return serde_json::to_string(&capture_settings::save(project, &options["json"])?).map_err(|e|e.to_string()),
         "workspace-paths-read" => return Ok(operation_settings::paths(project).to_string()),
         "workspace-paths-save" => return operation_settings::save_paths(project, &options["json"]).map(|v|v.to_string()),
         "operation-timings-read" => return operation_settings::history(project).map(|v|v.to_string()),

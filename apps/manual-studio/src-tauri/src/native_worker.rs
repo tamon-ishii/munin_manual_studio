@@ -118,9 +118,7 @@ pub fn activate_window(id: &str) -> Result<(), String> {
 pub fn requires_worker(action: &str) -> bool {
     matches!(
         action,
-        "screenshot-ai-plan"
-            | "screenshot-ai-capture"
-            | "list-windows"
+        "list-windows"
             | "list-accessible-windows"
             | "inspect-window"
             | "activate-window"
@@ -135,7 +133,7 @@ pub fn requires_worker(action: &str) -> bool {
 pub fn requires_hiding(action: &str) -> bool {
     matches!(
         action,
-        "screenshot-ai-capture" | "capture-window" | "recapture" | "capture-source-auto" | "markits-capture"
+        "capture-window" | "recapture" | "capture-source-auto" | "markits-capture"
     )
 }
 

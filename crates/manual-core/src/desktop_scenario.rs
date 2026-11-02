@@ -466,10 +466,6 @@ pub(super) fn list_accessible_windows() -> Result<String, String> {
     serde_json::to_string(&found).map_err(|error| error.to_string())
 }
 
-pub(super) fn window_title(query: &str) -> Result<String,String> {
-    a11y_window(query)?.name.clone().filter(|name| !name.trim().is_empty()).ok_or("撮影ウィンドウのタイトルを確認できません。".into())
-}
-
 pub(super) fn inspect_window(query: &str) -> Result<String, String> {
     if query.trim().is_empty() {
         return Err("inspect-window requires --window".into());

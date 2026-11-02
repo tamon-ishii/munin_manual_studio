@@ -1,6 +1,6 @@
 import { getRecentInsertionTarget, setRecentInsertionTarget } from './insertionContext';
 
-/** Small project-scoped dialogs shared by the screenshot library workflows. */
+/** Project-scoped dialogs for image insertion and manuscript tools. */
 export function featureDialog(title: string, modal = true): {dialog: HTMLDialogElement; body: HTMLDivElement} {
   const dialog=document.createElement('dialog');dialog.className='panel-dialog';
   const header=document.createElement('div');header.className='panel-header';

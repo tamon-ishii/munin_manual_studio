@@ -1,4 +1,4 @@
-import {featureDialog} from './screenshotWorkflow';
+import {featureDialog} from './imageDialogs';
 import {appendContentDiff,replaceMatches,type ManuscriptToolsOptions,type SearchMatch} from './manuscriptTools';
 import type {Document} from './types';
 

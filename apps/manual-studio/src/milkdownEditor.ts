@@ -417,7 +417,15 @@ export function setupMilkdownEditor(
           topBarLabels.splice(0, topBarLabels.length, ...builder.build().flatMap(group => group.items.filter(item => item.onRun).map(item => labels[item.key] || item.key)));
         },
       },
-      [Crepe.Feature.Toolbar]: { boldLabel: '太字', italicLabel: '斜体', codeLabel: 'インラインコード', linkLabel: 'リンク', strikethroughLabel: '取り消し線', latexLabel: '数式' },
+      [Crepe.Feature.Toolbar]: {
+        boldLabel: '太字', italicLabel: '斜体', codeLabel: 'インラインコード', linkLabel: 'リンク', strikethroughLabel: '取り消し線', latexLabel: '数式',
+        buildToolbar: builder => {
+          builder.addGroup('selection-ai', 'AI操作').addItem('selection-ai', {
+            icon: '<span class="selection-ai-label">AI操作</span>', label: 'AI操作', active: () => false,
+            onRun: () => { window.dispatchEvent(new Event('manual-studio-selection-ai')); },
+          });
+        },
+      },
       [Crepe.Feature.Placeholder]: { text: 'ここにマニュアルを書きます。' },
       [Crepe.Feature.ImageBlock]: { proxyDomURL: resolveImage, onUpload: uploadImage, inlineUploadButton: '画像を選ぶ', blockUploadButton: '画像を選ぶ', blockConfirmButton: '挿入', blockCaptionPlaceholderText: '画像の説明', inlineUploadPlaceholderText: '画像のURL', blockUploadPlaceholderText: '画像のURL' },
       [Crepe.Feature.CodeMirror]: {

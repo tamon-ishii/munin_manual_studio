@@ -480,7 +480,7 @@ fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Val
 
 
         "image_assets": image_assets,
-        "capture_sources": super::capture_source::read(root)?,
+        "capture_sources": if legacy_previews { serde_json::to_value(super::capture_source::read(root)?).map_err(|e|e.to_string())? } else { json!({}) },
         "pages": pages,
         "project_entries": project_entries,
         "preview": preview,
@@ -534,6 +534,19 @@ mod state_read_tests {
         assert_eq!(editor["preview_html"],"");
         assert!(full["preview_html"].as_str().unwrap().contains("Publication"));
         assert_eq!(fs::read_to_string(root.join("docs/index.md")).unwrap(),"# Workspace\n");
+    }
+    #[test]
+    fn editor_ignores_retired_capture_settings() {
+        let directory=tempfile::tempdir().unwrap();
+        let root=directory.path();
+        fs::create_dir_all(root.join("manual")).unwrap();
+        fs::create_dir_all(root.join(".munin")).unwrap();
+        fs::write(root.join("manual/capture_sources.json"),"invalid legacy settings").unwrap();
+        fs::write(root.join(".munin/capture-settings.json"),"invalid legacy settings").unwrap();
+        fs::write(root.join(".munin/launch_commands.json"),"invalid legacy settings").unwrap();
+        assert_eq!(get_editor_state(root).unwrap()["capture_sources"],json!({}));
+        assert!(crate::run(root,"state", &[("--json",r#"{"editor":true}"#)]).is_ok());
+        assert_eq!(fs::read_to_string(root.join("manual/capture_sources.json")).unwrap(),"invalid legacy settings");
     }
     #[test]
     fn state_reads_do_not_create_publication_output() {

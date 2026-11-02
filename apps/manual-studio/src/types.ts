@@ -2,7 +2,7 @@ export type CaptureSource = { kind: "window"; title: string; inset: number } | {
 export interface Task { name?: string; id: string; kind: string; page: string; prompt: string; status: string }
 export interface State {
   has_config: boolean;
-  config: { docs: string; output: string; agent: string; model: string; connection_type?: string; endpoint_url?: string; assets?: string; mkdocs: { site_name: string; theme: string; language: string; use_directory_urls: boolean } };
+  config: { docs: string; output: string; agent: string; model: string; cli_models?:Record<string,string>; connection_type?: string; endpoint_url?: string; assets?: string; mkdocs: { site_name: string; theme: string; language: string; use_directory_urls: boolean } };
   execution_results?: Record<string, {status:string;error?:string;run_id:string}>;
   update_reasons?: Record<string, string[]>;
   brief: string; pages: string[]; project_entries: Array<{ path: string; directory: boolean }>; image_assets: Record<string, string>;
@@ -10,6 +10,5 @@ export interface State {
   agents: Array<{ id: string; label: string; available: boolean }>;
 }
 export interface Document { page: string; content: string; revision: string }
-export interface NativeWindow { id: string; title: string; width: number; height: number }
-export interface RecordingResult { scenarioFile: string; events: number; operationText: string; sourceFile: string; annotationFile: string; completionFile: string; markitsStarted: boolean; message: string }
-export interface LaunchCommand { id?: string; name: string; program: string; args: string[]; workingDirectory?: string }
+
+export interface ResourceUsage {page:string;line:number;start:number;end:number;snippet:string}

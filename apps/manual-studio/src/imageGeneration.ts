@@ -1,4 +1,4 @@
-import { featureDialog } from './screenshotWorkflow';
+import { featureDialog } from './imageDialogs';
 import { showImageComparison } from './imageComparison';
 import type {ImageAiSettings} from './imageAiSettings';
 export interface ImageGenerationEntry {

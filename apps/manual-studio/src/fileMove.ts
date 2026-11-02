@@ -1,4 +1,4 @@
-import {featureDialog} from './screenshotWorkflow';
+import {featureDialog} from './imageDialogs';
 import type {Document} from './types';
 export interface FileMoveResult {source:string;destination:string;documents:Document[];backup:string}
 interface Plan {source:string;destination:string;token:string}

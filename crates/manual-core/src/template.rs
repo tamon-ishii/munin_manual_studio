@@ -223,6 +223,7 @@ fn init_template_inner(
         format: "mkdocs".to_string(),
         agent: agent.clone(),
         model: model.clone(),
+        cli_models: existing_cfg.cli_models.clone(),
         connection_type: existing_cfg.connection_type.clone(),
         endpoint_url: existing_cfg.endpoint_url.clone(),
         assets: existing_cfg.assets.clone(),

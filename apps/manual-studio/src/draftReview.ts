@@ -1,4 +1,4 @@
-import {featureDialog} from './screenshotWorkflow';
+import {featureDialog} from './imageDialogs';
 import {diffParts,acceptDiff} from './selectableDiff';
 export interface DraftPage {path:string;before:string;content:string;revision:string|null;}
 export interface DraftCandidate {docs:string;pages:DraftPage[];}

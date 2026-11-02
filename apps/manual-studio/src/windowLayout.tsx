@@ -17,7 +17,6 @@ export interface PanelDef {
 }
 
 export const PANELS: PanelDef[] = [
-  { id: "screenshots", name: "撮影一覧", elementId: "panel-screenshots" },
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
@@ -128,11 +127,13 @@ function loadStoredModel(): Model {
         !str.includes('"appearance"')
       ) {
         const restored = Model.fromJson(parsed);
+        const removedTabs: string[] = [];
         restored.visitNodes((node) => {
           if (node instanceof TabNode && node.getComponent() === "screenshots") {
-            restored.doAction(Actions.updateNodeAttributes(node.getId(), { name: "撮影一覧" }));
+            removedTabs.push(node.getId());
           }
         });
+        removedTabs.forEach((id) => restored.doAction(Actions.deleteTab(id)));
         // Older layouts included the terminal by default. Preserve the other
         // panels while making the terminal opt-in on this first migration.
         if (!current && restored.getNodeById("terminal")) {
@@ -223,7 +224,7 @@ export const FlexLayoutApp: React.FC<{
 
       // Find an appropriate tabset to add to
       let targetTabsetId = "";
-      const preferredTabset = model.getNodeById(["file-tree", "screenshots"].includes(componentId) ? "tabset-left" : "tabset-editor");
+      const preferredTabset = model.getNodeById(componentId === "file-tree" ? "tabset-left" : "tabset-editor");
       const activeTabset = preferredTabset instanceof TabSetNode ? preferredTabset : model.getActiveTabset();
       if (activeTabset) {
         targetTabsetId = activeTabset.getId();

@@ -1,4 +1,4 @@
-import {confirmAction,featureDialog} from './screenshotWorkflow';
+import {confirmAction,featureDialog} from './imageDialogs';
 import {appendContentDiff,sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions} from './manuscriptTools';
 import type {Document} from './types';
 

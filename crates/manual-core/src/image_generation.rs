@@ -525,10 +525,10 @@ pub fn generate(root: &Path, options: &Value) -> Result<Value, String> {
     atomic_json(&path, &job)?;
     result
 }
-fn probe(binary: &Path, args: &[String]) -> Result<String, String> {
+fn probe(root: &Path, binary: &Path, args: &[String]) -> Result<String, String> {
     let scratch = tempfile::tempdir().map_err(|e| e.to_string())?;
     let output = scratch.path().join("output");
-    let mut command = crate::agent::cli_command(&binary.to_string_lossy(), args, scratch.path());
+    let mut command = crate::agent::cli_command(&binary.to_string_lossy(), args, root);
     command
         .stdout(fs::File::create(&output).map_err(|e| e.to_string())?)
         .stderr(std::process::Stdio::null());
@@ -555,7 +555,7 @@ fn probe(binary: &Path, args: &[String]) -> Result<String, String> {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
-pub fn capabilities(options: &Value) -> Value {
+pub fn capabilities(root: &Path, options: &Value) -> Value {
     let mut items = Vec::new();
     for provider in ["agy", "codex"] {
         let Some(binary) = crate::agent::which_binary(provider) else {
@@ -563,14 +563,14 @@ pub fn capabilities(options: &Value) -> Value {
             continue;
         };
         if provider == "codex" {
-            let login = probe(&binary, &["login".into(), "status".into()]).is_ok();
-            let supported = probe(&binary, &["features".into(), "list".into()]).is_ok_and(|text| {
+            let login = probe(root, &binary, &["login".into(), "status".into()]).is_ok();
+            let supported = probe(root, &binary, &["features".into(), "list".into()]).is_ok_and(|text| {
                 text.lines()
                     .any(|line| line.split_whitespace().next() == Some("image_generation"))
             });
             items.push(json!({"provider":provider,"installed":true,"login":if login{"ready"}else{"required"},"image":if supported{"supported"}else{"unknown"},"message":if !login{"Codexにログインしてください。"}else if !supported{"CLIの画像生成対応を確認できません。Codexを更新してください。"}else{"ログイン済み・画像生成対応。プランの利用可否は生成時に確認します。"}}));
         } else {
-            let connection = probe(&binary, &["models".into()]).is_ok();
+            let connection = probe(root, &binary, &["models".into()]).is_ok();
             items.push(json!({"provider":provider,"installed":true,"login":if connection{"connected"}else{"unknown"},"image":"unknown","message":if connection{"Agyへの接続を確認しました。画像生成の利用可否は生成時に確認します。"}else{"Agyのログイン・接続を確認してください。画像生成の利用可否は生成時に確認します。"}}));
         }
     }

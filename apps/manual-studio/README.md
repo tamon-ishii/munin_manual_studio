@@ -40,7 +40,7 @@ python3 start_manual_studio.py
 
 「AIレビュー」で文書全体または選択範囲を確認し、「AIで修正・挿入」（選択中は「選択範囲をAIで修正」）で選択範囲の変更やカーソル位置への新規文章挿入を依頼します。変更候補はDiffで採用・見送りを選びます。AIタグ一覧・確定・一括タグ更新は廃止しています。
 
-「撮影一覧」では撮影原本とMarkIts画像を管理します。撮影からMarkIts編集・文書挿入までを一覧から行えます。再撮影時は保存済みのクロップと注釈を新しい撮影画像に再適用し、既存の文書参照先を更新します。元画像と各版は履歴に保持されます。AI撮影も一覧から開始できます。
+撮影・撮影アプリ・操作記録・注釈と履歴はMarkItsで管理します。Studioの「撮影」からMarkItsを開き、完成画像を原稿へ取り込みます。既存画像はファイルツリーから扱います。[役割と構成](../../docs/markits-ownership.md)を参照してください。
 
 読者・目的・操作は原稿操作の「⋯ → 執筆方針」から設定します。文章生成と画像生成の接続は「AI設定」で個別に設定できます。画像生成に文章と同じ接続を使うこともできます。「原稿チェック」ではリンクや画像の問題を確認します。HTML生成は外部連携・CLIから実行します。
 
@@ -74,18 +74,18 @@ Linux CIではリリース用 `.deb` を作成して実際にインストール�
 
 ## 性能とキャッシュ
 
-原稿保存では非表示の撮影一覧を再取得せず、編集のみ表示中は自動プレビューを保留します。一覧のサムネイルと原稿の画像参照索引を再利用し、画像・原稿の変更時に更新します。更新経路、キャッシュの保存先、検証コマンドは[高速化の説明](../../docs/performance.md)を参照してください。
+撮影一覧は撤去し、原稿保存・プロジェクト読み込み時に撮影一覧やサムネイルを取得しません。編集のみ表示中は自動プレビューを保留します。MarkItsの完成画像を取り込んだ場合は原稿と画像プレビューを更新します。
 
 ## 構成
 
 - `src/documentPersistence.ts`: 文書保存の直列化と、文書・プロジェクト切り替え後の古い保存結果の除外。
 - `src/editorHistory.ts`: DOMに依存しない編集履歴と選択位置。
 - `src/fileTree.ts`、`src/paneResizers.ts`: ファイルツリー描画とペイン操作。
-- `src/captureSession.ts`、`src/markitsWorkflow.ts`: 撮影対象の固定、キャンセル、画像取り込みと保存順序。
+- `src/markitsImages.ts`: MarkItsの完成画像の取り込みと、プロジェクト切り替え後の応答の除外。
+- `src/imageDialogs.ts`: 画像挿入先と原稿操作で共有するダイアログ。
 - `src/manualTransport.ts`、`src/types.ts`: 通信応答の検証と共有データ型。
 - `src/main.ts`: 画面イベントと各モジュールの接続。文書・プロジェクト・一覧の読込世代を確認し、古い応答を画面へ反映しません。
-- `src-tauri/src/recorder.rs`: 起動アプリと記録プロセスの所有権、撮影、MarkItsとのファイル受け渡し。
-- `crates/manual-core/src/capture_lifecycle.rs`: 撮影直前の準備。Tauriはこのタイミングで画面を隠し、文章生成中には実行ログを表示できます。
+- `src-tauri/src/markits_bridge.rs`: MarkItsの起動と完成PNGの取り込み・編集。
 - `crates/manual-core`: 原稿、撮影、シナリオ、生成・公開、編集API。
 - `crates/analysis-core`: Python解析と依存図の共有エンジン。
 - `apps/manual-studio`: 専用UIとTauriホスト。
@@ -97,7 +97,7 @@ Linux CIではリリース用 `.deb` を作成して実際にインストール�
 
 [現行仕様一覧](../../docs/specs/README.md) を仕様の入口とし、[OpenSpec](../../openspec/specs/) に検証可能な要件をまとめています。過去の変更アーカイブは履歴として残します。
 
-`npm run manual:check-generation` は読者レビュー・選択範囲編集・挿入・Diff・画像確認・AI撮影の連携を検証します。AI応答にはローカルのテスト用APIを使用します。実際のOS撮影・権限・MarkIts Desktopはネイティブ環境で別途確認してください。
+`npm run manual:check-generation` は読者レビュー・選択範囲編集・挿入・Diff・画像確認の連携を検証します。AI応答にはローカルのテスト用APIを使用します。選択範囲ツールバーの相談・書き直しとCtrl+F検索は`node scripts/test_manual_studio_selection_actions.mjs`、MarkItsとの画像受け渡しは`node scripts/test_manual_studio_markits_bridge.mjs`で確認します。実際のOS撮影・権限・MarkIts Desktopはネイティブ環境で別途確認してください。
 
 ### 編集画面とファイル移動
 

@@ -18,7 +18,7 @@ try{
     ${['record','refresh','stop','retry','cancel','recapture-all','import-button'].map(id=>`<button id="screenshot-library-${id}">${id}</button>`).join('')}
     <button id="screenshot-ui-settings"></button><input type="file" id="screenshot-library-import">
     <script type="module">
-    import {setupScreenshotLibrary} from '/src/screenshotLibrary.ts';
+    import {setupMarkitsImages} from '/src/markitsImages.ts';
     window.root='project-one';window.calls=[];window.mode='success';
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
       calls.push({command,args});
@@ -31,10 +31,10 @@ try{
       }
       throw new Error('Unexpected command: '+command);
     }};
-    window.library=setupScreenshotLibrary({root:()=>window.root,refreshAssets:async()=>{},request:async()=>JSON.stringify({items:[]}),work:async operation=>operation(),insert:()=>{},page:()=> 'index.md',chooseDestination:async()=>true,openPage:async()=>{},applications:()=>[],insertAsset:async()=>true,openImage:async()=>{},editImage:async()=>{},openUsage:async()=>{},generateImage:async()=>{},annotateScreenshot:async()=>{}});
+    window.library=setupMarkitsImages({root:()=>window.root,refreshAssets:async()=>{}});
     </script></body></html>`}));
   await page.goto(base+'/bridge-test');await page.waitForFunction(()=>Boolean(window.library));
-  await page.locator('#screenshot-library-record').click();
+  await page.evaluate(()=>window.library.recordForInsertion());
   await page.waitForFunction(()=>window.calls.length===1);
   assert.deepEqual(await page.evaluate(()=>window.calls),[{command:'capture_markits_image',args:{root:'project-one'}}]);
   assert.equal(await page.locator('dialog').count(),0,'library capture must not open a history dialog');
@@ -53,7 +53,7 @@ try{
   assert.deepEqual(edited,{path:'assets/markits/edited.png'});
   assert.deepEqual(await page.evaluate(()=>[...new Set(window.calls.map(call=>call.command))]),['capture_markits_image','edit_markits_image']);
   await page.goto(base);await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
-  assert.equal(await page.locator('#screenshot-library-record').textContent(),'撮影');
+  assert.equal(await page.locator('#editor-screenshot-ai').textContent(),'撮影');
   assert.deepEqual(errors,[]);
   console.log('Direct capture: no history dialogs from either entry, cancel, failure, project isolation and direct editing passed.');
 }finally{await browser?.close();server?.kill();}

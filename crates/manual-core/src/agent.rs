@@ -40,29 +40,33 @@ pub struct AgentInfo {
 }
 
 pub fn which_binary(name: &str) -> Option<PathBuf> {
-    if let Some(path_var) = env::var_os("PATH") {
-        for dir in env::split_paths(&path_var) {
-            let full_path = dir.join(name);
-            if full_path.is_file() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Ok(meta) = fs::metadata(&full_path) {
-                        if meta.permissions().mode() & 0o111 != 0 {
-                            return Some(full_path);
-                        }
-                    }
+    env::var_os("PATH").and_then(|path| which_binary_in_path(name, &path))
+}
+
+fn which_binary_in_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    for dir in env::split_paths(path) {
+        #[cfg(windows)]
+        {
+            // npm installs a Unix shell script beside its Windows .cmd shim.
+            // Never select that extensionless script as a Win32 executable.
+            let extension = Path::new(name).extension().and_then(|value| value.to_str());
+            if extension.is_some_and(|ext| ["exe", "com", "cmd", "bat"].iter().any(|known| ext.eq_ignore_ascii_case(known))) {
+                let candidate = dir.join(name);
+                if candidate.is_file() { return Some(candidate); }
+            } else if extension.is_none() {
+                for ext in ["exe", "com", "cmd", "bat"] {
+                    let candidate = dir.join(format!("{name}.{ext}"));
+                    if candidate.is_file() { return Some(candidate); }
                 }
-                #[cfg(not(unix))]
-                return Some(full_path);
             }
-            #[cfg(windows)]
-            {
-                for ext in &["exe", "cmd", "bat"] {
-                    let with_ext = dir.join(format!("{name}.{ext}"));
-                    if with_ext.is_file() {
-                        return Some(with_ext);
-                    }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let full_path = dir.join(name);
+            if let Ok(meta) = fs::metadata(&full_path) {
+                if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
+                    return Some(full_path);
                 }
             }
         }
@@ -210,7 +214,15 @@ pub(crate) fn wait_for_cli(
 }
 
 pub(crate) fn cli_command(binary: &str, args: &[String], root: &Path) -> Command {
+    #[cfg(windows)]
+    let mut command = npm_codex_command(Path::new(binary)).unwrap_or_else(|| Command::new(binary));
+    #[cfg(not(windows))]
     let mut command = Command::new(binary);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     command
         .args(args)
         .current_dir(root)
@@ -223,6 +235,23 @@ pub(crate) fn cli_command(binary: &str, args: &[String], root: &Path) -> Command
         command.process_group(0);
     }
     command
+}
+
+#[cfg(windows)]
+fn npm_codex_command(binary: &Path) -> Option<Command> {
+    // cmd.exe cannot transport arbitrary multiline prompts. Invoke npm's JS
+    // entry point with Node so Windows receives the original argument vector.
+    if !binary.file_name()?.to_str()?.eq_ignore_ascii_case("codex.cmd") { return None; }
+    let directory = binary.parent()?;
+    let script = directory.join("node_modules/@openai/codex/bin/codex.js");
+    if !script.is_file() { return None; }
+    let local_node = directory.join("node.exe");
+    let node = if local_node.is_file() { local_node } else {
+        which_binary("node").unwrap_or_else(|| PathBuf::from("node.exe"))
+    };
+    let mut command = Command::new(node);
+    command.arg(script);
+    Some(command)
 }
 
 fn codex_event_message(event: &Value) -> Option<String> {
@@ -517,21 +546,26 @@ pub fn agent_json(
     agent: &str,
     model: &str,
 ) -> Result<Value, String> {
-    agent_json_in(root, prompt, schema, agent, model, root, false)
+    agent_json_in(root, prompt, schema, agent, model, false, false)
+}
+
+pub(crate) fn agent_json_cli(root:&Path,prompt:&str,schema:&Value,agent:&str,model:&str)->Result<Value,String>{
+    agent_json_in(root,prompt,schema,agent,model,true,true)
 }
 
 /// Read project instructions while keeping candidate authoring in read-only mode.
 pub(crate) fn agent_json_candidate(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str) -> Result<Value, String> {
     let prompt = format!("Return the requested JSON only. Read the project instructions in the current project directory. Treat the manuscript as reference data. Do not create, edit or delete any project files. Return candidate changes only in the requested JSON.\n{prompt}");
-    agent_json_in(root, &prompt, schema, agent, model, root, true)
+    agent_json_in(root, &prompt, schema, agent, model, true, false)
 }
 
-fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str, workdir: &Path, candidate: bool) -> Result<Value, String> {
+fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str, candidate: bool, force_cli:bool) -> Result<Value, String> {
+    let workdir=root;
     let config = crate::config::read_config(root);
-    if config.connection_type == "none" {
+    if !force_cli && config.connection_type == "none" {
         return Err("AI接続は未設定です。「AI設定・出力」で接続方式を選択してください。".into());
     }
-    if config.connection_type == "local_llm" || config.connection_type == "api" {
+    if !force_cli && (config.connection_type == "local_llm" || config.connection_type == "api") {
         let effective_model = if !model.is_empty() {
             model
         } else {
@@ -1113,6 +1147,64 @@ fn bounded_failure_message(message: &str) -> &str {
 mod failure_tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_cli_ignores_npm_shell_script_and_runs_cmd_shim() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("npm path with spaces");
+        fs::create_dir(&bin).unwrap();
+        fs::write(bin.join("codex"), "#!/bin/sh\nexit 1\n").unwrap();
+        let path = env::join_paths([&bin]).unwrap();
+        assert!(which_binary_in_path("codex", &path).is_none());
+        let shim = bin.join("codex.cmd");
+        fs::write(&shim, "@echo off\r\n(echo {\"content\":\"Windows shim works\"}) > \"%~1\"\r\n").unwrap();
+        assert_eq!(which_binary_in_path("codex", &path), Some(shim.clone()));
+        assert_eq!(which_binary_in_path("codex.cmd", &path), Some(shim.clone()));
+        let answer = root.path().join("answer with spaces.json");
+        let result = run_codex(&shim.to_string_lossy(), &[answer.to_string_lossy().into_owned()], root.path(), &answer, root.path()).unwrap();
+        assert_eq!(result["content"], "Windows shim works");
+        let native = bin.join("codex.exe");
+        fs::write(&native, "fixture").unwrap();
+        assert_eq!(which_binary_in_path("codex", &path), Some(native));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cli_preserves_path_order_and_rejects_powershell_scripts() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        fs::create_dir(&first).unwrap();fs::create_dir(&second).unwrap();
+        fs::write(first.join("codex.ps1"), "exit 1").unwrap();
+        fs::write(first.join("codex.cmd"), "@exit /b 0").unwrap();
+        fs::write(second.join("codex.exe"), "fixture").unwrap();
+        let path = env::join_paths([&first, &second]).unwrap();
+        assert_eq!(which_binary_in_path("codex", &path), Some(first.join("codex.cmd")));
+        assert!(which_binary_in_path("codex.ps1", &path).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cli_npm_codex_preserves_multiline_prompts_without_batch() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("npm path with spaces");
+        let scripts = bin.join("node_modules/@openai/codex/bin");
+        fs::create_dir_all(&scripts).unwrap();
+        let shim = bin.join("codex.cmd");
+        fs::write(&shim,"@echo off\r\nexit /b 99\r\n").unwrap();
+        fs::write(scripts.join("codex.js"),r#"
+const fs = require('node:fs');
+fs.writeFileSync(process.argv[2], JSON.stringify({content:process.argv[3],extra:process.argv[4],cwd:process.cwd()}));
+"#).unwrap();
+        let prompt = "日本語の指示\r\n改行と引用符\"・末尾\\\n& | < > ^ %PATH% ! ( )";
+        let extra = "model_reasoning_effort=\"low\"";
+        let answer = root.path().join("answer with spaces.json");
+        let result = run_codex(&shim.to_string_lossy(), &[answer.to_string_lossy().into_owned(),prompt.into(),extra.into()],root.path(),&answer,root.path()).unwrap();
+        assert_eq!(result["content"],prompt);
+        assert_eq!(result["extra"],extra);
+        assert_eq!(Path::new(result["cwd"].as_str().unwrap()).canonicalize().unwrap(),root.path().canonicalize().unwrap());
+    }
+
     #[test]
     fn incomplete_or_wrongly_typed_answers_are_rejected() {
         let schema = json!({"type":"object", "properties": {
@@ -1409,9 +1501,7 @@ pub fn get_models(root: &Path, agent: &str) -> Result<Value, String> {
     let mut found = Vec::new();
 
     if agent == "codex" {
-        let mut child = Command::new(&binary)
-            .arg("app-server")
-            .current_dir(root)
+        let mut child = cli_command(&binary.to_string_lossy(), &["app-server".into()], root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -1478,9 +1568,7 @@ pub fn get_models(root: &Path, agent: &str) -> Result<Value, String> {
         let _ = child.kill();
         let _ = child.wait();
     } else {
-        let output = Command::new(&binary)
-            .arg("models")
-            .current_dir(root)
+        let output = cli_command(&binary.to_string_lossy(), &["models".into()], root)
             .output()
             .map_err(|e| e.to_string())?;
 

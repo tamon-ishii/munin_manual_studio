@@ -5,6 +5,31 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_BRIEF: &str =
     "# マニュアル作成の指示\n\n## 対象読者\n\n## 目的\n\n## 含める操作\n\n## 追加の指示\n";
 
+#[cfg(test)]
+mod cli_model_tests {
+    use super::*;
+    #[test]
+    fn cli_models_are_independent_and_survive_other_settings_saves() {
+        let directory=tempfile::tempdir().unwrap();let root=directory.path();
+        fs::create_dir(root.join("docs")).unwrap();
+        let models=std::collections::BTreeMap::from([
+            ("codex".into(),"codex-model".into()),("claude".into(),"claude-model".into()),("agy".into(),"agy-model".into())]);
+        save_settings_with_cli_models(root,"docs","site","","codex","codex-model","mkdocs","{}",None,Some("cli"),None,None,Some(&models)).unwrap();
+        assert_eq!(read_config(root).cli_models,models);
+        save_settings(root,"docs","site","","claude","new-claude-model","mkdocs","{}",None,Some("cli"),None,None).unwrap();
+        let saved=read_config(root);
+        assert_eq!(saved.cli_models["codex"],"codex-model");
+        assert_eq!(saved.cli_models["agy"],"agy-model");
+        assert_eq!(saved.cli_models["claude"],"new-claude-model");
+        save_settings(root,"docs","site","","claude","api-model","mkdocs","{}",None,Some("api"),Some("https://example.invalid"),None).unwrap();
+        assert_eq!(read_config(root).cli_models,saved.cli_models);
+        let before=fs::read(config_path(root)).unwrap();
+        let invalid=std::collections::BTreeMap::from([("codex".into(),"bad\nmodel".into())]);
+        assert!(save_settings_with_cli_models(root,"docs","site","","codex","","mkdocs","{}",None,Some("cli"),None,None,Some(&invalid)).is_err());
+        assert_eq!(fs::read(config_path(root)).unwrap(),before);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MkDocsConfig {
     pub site_name: String,
@@ -45,6 +70,8 @@ pub struct ManualConfig {
     pub format: String,
     pub agent: String,
     pub model: String,
+    #[serde(default)]
+    pub cli_models: std::collections::BTreeMap<String, String>,
     #[serde(default = "default_connection_type")]
     pub connection_type: String,
     #[serde(default)]
@@ -63,6 +90,7 @@ impl Default for ManualConfig {
             format: "mkdocs".to_string(),
             agent: "codex".to_string(),
             model: "".to_string(),
+            cli_models: Default::default(),
             connection_type: default_connection_type(),
             endpoint_url: String::new(),
             assets: default_assets(),
@@ -142,6 +170,9 @@ pub fn read_config(root: &Path) -> ManualConfig {
     if let Some(m) = value.get("model").and_then(|v| v.as_str()) {
         config.model = m.to_string();
     }
+    if let Some(models) = value.get("cli_models") {
+        config.cli_models = serde_json::from_value(models.clone()).unwrap_or_default();
+    }
     if let Some(mk) = value.get("mkdocs").and_then(|v| v.as_object()) {
         if let Some(sn) = mk.get("site_name").and_then(|v| v.as_str()) {
             config.mkdocs.site_name = sn.to_string();
@@ -171,6 +202,7 @@ pub fn read_config(root: &Path) -> ManualConfig {
         config.assets = format!("{}/assets", config.docs);
     }
 
+    if config.connection_type == "cli" { config.cli_models.entry(config.agent.clone()).or_insert_with(||config.model.clone()); }
     config
 }
 
@@ -290,6 +322,21 @@ pub fn save_settings(
     endpoint_url: Option<&str>,
     assets: Option<&str>,
 ) -> Result<ManualConfig, String> {
+    save_settings_with_cli_models(root, docs, output, brief, agent, model, doc_format, mkdocs_raw, targets, connection_type, endpoint_url, assets, None)
+}
+
+pub fn save_settings_with_cli_models(
+    root: &Path, docs: &str, output: &str, brief: &str, agent: &str, model: &str,
+    doc_format: &str, mkdocs_raw: &str, targets: Option<&[String]>, connection_type: Option<&str>,
+    endpoint_url: Option<&str>, assets: Option<&str>, cli_models: Option<&std::collections::BTreeMap<String,String>>,
+) -> Result<ManualConfig, String> {
+    let mut cli_models = cli_models.cloned().unwrap_or_else(||read_config(root).cli_models);
+    for (agent, model) in &cli_models {
+        if !["codex","claude","gemini","grok","agy"].contains(&agent.as_str()) || model.len()>120 || model.contains(['\n','\r','\0']) {
+            return Err("AIごとのモデル設定が不正です。".into());
+        }
+    }
+    if connection_type.unwrap_or("cli")=="cli" { cli_models.insert(agent.to_string(), model.trim().to_string()); }
     let docs_path = project_path(root, docs)?;
     let output_path = project_path(root, output)?;
 
@@ -388,6 +435,7 @@ pub fn save_settings(
         format: doc_format.to_string(),
         agent: agent.to_string(),
         model: model.trim().to_string(),
+        cli_models,
         connection_type: conn_type.to_string(),
         endpoint_url: endpoint_url.unwrap_or_default().trim().to_string(),
         assets: rel_assets,
