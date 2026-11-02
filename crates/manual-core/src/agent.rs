@@ -215,7 +215,7 @@ pub(crate) fn wait_for_cli(
 
 pub(crate) fn cli_command(binary: &str, args: &[String], root: &Path) -> Command {
     #[cfg(windows)]
-    let mut command = npm_codex_command(Path::new(binary)).unwrap_or_else(|| Command::new(binary));
+    let mut command = npm_cli_command(Path::new(binary)).unwrap_or_else(|| Command::new(binary));
     #[cfg(not(windows))]
     let mut command = Command::new(binary);
     #[cfg(windows)]
@@ -238,12 +238,16 @@ pub(crate) fn cli_command(binary: &str, args: &[String], root: &Path) -> Command
 }
 
 #[cfg(windows)]
-fn npm_codex_command(binary: &Path) -> Option<Command> {
+fn npm_cli_command(binary: &Path) -> Option<Command> {
     // cmd.exe cannot transport arbitrary multiline prompts. Invoke npm's JS
     // entry point with Node so Windows receives the original argument vector.
-    if !binary.file_name()?.to_str()?.eq_ignore_ascii_case("codex.cmd") { return None; }
+    let package=match binary.file_name()?.to_str()?.to_ascii_lowercase().as_str(){
+        "codex.cmd"=>"node_modules/@openai/codex/bin/codex.js",
+        "claude.cmd"=>"node_modules/@anthropic-ai/claude-code/cli.js",
+        _=>return None,
+    };
     let directory = binary.parent()?;
-    let script = directory.join("node_modules/@openai/codex/bin/codex.js");
+    let script = directory.join(package);
     if !script.is_file() { return None; }
     let local_node = directory.join("node.exe");
     let node = if local_node.is_file() { local_node } else {

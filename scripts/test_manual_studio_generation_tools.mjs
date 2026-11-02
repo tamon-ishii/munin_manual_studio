@@ -147,7 +147,7 @@ try {
   const red = page.locator('.xterm-rows span').filter({hasText:'COLOR_RED'}).first();
   await red.waitFor();
   assert.equal(await red.evaluate(node => getComputedStyle(node).color), 'rgb(255, 0, 0)');
-  await page.locator('#terminal-disconnect-btn').click();
+  await page.locator('#terminal-connect-btn').click();
   await page.waitForFunction(() => document.querySelector('#terminal-badge').textContent.includes('未接続'));
   assert.equal(closes, 1);
   await page.locator('#terminal-connect-btn').click();

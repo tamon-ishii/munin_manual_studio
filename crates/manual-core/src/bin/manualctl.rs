@@ -1,5 +1,11 @@
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--studio-tools") {
+        let result=args.get(2).zip(args.get(3)).ok_or("--studio-tools requires request and response file paths".to_string())
+            .and_then(|(input,output)|manual_core::terminal_tools::run_files(std::path::Path::new(input),std::path::Path::new(output)));
+        if let Err(error)=result {eprintln!("{error}");std::process::exit(2);}
+        return;
+    }
     if args.get(1).map(String::as_str) == Some("--pty-daemon") {
         manual_core::pty::run_daemon();
         return;

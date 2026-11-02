@@ -689,12 +689,12 @@ try {
   assert.equal(await page.locator('#terminal-connect-btn').isVisible(), true);
   assert.equal(await page.locator('#terminal-clear-btn').isVisible(), true);
   assert.match(await page.locator('#terminal-badge').innerText(), /未接続/);
-  assert.equal(await page.locator('#terminal-disconnect-btn').isDisabled(), true);
+  assert.equal(await page.locator('#terminal-connect-btn').isDisabled(), false);
   await page.locator('#terminal-clear-btn').click();
   await page.locator('#terminal-connect-btn').click();
   await page.waitForTimeout(500);
 
-  await page.locator('#terminal-disconnect-btn').click();
+  await page.locator('#terminal-connect-btn').click();
   await page.waitForFunction(() => document.querySelector('#terminal-badge').textContent.includes('未接続'));
 
 

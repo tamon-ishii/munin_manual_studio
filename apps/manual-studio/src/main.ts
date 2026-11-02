@@ -412,8 +412,8 @@ async function rpc(action: string, options: Record<string, unknown> = {}, root =
 let terminalController: TerminalController | null = null;
 
 function getTerminalCliCommand(): { command: string; args: string[]; label: string } {
-  const agent = workspace?.config.agent || "claude";
-  const model = workspace?.config.model?.trim();
+  const agent = element<HTMLSelectElement>('terminal-cli-agent').value;
+  const model = cliAiSettings.get(agent);
   const labels: Record<string, string> = {
     codex: "Codex",
     claude: "Claude Code",
@@ -437,13 +437,25 @@ function getTerminalCliCommand(): { command: string; args: string[]; label: stri
 }
 
 const terminalPanel = element<HTMLElement>("panel-terminal");
+let terminalWorkingDirectory='';
 function openManualTerminal(): void {
   if (!terminalPanel || terminalController) return;
   terminalController = setupTerminalPane(terminalPanel, {
     rpc,
     getProjectRoot: () => projectRoot,
     getCliCommand: getTerminalCliCommand,
-    onStatusChange: (state, message) => { if (state === "error" && message) status(message, true); },
+    getWorkingDirectory:()=>terminalWorkingDirectory||projectRoot,
+    prepareSession: async (root,workingDirectory) => {
+      await saveAiSettings();
+      const prepared=JSON.parse(await rpc('terminal-prepare',{working_directory:workingDirectory},root)) as {prompt:string};
+      if(!prepared.prompt)throw new Error('AIターミナルのMarkIts案内を準備できませんでした。');
+      return prepared.prompt;
+    },
+    onStatusChange: (state, message) => {
+      element<HTMLSelectElement>('terminal-cli-agent').disabled=['connected','starting','stopping'].includes(state);
+      for(const id of ['terminal-directory-settings','terminal-working-directory','terminal-choose-directory','terminal-project-directory'])element<HTMLInputElement|HTMLButtonElement>(id).disabled=['connected','starting','stopping'].includes(state);
+      if (state === "error" && message) status(message, true);
+    },
     onUnload: (ownerId, root) => {
       const request = { root, action: "pty-close-owner", options: { ownerId } };
       if (native) void invoke("manual_request", { request }).catch(() => {});
@@ -455,6 +467,23 @@ function openManualTerminal(): void {
   });
 }
 window.addEventListener("manual-studio-terminal-open", openManualTerminal);
+element('terminal-directory-settings').addEventListener('click',()=>{
+  input('terminal-working-directory').value=terminalWorkingDirectory||projectRoot;
+  element<HTMLDialogElement>('terminal-directory-dialog').showModal();
+  input('terminal-working-directory').focus();
+});
+element('terminal-directory-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  terminalWorkingDirectory=input('terminal-working-directory').value.trim()||projectRoot;
+  element('terminal-directory-settings').title=terminalWorkingDirectory;
+  element<HTMLDialogElement>('terminal-directory-dialog').close();
+});
+document.querySelectorAll('#terminal-directory-dialog [data-close-dialog]').forEach(button=>button.addEventListener('click',()=>element<HTMLDialogElement>('terminal-directory-dialog').close()));
+element('terminal-choose-directory').addEventListener('click',()=>{
+  if(!native){status('作業フォルダのパスを入力してください。');return;}
+  void invoke<string|null>('choose_project',{initialDirectory:input('terminal-working-directory').value.trim()||projectRoot}).then(path=>{if(path)input('terminal-working-directory').value=path;}).catch(error=>status(String(error),true));
+});
+element('terminal-project-directory').addEventListener('click',()=>{input('terminal-working-directory').value=projectRoot;});
 
 function setBusy(value: boolean): void {
   busy = value;
@@ -549,7 +578,7 @@ function chooseTab(name: string): void {
   document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
   if (name === "editor") void renderPreview();
   if (name === "terminal") {
-    setTimeout(() => { terminalController?.fit(); }, 50);
+    setTimeout(() => { terminalController?.fit();terminalController?.focus(); }, 50);
   }
 }
 interface OpenDocumentTab { document: Document; content: string; start: number; end: number; scroll: number; richScroll: number; history: EditorHistory; richState: ReturnType<typeof milkdown.captureState>; }
@@ -1076,7 +1105,10 @@ async function openProject(root: string, check = true): Promise<void> {
   saveDocumentTabSession();
   restoringDocumentTabs = true;
   documentTabs.clear(); imageTabs.clear(); showDocumentView();
+  if(version!==projectRequestVersion)return;
   projectRoot = root; workspace = loaded; documentState = null; dirty = false;
+  terminalWorkingDirectory=root;
+  element('terminal-directory-settings').title=root;
   if (version !== projectRequestVersion) return;
   documentPersistence.state = null;
   setAiPhase(element('ai-workflow-status'), 'idle');
@@ -1416,6 +1448,11 @@ element("reload-page").addEventListener("click", () => { if (documentState) void
   if (!await confirmDiscard() || !documentState) return;
   await openPage(documentState.page, false);
 }); });
+element('terminal-reload-files').addEventListener('click',()=>{void work(async()=>{
+  if(!projectRoot||!await confirmDiscard())return;
+  await refreshWorkspace(true);
+  status('AIターミナルで変更した原稿とファイル一覧を読み直しました。');
+});});
 element("undo-edit").addEventListener("click", () => stepEditHistory(-1));
 element("redo-edit").addEventListener("click", () => stepEditHistory(1));
 element("detach-editor").addEventListener("click", () => { void work(async () => {

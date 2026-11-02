@@ -462,6 +462,12 @@ fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
     let mode = args.next();
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--studio-tools")) {
+        let result=args.next().zip(args.next()).ok_or("--studio-tools requires request and response file paths".to_string())
+            .and_then(|(input,output)|manual_core::terminal_tools::run_files(std::path::Path::new(&input),std::path::Path::new(&output)));
+        if let Err(error)=result {eprintln!("{error}");std::process::exit(2);}
+        return;
+    }
     if mode.as_deref() == Some(std::ffi::OsStr::new("--manual-studio-annotate"))
         || mode.as_deref() == Some(std::ffi::OsStr::new("--munin-markits")) {
         markits_desktop_lib::run();

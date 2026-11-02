@@ -4,7 +4,7 @@ export const consultationAgents=[{id:'codex',label:'Codex'},{id:'claude',label:'
 export function setupCliAiSettings(changed:(agent:string,model:string)=>void){
   const section=document.createElement('section');section.className='card';
   const heading=document.createElement('h3');heading.textContent='相談先AIごとの設定';
-  const note=document.createElement('p');note.className='muted';note.textContent='各CLIのモデルを個別に保存します。空欄はCLIの既定モデルを使います。ログインは各CLIで行ってください。作業フォルダは開いているプロジェクトです。';
+  const note=document.createElement('p');note.className='muted';note.textContent='各CLIのモデルを個別に保存します。空欄はCLIの既定モデルを使います。ログインは各CLIで行ってください。文書編集はプロジェクトフォルダで実行します。AIターミナルでは作業フォルダを変更できます。';
   section.append(heading,note);
   const fields=new Map<string,HTMLInputElement>();
   for(const agent of consultationAgents){

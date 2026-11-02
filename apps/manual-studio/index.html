@@ -10,7 +10,7 @@
     </div>
   </header>
   <nav class="workspace-tabs" aria-label="作業">
-    <div class="workspace-nav-group" role="group" aria-label="編集と撮影"><button data-tab="editor" data-ui-icon="file" class="active">原稿を編集</button></div>
+    <div class="workspace-nav-group" role="group" aria-label="編集と撮影"><button data-tab="editor" data-ui-icon="file" class="active">原稿を編集</button><button type="button" data-tab="terminal" data-ui-icon="terminal">AIターミナル</button></div>
     <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影してカーソル位置に挿入">撮影</button><button type="button" id="reader-review" data-ui-icon="review">AIレビュー</button><button type="button" id="selection-ai" data-ui-icon="sparkle" title="選択範囲をAIで変更、選択がない場合はカーソル位置へ新規文章を挿入">AIで修正・挿入</button><button type="button" id="generate-ai-image" class="ai-image-button" title="AIで画像を作成し、プレビューして原稿へ挿入" aria-haspopup="dialog"><svg class="ui-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg><span>AI作画</span></button><details id="editor-more" class="editor-more"><summary aria-label="その他の文書操作">⋯</summary><div class="editor-more-menu"><button type="button" data-tab="brief" data-ui-icon="file">執筆方針</button><button type="button" id="generate-draft" data-ui-icon="sparkle" title="設定したAIで複数ページの下書き候補を作成します。採用するまで原稿は変わりません">AIで全体の下書きを作る</button><button type="button" id="image-presentation" data-ui-icon="image" title="画像を選んで表示幅・配置・説明を設定" aria-haspopup="dialog">画像の表示設定</button><button type="button" id="shortcut-help" data-ui-icon="review" title="キーボード操作を確認">ショートカット</button><button id="reload-page" data-ui-icon="refresh">読み直す</button><button id="detach-editor" data-ui-icon="application">別ウィンドウで編集</button></div></details></div>
     <div class="workspace-nav-group workspace-nav-output" role="group" aria-label="出力"><button data-tab="publish" data-ui-icon="review">原稿チェック</button></div>
   </nav>
@@ -69,19 +69,30 @@
     </section>
     <section id="panel-terminal" class="panel panel-terminal">
       <div class="terminal-toolbar">
-        <div class="terminal-status"><span class="terminal-emblem" data-ui-icon="terminal"></span><div class="terminal-identity"><strong>AIターミナル</strong><span id="terminal-badge" class="badge">● 接続待機中</span><span id="terminal-agent-name" class="muted">AI CLI</span></div></div>
+        <div hidden><span id="terminal-badge">未接続</span><span id="terminal-agent-name">AI CLI</span></div>
         <div class="actions">
+          <select id="terminal-cli-agent" aria-label="ターミナルのAI"><option value="codex">Codex</option><option value="claude">Claude</option><option value="agy">Agy</option></select>
           <button type="button" id="terminal-connect-btn" data-ui-icon="connect">接続</button>
+          <button type="button" id="terminal-directory-settings" data-ui-icon="open" aria-haspopup="dialog">作業フォルダ設定</button>
           <button type="button" id="terminal-clear-btn" data-ui-icon="clear">クリア</button>
-          <button type="button" id="terminal-disconnect-btn" data-ui-icon="disconnect" disabled>切断</button>
+          <button type="button" id="terminal-reload-files" data-ui-icon="refresh">変更を読み直す</button>
 
         </div>
       </div>
-      <div class="terminal-guidance"><span data-ui-icon="sparkle"></span><p>AIと相談しながら文章や操作を検討できます。必要な文章をコピーして原稿へ反映してください。</p></div>
-      <p id="terminal-state-note" class="muted" role="status">接続ボタンでAI CLIを起動します。</p>
+      <span id="terminal-state-note" hidden></span>
       <div id="terminal-container" class="terminal-container"></div>
     </section>
   </div>
+  <dialog id="terminal-directory-dialog" class="panel-dialog" aria-labelledby="terminal-directory-title">
+    <div class="panel-header"><h1 id="terminal-directory-title">作業フォルダ設定</h1><button type="button" data-close-dialog="terminal-directory-dialog">閉じる</button></div>
+    <form id="terminal-directory-form">
+      <p class="muted">初期値はプロジェクトルートです。変更は次の接続から使います。</p>
+      <label for="terminal-working-directory">作業フォルダ</label>
+      <div class="terminal-directory-picker"><input id="terminal-working-directory" type="text" placeholder="プロジェクトルート" /><button type="button" id="terminal-choose-directory">選択</button></div>
+      <button type="button" id="terminal-project-directory">プロジェクトルートに戻す</button>
+      <div class="actions dialog-actions"><button type="button" data-close-dialog="terminal-directory-dialog">キャンセル</button><button type="submit" class="primary">設定する</button></div>
+    </form>
+  </dialog>
   <dialog id="panel-appearance" class="panel-dialog">
     <div class="panel-header">
       <div><h1>外観設定</h1></div>

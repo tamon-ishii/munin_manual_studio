@@ -134,11 +134,6 @@ function loadStoredModel(): Model {
           }
         });
         removedTabs.forEach((id) => restored.doAction(Actions.deleteTab(id)));
-        // Older layouts included the terminal by default. Preserve the other
-        // panels while making the terminal opt-in on this first migration.
-        if (!current && restored.getNodeById("terminal")) {
-          restored.doAction(Actions.deleteTab("terminal"));
-        }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(restored.toJson()));
         return restored;
       }
@@ -248,7 +243,7 @@ export const FlexLayoutApp: React.FC<{
               enableClose: true,
             },
             targetTabsetId,
-            DockLocation.CENTER,
+            componentId === "terminal" ? DockLocation.BOTTOM : DockLocation.CENTER,
             -1,
             true
           )

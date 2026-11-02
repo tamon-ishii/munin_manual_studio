@@ -45,6 +45,21 @@ fn pty_spawn_owned(
     rows: u16,
     owner: Option<&str>,
 ) -> Result<String, String> {
+    pty_spawn_owned_in(command,args,cols,rows,owner,root)
+}
+
+pub fn working_directory(root:&Path,value:Option<&str>)->Result<std::path::PathBuf,String>{
+    let path=match value.map(str::trim).filter(|value|!value.is_empty()){
+        Some(value) if Path::new(value).is_absolute()||Path::new(value)==root=>std::path::PathBuf::from(value),
+        Some(value)=>root.join(value),
+        None=>root.to_path_buf(),
+    };
+    let directory=path.canonicalize().map_err(|_|"作業フォルダが見つかりません。既存のフォルダを指定してください。".to_string())?;
+    if !directory.is_dir(){return Err("作業フォルダにはフォルダを指定してください。".into());}
+    Ok(directory)
+}
+
+fn pty_spawn_owned_in(command:&str,args:&[String],cols:u16,rows:u16,owner:Option<&str>,working_directory:&Path)->Result<String,String>{
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -55,14 +70,17 @@ fn pty_spawn_owned(
         })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-    let mut cmd = CommandBuilder::new(command);
-    cmd.cwd(root);
+    let binary=crate::agent::which_binary(command).unwrap_or_else(||command.into());
+    let launch=crate::agent::cli_command(&binary.to_string_lossy(),args,working_directory);
+    let mut cmd = CommandBuilder::new(launch.get_program());
+    cmd.cwd(working_directory);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("CLICOLOR", "1");
     cmd.env("FORCE_COLOR", "3");
+    cmd.env("MUNIN_STUDIO_TOOLS",std::env::current_exe().map_err(|e|e.to_string())?);
     cmd.env_remove("NO_COLOR");
-    for arg in args {
+    for arg in launch.get_args() {
         cmd.arg(arg);
     }
 
@@ -267,7 +285,8 @@ pub fn execute_pty_request(
                 .get("owner_id")
                 .or_else(|| options.get("ownerId"))
                 .and_then(|v| v.as_str());
-            let session_id = pty_spawn_owned(root, command, &args, cols, rows, owner)?;
+            let directory=working_directory(root,options["working_directory"].as_str())?;
+            let session_id = pty_spawn_owned_in(command, &args, cols, rows, owner,&directory)?;
             serde_json::to_string(&serde_json::json!({ "session_id": session_id }))
                 .map_err(|e| e.to_string())
         }
@@ -508,6 +527,53 @@ pub fn run_daemon() {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[cfg(windows)]
+    #[test]
+    fn npm_codex_terminal_runs_in_project_and_accepts_input() {
+        let root=tempfile::tempdir().unwrap();
+        let bin=root.path().join("npm path with spaces");
+        let scripts=bin.join("node_modules/@openai/codex/bin");
+        std::fs::create_dir_all(&scripts).unwrap();
+        let shim=bin.join("codex.cmd");
+        std::fs::write(&shim,"@exit /b 99\r\n").unwrap();
+        std::fs::write(scripts.join("codex.js"),r#"
+require('node:fs').writeFileSync('terminal-cwd.json',JSON.stringify(process.cwd()));
+console.log('NODE_READY');
+process.stdin.setRawMode(true);
+process.stdin.on('data',data=>{require('node:fs').appendFileSync('terminal-input.txt',data);console.log('NODE:'+String(data).trim());});
+"#).unwrap();
+        let work=root.path().join("application source");std::fs::create_dir(&work).unwrap();
+        let id=pty_spawn_owned_in(&shim.to_string_lossy(),&[],80,24,None,&work).unwrap();
+        let mut output=String::new();let started=std::time::Instant::now();
+        while !output.contains("NODE_READY") && started.elapsed().as_secs()<5 {
+            output.push_str(&pty_read(&id).unwrap().0);thread::sleep(std::time::Duration::from_millis(20));
+        }
+        pty_write(&id,"hello_terminal\r").unwrap();
+        while !output.contains("NODE:hello_terminal") && started.elapsed().as_secs()<7 {
+            output.push_str(&pty_read(&id).unwrap().0);thread::sleep(std::time::Duration::from_millis(20));
+        }
+        pty_write(&id,"\x1b[B回答\r").unwrap();
+        while !std::fs::read_to_string(work.join("terminal-input.txt")).unwrap_or_default().ends_with("\x1b[B回答\r") && started.elapsed().as_secs()<7 {
+            thread::sleep(std::time::Duration::from_millis(20));
+        }
+        pty_kill(&id).unwrap();
+        assert!(output.contains("NODE:hello_terminal"),"{output:?}");
+        assert_eq!(std::fs::read_to_string(work.join("terminal-input.txt")).unwrap(),"hello_terminal\r\x1b[B回答\r");
+        let cwd:String=serde_json::from_slice(&std::fs::read(work.join("terminal-cwd.json")).unwrap()).unwrap();
+        assert_eq!(Path::new(&cwd).canonicalize().unwrap(),work.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn working_directory_defaults_to_root_and_validates_custom_folders(){
+        let root=tempfile::tempdir().unwrap();
+        assert_eq!(working_directory(root.path(),None).unwrap(),root.path().canonicalize().unwrap());
+        let custom=root.path().join("application source");std::fs::create_dir(&custom).unwrap();
+        assert_eq!(working_directory(root.path(),Some("application source")).unwrap(),custom.canonicalize().unwrap());
+        std::fs::write(root.path().join("file.txt"),"not a directory").unwrap();
+        assert!(working_directory(root.path(),Some("file.txt")).is_err());
+        assert!(working_directory(root.path(),Some("missing")).is_err());
+    }
 
     #[cfg(unix)]
     #[test]

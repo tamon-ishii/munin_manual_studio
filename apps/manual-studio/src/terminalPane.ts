@@ -8,6 +8,8 @@ export interface TerminalPaneOptions {
   rpc: (action: string, options?: Record<string, unknown>, root?: string) => Promise<string>;
   getProjectRoot: () => string;
   getCliCommand: () => { command: string; args: string[]; label: string };
+  getWorkingDirectory?:()=>string;
+  prepareSession?: (root:string,workingDirectory:string) => Promise<string>;
   onUnload?: (ownerId: string, root: string) => void;
   onStatusChange?: (status: "connected" | "stopped" | "starting" | "stopping" | "error", message?: string) => void;
 }
@@ -15,6 +17,7 @@ export interface TerminalPaneOptions {
 export interface TerminalController {
   write(data: string): void;
   fit(): void;
+  focus():void;
   kill(): Promise<void>;
   restart(): Promise<void>;
   injectPrompt(prompt: string, timeoutMs?: number): Promise<string>;
@@ -194,7 +197,6 @@ export function setupTerminalPane(
   const badge = panelElement.querySelector<HTMLElement>("#terminal-badge");
   const agentLabel = panelElement.querySelector<HTMLElement>("#terminal-agent-name");
   const connectBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-connect-btn");
-  const disconnectBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-disconnect-btn");
   const stateNote = panelElement.querySelector<HTMLElement>("#terminal-state-note");
   const clearBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-clear-btn");
 
@@ -203,6 +205,8 @@ export function setupTerminalPane(
   let sessionRoot = "";
   let ownerId: string | null = null;
   let disposed = false;
+  let connectionState:'connected'|'stopped'|'starting'|'stopping'|'error'='stopped';
+  let inputQueue=Promise.resolve();
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let isPolling = false;
   let isPromptInjecting = false;
@@ -224,6 +228,11 @@ export function setupTerminalPane(
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.open(container);
+  const focusTerminal=()=>terminal.focus();
+  const keepTerminalKeys=(event:KeyboardEvent)=>event.stopPropagation();
+  container.addEventListener('click',focusTerminal);
+  // xterm handles the key first; editor/page shortcuts must not consume it.
+  container.addEventListener('keydown',keepTerminalKeys);
 
   if (typeof document !== "undefined" && (document as any).fonts?.ready) {
     (document as any).fonts.ready.then(() => {
@@ -300,23 +309,33 @@ export function setupTerminalPane(
   resizeObserver.observe(container);
 
   function updateStatus(status: "connected" | "stopped" | "starting" | "stopping" | "error", message?: string): void {
+    connectionState=status;
     const labels = { connected: "接続中", stopped: "未接続", starting: "起動中", stopping: "終了中", error: "接続失敗" };
     if (badge) { badge.className = `badge ${status}`; badge.innerHTML = `${uiIcon(status === "connected" ? "connect" : status === "starting" || status === "stopping" ? "refresh" : "disconnect")}<span>${labels[status]}</span>`; }
-    if (connectBtn) connectBtn.disabled = status === "connected" || status === "starting" || status === "stopping" || (status === "error" && sessionId !== null);
-    if (disconnectBtn) disconnectBtn.disabled = status !== "connected" && status !== "starting" && !(status === "error" && ownerId !== null);
-    if (stateNote) stateNote.textContent = message || (status === "stopped" ? "接続ボタンでAI CLIを起動します。" : labels[status]);
+    if(connectBtn){
+      const disconnect=status==='connected'||status==='starting'||status==='error'&&ownerId!==null;
+      const label=status==='stopping'?'切断中…':disconnect?'切断':'接続';
+      connectBtn.disabled=status==='stopping';
+      connectBtn.dataset.uiIcon=disconnect?'disconnect':'connect';
+      connectBtn.innerHTML=uiIcon(disconnect?'disconnect':'connect')+`<span>${label}</span>`;
+      connectBtn.setAttribute('aria-label',label);
+      connectBtn.setAttribute('aria-pressed',String(disconnect));
+    }
+    if (stateNote) stateNote.textContent = message || (status === "stopped" ? "接続ボタンでAI CLIを起動します。" : status==='connected'?'質問には文字を入力し、選択肢には矢印キーとEnterで回答できます。':labels[status]);
     options.onStatusChange?.(status, message);
   }
 
   // Terminal input handler -> pty-write
   terminal.onData((data) => {
     if (!sessionId) return;
-    if (isPromptInjecting) {
-      // Prevent user input collision while prompt injection is running
-      return;
-    }
-    void options.rpc("pty-write", { sessionId, data }, options.getProjectRoot()).catch((err) => {
-      console.warn("Failed to write to terminal:", err);
+    const id=sessionId,root=sessionRoot,generation=sessionGeneration;
+    // Preserve arrow/Enter ordering, including answers during injected prompts.
+    inputQueue=inputQueue.then(async()=>{
+      if(disposed||generation!==sessionGeneration||id!==sessionId)return;
+      await options.rpc("pty-write", { sessionId:id, data }, root);
+    }).catch(err=>{
+      if(stateNote)stateNote.textContent=`入力を送信できませんでした: ${String(err)}`;
+      console.warn("Failed to write to terminal:",err);
     });
   });
 
@@ -375,19 +394,22 @@ export function setupTerminalPane(
     sessionRoot = root;
     const spawningOwner = ownerId;
     const { command, args, label } = options.getCliCommand();
+    const workingDirectory=options.getWorkingDirectory?.().trim()||root;
     if (agentLabel) {
       agentLabel.textContent = label;
     }
 
     updateStatus("starting", `${label} を起動中…`);
-    terminal.writeln(`\r\n\x1b[36m--- ${label} セッションを起動中 (${root}) ---\x1b[0m\r\n`);
 
     try {
+      const initialPrompt=await options.prepareSession?.(root,workingDirectory);
+      if(disposed||generation!==sessionGeneration||root!==options.getProjectRoot())return;
       fitAddon.fit();
       const raw = await options.rpc("pty-spawn", {
         command,
-        args,
+        args:initialPrompt?[...args,...(command==='agy'?['--prompt-interactive']:[]),initialPrompt]:args,
         ownerId: spawningOwner,
+        working_directory:workingDirectory,
         cols: terminal.cols || 80,
         rows: terminal.rows || 24,
       }, root);
@@ -402,6 +424,7 @@ export function setupTerminalPane(
       sessionRoot = root;
       if (sessionId) {
         updateStatus("connected");
+        terminal.focus();
         void pollOutput();
       } else {
         updateStatus("stopped", "セッションIDの取得に失敗しました");
@@ -428,8 +451,11 @@ export function setupTerminalPane(
     if (generation === sessionGeneration) updateStatus("stopped");
   }
 
-  connectBtn?.addEventListener("click", () => { void spawnSession(); });
-  disconnectBtn?.addEventListener("click", () => { void killSession().catch(() => {}); });
+  connectBtn?.addEventListener("click", () => {
+    if(connectionState==='stopping')return;
+    if(connectionState==='connected'||connectionState==='starting'||connectionState==='error'&&ownerId!==null)void killSession().catch(()=>{});
+    else void spawnSession();
+  });
   updateStatus("stopped");
 
   if (clearBtn) {
@@ -439,6 +465,7 @@ export function setupTerminalPane(
   }
 
   return {
+    focus(){terminal.focus();},
     write(data: string) {
       terminal.write(data);
     },
@@ -528,6 +555,8 @@ export function setupTerminalPane(
       window.removeEventListener("manual-studio-terminal-font-change", applyActiveFont);
       themeObserver.disconnect();
       resizeObserver.disconnect();
+      container.removeEventListener('click',focusTerminal);
+      container.removeEventListener('keydown',keepTerminalKeys);
       terminal.dispose();
     },
   };

@@ -27,6 +27,7 @@ mod draft_review;
 pub mod platform;
 pub mod preview;
 pub mod pty;
+pub mod terminal_tools;
 pub mod quality;
 pub mod scenario;
 pub mod screenshots;
@@ -793,6 +794,7 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         .and_then(serde_json::Value::as_str)
         .ok_or("Action is required")?;
     let project = Path::new(root);
+    if action == "terminal-prepare" {return terminal_tools::prepare_in(project,request["options"]["working_directory"].as_str()).map(|value|value.to_string());}
     let options = &request["options"];
     let id = || options["id"].as_str().ok_or("実行IDを指定してください。");
     let page = || options["page"].as_str().ok_or("原稿を指定してください。");
