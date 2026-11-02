@@ -3,6 +3,18 @@ use crate::config::{project_path,read_config};
 use serde_json::{json,Value};
 use std::{fs,path::Path};
 
+pub(crate) fn invoke_isolated(root:&Path,request:&Value)->Result<Value,String>{
+    let temporary=tempfile::tempdir().map_err(|e|e.to_string())?;
+    let input=temporary.path().join("request.json");let output=temporary.path().join("response.json");
+    fs::write(&input,serde_json::to_vec(request).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    let executable=std::env::current_exe().map_err(|e|e.to_string())?;
+    let result=crate::agent::run_process(root,&executable.to_string_lossy(),&["--studio-tools".into(),input.to_string_lossy().into_owned(),output.to_string_lossy().into_owned()])?;
+    if !result.status.success(){return Err(format!("MarkItsの撮影ツールが終了しました: {}",String::from_utf8_lossy(&result.stderr)));}
+    let response:Value=serde_json::from_slice(&fs::read(output).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    if response["ok"]!=true{return Err(response["error"].as_str().unwrap_or("MarkIts tool failed").to_string());}
+    Ok(response["result"].clone())
+}
+
 pub fn prepare(root:&Path)->Result<Value,String>{
     prepare_in(root,None)
 }

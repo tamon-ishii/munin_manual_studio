@@ -2406,14 +2406,16 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
   const expected=editor.value,page=owner.page,revision=documentState?.revision;
   let previousCandidate:{content:string;accepted:number[];feedback:string}|undefined;
   while(instruction){
+    const includeScreenshots=action?.includeScreenshots??/スクリーンショット|スクショ|撮影|screenshot|screen capture/i.test(instruction);
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
     let candidate:string|undefined,failure="",cancelled=false;
     await work(async()=>{
       await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('selection-generate',root,action?.cliAgent);let succeeded=false;
-      try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{selected:selection.text,mode:action?.mode==='consult'?'consult':selection.text?"replace":"insert",cli_agent:action?.cliAgent,insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
+      try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{selected:selection.text,mode:action?.mode==='consult'?'consult':selection.text?"replace":"insert",cli_agent:action?.cliAgent,include_screenshots:includeScreenshots,insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
       catch(error){failure=String(error);logAiFailure(error);throw error;}
       finally{cancelled=Boolean(generationCancelRequest);await stopAiProgress(succeeded);}
     });
+    if(candidate!==undefined&&includeScreenshots&&action?.mode!=='consult'&&root===projectRoot)await refreshWorkspace(false,false);
     if(candidate===undefined){
       if(root!==projectRoot||documentState?.page!==page||editor.value!==expected)return;
       if(previousCandidate){candidate=previousCandidate.content;failure=`再作成を完了できませんでした。前の候補と採用の選択を保持しています。${failure}`;}

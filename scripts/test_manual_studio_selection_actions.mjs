@@ -128,9 +128,12 @@ try {
   }
   const before=await page.locator('#markdown-editor').inputValue();
   await selectText('rewrite');await page.getByRole('combobox',{name:'相談先のAI',exact:true}).selectOption('claude');
-  await page.getByRole('textbox',{name:'相談内容・指示',exact:true}).fill('短く書き直す');await page.getByRole('button',{name:'AIに送信',exact:true}).click();
+  await page.getByRole('textbox',{name:'相談内容・指示',exact:true}).fill('スクリーンショット込みで短く書き直す');
+  assert.equal(await page.getByRole('checkbox',{name:'起動済みアプリのスクリーンショットを含める',exact:true}).isChecked(),true);
+  await page.getByRole('button',{name:'AIに送信',exact:true}).click();
   await page.locator('#selection-diff-dialog').waitFor();assert.equal(await page.locator('#markdown-editor').inputValue(),before);
   assert.equal(requests.filter(r=>r.action==='selection-generate').at(-1).options.json.cli_agent,'claude');
+  assert.equal(requests.filter(r=>r.action==='selection-generate').at(-1).options.json.include_screenshots,true);
   await page.getByRole('button',{name:'破棄',exact:true}).click();
   await selectText();await page.getByRole('textbox',{name:'相談内容・指示',exact:true}).fill('伝わりやすくするには？');await page.getByRole('button',{name:'AIに送信',exact:true}).click();
   await page.locator('#selection-ai-advice-dialog').waitFor();assert.match(await page.locator('#selection-ai-advice-dialog').textContent(),/具体的/);

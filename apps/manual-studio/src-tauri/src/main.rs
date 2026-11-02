@@ -138,7 +138,8 @@ async fn manual_request(
     request: serde_json::Value,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let recapture = request["action"].as_str() == Some("screenshots-recapture");
+        let restore_after_capture = request["action"].as_str() == Some("screenshots-recapture")
+            || request["action"].as_str()==Some("selection-generate")&&request["options"]["json"]["include_screenshots"]==true;
         let capture_app = app.clone();
         let attempted_capture = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let attempted = attempted_capture.clone();
@@ -172,7 +173,7 @@ async fn manual_request(
         .unwrap_or_else(|_| {
             Err("処理中に予期しないエラーが発生しました。Munin Manual Studioへ戻ります。".into())
         });
-        if recapture || attempted_capture.load(std::sync::atomic::Ordering::Relaxed) {
+        if restore_after_capture || attempted_capture.load(std::sync::atomic::Ordering::Relaxed) {
             let restored = restore_manual_studio(app.clone(), app.state::<HiddenStudioWindows>());
             match (result, restored) {
                 (Err(error), Err(restore_error)) => Err(format!(

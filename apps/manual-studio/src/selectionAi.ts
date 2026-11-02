@@ -2,7 +2,7 @@ import {featureDialog} from './imageDialogs';
 import {diffParts,acceptDiff} from './selectableDiff';
 import {consultationAgents} from './cliAiSettings';
 export interface SelectionDraft { text:string; apply:(content:string)=>void; }
-export interface SelectionAction {mode:'consult'|'rewrite';instruction:string;cliAgent?:string}
+export interface SelectionAction {mode:'consult'|'rewrite';instruction:string;cliAgent?:string;includeScreenshots?:boolean}
 export function askSelectionAction(selected:string,agents:Array<{id:string;available:boolean}>=[],defaultAgent=''):Promise<SelectionAction|null>{
   const {dialog,body}=featureDialog('AIで選択範囲を書き直す');dialog.id='selection-ai-action-dialog';
   const preview=document.createElement('pre');preview.textContent=selected;preview.className='selection-ai-preview';
@@ -17,13 +17,17 @@ export function askSelectionAction(selected:string,agents:Array<{id:string;avail
   aiLabel.append(ai);
   const label=document.createElement('label');label.textContent='相談内容・指示';
   const instruction=document.createElement('textarea');instruction.rows=5;instruction.required=true;instruction.setAttribute('aria-label','相談内容・指示');label.append(instruction);
+  const captureLabel=document.createElement('label');captureLabel.className='selection-capture-option';
+  const capture=document.createElement('input');capture.type='checkbox';capture.setAttribute('aria-label','起動済みアプリのスクリーンショットを含める');
+  captureLabel.append(capture,document.createTextNode('起動済みアプリのスクリーンショットを含める'));
+  let captureChosen=false;capture.onchange=()=>{captureChosen=true;};
   const help=document.createElement('p');const update=()=>{
     help.textContent=mode.value==='consult'?'選択範囲を書き直す前提で方針を相談します。回答を見てから、そのまま書き直し候補を作成できます。':'入力した指示を基に、選択範囲の書き直し候補を作成します。差分を確認してから原稿へ反映します。';
     instruction.placeholder=mode.value==='consult'?'例：初心者向けに書き直すには、どの説明を補うとよいですか？':'例：初心者向けに、短く分かりやすく書き直してください';
   };mode.onchange=update;update();
   const form=document.createElement('form');const run=document.createElement('button');run.type='submit';run.className='primary';run.textContent='AIに送信';run.disabled=true;
-  instruction.oninput=()=>{run.disabled=!instruction.value.trim();};form.append(modeLabel,aiLabel,help,label,run);body.append(preview,form);instruction.focus();
-  return new Promise(resolve=>{let result:SelectionAction|null=null;form.onsubmit=event=>{event.preventDefault();if(!instruction.value.trim())return;result={mode:mode.value as SelectionAction['mode'],instruction:instruction.value.trim(),cliAgent:ai.value||undefined};dialog.close();};dialog.addEventListener('close',()=>resolve(result),{once:true});});
+  instruction.oninput=()=>{run.disabled=!instruction.value.trim();if(!captureChosen)capture.checked=/スクリーンショット|スクショ|撮影|screenshot|screen capture/i.test(instruction.value);};form.append(modeLabel,aiLabel,help,label,captureLabel,run);body.append(preview,form);instruction.focus();
+  return new Promise(resolve=>{let result:SelectionAction|null=null;form.onsubmit=event=>{event.preventDefault();if(!instruction.value.trim())return;result={mode:mode.value as SelectionAction['mode'],instruction:instruction.value.trim(),cliAgent:ai.value||undefined,includeScreenshots:capture.checked};dialog.close();};dialog.addEventListener('close',()=>resolve(result),{once:true});});
 }
 export function showSelectionAdvice(content:string):Promise<string|null>{
   const {dialog,body}=featureDialog('AIからの回答');dialog.id='selection-ai-advice-dialog';

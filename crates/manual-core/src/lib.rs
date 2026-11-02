@@ -22,6 +22,7 @@ mod manuscript_git;
 pub mod fact;
 mod legacy_ai;
 mod selection_ai;
+mod selection_capture;
 mod document_review;
 mod draft_review;
 pub mod platform;

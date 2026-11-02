@@ -404,6 +404,7 @@ fn run_codex(
     }
     let answer_content = fs::read_to_string(answer_path)
         .map_err(|error| format!("Failed to read codex answer: {error}"))?;
+    if answer_content.trim().is_empty(){return Err(empty_cli_answer("codex",&stderr_text));}
     serde_json::from_str(&answer_content).map_err(|error| error.to_string())
 }
 
@@ -645,8 +646,11 @@ fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: 
         }
         "agy" => {
             cmd_args.extend([
-                "-p".into(),
-                prompt.to_string(),
+                // The screenshot metadata and selected manuscript can make
+                // this prompt exceed Windows' CreateProcess command-line
+                // limit. Antigravity supports reading text prompts from stdin.
+                "--input-format".into(),
+                "text".into(),
                 "--output-format".into(),
                 "json".into(),
                 "--json-schema".into(),
@@ -685,9 +689,18 @@ fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: 
     append_progress(&log_path, &format!("{binary_name} CLIを起動しています"));
     let started = Instant::now();
     let checkpoint = cancellation_checkpoint(root);
-    let mut child = cli_command(&binary.to_string_lossy(), &cmd_args, workdir)
+    let mut command = cli_command(&binary.to_string_lossy(), &cmd_args, workdir);
+    if agent == "agy" {
+        command.stdin(Stdio::piped());
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to run {binary_name}: {e}"))?;
+    if agent == "agy" {
+        let mut stdin = child.stdin.take().ok_or("Failed to write Agy prompt")?;
+        stdin.write_all(prompt.as_bytes()).map_err(|error| format!("Failed to write Agy prompt: {error}"))?;
+        drop(stdin);
+    }
     append_progress(&log_path, "AIエージェントの応答を待っています");
     let stderr = child.stderr.take().ok_or("Failed to read AI errors")?;
     let stderr_log_path = log_path.clone();
@@ -718,7 +731,7 @@ fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: 
     append_progress(
         &log_path,
         &format!(
-            "AIエージェントの応答を受け取りました（所要{}秒）",
+            "AI CLIの処理が終了しました（所要{}秒）",
             started.elapsed().as_secs()
         ),
     );
@@ -730,10 +743,22 @@ fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: 
         ));
     }
 
-    let parsed: Value = extract_json_value(&stdout_str)
-        .map_err(|e| format!("Failed to parse {agent} JSON: {e}\nOutput was: {stdout_str}"))?;
+    parse_cli_answer(agent,&stdout_str,&stderr_text,schema)
+}
 
-    extract_agent_payload(agent, &parsed, schema)
+fn parse_cli_answer(agent:&str,stdout:&str,stderr:&str,schema:&Value)->Result<Value,String>{
+    if stdout.trim().is_empty(){return Err(empty_cli_answer(agent,stderr));}
+    let parsed:Value=extract_json_value(stdout).map_err(|e|format!("Failed to parse {agent} JSON: {e}\nOutput was: {stdout}"))?;
+    extract_agent_payload(agent, &parsed, schema).map_err(|error|{
+        if error.contains("EOF while parsing") {empty_cli_answer(agent,stderr)} else {error}
+    })
+}
+
+fn empty_cli_answer(agent:&str,stderr:&str)->String{
+    let detail: String=stderr.trim().chars().take(1200).collect();
+    if stderr.contains("auto-denied")||stderr.contains("headless mode cannot prompt")||stderr.contains("permission"){
+        format!("{agent}は必要な操作の権限を取得できず、回答を返しませんでした。撮影を含む場合は「起動済みアプリのスクリーンショットを含める」を選択してください。アプリ操作が必要な場合はAIターミナルから実行してください。\n{detail}")
+    }else{format!("{agent}から回答が返されませんでした。CLIの接続・ログイン状態を確認して再試行してください。\n{detail}")}
 }
 
 fn clean_markdown_fence(s: &str) -> String {
@@ -1150,6 +1175,18 @@ fn bounded_failure_message(message: &str) -> &str {
 #[cfg(test)]
 mod failure_tests {
     use super::*;
+
+    #[test]
+    fn headless_permission_denial_reports_reason_instead_of_empty_json_error(){
+        let schema=json!({"type":"object","properties":{"content":{"type":"string"}},"required":["content"]});
+        let stderr="jetski: no output produced — a tool required the command permission that headless mode cannot prompt for, so it was auto-denied.";
+        for stdout in ["",r#"{"status":"SUCCESS","response":""}"#]{
+            let error=parse_cli_answer("agy",stdout,stderr,&schema).unwrap_err();
+            assert!(error.contains("権限"),"{error}");assert!(!error.contains("EOF"),"{error}");
+            assert!(error.contains("auto-denied"));
+        }
+        assert_eq!(parse_cli_answer("agy",r#"{"status":"SUCCESS","structured_output":{"content":"Valid"}}"#,"",&schema).unwrap()["content"],"Valid");
+    }
 
     #[cfg(windows)]
     #[test]

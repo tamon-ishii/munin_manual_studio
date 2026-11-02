@@ -1195,4 +1195,5 @@ footer>.document-save-status{flex:0 0 auto}
 .milkdown .milkdown-toolbar .toolbar-item[data-toolbar-item="selection-ai"]{width:auto;min-width:64px}
 .milkdown .milkdown-toolbar .toolbar-item[data-toolbar-item="selection-ai"] .milkdown-icon{width:auto}
 .selection-ai-preview{max-height:160px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.selection-capture-option{display:flex;flex-direction:row;align-items:center;gap:8px;font-weight:400}
 .selection-ai-answer{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
