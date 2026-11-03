@@ -528,7 +528,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         }
         "document-review" => document_review::review(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "document-review-capabilities" => document_review::capabilities(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
-        "draft-propose" => draft_review::propose(root),
+        "draft-propose" => match json_opt { Some(options) => draft_review::propose_options(root, options), None => draft_review::propose(root) },
         "draft-apply" => draft_review::apply(root, json_opt.unwrap_or("{}")),
         "selection-generate" => selection_ai::generate(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "draft" => {

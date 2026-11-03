@@ -3,8 +3,14 @@ import {featureDialog} from './imageDialogs';
 export interface ReviewFinding {category:'reader'|'proofreading'|'image';severity:string;quote:string;message:string;suggestion:string;replacement?:string|null;image:string;start:number;end:number;}
 export interface ReaderReport {issues:ReviewFinding[];images:Array<{path:string;status:string;reason?:string}>;warnings:string[];}
 export interface ReviewCapabilities {supports_images:boolean;images:number;connection:string;agent:string;note:string;}
-export function askReader(defaultReader:string,hasSelection=false,preflight?:(scope:"document"|"selection")=>Promise<ReviewCapabilities>,previous?:()=>void):Promise<{reader:string;scope:"document"|"selection"}|null>{
-  const {dialog,body}=featureDialog('読者目線のレビュー・校正');dialog.id='reader-review-options';
+export function askReader(defaultReader:string,hasSelection=false,preflight?:(scope:"document"|"selection")=>Promise<ReviewCapabilities>,previous?:()=>void,manuscriptCheck?:HTMLElement):Promise<{reader:string;scope:"document"|"selection"}|null>{
+  const {dialog,body}=featureDialog('AIレビュー');dialog.id='reader-review-options';
+  if(manuscriptCheck){
+    const host=manuscriptCheck.parentElement!;
+    body.append(manuscriptCheck);
+    dialog.addEventListener('close',()=>host.append(manuscriptCheck),{once:true});
+  }
+  const heading=document.createElement('h2');heading.textContent='読者目線のレビュー・校正';body.append(heading);
   const scope=document.createElement('select');scope.setAttribute('aria-label','レビュー対象');scope.add(new Option('文書全体','document'));if(hasSelection)scope.add(new Option('選択範囲','selection'));scope.value=hasSelection?'selection':'document';
   const help=document.createElement('p');help.textContent='説明不足・操作手順・用語・誤字脱字・表記揺れと、画像と説明の整合性を確認します。指摘と具体的な修正案をまとめて作成します。採用するまで原稿は変更しません。';
   const label=document.createElement('label');label.textContent='想定する読者・目的';const input=document.createElement('textarea');input.rows=3;input.value=defaultReader||'初めてこのアプリを使う人。操作を迷わず完了できるか確認する。';label.append(input);

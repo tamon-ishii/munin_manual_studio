@@ -1,4 +1,5 @@
 import {featureDialog} from './imageDialogs';
+import {addPathBrowse} from './pathPicker';
 import type {Document} from './types';
 export interface FileMoveResult {source:string;destination:string;documents:Document[];backup:string}
 interface Plan {source:string;destination:string;token:string}
@@ -19,6 +20,7 @@ export function setupFileMove(options:Options){
     const originalFolder=source.split('/').slice(0,-1).join('/');folders.value=folder??originalFolder;folderLabel.append(folders);
     const label=document.createElement('label');label.textContent='移動先（プロジェクト相対パス）';const destination=document.createElement('input');destination.setAttribute('aria-label','移動先（プロジェクト相対パス）');
     const name=source.split('/').at(-1)!;destination.value=[folder??originalFolder,name].filter(Boolean).join('/');label.append(destination);
+    addPathBrowse(destination,()=> 'file');
     const message=document.createElement('p');message.role='status';
     const actions=document.createElement('div');actions.className='actions';
     const apply=document.createElement('button');apply.type='button';apply.textContent='移動してリンクを更新';apply.className='primary';

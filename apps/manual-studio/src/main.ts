@@ -9,6 +9,9 @@ import {setupEditorContextMenu} from './editorContextMenu';
 import {applyReviewCorrections} from './reviewCorrections';
 import {askReader,showReaderReport,type ReaderReport,type ReviewCapabilities} from './readerReview';
 import {reviewDraft,type DraftCandidate} from './draftReview';
+import {askTemplateDestination} from './templateCreation';
+import {setupPathPickers,addPathBrowse} from './pathPicker';
+import {setupFileTabMenu,type FileTab} from './fileTabMenu';
 import { AiProgressManager } from './aiProgressManager';
 import {imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
 import type {ResourceUsage} from './types';
@@ -19,7 +22,6 @@ import { chooseDestination,featureDialog } from './imageDialogs';
 import { setupMarkitsImages } from "./markitsImages";
 import { uiIcon } from './uiIcons';
 import { setupControlIcons } from './controlIcons';
-import { showShortcutHelp } from './shortcutHelp';
 import { setAiPhase } from './workflowPresentation';
 import { readAiCredential, saveAiCredential, hasUnassignedAiCredential, assignLegacyAiCredential } from "./aiCredentials";
 import { applyEditorFontSize, isEditorFontSize, setupEditorFontSize } from "./editorFontSize";
@@ -48,7 +50,6 @@ import { emit } from "@tauri-apps/api/event";
 import "./style.css";
 import { captureInsertionContext, isInsertionCurrent, STALE_INSERTION_MESSAGE } from "./insertionContext";
 import {setupManuscriptSearch} from './manuscriptSearch';
-import {setupManuscriptGit} from './manuscriptGit';
 import {sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions} from './manuscriptTools';
 
 import type { State, Document } from "./types";
@@ -116,6 +117,11 @@ if (terminalFontFamilySelect) {
 }
 let projectRoot = "";
 let workspace: State | null = null;
+setupPathPickers({root:()=>projectRoot,entries:()=>workspace?.project_entries||[]});
+addPathBrowse(input('new-page-path'),()=> 'file',()=>contextCreateParent!==null?'.':workspace?.config.docs||'docs');
+addPathBrowse(input('new-folder-path'),()=> 'folder',()=>contextCreateParent!==null?'.':workspace?.config.docs||'docs');
+addPathBrowse(input('image-save-folder'),()=> 'folder');
+addPathBrowse(input('image-save-filename'),()=> 'file',()=>input('image-save-folder').value.trim()||'.');
 let documentState: Document | null = null;
 let dirty = false;
 const documentPersistence = new DocumentPersistence({
@@ -562,7 +568,7 @@ function tabToComponentId(name: string): string {
   }
 }
 function chooseTab(name: string): void {
-  if (name === "brief" || name === "publish" || name === "appearance" || name === "settings") {
+  if (name === "brief" || name === "appearance" || name === "settings") {
     if(name==='settings')void imageAiSettings.refresh();
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
     openPanelDialog(`panel-${name}`);
@@ -610,6 +616,32 @@ function retainDocumentTab(): void {
   documentTabs.set(documentState.page, { document: documentState, content: editor.value, start: editor.selectionStart, end: editor.selectionEnd, scroll: editor.scrollTop, richScroll: milkdown.host.scrollTop, history: editHistory, richState: milkdown.captureState() });
 }
 let documentTabsSignature = '';
+async function closeFileTabs(targets:FileTab[]):Promise<void>{
+  await documentPersistence.wait();retainDocumentTab();
+  const originalDocument=documentState?.page,originalImage=activeImageTab,root=projectRoot;
+  for(const target of targets){
+    if(target.kind!=='document')continue;
+    const tab=documentTabs.get(target.path);if(!tab||tab.content===tab.document.content)continue;
+    await openPage(target.path);
+    if(!await confirmDiscard()){
+      if(originalImage)await openImageTab(originalImage);
+      else if(originalDocument)await openPage(originalDocument);
+      return;
+    }
+    if(root!==projectRoot)return;
+    retainDocumentTab();
+  }
+  retainDocumentTab();
+  for(const target of targets){if(target.kind==='document')documentTabs.delete(target.path);else imageTabs.delete(target.path);}
+  if(documentState&&!documentTabs.has(documentState.page)){documentState=null;documentPersistence.state=null;dirty=false;}
+  const nextDocument=originalDocument&&documentTabs.has(originalDocument)?originalDocument:[...documentTabs.keys()].at(-1);
+  if(nextDocument)await openPage(nextDocument);
+  else if(!documentState){editor.value='';resetEditHistory();element<HTMLIFrameElement>('markdown-preview').srcdoc='';element('editor-title').textContent='Markdownを編集する';}
+  const nextImage=originalImage&&imageTabs.has(originalImage)?originalImage:!nextDocument?[...imageTabs].at(-1):undefined;
+  if(nextImage)await openImageTab(nextImage);else showDocumentView();
+  updateSaveState();renderPages();renderDocumentTabs();
+}
+setupFileTabMenu({tabs:()=>[...[...documentTabs.keys()].map(path=>({kind:'document' as const,path})),...[...imageTabs].map(path=>({kind:'image' as const,path}))],busy:()=>busy,close:targets=>work(()=>closeFileTabs(targets)),report:error=>status(String(error),true)});
 function renderDocumentTabs(): void {
   const signature = JSON.stringify([projectRoot, activeImageTab, documentState?.page,
     [...documentTabs].map(([page, tab]) => [page, documentState?.page === page ? dirty : tab.content !== tab.document.content]),
@@ -626,22 +658,14 @@ function renderDocumentTabs(): void {
     button.setAttribute('aria-label', `${page}${changed ? '（未保存の変更）' : ''}`);
     button.onclick = () => { void work(() => openPage(page)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${page}を閉じる`);
-    close.onclick = () => { void work(async () => {
-
-      if (documentState?.page !== page) await openPage(page);
-      if (!await confirmDiscard()) return;
-      documentTabs.delete(page); documentState = null; documentPersistence.state = null; dirty = false;
-      const next = [...documentTabs.keys()].at(-1);
-      if (next) await openPage(next);
-      else { editor.value = ''; resetEditHistory(); element<HTMLIFrameElement>('markdown-preview').srcdoc = ''; element('editor-title').textContent = 'Markdownを編集する'; updateSaveState(); renderPages();  }
-    }); };
+    close.onclick = () => { void work(()=>closeFileTabs([{kind:'document',path:page}])).catch(error=>status(String(error),true)); };
     group.append(button, close); strip.append(group);
   }
   for (const path of imageTabs) {
     const group = document.createElement('div'); group.className = 'document-tab';
     const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.textContent = path.split('/').at(-1) || path; button.title = path; button.dataset.imagePage = path; button.setAttribute('aria-selected', String(activeImageTab === path)); button.onclick = () => { void work(() => openImageTab(path)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${path}を閉じる`);
-    close.onclick = () => { void work(async () => { imageTabs.delete(path); if (activeImageTab === path) { showDocumentView(); if (documentState) { element('editor-title').textContent = documentState.page; chooseTab('editor'); } else if (imageTabs.size) await openImageTab([...imageTabs].at(-1)!); } renderDocumentTabs(); }); };
+    close.onclick = () => { void work(()=>closeFileTabs([{kind:'image',path}])).catch(error=>status(String(error),true)); };
     group.append(button, close); strip.append(group);
   }
   strip.hidden = !documentTabs.size && !imageTabs.size;
@@ -671,7 +695,7 @@ function updateSaveState(): void {
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
   element('save-retry').hidden = ownerState?.state !== 'error' || conflicted;
   element('save-conflict').hidden = !conflicted;
-  updateEditorEmptyState(); updateSelectionAction();
+  updateEditorEmptyState();
 }
 type PreviewSnapshot = { root: string; page: string; body: string; version: number };
 const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
@@ -685,7 +709,7 @@ const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
 });
 function renderPreview(force = false): Promise<void> { return previewScheduler.request(force); }
 function updateCursor(): void {
-  updateSelectionAction();
+
   const lines = editor.value.slice(0, editor.selectionStart).split("\n");
   element("cursor-position").textContent = `${lines.length}:${lines.at(-1)!.length + 1}`;
 }
@@ -847,7 +871,6 @@ function showImagePresentation(image?:HTMLImageElement){
   }catch(error){feedback.textContent=String(error);}};
   body.append(widthControls,alignLabel,captionLabel,help,feedback,apply);
 }
-element('image-presentation').addEventListener('click',()=>showImagePresentation());
 async function recaptureDocumentImage(imageSource:string):Promise<void>{
   await handleEditDocumentImage(imageSource,element<HTMLImageElement>('image-tab-preview'),true);
 }
@@ -1329,31 +1352,6 @@ document.addEventListener('keydown', event => {
 });
 input("tree-search").addEventListener("input", renderPages);
 element("tree-filter").addEventListener("change", renderPages);
-// The toolbar scrolls horizontally; position the dropdown outside its clipping area.
-function positionEditorMoreMenu(): void {
-  const menu=element<HTMLDetailsElement>('editor-more');
-  if(!menu.open)return;
-  const bounds=menu.querySelector('summary')!.getBoundingClientRect();
-  const dropdown=menu.querySelector<HTMLElement>('.editor-more-menu')!;
-  dropdown.style.top=String(bounds.bottom+5)+'px';
-  dropdown.style.right=String(Math.max(8,window.innerWidth-bounds.right))+'px';
-}
-element('editor-more').addEventListener('toggle',positionEditorMoreMenu);
-window.addEventListener('resize',positionEditorMoreMenu);
-document.querySelector('.workspace-tabs')!.addEventListener('scroll',positionEditorMoreMenu);
-element("editor-more").addEventListener("click", event => {
-  if ((event.target as HTMLElement).closest("button")) element<HTMLDetailsElement>("editor-more").open = false;
-});
-document.addEventListener("click", event => {
-  const menu = element<HTMLDetailsElement>("editor-more");
-  if (!menu.contains(event.target as Node)) menu.open = false;
-});
-element("editor-more").addEventListener("keydown", event => {
-  if (event.key === "Escape") {
-    element<HTMLDetailsElement>("editor-more").open = false;
-    element("editor-more").querySelector<HTMLElement>("summary")?.focus();
-  }
-});
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
   const openMenu = document.querySelector<HTMLDetailsElement>(".format-insert-menu[open]");
@@ -1395,13 +1393,6 @@ new ResizeObserver(() => { if (element('markdown-preview').getClientRects().leng
 editor.addEventListener("editor-mode-change", () => {
   if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
 });
-function updateSelectionAction(): void {
-  const selected = milkdown.isRichEditing ? Boolean(milkdown.captureSelectionEdit()?.text) : editor.selectionEnd > editor.selectionStart;
-  const button = element('selection-ai');
-  const label = selected ? '選択範囲をAIで修正' : 'AIで修正・挿入';
-  button.innerHTML = `${uiIcon('sparkle')} ${label}`;
-  button.title = selected ? '選択した文章への修正指示を入力（Ctrl/Cmd+Shift+G）' : '文章を選択するとAIで修正、未選択ならカーソル位置へ挿入（Ctrl/Cmd+Shift+G）';
-}
 function updateEditorEmptyState(): void {
   const empty = !documentState && !activeImageTab;
   element('editor-empty-state').hidden = !empty;
@@ -1411,7 +1402,7 @@ function updateEditorEmptyState(): void {
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
   element('panel-editor').classList.toggle('editor-is-empty', empty);
-  for (const id of ['reader-review','selection-ai','generate-ai-image','save-page','editor-screenshot-ai']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  for (const id of ['reader-review','generate-ai-image','save-page','editor-screenshot-ai']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
@@ -1430,13 +1421,9 @@ element('save-conflict').addEventListener('click', () => { void work(async () =>
     const column = document.createElement('section'), heading = document.createElement('h3'), pre = document.createElement('pre'); heading.textContent = label; pre.textContent = content; column.append(heading,pre); columns.append(column);
   }
   const keep = document.createElement('button'); keep.textContent = '編集中の内容を保持して閉じる'; keep.onclick = () => dialog.close();
-  const reload = document.createElement('button'); reload.textContent = '保存先の内容を読み直す'; reload.onclick = () => { dialog.close(); element('reload-page').click(); };
+  const reload = document.createElement('button'); reload.textContent = '保存先の内容を読み直す'; reload.onclick = () => { dialog.close(); if(documentState)void work(async()=>{if(!await confirmDiscard()||!documentState)return;await openPage(documentState.page,false);}); };
   body.append(note,columns,keep,reload);
 }); });
-editor.addEventListener('select', updateSelectionAction);
-editor.addEventListener('editor-selection-change', updateSelectionAction);
-editor.addEventListener('editor-mode-change', updateSelectionAction);
-document.addEventListener('selectionchange', () => { if (milkdown.host.contains(document.activeElement) || document.activeElement === editor) updateSelectionAction(); });
 element('workspace-name').addEventListener('keydown', event => { if (event.key === 'ArrowDown' && !document.getElementById('workspace-history-dialog')) { event.preventDefault(); element('workspace-name').click(); } });
 for (const id of ['tree-create-menu']) {
   const menu = element<HTMLDetailsElement>(id);
@@ -1444,10 +1431,6 @@ for (const id of ['tree-create-menu']) {
   menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); } });
   document.addEventListener('click', event => { if (!menu.contains(event.target as Node)) menu.open = false; });
 }
-element("reload-page").addEventListener("click", () => { if (documentState) void work(async () => {
-  if (!await confirmDiscard() || !documentState) return;
-  await openPage(documentState.page, false);
-}); });
 element('terminal-reload-files').addEventListener('click',()=>{void work(async()=>{
   if(!projectRoot||!await confirmDiscard())return;
   await refreshWorkspace(true);
@@ -1455,12 +1438,6 @@ element('terminal-reload-files').addEventListener('click',()=>{void work(async()
 });});
 element("undo-edit").addEventListener("click", () => stepEditHistory(-1));
 element("redo-edit").addEventListener("click", () => stepEditHistory(1));
-element("detach-editor").addEventListener("click", () => { void work(async () => {
-  await savedBeforeOperation();
-  if (!documentState) throw new Error("原稿を選択してください。");
-  if (native) await invoke("open_editor", { root: projectRoot, page: documentState.page });
-  else window.open(`/?editor=1&root=${encodeURIComponent(projectRoot)}&page=${encodeURIComponent(documentState.page)}`, "_blank");
-}); });
 editor.addEventListener("editor-mode-change", updateHistoryButtons);
 editor.addEventListener("beforeinput", (event) => {
   if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
@@ -1605,7 +1582,6 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
   else { void createSelectionDocument(); }
 }
 document.addEventListener('keydown', handleDocumentShortcut);
-element('shortcut-help').addEventListener('click', showShortcutHelp);
 document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button => { button.title = `${button.getAttribute("aria-label") || button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
 let closingApproved = false;
 let closingPrompt = false;
@@ -2348,35 +2324,37 @@ function loadDraftCandidate(root: string): DraftCandidate | null {
     return raw ? JSON.parse(raw) as DraftCandidate : null;
   } catch { return null; }
 }
-async function createFullDraft():Promise<void>{
+async function createFullDraft(templateMode=false):Promise<void>{
   if(busy)return;
+  const options=templateMode?await askTemplateDestination(workspace?.config.docs||'docs'):null;
+  if(templateMode&&!options)return;
   await savedBeforeOperation();
   const root=projectRoot;
-  element<HTMLDialogElement>("panel-publish").close();
-  let candidate:DraftCandidate|undefined = loadDraftCandidate(root) || undefined;
+  let candidate:DraftCandidate|undefined = templateMode?undefined:loadDraftCandidate(root) || undefined;
   if (!candidate) {
     await work(async()=>{
       await ensureAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('draft-propose',root);let success=false;
-      try{candidate=JSON.parse(await rpc('draft-propose',{},root)) as DraftCandidate;success=true;saveDraftCandidate(root,candidate);}
+      try{candidate=JSON.parse(await rpc('draft-propose',options?{json:options}:{},root)) as DraftCandidate;success=true;if(!templateMode)saveDraftCandidate(root,candidate);}
       catch(error){logAiFailure(error);throw error;}
       finally{await stopAiProgress(success);}
     });
   }
   if(!candidate||root!==projectRoot)return;
   const pages=await reviewDraft(candidate,()=>root===projectRoot&&!dirty&&!Array.from(documentTabs.values()).some(tab=>tab.content!==tab.document.content));
-  if(!pages){clearDraftCandidate(root);status('下書き候補を破棄しました。原稿は変更していません。');return;}
+  if(!pages){if(!templateMode)clearDraftCandidate(root);status('下書き候補を破棄しました。原稿は変更していません。');return;}
   await work(async()=>{
     if(root!==projectRoot||dirty)throw new Error('原稿が変更されました。候補を作り直してください。');
-    const result=JSON.parse(await rpc('draft-apply',{json:{docs:candidate!.docs,pages}},root)) as {applied:number};
-    clearDraftCandidate(root);
-    for(const page of pages){documentTabs.delete(page.path);documentTabs.delete(`${candidate!.docs.replace(/\/$/,'')}/${page.path}`);}
+    const result=JSON.parse(await rpc('draft-apply',{json:{docs:candidate!.docs,pages,template:templateMode}},root)) as {applied:number};
+    if(!templateMode)clearDraftCandidate(root);
+    const outputPath=(path:string)=>candidate!.docs==='.'?path:`${candidate!.docs.replace(/\/$/,'')}/${path}`;
+    for(const page of pages){documentTabs.delete(page.path);documentTabs.delete(outputPath(page.path));}
     await refreshWorkspace();
     const selectedPage=pages.find(page=>page.path==='index.md')||pages[0];
-    if(selectedPage){await openPage(`${candidate!.docs.replace(/\/$/,'')}/${selectedPage.path}`,false);chooseTab('editor');}
+    if(selectedPage){await openPage(outputPath(selectedPage.path),false);chooseTab('editor');}
     status(`${result.applied}ページへ選んだ変更を反映しました。変更前の原稿はバックアップしました。`);
   });
 }
-element('generate-draft').addEventListener('click',()=>{void createFullDraft().catch(error=>status(String(error),true));});
+element('create-ai-template').addEventListener('click',()=>{void createFullDraft(true).catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
 setBusy(false);
 updateSaveState();
@@ -2439,7 +2417,6 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
     selection.apply(decision.content);updateHistoryButtons();status(selection.text?'指定範囲へAI文書を反映しました。':'カーソル位置にAI文書を挿入しました。');return true;
   }
 }
-element('selection-ai').addEventListener('click',()=>{void createSelectionDocument().catch(error=>status(String(error),true));});
 window.addEventListener('manual-studio-selection-ai',()=>{
   if(busy||!documentState||activeImageTab)return;
   const root=projectRoot,page=documentState.page,expected=editor.value,selection=captureAiSelection();
@@ -2535,7 +2512,7 @@ async function reviewCurrentDocument():Promise<void>{
   const root=projectRoot,page=documentState.page,captured=editor.value;
   const start=editor.selectionStart,end=editor.selectionEnd;
   await savedBeforeOperation();await saveAiSettings();
-  const choices=await askReader(workspace?.brief||'',start!==end,async scope=>JSON.parse(await rpc('document-review-capabilities',{page,json:{range:scope==='selection'?{start,end}:undefined}},root)) as ReviewCapabilities,reopenReaderReview?()=>{if(!reopenReaderReview?.())status('原稿が変更されています。レビューを実行し直してください。',true);}:undefined);if(choices===null)return;
+  const choices=await askReader(workspace?.brief||'',start!==end,async scope=>JSON.parse(await rpc('document-review-capabilities',{page,json:{range:scope==='selection'?{start,end}:undefined}},root)) as ReviewCapabilities,reopenReaderReview?()=>{if(!reopenReaderReview?.())status('原稿が変更されています。レビューを実行し直してください。',true);}:undefined,element('manuscript-check'));if(choices===null)return;
   if(root!==projectRoot||documentState?.page!==page||editor.value!==captured)throw new Error('原稿が変更されました。レビューを実行し直してください。');
   await savedBeforeOperation();let expected=editor.value;const revision=documentState?.revision;
   const range=choices.scope==='selection'?{start,end}:undefined;
@@ -2643,7 +2620,3 @@ const manuscriptToolOptions:ManuscriptToolsOptions={
 };
 const openManuscriptSearch=setupManuscriptSearch(manuscriptToolOptions);
 element('manuscript-search-open').addEventListener('click',openManuscriptSearch);
-const openManuscriptGit=setupManuscriptGit(manuscriptToolOptions);
-const manuscriptGitButton=document.createElement('button');manuscriptGitButton.type='button';manuscriptGitButton.id='manuscript-git-open';manuscriptGitButton.textContent='Git履歴・復元';
-manuscriptGitButton.addEventListener('click',openManuscriptGit);
-element('editor-more').querySelector('.editor-more-menu')!.append(manuscriptGitButton);

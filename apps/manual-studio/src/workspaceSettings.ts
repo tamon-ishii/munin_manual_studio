@@ -1,4 +1,5 @@
 import {featureDialog} from './imageDialogs';
+import {addPathBrowse} from './pathPicker';
 import {stageLabels,type TimingRecord} from './operationTimings';
 interface Paths {docs:string;assets:string;output:string}
 interface Options {
@@ -19,6 +20,7 @@ export async function showWorkspacePaths(options:Options):Promise<void>{
   const label=document.createElement('label');label.textContent=title;const input=document.createElement('input');
   input.value=paths[key];input.required=true;input.setAttribute('aria-label',title);input.dataset.workspacePath=key;
   label.append(input);form.append(label);fields[key]=input;
+  addPathBrowse(input,()=> 'folder');
  }
  const error=document.createElement('p');error.role='alert';
  const save=document.createElement('button');save.type='submit';save.className='primary';save.textContent='保存先を変更';

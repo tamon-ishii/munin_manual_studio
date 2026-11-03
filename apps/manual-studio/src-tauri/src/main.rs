@@ -210,6 +210,21 @@ async fn choose_project(initial_directory: Option<String>) -> Result<Option<Stri
 }
 
 #[tauri::command]
+async fn choose_path(initial_path: String, folder: bool) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(initial_path);
+        let mut directory = if folder { path.as_path() } else { path.parent().unwrap_or(path.as_path()) };
+        while !directory.is_dir() {
+            match directory.parent() { Some(parent) => directory = parent, None => break }
+        }
+        let mut dialog = rfd::FileDialog::new().set_title(if folder { "出力フォルダーを選択" } else { "出力ファイルを指定" }).set_directory(directory);
+        if !folder { if let Some(name) = path.file_name() { dialog = dialog.set_file_name(name.to_string_lossy()); } }
+        let selected = if folder { dialog.pick_folder() } else { dialog.save_file() };
+        selected.map(|path| path.to_string_lossy().into_owned())
+    }).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn choose_image() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         rfd::FileDialog::new()
@@ -534,6 +549,7 @@ fn main() {
             hide_manual_studio,
             restore_manual_studio,
             choose_project,
+            choose_path,
             choose_image,
             read_clipboard_image,
             paste_clipboard_image,

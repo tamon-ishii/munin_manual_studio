@@ -80,6 +80,10 @@ pub fn draft(root: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn draft_pages(root: &Path) -> Result<Vec<(String, String)>, String> {
+    draft_pages_with_instruction(root, "Create a comprehensive Japanese MkDocs manual.")
+}
+
+pub(crate) fn draft_pages_with_instruction(root: &Path, instruction: &str) -> Result<Vec<(String, String)>, String> {
     let config = read_config(root);
     let brief_path = root.join("manual").join("brief.md");
     if !brief_path.is_file() {
@@ -93,7 +97,7 @@ pub(crate) fn draft_pages(root: &Path) -> Result<Vec<(String, String)>, String> 
     log_progress(root, "プロジェクトの構造と画面情報を調べています");
     let app_context = super::context::build_application_context(root);
 
-    let draft_prompt = format!("Create a comprehensive Japanese MkDocs manual as JSON pages, with index.md required and at most eight pages. Write actual prose and Mermaid directly as ordinary Markdown. Do not use AI tags, metadata comments or screenshot tasks. Do not invent UI labels or product facts.\nInput JSON: {}",json!({"context":app_context.prompt_summary,"brief":brief}));
+    let draft_prompt = format!("{instruction} Return JSON pages, with index.md required and at most eight pages. Write actual prose and Mermaid directly as ordinary Markdown. Do not use AI tags, metadata comments or screenshot tasks. Do not invent UI labels or product facts.\nInput JSON: {}",json!({"context":app_context.prompt_summary,"brief":brief}));
 
     let schema = json!({
         "type": "object",

@@ -1080,7 +1080,9 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 /* Keep disclosure content in a full-width grid row: WebKit details does not reliably flatten with display:contents. */
 
 #workspace-dialog .folder-picker{display:flex;align-items:center;gap:8px;margin-top:6px}#workspace-dialog .folder-picker input{flex:1;min-width:0}#workspace-dialog .folder-picker button{flex:none}
-@media(max-width:480px){#workspace-dialog .folder-picker{flex-wrap:wrap}#workspace-dialog .folder-picker input{flex-basis:100%}}
+.path-picker-row{display:flex;align-items:center;gap:8px;min-width:0;width:100%}
+.path-picker-row>input{flex:1 1 0;min-width:0;width:0}
+.path-picker-row>.path-browse{flex:none;margin:0}
 
 #workspace-name{display:inline-flex;align-items:center;gap:10px;min-width:0}
 #workspace-name-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;font-size:inherit}

@@ -27,20 +27,53 @@ fn existing(path: &Path) -> Result<Option<(String, String)>, String> {
 }
 
 pub(crate) fn propose(root: &Path) -> Result<String, String> {
-    let config = crate::config::read_config(root);
+    propose_options(root, "{}")
+}
+
+pub(crate) fn propose_options(root: &Path, options: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(options).map_err(|e| e.to_string())?;
+    let mut config = crate::config::read_config(root);
+    let template = value["template"].as_str();
+    let instruction = match template {
+        None => "Create a comprehensive Japanese MkDocs manual.",
+        Some("manual") => "日本語の操作マニュアルの雛形を作成する。対象読者、前提条件、導入、基本操作、手順、確認方法、トラブル対処を章立てする。未確認事項は要確認と明示する。",
+        Some("specification") => "日本語の仕様書の雛形を作成する。目的、適用範囲、用語、機能要件、入出力、データ構造、状態遷移、エラー処理、非機能要件、制約、受け入れ条件、未決事項を章立てする。未確認の仕様を断定しない。",
+        Some("readme") => "日本語のREADMEの雛形を作成する。概要、特徴、動作要件、インストール、クイックスタート、使い方、設定、開発とテスト、関連資料、ライセンスを簡潔にまとめる。未確認のコマンドやライセンスを創作しない。index.md一ページだけを返す。",
+        _ => return Err("文書の種類が不正です。".into()),
+    };
+    let mut filename = None;
+    if template.is_some() {
+        let destination = value["destination"].as_str().ok_or("出力先を指定してください。")?;
+        crate::config::project_path(root, destination)?;
+        if template == Some("readme") {
+            valid_path(destination)?;
+            let path = Path::new(destination);
+            filename = Some(path.file_name().ok_or("ファイル名が必要です。")?.to_string_lossy().to_string());
+            config.docs = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_string_lossy().replace('\\', "/");
+        } else { config.docs = destination.to_string(); }
+    }
     let docs = crate::config::project_path(root, &config.docs)?;
+    if docs.exists() && !docs.is_dir() { return Err("出力フォルダーにファイルが指定されています。".into()); }
     let mut originals = BTreeMap::new();
-    for path in crate::task::collect_markdown_files(&docs) {
+    let sources = if let Some(name) = &filename {
+        let path = crate::config::project_path(&docs, name)?;
+        if path.is_file() { vec![path] } else { vec![] }
+    } else { crate::task::collect_markdown_files(&docs) };
+    for path in sources {
         let relative = path.strip_prefix(&docs).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
         let safe = crate::config::project_path(&docs, &relative)?;
         originals.insert(relative, existing(&safe)?.ok_or("原稿が削除されました。")?);
     }
     let checkpoint = crate::agent::cancellation_checkpoint(root);
-    let generated = crate::author::draft_pages(root)?;
+    let generated = if template.is_some() { crate::author::draft_pages_with_instruction(root, instruction)? } else { crate::author::draft_pages(root)? };
+    if filename.is_some() && (generated.len() != 1 || generated[0].0 != "index.md") {
+        return Err("READMEは一つのページで作成してください。".into());
+    }
     crate::agent::check_cancelled(root, &checkpoint)?;
     let mut seen = HashSet::new();
     let mut pages = Vec::new();
     for (path, content) in generated {
+        let path = filename.clone().unwrap_or(path);
         valid_path(&path)?;
         crate::config::project_path(&docs, &path)?;
         if !seen.insert(path.clone()) { return Err(format!("下書きのページが重複しています: {path}")); }
@@ -59,10 +92,10 @@ pub(crate) fn propose(root: &Path) -> Result<String, String> {
 pub(crate) fn apply(root: &Path, options: &str) -> Result<String, String> {
     let value: serde_json::Value = serde_json::from_str(options).map_err(|e| e.to_string())?;
     let config = crate::config::read_config(root);
-    if value["docs"].as_str() != Some(&config.docs) { return Err("原稿フォルダーの設定が変わりました。候補を作り直してください。".into()); }
+    if value["template"].as_bool() != Some(true) && value["docs"].as_str() != Some(&config.docs) { return Err("原稿フォルダーの設定が変わりました。候補を作り直してください。".into()); }
     let pages: Vec<DraftPage> = serde_json::from_value(value["pages"].clone()).map_err(|e| e.to_string())?;
     if pages.len() > 8 { return Err("下書きは8ページまでです。".into()); }
-    let docs = crate::config::project_path(root, &config.docs)?;
+    let docs = crate::config::project_path(root, value["docs"].as_str().ok_or("出力先が必要です。")?)?;
     let mut seen = HashSet::new();
     let mut checked = Vec::new();
     // Validate every accepted page before writing any of them.
@@ -105,6 +138,23 @@ pub(crate) fn apply(root: &Path, options: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn templates_use_selected_destinations_and_check_revisions() {
+        let temp = tempfile::tempdir().unwrap(); let root = temp.path();
+        fs::write(root.join("manual_setting.json"), r#"{"docs":"docs"}"#).unwrap();
+        let page = json!({"path":"Readme.md","before":"","content":"# Overview","revision":null});
+        let options = json!({"docs":".","template":true,"pages":[page]});
+        apply(root, &options.to_string()).unwrap();
+        assert_eq!(fs::read_to_string(root.join("Readme.md")).unwrap(), "# Overview");
+        assert!(apply(root, &options.to_string()).is_err());
+        let page = json!({"path":"index.md","before":"","content":"# Requirements","revision":null});
+        apply(root, &json!({"docs":"specs/new","template":true,"pages":[page.clone()]}).to_string()).unwrap();
+        assert!(root.join("specs/new/index.md").is_file());
+        assert!(apply(root, &json!({"docs":"../escape","template":true,"pages":[page]}).to_string()).is_err());
+        assert!(propose_options(root, r#"{"template":"unknown","destination":"docs"}"#).is_err());
+        assert!(propose_options(root, r#"{"template":"readme","destination":"../Readme.md"}"#).is_err());
+        assert!(propose_options(root, r#"{"template":"readme","destination":"folder"}"#).is_err());
+    }
     #[test]
     fn adoption_checks_all_revisions_before_writes_and_backs_up() {
         let temp = tempfile::tempdir().unwrap(); let root = temp.path();
