@@ -61,8 +61,8 @@ export function setupMilkdownEditor(
   const toggle = document.createElement('button');
   toggle.type = 'button'; toggle.textContent = 'Markdownソース';
   toggle.id = 'editor-mode-toggle';
-  const modeControls = source.closest('#panel-editor')?.querySelector('.editor-action-group') || source.parentElement!.querySelector('.column-label') || source.parentElement!;
-  modeControls.insertBefore(toggle, modeControls.querySelector('#editor-more'));
+  const modeControls = source.closest('#panel-editor')?.querySelector('.editor-mode-controls') || source.parentElement!;
+  modeControls.append(toggle);
   const pendingUploads: Array<{ cancelled: boolean }> = [];
   function cancelLatestUpload(): boolean {
     const pending = [...pendingUploads].reverse().find(upload => !upload.cancelled);

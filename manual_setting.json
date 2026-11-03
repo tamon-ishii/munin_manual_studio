@@ -6,8 +6,13 @@
     "README.md"
   ],
   "format": "mkdocs",
-  "agent": "codex",
+  "agent": "agy",
   "model": "",
+  "cli_models": {
+    "agy": "",
+    "claude": "",
+    "codex": ""
+  },
   "connection_type": "cli",
   "endpoint_url": "",
   "assets": "docs/assets",

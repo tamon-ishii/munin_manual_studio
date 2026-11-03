@@ -5,7 +5,7 @@ import os from 'node:os';import path from 'node:path';import {chromium} from 'pl
 const root=await mkdtemp(path.join(os.tmpdir(),'munin-priority-'));const base='http://127.0.0.1:5183';
 let server,browser;
 try{
- await writeFile(path.join(root,'README.md'),'# Guide\n\nOriginal manuscript.\n');
+ await writeFile(path.join(root,'index.md'),'# Guide\n\nOriginal manuscript.\n');
  server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','apps/manual-studio/vite.config.ts','--port','5183'],{stdio:'ignore'});
  for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
  browser=await chromium.launch({channel:'chrome',headless:true,args:['--no-sandbox']});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -21,7 +21,7 @@ try{
  await dialog.getByRole('textbox',{name:'画像保存先'}).fill('../outside');await dialog.getByRole('button',{name:'保存先を変更'}).click();await dialog.getByRole('alert').getByText(/project|相対|内/).waitFor();
  await dialog.getByRole('textbox',{name:'画像保存先'}).fill('media/shots');await dialog.getByRole('button',{name:'保存先を変更'}).click();await dialog.waitFor({state:'detached'});await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
  assert.equal((await rpc('workspace-paths-read')).assets,'media/shots');
- assert.equal(await readFile(path.join(root,'README.md'),'utf8'),'# Guide\n\nOriginal manuscript.\n');
+ assert.equal(await readFile(path.join(root,'index.md'),'utf8'),'# Guide\n\nOriginal manuscript.\n');
  await menu('原稿・画像の保存先');await dialog.waitFor();
  const cfg=JSON.parse(await readFile(path.join(root,'manual_setting.json'),'utf8'));cfg.assets='external-update';await writeFile(path.join(root,'manual_setting.json'),JSON.stringify(cfg));
  await dialog.getByRole('textbox',{name:'画像保存先'}).fill('stale');await dialog.getByRole('button',{name:'保存先を変更'}).click();await dialog.getByRole('alert').getByText(/別の操作/).waitFor();assert.equal((await rpc('workspace-paths-read')).assets,'external-update');await dialog.getByRole('button',{name:'キャンセル'}).click();

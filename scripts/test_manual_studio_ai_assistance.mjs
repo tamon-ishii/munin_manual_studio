@@ -59,7 +59,7 @@ const ai=createServer(async(req,res)=>{try{
   }else if(prompt.startsWith('Write concrete Markdown replacements'))result={replacements:input.findings.map(finding=>({id:finding.id,replacement:finding.quote==='old A'?'new A with extra explanation':'new B'}))};
   else if(prompt.startsWith('Create a comprehensive'))result={pages:[{path:'index.md',content:original.replace('old A','new A').replace('old B','new B')},{path:'other.md',content:'# Other changed\n\nCandidate\n'},{path:'new.md',content:'# New candidate\n'}]};
   else if(prompt.startsWith('Create or revise'))result={content:input.mode==='insert new text'?'新しい文章です。':input.selected.replaceAll('old A',expandedCorrection?'new A with extra explanation':'new A').replaceAll('old B','new B')};
-  else if(prompt.startsWith('Choose the target')){assert.ok(input.launch_context.some(file=>file.path==='README.md'&&file.content.includes('--workspace')));assert.ok(input.executable_candidates.some(candidate=>candidate.name==='fixture-app'));result={name:'Fixture app',program:input.selected_application?.program||'/usr/bin/true',args:['--workspace','demo project','--mode','docs'],workingDirectory:input.selected_application?.workingDirectory||''};}
+  else if(prompt.startsWith('Choose the target')){assert.ok(input.launch_context.some(file=>file.path==='index.md'&&file.content.includes('--workspace')));assert.ok(input.executable_candidates.some(candidate=>candidate.name==='fixture-app'));result={name:'Fixture app',program:input.selected_application?.program||'/usr/bin/true',args:['--workspace','demo project','--mode','docs'],workingDirectory:input.selected_application?.workingDirectory||''};}
   else if(prompt.startsWith('Select actual screenshot'))result={marks:[{element:1,type:'badge',step:1,text:''}]};
   else throw new Error(`Unexpected prompt ${prompt.slice(0,50)}`);
   res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(result)}}]}));
@@ -70,7 +70,7 @@ const rpc=async(action,options={})=>{console.log(`AI integration backend: ${acti
 const original='# Guide\n\n前文😀\n\nold A\n\nunchanged\n\nold B\n\n後文\n\n画面 ![sample](assets/sample.png)\n\n```html\n<img src="ignored.png">\n```\n';
 try{
   await mkdir(path.join(root,'bin'),{recursive:true});await writeFile(path.join(root,'bin/fixture-app'),'#!/bin/sh\nexit 0\n',{mode:0o755});
-  await writeFile(path.join(root,'README.md'),'Fixture app launch: /usr/bin/true --workspace "demo project" --mode docs\n');
+  await writeFile(path.join(root,'index.md'),'Fixture app launch: /usr/bin/true --workspace "demo project" --mode docs\n');
   await mkdir(path.join(root,'docs/assets'),{recursive:true});await writeFile(path.join(root,'docs/index.md'),original);await writeFile(path.join(root,'docs/other.md'),'# Other\n\nOther text\n');await writeFile(path.join(root,'docs/assets/sample.png'),png);
   await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',output:'manual',agent:'codex',model:'fixture',connection_type:'api',endpoint_url:endpoint,assets:'docs/assets'}));
   const doc=await rpc('editor-read',{page:'docs/index.md'});

@@ -1108,6 +1108,8 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 .document-heading>h1{font-size:16px;margin:0;min-width:0;overflow-wrap:anywhere}
 .document-heading>.document-tabs{flex:1 1 160px;min-width:0;margin:0}
 .document-heading>.editor-display-group{margin-left:auto;flex:none}
+.document-heading>.editor-mode-controls{display:flex;align-items:center;flex:none}
+#editor-mode-toggle{min-height:32px;padding:6px 10px;font-size:12px}
 .document-save-status{display:flex;align-items:center;gap:6px;font-size:11px;min-width:0}
 .document-save-status button{font-size:11px;padding:4px 6px}
 #panel-editor[data-image-open=true]>.document-heading>.editor-display-group,#panel-editor[data-image-open=true]>.document-heading>.document-save-status{display:none}

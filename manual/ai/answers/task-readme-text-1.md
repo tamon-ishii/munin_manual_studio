@@ -14,7 +14,7 @@
 ```sh
 python3 start_manual_studio.py
 ```
-<!-- ai:fact {"claim":"開発環境からの起動コマンドは python3 start_manual_studio.py","file":"apps/manual-studio/README.md","contains":"python3 start_manual_studio.py"} -->
+<!-- ai:fact {"claim":"開発環境からの起動コマンドは python3 start_manual_studio.py","file":"apps/manual-studio/index.md","contains":"python3 start_manual_studio.py"} -->
 
 1. ワークスペースとして対象プロジェクトのフォルダーを開きます。
 2. 左側のファイルツリーから原稿ファイルを選択するか、「＋ MD」ボタンで新しいページを作成します。

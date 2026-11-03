@@ -26,7 +26,7 @@ try {
   const root=await mkdtemp(path.join(os.tmpdir(),'manual-folder-ui-'));
   roots.push(root);
   if(layout==='docs')await mkdir(`${root}/docs`);
-  await writeFile(`${root}/${layout==='docs'?'docs/index.md':'README.md'}`,'# Folder test\n');
+  await writeFile(`${root}/${layout==='docs'?'docs/index.md':'index.md'}`,'# Folder test\n');
   const page=await browser.newPage();
   await page.route('**/__manual/rpc',async route=>{
    const response=await route.fetch({headers:{...route.request().headers(),origin:'http://127.0.0.1:5174'}});

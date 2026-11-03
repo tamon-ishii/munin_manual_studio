@@ -143,8 +143,8 @@ try {
   const annotations = JSON.stringify({ canvas: { width: 640, height: 400 }, annotations: [{ type: 'rect', target: [30, 40, 120, 80], style: 'primary' }] });
   const uiElements = JSON.stringify([{ role: 'button', name: 'Fixture UI: 保存', x: 12, y: 16, width: 110, height: 32 }]);
   await writeFile(input, pngWithText([['markits:annotations', annotations], ['markits:ui_elements', uiElements]]));
-  await writeFile(path.join(tempRoot, 'manual_setting.json'), JSON.stringify({ docs: 'docs', output: 'manual', format: 'mkdocs', connection_type:'none', agent: 'codex', model: '', targets: ['docs', 'README.md'] }));
-  await writeFile(path.join(tempRoot, 'README.md'), '# native handoff smoke\n');
+  await writeFile(path.join(tempRoot, 'manual_setting.json'), JSON.stringify({ docs: 'docs', output: 'manual', format: 'mkdocs', connection_type:'none', agent: 'codex', model: '', targets: ['docs', 'index.md'] }));
+  await writeFile(path.join(tempRoot, 'index.md'), '# native handoff smoke\n');
   await writeFile(path.join(docs, 'index.md'), '# Native handoff fixture\n');
   const scenarioPath = path.join(tempRoot, 'handoff.json');
   const scenario = {
