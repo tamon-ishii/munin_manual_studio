@@ -1,4 +1,9 @@
 import {setupGfmSourceToolbar} from './gfmEditor';
+import {installShortcutRouter,currentBindings,bindingLabel,keyStroke,type ShortcutCommand} from './keyboardShortcuts';
+import {setupShortcutSettings} from './shortcutSettings';
+import {setupSettingsTabs} from './settingsTabs';
+import {setupDialogDragging} from './dialogDragging';
+import {currentLine} from './editorLineCommands';
 import {setupCliAiSettings} from './cliAiSettings';
 import { setupFileMove, type FileMoveResult } from './fileMove';
 import { PreviewScheduler } from './previewScheduler';
@@ -19,7 +24,7 @@ import { setupImageAiSettings } from './imageAiSettings';
 import { setupImageGeneration } from './imageGeneration';
 import { setupToolbarCustomization } from './toolbarCustomization';
 import { chooseDestination,featureDialog } from './imageDialogs';
-import { setupMarkitsImages } from "./markitsImages";
+import { setupMarkitsImages, cursorCapturePreference } from "./markitsImages";
 import { uiIcon } from './uiIcons';
 import { setupControlIcons } from './controlIcons';
 import { setAiPhase } from './workflowPresentation';
@@ -79,6 +84,42 @@ const milkdown = setupMilkdownEditor(editor, message => status(message, true), s
 }, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img),source=>{void recaptureDocumentImage(source);});
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 const native = "__TAURI_INTERNALS__" in window;
+setupDialogDragging();
+const selectSettingsCategory=setupSettingsTabs();
+setupShortcutSettings(element('keyboard-shortcut-settings'));
+element('application-settings').addEventListener('click',()=>chooseTab('settings'));
+const markitsCaptureKey=input('markits-capture-key');
+const defaultIncludeCursor=input('capture-default-include-cursor');
+defaultIncludeCursor.checked=cursorCapturePreference();
+defaultIncludeCursor.addEventListener('change',()=>{
+  try {
+    localStorage.setItem('manual-studio-capture-include-cursor',String(defaultIncludeCursor.checked));
+    element('capture-default-include-cursor-status').textContent='保存しました。次の撮影から反映します。';
+  } catch(error) {defaultIncludeCursor.checked=cursorCapturePreference();element('capture-default-include-cursor-status').textContent=`保存できませんでした: ${String(error)}`;}
+});
+let markitsKey='Control+Shift+E';
+let markitsKeyEdited=false;
+let markitsKeySave:Promise<void>=Promise.resolve();
+const displayMarkitsKey=()=>{markitsCaptureKey.value=markitsKey.replace('Control','Ctrl').replace('Super','Cmd');};
+displayMarkitsKey();
+const markitsKeyLoaded=native?invoke<string>('get_markits_capture_shortcut').then(value=>{if(!markitsKeyEdited){markitsKey=value;displayMarkitsKey();}}).catch(error=>{element('markits-capture-key-status').textContent=String(error);}):Promise.resolve();
+function persistMarkitsCaptureKey():void {
+  if(!native){element('markits-capture-key-status').textContent='撮影キーはデスクトップ版で設定できます。';return;}
+  const selected=markitsKey;
+  element('markits-capture-key-status').textContent='撮影キーを保存しています…';
+  markitsKeySave=markitsKeySave.catch(()=>{}).then(async()=>{
+    await invoke('set_markits_capture_shortcut',{shortcut:selected});
+  });
+  void markitsKeySave.then(()=>{if(markitsKey===selected)element('markits-capture-key-status').textContent='保存しました。次の撮影ではこのキーを使います。';}).catch(error=>{if(markitsKey===selected)element('markits-capture-key-status').textContent=`保存できませんでした: ${String(error)}`;});
+}
+markitsCaptureKey.addEventListener('keydown',event=>{
+  if(event.key==='Tab')return;
+  event.preventDefault();event.stopPropagation();
+  const key=keyStroke(event);if(!key)return;
+  markitsKeyEdited=true;markitsKey=key.replace('Mod',/Mac|iPhone|iPad/.test(navigator.platform)?'Super':'Control');displayMarkitsKey();persistMarkitsCaptureKey();
+});
+element('markits-capture-key-reset').addEventListener('click',()=>{markitsKeyEdited=true;markitsKey='Control+Shift+E';displayMarkitsKey();persistMarkitsCaptureKey();});
+element('markits-capture-key-save').addEventListener('click',persistMarkitsCaptureKey);
 let refreshEditorContextMenu = () => {};
 const params = new URLSearchParams(location.search);
 
@@ -256,6 +297,12 @@ function loadAiProgressLogs(root: string): void {
         saveAiProgressLogs();
       }
       renderProgressLog();
+      element('operation-progress').dataset.running = 'false';
+      element('progress-track').hidden = true;
+      element('progress-label').textContent = '直近のAI実行ログ';
+      element('progress-note').textContent = data.running ? '前回の処理は中断されました。現在は実行していません。' : '保存された実行ログです。現在は実行していません。';
+      element('progress-elapsed').textContent = '';
+      element('progress-cancel').hidden = true;
       element("progress-open").textContent = `直近のAI実行ログ (${progressDisplayLogs.length}件)`;
       element("progress-open").hidden = false;
     }
@@ -323,6 +370,8 @@ function startAiProgress(action: string,cliAgent?:string): void {
   aiProgress.start({ connection: progressConnection, operation, root: projectRoot });
   element("progress-label").textContent = `${progressConnection}で${operation}`;
   progressRunning = true;
+  element('operation-progress').dataset.running = 'true';
+  element('progress-track').hidden = false;
   element("ai-error-advice").hidden = true;
   progressDisplayLogs = aiProgress.logs;
   element("progress-track").classList.remove("progress-failed", "progress-completed");
@@ -371,6 +420,8 @@ async function stopAiProgress(succeeded: boolean): Promise<void> {
   progressTimer = undefined;
   progressPollTimer = undefined;
   progressRunning = false;
+  element('operation-progress').dataset.running = 'false';
+  element('progress-track').hidden = true;
   activeGenerationRoot = null;
   element("progress-cancel").hidden = true;
   element("progress-compact-cancel").hidden = true;
@@ -400,6 +451,13 @@ element("progress-dismiss").addEventListener("click", () => {
   element("progress-compact-cancel").hidden = !progressRunning;
 });
 element("progress-open").addEventListener("click", () => {
+  if (!progressRunning) {
+    element('operation-progress').dataset.running = 'false';
+    element('progress-track').hidden = true;
+    element('progress-label').textContent = '直近のAI実行ログ';
+    element('progress-note').textContent = '過去の実行ログです。現在は実行していません。';
+    element('progress-cancel').hidden = true;
+  }
   element("operation-progress").hidden = false;
   element("progress-open").hidden = true;
   element("progress-compact-cancel").hidden = true;
@@ -568,6 +626,12 @@ function tabToComponentId(name: string): string {
   }
 }
 function chooseTab(name: string): void {
+  if(name==='appearance'){
+    selectSettingsCategory('appearance');
+    const dialog=element<HTMLDialogElement>('panel-settings');
+    if(!dialog.open){closeAllPanelDialogs();dialog.show();}
+    return;
+  }
   if (name === "brief" || name === "appearance" || name === "settings") {
     if(name==='settings')void imageAiSettings.refresh();
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
@@ -830,6 +894,7 @@ async function openResourceUsage(usage:ResourceUsage):Promise<void>{
   jumpToSource(editor,start,start+(usage.snippet?.length||0));updateCursor();
 }
 const markitsImages = setupMarkitsImages({
+  captureShortcut:async()=>{await markitsKeyLoaded;await markitsKeySave;return markitsKey;},
   root: () => projectRoot,
   refreshAssets: async root => {
     if (root !== projectRoot) return;
@@ -1195,7 +1260,7 @@ async function openProject(root: string, check = true): Promise<void> {
   if(version!==projectRequestVersion)return;
   const restoredDocument = documentState as Document | null;
   if (restoredDocument) status(`プロジェクトを開きました。${restoredDocument.page}を編集できます。`);
-  if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は上部の「AI設定 → 文章・図の生成」で設定できます。");
+  if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は上部の「設定 → 文章・図のAI」で設定できます。");
 
 }
 function saveDocument(refresh = true): Promise<void> {
@@ -1278,7 +1343,10 @@ for (const [selector, name] of [["#undo-edit", "undo"], ["#redo-edit", "redo"], 
   const button = document.querySelector<HTMLButtonElement>(selector);
   if (button) button.innerHTML = uiIcon(name) + (name === "image" ? " 画像" : name === "link" ? " リンク" : "");
 }
-document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => button.addEventListener("click", () => chooseTab(button.dataset.tab!)));
+document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => button.addEventListener("click", () => {
+  if(button.dataset.tab==='settings')selectSettingsCategory('text-ai');
+  chooseTab(button.dataset.tab!);
+}));
 
 document.querySelectorAll<HTMLDialogElement>('dialog.panel-dialog[id^="panel-"]').forEach((dialog) => {
   dialog.querySelectorAll("[data-close-dialog]").forEach((button) => {
@@ -1335,12 +1403,7 @@ element("page-list").addEventListener("toggle", (event) => {
 }, true);
 document.addEventListener('keydown', event => {
   if (event.isComposing || document.querySelector('dialog:modal') || (event.target instanceof Element && event.target.closest('#panel-terminal'))) return;
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') {
-    event.preventDefault();
-    layoutManager?.focusPanel('file-tree');
-    element('tree-filters').hidden = false;
-    requestAnimationFrame(() => { input('tree-search').focus(); input('tree-search').select(); });
-  } else if (event.key === 'Escape' && !element('tree-filters').hidden && event.target instanceof Element && event.target.closest('#panel-tree')) {
+  if (event.key === 'Escape' && !element('tree-filters').hidden && event.target instanceof Element && event.target.closest('#panel-tree')) {
     event.preventDefault();
     input('tree-search').value = '';
     element<HTMLSelectElement>('tree-filter').value = 'all';
@@ -1544,45 +1607,61 @@ function applyMarkdownFormat(format: string): void {
 document.querySelectorAll<HTMLButtonElement>("[data-format]").forEach((button) => button.addEventListener("click", () => applyMarkdownFormat(button.dataset.format!)));
 editor.addEventListener("keydown", (event) => {
   if (busy || !documentState) return;
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
-    event.preventDefault(); stepEditHistory(event.shiftKey ? 1 : -1); return;
-  }
-  if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "y") {
-    event.preventDefault(); stepEditHistory(1); return;
-  }
-  if ((event.ctrlKey || event.metaKey) && ["b", "i", "k"].includes(event.key.toLowerCase())) {
-    event.preventDefault();
-    applyMarkdownFormat(({ b: "bold", i: "italic", k: "link" } as Record<string, string>)[event.key.toLowerCase()]);
-    return;
-  }
   if (event.key === "Enter" && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && editor.selectionStart === editor.selectionEnd) {
     event.preventDefault(); applyAssist(continueMarkdownList(editor.value, editor.selectionStart)); return;
   }
-  if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
-    event.preventDefault();
-    if (event.shiftKey || editor.selectionStart !== editor.selectionEnd) applyAssist(changeIndent(editor.value, editor.selectionStart, editor.selectionEnd, event.shiftKey ? "unindent" : "indent"));
-    else replaceMarkdown(editor.selectionStart, editor.selectionEnd, "  ", 2);
-  }
 });
 function handleDocumentShortcut(event: KeyboardEvent): void {
-  if (event.isComposing || event.repeat || event.defaultPrevented || event.altKey || !(event.ctrlKey || event.metaKey)) return;
-  const target = event.target instanceof Element ? event.target : null;
-  if (document.querySelector('dialog:modal') || target?.closest('#panel-terminal')) return;
-  if (target?.matches('input,select,textarea') && target !== editor && !milkdown.host.contains(target)) return;
-  const key = event.key.toLowerCase();
-  if (key === 's' && !event.shiftKey) { event.preventDefault(); if (documentState && !activeImageTab) void work(saveDocument); return; }
-  if (!event.shiftKey || !['p', 'r', 'g'].includes(key)) return;
-  event.preventDefault();
-  if (!documentState || busy) return;
-  if (key === 'p') {
-    const views: EditorView[] = ['edit', 'split', 'preview'];
-    const next = views[(views.indexOf(element('panel-editor').dataset.editorView as EditorView) + 1) % views.length];
-    document.querySelector<HTMLButtonElement>(`#panel-editor button[data-editor-view="${next}"]`)!.click();
-  } else if (key === 'r') { void work(renderPreview); }
-  else { void createSelectionDocument(); }
+  if(event.defaultPrevented||event.isComposing||document.querySelector('dialog:modal'))return;
+  const stroke=keyStroke(event),bindings=currentBindings();
+  const command=(['save','preview','refresh','settings'] as ShortcutCommand[]).find(command=>stroke&&bindings[command].includes(stroke));
+  if(command){event.preventDefault();runKeyboardCommand(command,event);}
 }
-document.addEventListener('keydown', handleDocumentShortcut);
-document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button => { button.title = `${button.getAttribute("aria-label") || button.textContent} (Ctrl/Cmd+Shift+Pで順に切替)`; });
+function runKeyboardCommand(command: ShortcutCommand, event: KeyboardEvent): void {
+  if(command==='settings'){chooseTab('settings');return;}
+  if(command==='treeSearch'){
+    layoutManager?.focusPanel('file-tree');element('tree-filters').hidden=false;
+    requestAnimationFrame(()=>{input('tree-search').focus();input('tree-search').select();});return;
+  }
+  if(command==='search'){element('manuscript-search-open').click();return;}
+  if(busy||!documentState||activeImageTab)return;
+  if(command==='save'){void work(saveDocument);return;}
+  if(command==='preview'){
+    const views:EditorView[]=['edit','split','preview'];
+    const next=views[(views.indexOf(element('panel-editor').dataset.editorView as EditorView)+1)%views.length];
+    document.querySelector<HTMLButtonElement>(`#panel-editor button[data-editor-view="${next}"]`)!.click();return;
+  }
+  if(command==='refresh'){void work(renderPreview);return;}
+  if(command==='selectionAi'){void createSelectionDocument();return;}
+  if(milkdown.runShortcut(command))return;
+  if(editor.readOnly||editor.disabled)return;
+  if(command==='undo'||command==='redo'){stepEditHistory(command==='undo'?-1:1);return;}
+  if(command==='bold'||command==='italic'||command==='link'){applyMarkdownFormat(command);return;}
+  if(command==='indent'||command==='outdent'){
+    if(command==='indent'&&event.key==='Tab'&&editor.selectionStart===editor.selectionEnd)replaceMarkdown(editor.selectionStart,editor.selectionEnd,'  ',2);
+    else applyAssist(changeIndent(editor.value,editor.selectionStart,editor.selectionEnd,command==='indent'?'indent':'unindent'));
+    return;
+  }
+  const expected=editor.value,start=editor.selectionStart,end=editor.selectionEnd,line=currentLine(expected,start);
+  if(command==='duplicate'){replaceMarkdown(line.end,line.end,'\n'+line.text.slice(0,-1),1+start-line.start);return;}
+  if(command==='deleteLine'){replaceMarkdown(line.deleteStart,line.deleteEnd,'',0);return;}
+  if(command==='cut'){
+    const selected=start!==end,text=selected?expected.slice(start,end):line.text;
+    void navigator.clipboard.writeText(text).then(()=>{
+      if(editor.value!==expected||editor.selectionStart!==start||editor.selectionEnd!==end)return;
+      replaceMarkdown(selected?start:line.deleteStart,selected?end:line.deleteEnd,'',0);
+    }).catch(error=>status(`切り取りできませんでした: ${String(error)}`,true));
+  }
+}
+installShortcutRouter(runKeyboardCommand,target=>target===editor||Boolean(target.closest('.ProseMirror,.cm-editor')));
+function updateShortcutTitles():void {
+  const bindings=currentBindings();
+  const keys=(command:ShortcutCommand)=>bindings[command].map(bindingLabel).join(' / ')||'未割り当て';
+  element('save-page').title=`原稿を保存 (${keys('save')})`;
+  element('application-settings').title=`設定 (${keys('settings')})`;
+  document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button=>{button.title=`${button.getAttribute('aria-label')||button.textContent} (${keys('preview')})`;});
+}
+updateShortcutTitles();window.addEventListener('manual-studio-keybindings-change',updateShortcutTitles);
 let closingApproved = false;
 let closingPrompt = false;
 window.addEventListener("beforeunload", (event) => { if ((briefDirty || briefSaving > 0 || dirty || [...documentTabs.entries()].some(([page,tab]) => page !== documentState?.page && tab.content !== tab.document.content)) && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });

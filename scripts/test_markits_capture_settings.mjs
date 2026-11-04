@@ -1,0 +1,18 @@
+﻿import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
+const calls=[];
+const code=ts.transpileModule(fs.readFileSync('apps/manual-studio/src/markitsImages.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const exports={};
+vm.runInNewContext(code,{exports,require:()=>({invoke:async(command,args)=>{calls.push({command,args});return 'docs/assets/capture.png';}}),window:{__TAURI_INTERNALS__:{}},localStorage:{getItem:()=> 'true'}});
+let releaseSave;const saved=new Promise(resolve=>{releaseSave=resolve;});
+const controller=exports.setupMarkitsImages({root:()=>'/fixture',refreshAssets:async()=>{},captureShortcut:async()=>{await saved;return 'Control+T';}});
+const result=controller.recordForInsertion();
+await Promise.resolve();assert.equal(calls.length,0,'Capture waits until the selected key has been saved');
+releaseSave();await result;
+assert.equal(calls.length,1);assert.equal(calls[0].command,'capture_markits_image');
+assert.equal(calls[0].args.shortcut,'Control+T');assert.equal(calls[0].args.includeCursor,true);
+const failed=exports.setupMarkitsImages({root:()=>'/fixture',refreshAssets:async()=>{},captureShortcut:async()=>{throw new Error('save failed');}});
+await assert.rejects(failed.recordForInsertion(),/save failed/);assert.equal(calls.length,1,'A failed save cannot silently launch with the old key');
+console.log('Capture key forwarding passed: Ctrl+T, cursor option, save ordering, no launch after failed save.');

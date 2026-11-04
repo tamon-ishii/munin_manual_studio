@@ -537,6 +537,8 @@ fn main() {
         .manage(HiddenStudioWindows::default())
         .invoke_handler(tauri::generate_handler![
             markits_bridge::open_markits,
+            markits_bridge::get_markits_capture_shortcut,
+            markits_bridge::set_markits_capture_shortcut,
             markits_bridge::edit_markits_image,
             markits_bridge::capture_markits_image,
             markits_bridge::markits_captures,

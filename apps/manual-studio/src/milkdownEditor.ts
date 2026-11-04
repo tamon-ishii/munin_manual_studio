@@ -1,4 +1,8 @@
 import {gfmAlerts,configureGfmAlerts,alertKinds,alertMarkdown} from './gfmEditor';
+import type {ShortcutCommand} from './keyboardShortcuts';
+import {currentLine} from './editorLineCommands';
+import {sinkListItem,liftListItem} from '@milkdown/kit/prose/schema-list';
+import {lift} from '@milkdown/kit/prose/commands';
 import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePresentation} from './imagePresentation';
 import { Slice } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
@@ -488,17 +492,6 @@ export function setupMilkdownEditor(
     if (!sourceMode) source.hidden = true;
     source.dispatchEvent(new Event('editor-mode-change'));
   }).catch(error => { showSource(); toggle.disabled = true; report(`Milkdownの起動に失敗しました: ${String(error)}`); });
-  host.addEventListener('keydown', event => {
-    if (!(event.target instanceof Element) || !event.target.closest('.ProseMirror') || event.target.closest('input,textarea')) return;
-    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'z') return;
-    if (!instance || !ready || sourceMode) return;
-    const cancelled = instance.action(ctx => {
-      const view = ctx.get(editorViewCtx);
-      if (pendingUploads.length === 1 && !/!\[\]\(\)/.test(sourceValue()) && cancelLatestUpload()) return true;
-      return !undo(view.state) && cancelLatestUpload();
-    });
-    if (cancelled) { event.preventDefault(); event.stopPropagation(); }
-  }, true);
   function stepHistory(direction: number): boolean {
     if (sourceMode || !instance || !ready) return false;
     instance.action(ctx => { const view = ctx.get(editorViewCtx); if (direction < 0) undoOrCancel(ctx); else redo(view.state, view.dispatch); view.focus(); });
@@ -509,7 +502,56 @@ export function setupMilkdownEditor(
     instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.state.doc.descendants((node,pos)=>{if(!['image','image-block'].includes(node.type.name)||node.attrs.src!==src)return;const dom=view.nodeDOM(pos);if(dom===image||dom instanceof HTMLElement&&dom.contains(image))ordinal=index;index++;});});
     const images=documentImages(sourceValue()).filter(item=>item.src===src);return ordinal>=0?images[ordinal]:images.length===1?images[0]:undefined;
   }
-  return { showSource, refresh, refreshImages, host, stepHistory,imageSourceRange,
+  function runShortcut(command: ShortcutCommand): boolean {
+    if (!ready || !instance || sourceMode) return false;
+    return instance.action(ctx => {
+      const view = ctx.get(editorViewCtx), state = view.state;
+      if (!view.editable) return true;
+      if (command === 'undo' || command === 'redo') { stepHistory(command === 'undo' ? -1 : 1); return true; }
+      if (command === 'bold' || command === 'italic' || command === 'link') {
+        const key = command === 'bold' ? 'b' : command === 'italic' ? 'i' : 'k';
+        const mac=/Mac|iPhone|iPad/.test(navigator.platform);
+        view.someProp('handleKeyDown', handler => handler(view, new KeyboardEvent('keydown',{key,ctrlKey:!mac,metaKey:mac,bubbles:true})));
+        return true;
+      }
+      const {$from,empty} = state.selection;
+      if (!$from.parent.isTextblock) return true;
+      if (command === 'indent' || command === 'outdent') {
+        const listItem = state.schema.nodes.list_item;
+        if (listItem && (command === 'indent' ? sinkListItem(listItem) : liftListItem(listItem))(state, view.dispatch)) return true;
+        if (command === 'outdent' && lift(state, view.dispatch)) return true;
+        let tr = state.tr;
+        state.doc.nodesBetween(state.selection.from,state.selection.to,(node,pos)=>{
+          if (!node.isTextblock) return;
+          if (command === 'indent') tr.insertText('  ',tr.mapping.map(pos+1));
+          else {const prefix=/^(?:\t| {1,2})/.exec(node.textContent)?.[0];if(prefix)tr.delete(tr.mapping.map(pos+1),tr.mapping.map(pos+1+prefix.length));}
+          return false;
+        });
+        if(tr.docChanged)view.dispatch(tr.scrollIntoView());
+        return true;
+      }
+      if (!['cut','deleteLine','duplicate'].includes(command)) return false;
+      const blockStart = $from.start(), line = currentLine($from.parent.textBetween(0,$from.parent.content.size,'','\uFFFC'),$from.parentOffset);
+      let tr = state.tr;
+      if (command === 'duplicate') {
+        tr.insertText('\n'+line.text.slice(0,-1),blockStart+line.end);
+      } else if (command === 'cut' && !empty) {
+        const text=state.doc.textBetween(state.selection.from,state.selection.to,'\n');
+        void navigator.clipboard.writeText(text).then(()=>{if(view.state===state)view.dispatch(state.tr.deleteSelection().scrollIntoView());}).catch(error=>report(`切り取りできませんでした: ${String(error)}`));
+        return true;
+      } else {
+        const from=blockStart+line.deleteStart,to=blockStart+line.deleteEnd;
+        if (line.start===0 && line.end===$from.parent.content.size && $from.depth>0) tr.delete($from.before(),$from.after());
+        else tr.delete(from,to);
+        if(command==='cut') {
+          void navigator.clipboard.writeText(line.text).then(()=>{if(view.state===state)view.dispatch(tr.scrollIntoView());}).catch(error=>report(`切り取りできませんでした: ${String(error)}`));
+          return true;
+        }
+      }
+      view.dispatch(tr.scrollIntoView());return true;
+    });
+  }
+  return { showSource, refresh, refreshImages, host, stepHistory,imageSourceRange,runShortcut,
     selectedImageSourceRange:()=>{if(!ready||!instance||sourceMode)return;let image:HTMLImageElement|undefined;instance.action(ctx=>{const view=ctx.get(editorViewCtx);const dom=view.nodeDOM(view.state.selection.from);image=dom instanceof HTMLImageElement?dom:dom instanceof HTMLElement?dom.querySelector<HTMLImageElement>('img')||undefined:undefined;});return image?imageSourceRange(image):undefined;},
     replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.dispatch(closeHistory(view.state.tr));replaceAll(markdown,false)(ctx);view.dispatch(closeHistory(view.state.tr));});return true;},
     focus: () => { if (sourceMode) source.focus(); else instance?.action(ctx=>ctx.get(editorViewCtx).focus()); },

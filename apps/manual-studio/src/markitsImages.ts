@@ -1,6 +1,11 @@
 import {invoke} from '@tauri-apps/api/core';
 
+export function cursorCapturePreference(): boolean {
+  try {return localStorage.getItem('manual-studio-capture-include-cursor')==='true';}catch{return false;}
+}
+
 interface Options {
+  captureShortcut?(): Promise<string>;
   root(): string;
   refreshAssets(root: string): Promise<void>;
 }
@@ -19,9 +24,10 @@ export function setupMarkitsImages(options: Options) {
 
   return {
     refresh: () => options.refreshAssets(options.root()),
-    recordForInsertion: (stage?: (stage: string) => void) => {
+    recordForInsertion: async (stage?: (stage: string) => void) => {
       stage?.('capture');
-      return importImage('capture_markits_image', {});
+      const shortcut = await options.captureShortcut?.();
+      return importImage('capture_markits_image', {includeCursor:cursorCapturePreference(),shortcut:shortcut||null});
     },
     editImage: (asset: string, page?: string) => importImage('edit_markits_image', {asset, page: page || null}),
   };

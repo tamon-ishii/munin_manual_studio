@@ -5,6 +5,14 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{fs, io::Write, path::Path};
 
+#[tauri::command]
+pub fn get_markits_capture_shortcut() -> String { markits_desktop_lib::saved_capture_shortcut() }
+
+#[tauri::command]
+pub fn set_markits_capture_shortcut(shortcut: String) -> Result<(), String> {
+    markits_desktop_lib::save_capture_shortcut(&shortcut)
+}
+
 struct ImageEdit {
     _temporary: tempfile::TempDir,
     input: std::path::PathBuf,
@@ -13,13 +21,17 @@ struct ImageEdit {
 }
 
 #[tauri::command]
-pub async fn capture_markits_image(root: String) -> Result<Option<String>, String> {
+pub async fn capture_markits_image(root: String, include_cursor: Option<bool>, shortcut: Option<String>) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let temporary = tempfile::Builder::new().prefix("munin-markits-capture-").tempdir().map_err(|e| e.to_string())?;
         let output = temporary.path().join("capture.png");
         let completion = temporary.path().join("complete.done");
-        let status = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
-            .args(["--munin-markits", "--capture", "--manual-studio-output"])
+        let mut command = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+        let shortcut = shortcut.unwrap_or_else(markits_desktop_lib::saved_capture_shortcut);
+        markits_desktop_lib::LaunchCaptureOptions::parse(&["--capture-shortcut".into(), shortcut.clone()])?;
+        command.args(["--munin-markits", "--capture", "--capture-shortcut"]).arg(shortcut);
+        command.arg(if include_cursor.unwrap_or(false) { "--include-cursor" } else { "--no-cursor" });
+        let status = command.arg("--manual-studio-output")
             .arg(&output).arg("--manual-studio-completion").arg(&completion)
             .status().map_err(|e| format!("MarkItsを起動できません: {e}"))?;
         if !status.success() { return Err(format!("MarkItsが異常終了しました: {status}")); }

@@ -1,10 +1,10 @@
+﻿import {bindingLabel,currentBindings,shortcutCommands} from './keyboardShortcuts';
 export function showShortcutHelp(): void {
-  const dialog = document.createElement('dialog'); dialog.id = 'shortcut-help-dialog';
-  dialog.setAttribute('aria-labelledby', 'shortcut-help-title');
-  dialog.innerHTML = '<h2 id="shortcut-help-title">キーボード操作</h2><p>macOSではCtrlの代わりにCmdを使います。</p><dl class="shortcut-list"><dt>保存</dt><dd><kbd>Ctrl + S</kbd></dd><dt>元に戻す</dt><dd><kbd>Ctrl + Z</kbd></dd><dt>やり直す</dt><dd><kbd>Ctrl + Shift + Z</kbd> / <kbd>Ctrl + Y</kbd>（Windows/Linux）</dd><dt>編集表示の切替</dt><dd><kbd>Ctrl + Shift + P</kbd></dd><dt>プレビューを再読込</dt><dd><kbd>Ctrl + Shift + R</kbd></dd><dt>選択範囲のAI変更・カーソル位置への挿入</dt><dd><kbd>Ctrl + Shift + G</kbd></dd><dt>太字・斜体・リンク</dt><dd><kbd>Ctrl + B / I / K</kbd></dd></dl><p class="muted">AI文書作成は候補の確認後に反映します。ダイアログやAIターミナルに入力中は、文書操作のショートカットを実行しません。</p><button type="button" data-close>閉じる</button>';
-  dialog.querySelector('.shortcut-list')!.insertAdjacentHTML('afterbegin','<dt>ファイルツリーを検索（Escで閉じる）</dt><dd><kbd>Ctrl + F</kbd></dd>');
-  const finish = () => { dialog.close(); dialog.remove(); };
-  dialog.querySelector('[data-close]')!.addEventListener('click', finish);
-  dialog.addEventListener('cancel', event => { event.preventDefault(); finish(); });
-  document.body.append(dialog); dialog.showModal();
+ const dialog=document.createElement('dialog');dialog.id='shortcut-help-dialog';
+ const title=document.createElement('h2');title.id='shortcut-help-title';title.textContent='キーボード操作';dialog.setAttribute('aria-labelledby',title.id);
+ const list=document.createElement('dl');list.className='shortcut-list';const bindings=currentBindings();
+ for(const command of shortcutCommands){const label=document.createElement('dt');label.textContent=command.label;const keys=document.createElement('dd');keys.textContent=bindings[command.id].map(bindingLabel).join(' / ')||'未割り当て';list.append(label,keys);}
+ const note=document.createElement('p');note.textContent='上部の「設定」からキー割り当てを変更できます。';
+ const close=document.createElement('button');close.textContent='閉じる';const finish=()=>{dialog.close();dialog.remove();};close.onclick=finish;dialog.addEventListener('cancel',event=>{event.preventDefault();finish();});
+ dialog.append(title,list,note,close);document.body.append(dialog);dialog.showModal();
 }
