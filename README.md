@@ -98,7 +98,8 @@ python3 start_manual_studio.py
 
 ## 関連ドキュメント
 
-* 利用者向けガイド: [Munin Manual Studio 利用ガイド](manual_doc/index.md)
+* 利用者向けガイド:
+  *  [Munin Manual Studio 利用ガイド](manual_doc/index.md)
   * [準備と最初の原稿作成](manual_doc/getting-started.md)
   * [原稿編集とAI支援](manual_doc/editing-and-ai.md)
   * [画像とスクリーンショットの管理](manual_doc/images-and-screenshots.md)

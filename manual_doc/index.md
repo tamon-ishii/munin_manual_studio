@@ -26,7 +26,6 @@ Markdown編集、MarkItsによる手動撮影・操作記録・再撮影・画�
 
 ## 関連情報
 
-* [プロジェクト概要](../README.md)
 * [起動方法と配布版の説明](../apps/manual-studio/README.md)
 * [StudioとMarkItsの役割](../docs/markits-ownership.md)
 * [現行仕様一覧](../docs/specs/README.md)
