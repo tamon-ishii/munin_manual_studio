@@ -588,7 +588,7 @@ pub(crate) fn record_screenshot_task(
                 .map_err(|e| format!("撮影画像を読み込めません: {e}"))?
                 .dimensions();
             let (width, height) = dimensions;
-            scale_markits_scene(&mut scene, width, height)?;
+            crate::markits_scene::scale_markits_scene(&mut scene, width, height)?;
             let scene_json = serde_json::to_string(&scene).map_err(|e| e.to_string())?;
             let mut rendered = markits::raster::render_composed_png_bytes(&scene_json, &capture)
                 .map_err(|e| format!("MarkIts注釈を再適用できません: {e}"))?;
@@ -705,67 +705,6 @@ fn previous_markits_scene(
     let scene: Value = serde_json::from_str(&scene)
         .map_err(|e| format!("保存済みMarkIts注釈を読み込めません: {e}"))?;
     Ok(Some(scene))
-}
-
-fn scale_markits_scene(scene: &mut Value, width: u32, height: u32) -> Result<(), String> {
-    let canvas = scene
-        .get("canvas")
-        .and_then(Value::as_object)
-        .ok_or("MarkIts注釈にcanvas情報がありません")?;
-    let old_width = canvas
-        .get("width")
-        .and_then(Value::as_f64)
-        .filter(|value| *value > 0.0)
-        .ok_or("MarkIts注釈のcanvas幅が不正です")?;
-    let old_height = canvas
-        .get("height")
-        .and_then(Value::as_f64)
-        .filter(|value| *value > 0.0)
-        .ok_or("MarkIts注釈のcanvas高さが不正です")?;
-    let sx = width as f64 / old_width;
-    let sy = height as f64 / old_height;
-    let root = scene.as_object_mut().ok_or("MarkIts注釈の形式が不正です")?;
-    root.insert("canvas".into(), json!({"width": width, "height": height}));
-    if let Some(annotations) = root.get_mut("annotations").and_then(Value::as_array_mut) {
-        for annotation in annotations {
-            let Some(fields) = annotation.as_object_mut() else {
-                continue;
-            };
-            for key in ["target"] {
-                if let Some(values) = fields.get_mut(key).and_then(Value::as_array_mut) {
-                    if values.len() == 4 {
-                        for (index, factor) in [sx, sy, sx, sy].into_iter().enumerate() {
-                            if let Some(value) = values[index].as_f64() {
-                                values[index] = json!(value * factor);
-                            }
-                        }
-                    }
-                }
-            }
-            for key in ["start", "control", "end"] {
-                if let Some(values) = fields.get_mut(key).and_then(Value::as_array_mut) {
-                    if values.len() == 2 {
-                        for (index, factor) in [sx, sy].into_iter().enumerate() {
-                            if let Some(value) = values[index].as_f64() {
-                                values[index] = json!(value * factor);
-                            }
-                        }
-                    }
-                }
-            }
-            for (key, factor) in [
-                ("stroke_width", sx.min(sy)),
-                ("rx", sx),
-                ("ry", sy),
-                ("max_width", sx),
-            ] {
-                if let Some(value) = fields.get(key).and_then(Value::as_f64) {
-                    fields.insert(key.into(), json!(value * factor));
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 pub fn record_diagram(

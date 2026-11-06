@@ -46,6 +46,8 @@ python3 start_manual_studio.py
 
 同梱ツールは`--studio-tools REQUEST_JSON RESPONSE_JSON`のファイル入出力で、ウィンドウ一覧、実画面の撮影、UIMapの確認、MarkIts sceneによる注釈を提供します。単体MarkIts CLIの追加インストールは不要です。既存の`AGENTS.md`や`CLAUDE.md`は変更しません。CLIの認証とOSの画面撮影・アクセシビリティ権限は各環境で必要です。
 
+AIは操作をJSONで記述し、`operations-validate`で検証してから`operations-run`で実行・連続撮影できます。各PNGに撮影地点までのMarkIts操作記録を保存します。既存の記録の読み取りや、入力を実行しない記録付きPNGの作成にも対応します。[操作スクリプトの仕様と検証状況](../../docs/ai-operation-scripts.md)を参照してください。
+
 読者・目的・操作は原稿操作の「⋯ → 執筆方針」から設定します。文章生成と画像生成の接続は「AI設定」で個別に設定できます。画像生成に文章と同じ接続を使うこともできます。「原稿チェック」ではリンクや画像の問題を確認します。HTML生成は外部連携・CLIから実行します。
 
 ## 生成に必要なツール

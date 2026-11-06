@@ -1940,6 +1940,33 @@ element("insert-image").addEventListener("click", () => {
   pendingImageSelection = null;
   toolbarImageInput.click();
 });
+function insertSourceImage(markdown: string, start: number, end: number): void {
+  rememberCurrentSelection(start, end);
+  editor.setRangeText(markdown, start, end, "end");
+  dirty = true;
+  updateSaveState();
+  editor.dispatchEvent(new Event("input"));
+  editor.focus();
+}
+
+function readImageForSaveDialog(file: File, origin: ReturnType<typeof captureInsertionContext<Document>>, selection: {start:number;end:number}, onError?: () => void): void {
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (!isInsertionCurrent(origin, insertionState())) {
+      pendingImageSelection = null;
+      status(STALE_INSERTION_MESSAGE, true);
+      return;
+    }
+    if (typeof reader.result === 'string') {
+      const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      pendingImageSelection = selection;
+      openImageSaveDialog(reader.result, cleanName, cleanName.replace(/\.[^.]+$/, ''));
+    }
+  };
+  if (onError) reader.onerror = onError;
+  reader.readAsDataURL(file);
+}
+
 toolbarImageInput.addEventListener("change", () => {
   const origin = captureInsertionContext(insertionState());
   const file = toolbarImageInput.files?.[0];
@@ -1951,21 +1978,7 @@ toolbarImageInput.addEventListener("change", () => {
     status("PNG、JPEG、GIF、WebP、SVGの画像を選んでください。", true);
     return;
   }
-  const reader = new FileReader();
-  reader.onload = () => {
-    if (!isInsertionCurrent(origin, insertionState())) {
-      pendingImageSelection = null;
-      status(STALE_INSERTION_MESSAGE, true);
-      return;
-    }
-    if (typeof reader.result === "string") {
-      const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      pendingImageSelection = selection;
-      openImageSaveDialog(reader.result, cleanName, cleanName.replace(/\.[^.]+$/, ""));
-    }
-  };
-  reader.onerror = () => { pendingImageSelection = null; status("画像を読み込めませんでした。", true); };
-  reader.readAsDataURL(file);
+  readImageForSaveDialog(file, origin, selection, () => {pendingImageSelection = null; status("画像を読み込めませんでした。", true);});
 });
 const insertionState = () => ({ document: documentState, root: projectRoot, content: editor.value, documentSession: documentRequestVersion });
 async function uploadMilkdownImage(file: File): Promise<string> {
@@ -2086,12 +2099,7 @@ element("image-save-form").addEventListener("submit", (event) => {
     const start = selection.start;
     const end = selection.end;
     pendingImageSelection = null;
-    rememberCurrentSelection(start, end);
-    editor.setRangeText(markdownCode, start, end, "end");
-    dirty = true;
-    updateSaveState();
-    editor.dispatchEvent(new Event("input"));
-    editor.focus();
+    insertSourceImage(markdownCode, start, end);
     status(`画像を ${fullAssetPath} に保存し、原稿に挿入しました。`);
   });
 });
@@ -2163,12 +2171,7 @@ async function saveAndInsertImage(dataUrl: string, defaultFileType: string, past
     const markdownCode = `![${alt}](${relPath})`;
     const start = owner.start;
     const end = owner.end;
-    rememberCurrentSelection(start, end);
-    editor.setRangeText(markdownCode, start, end, "end");
-    dirty = true;
-    updateSaveState();
-    editor.dispatchEvent(new Event("input"));
-    editor.focus();
+    insertSourceImage(markdownCode, start, end);
     status(`画像を ${fullAssetPath} に保存し、貼り付けました。`);
   } catch (error) {
     status(String(error), true);
@@ -2286,12 +2289,7 @@ async function tryNativeImagePaste(): Promise<boolean> {
       const markdownCode = `![${result.alt}](${relPath})`;
       const start = paste.start;
       const end = paste.end;
-      rememberCurrentSelection(start, end);
-      editor.setRangeText(markdownCode, start, end, "end");
-      dirty = true;
-      updateSaveState();
-      editor.dispatchEvent(new Event("input"));
-      editor.focus();
+      insertSourceImage(markdownCode, start, end);
       status(`画像を ${result.filePath} に保存し、貼り付けました。`);
       return true;
     } else {
@@ -2321,45 +2319,32 @@ editor.addEventListener("paste", (event: ClipboardEvent) => {
   }
 });
 
+function canPasteImageIntoEditor(): boolean {
+  const active = document.activeElement;
+  if (active && milkdown.host.contains(active)) return false;
+  if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return false;
+  if (element('panel-editor').hidden) return false;
+  if (!documentState) {
+    status("先にMarkdown原稿を開いてください。", true);
+    return false;
+  }
+  return true;
+}
 document.addEventListener("paste", (event: ClipboardEvent) => {
   if (event.target instanceof Node && milkdown.host.contains(event.target)) return;
-  if (event.defaultPrevented) return;
-  const active = document.activeElement;
-  if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
+  if (event.defaultPrevented || !canPasteImageIntoEditor()) return;
+  if (handleImagePaste(event.clipboardData)) {
+    event.preventDefault();
+    lastImagePasteTime = Date.now();
     return;
   }
-  if (!element("panel-editor").hidden) {
-    if (!documentState) {
-      status("先にMarkdown原稿を開いてください。", true);
-      return;
-    }
-    if (handleImagePaste(event.clipboardData)) {
-      event.preventDefault();
-      lastImagePasteTime = Date.now();
-      return;
-    }
-    if (native) {
-      void tryNativeImagePaste();
-    }
-  }
+  if (native) void tryNativeImagePaste();
 });
 
 window.addEventListener("keydown", (event: KeyboardEvent) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
-    const active = document.activeElement;
-    if (active && milkdown.host.contains(active)) return;
-    if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
-      return;
-    }
-    if (!element("panel-editor").hidden) {
-      if (!documentState) {
-        status("先にMarkdown原稿を開いてください。", true);
-        return;
-      }
-      if (native) {
-        void tryNativeImagePaste();
-      }
-    }
+    if (!canPasteImageIntoEditor()) return;
+    if (native) void tryNativeImagePaste();
   }
 });
 const editorColumn = document.querySelector<HTMLElement>(".editor-column");
@@ -2395,21 +2380,7 @@ if (editorColumn) {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (file.type.startsWith("image/") || /\.(png|jpe?g|gif|svg|webp)$/i.test(file.name)) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (!isInsertionCurrent(origin, insertionState())) {
-            pendingImageSelection = null;
-            status(STALE_INSERTION_MESSAGE, true);
-            return;
-          }
-          if (typeof reader.result === "string") {
-            const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-            const alt = cleanName.replace(/\.[^.]+$/, "");
-            pendingImageSelection = selection;
-            openImageSaveDialog(reader.result, cleanName, alt);
-          }
-        };
-        reader.readAsDataURL(file);
+        readImageForSaveDialog(file, origin, selection);
         break;
       }
     }

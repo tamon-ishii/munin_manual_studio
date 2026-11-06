@@ -624,6 +624,11 @@ fn click_observed(selected: &SelectedWindow, element: &markits::ui_elements::Det
 }
 
 fn activate(selected: &SelectedWindow) -> Result<(), String> {
+    // An already active native target needs no focus transfer. Windows may deny
+    // a redundant SetForegroundWindow from a background CLI process.
+    if let Ok(window) = selected.native() {
+        if window_capture::is_window_active(&window.id).unwrap_or(false) {return Ok(());}
+    }
     #[cfg(target_os = "linux")]
     if !window_capture::is_wayland_session() {
         if let Ok(window) = selected.native() {

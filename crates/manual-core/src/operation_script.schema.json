@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI-authored MarkIts operation script",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "window", "steps"],
+  "properties": {
+    "version": {"const": 1},
+    "window": {
+      "type": "object", "additionalProperties": false, "required": ["title", "bounds"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "description": "Exact title from windows, never an invented application name"},
+        "bounds": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4, "description": "Observed screen x, y, width, height from windows"}
+      }
+    },
+    "steps": {"type": "array", "minItems": 1, "maxItems": 500, "items": {"$ref": "#/$defs/step"}, "description": "Must contain at least one screenshot; screenshot names must be unique"}
+  },
+  "$defs": {
+    "target": {
+      "type": "object", "additionalProperties": false, "required": ["role", "name"],
+      "properties": {"role": {"type": "string", "minLength": 1}, "name": {"type": "string", "minLength": 1}, "reveals": {"$ref": "#/$defs/target"}}
+    },
+    "step": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "target"], "properties": {"kind": {"const": "click"}, "target": {"$ref": "#/$defs/target"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "x", "y"], "properties": {"kind": {"const": "click"}, "x": {"type": "number", "minimum": 0}, "y": {"type": "number", "minimum": 0}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "text"}, "value": {"type": "string", "maxLength": 100000}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "key"}, "value": {"type": "string", "description": "Control/Alt/Shift/Meta modifiers plus ASCII letter, digit, f1–f12, enter, escape, tab, backspace, delete, space, up/down/left/right; e.g. Control+a"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "x", "y", "dx", "dy"], "properties": {"kind": {"const": "scroll"}, "x": {"type": "number", "minimum": 0}, "y": {"type": "number", "minimum": 0}, "dx": {"type": "integer"}, "dy": {"type": "integer"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "milliseconds"], "properties": {"kind": {"const": "wait"}, "milliseconds": {"type": "integer", "minimum": 0, "maximum": 30000}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"const": "screenshot"}, "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "include_cursor": {"type": "boolean", "default": false, "description": "Direct operations-run currently requires false; true is supported when attached and replayed in MarkIts"}}}
+      ]
+    }
+  }
+}

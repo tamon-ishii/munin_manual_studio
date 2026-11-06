@@ -19,7 +19,9 @@
     "manual:app": "npm run manual:build-markits && cd apps/manual-studio && tauri dev",
     "manual:bundle": "cd apps/manual-studio && tauri build",
     "manual:smoke": "node scripts/smoke_manual_studio.mjs --start-server",
-    "manual:smoke-native": "node scripts/smoke_manual_markits_native.mjs"
+    "manual:smoke-native": "node scripts/smoke_manual_markits_native.mjs",
+    "manual:duplicates": "jscpd apps/manual-studio/src apps/manual-studio/src-tauri/src crates/manual-core/src --config .jscpd.json --noTips",
+    "manual:test-refactoring": "node scripts/test_manual_studio_refactoring.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.4",
@@ -31,16 +33,17 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "flexlayout-react": "^0.11.1",
+    "mdast-util-to-markdown": "^2.2.0",
     "mermaid": "^11.17.2",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "mdast-util-to-markdown": "^2.2.0"
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "jscpd": "^4.3.0",
     "playwright-core": "^1.63.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.3",

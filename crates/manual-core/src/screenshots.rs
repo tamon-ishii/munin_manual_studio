@@ -1094,65 +1094,6 @@ pub fn plan_recapture(root: &Path, id: Option<&str>) -> Result<Value, String> {
     Ok(json!({"items":items,"capture_count":captures.len()}))
 }
 
-fn scale_markits_scene(scene: &mut Value, width: u32, height: u32) -> Result<(), String> {
-    let canvas = scene
-        .get("canvas")
-        .and_then(Value::as_object)
-        .ok_or("MarkIts注釈にcanvas情報がありません")?;
-    let old_width = canvas
-        .get("width")
-        .and_then(Value::as_f64)
-        .filter(|value| *value > 0.0)
-        .ok_or("MarkIts注釈のcanvas幅が不正です")?;
-    let old_height = canvas
-        .get("height")
-        .and_then(Value::as_f64)
-        .filter(|value| *value > 0.0)
-        .ok_or("MarkIts注釈のcanvas高さが不正です")?;
-    let sx = width as f64 / old_width;
-    let sy = height as f64 / old_height;
-    let root = scene.as_object_mut().ok_or("MarkIts注釈の形式が不正です")?;
-    root.insert("canvas".into(), json!({"width":width,"height":height}));
-    if let Some(annotations) = root.get_mut("annotations").and_then(Value::as_array_mut) {
-        for annotation in annotations {
-            let Some(fields) = annotation.as_object_mut() else {
-                continue;
-            };
-            if let Some(values) = fields.get_mut("target").and_then(Value::as_array_mut) {
-                if values.len() == 4 {
-                    for (index, factor) in [sx, sy, sx, sy].into_iter().enumerate() {
-                        if let Some(value) = values[index].as_f64() {
-                            values[index] = json!(value * factor);
-                        }
-                    }
-                }
-            }
-            for key in ["start", "control", "end"] {
-                if let Some(values) = fields.get_mut(key).and_then(Value::as_array_mut) {
-                    if values.len() == 2 {
-                        for (index, factor) in [sx, sy].into_iter().enumerate() {
-                            if let Some(value) = values[index].as_f64() {
-                                values[index] = json!(value * factor);
-                            }
-                        }
-                    }
-                }
-            }
-            for (key, factor) in [
-                ("stroke_width", sx.min(sy)),
-                ("rx", sx),
-                ("ry", sy),
-                ("max_width", sx),
-            ] {
-                if let Some(value) = fields.get(key).and_then(Value::as_f64) {
-                    fields.insert(key.into(), json!(value * factor));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 fn recaptured_render(
     root: &Path,
     shot: &Screenshot,
@@ -1214,7 +1155,7 @@ fn recaptured_render(
         }
     }
     if !scene.is_null() {
-        scale_markits_scene(&mut scene, background.width(), background.height())?;
+        crate::markits_scene::scale_markits_scene(&mut scene, background.width(), background.height())?;
     }
     let mut bytes = std::io::Cursor::new(Vec::new());
     background

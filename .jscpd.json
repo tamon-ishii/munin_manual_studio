@@ -1,0 +1,12 @@
+{
+  "format": ["typescript", "tsx", "rust"],
+  "minLines": 5,
+  "minTokens": 50,
+  "maxLines": 20000,
+  "maxSize": "1mb",
+  "mode": "mild",
+  "reporters": ["console", "json"],
+  "output": "ui-coverage-results/jscpd",
+  "ignore": ["**/*.test.ts"],
+  "gitignore": true
+}

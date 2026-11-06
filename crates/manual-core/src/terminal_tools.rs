@@ -26,11 +26,12 @@ pub fn prepare_in(root:&Path,working_directory:Option<&str>)->Result<Value,Strin
     fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
     let config=read_config(&root);
     let executable=std::env::current_exe().map_err(|e|e.to_string())?;
-    let manifest=json!({"project":root,"working_directory":working_directory,"executable":executable,"docs":config.docs,"assets":config.assets,"actions":["windows","capture","inspect","annotate"]});
+    let manifest=json!({"project":root,"working_directory":working_directory,"executable":executable,"docs":config.docs,"assets":config.assets,"actions":["windows","capture","inspect","annotate","operations-schema","operations-validate","operations-inspect","operations-attach","operations-run"]});
     fs::write(directory.join("tools.json"),serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     fs::write(directory.join("guide.md"),include_str!("terminal_guide.md")).map_err(|e|e.to_string())?;
+    fs::write(directory.join("operation-script.schema.json"),include_str!("operation_script.schema.json")).map_err(|e|e.to_string())?;
     fs::write(directory.join("markits-manual.md"),include_str!("../../markits/docs/AI_MANUAL.md")).map_err(|e|e.to_string())?;
-    let prompt=format!("Read the guide at {} and the tools.json beside it before replying. Use bundled MarkIts tools for actual app screenshots and annotations. The current working directory may differ from the manual project; generate manuals in the project specified by tools.json. Ask which application and workflow to document if not specified.",directory.join("guide.md").display());
+    let prompt=format!("Read the guide at {} and the tools.json beside it before replying. Use bundled MarkIts tools for actual app screenshots, annotations and AI-authored operation scripts (operations-schema, operations-validate, operations-run). The current working directory may differ from the manual project; generate manuals in the project specified by tools.json. Ask which application and workflow to document if not specified.",directory.join("guide.md").display());
     Ok(json!({"prompt":prompt,"guide":directory.join("guide.md"),"working_directory":working_directory}))
 }
 
@@ -50,6 +51,7 @@ pub fn execute(request:&Value)->Result<Value,String>{
     if !root.is_dir(){return Err("Project directory does not exist".into());}
     match request["action"].as_str().unwrap_or(""){
         "windows"=>serde_json::to_value(markits::window_capture::list_windows()?).map_err(|e|e.to_string()),
+        action @ ("operations-schema" | "operations-validate" | "operations-inspect" | "operations-attach" | "operations-run") => crate::operation_script::execute(root,action,request),
         "capture"=>{
             let window=request["window"].as_str().filter(|s|!s.trim().is_empty()).ok_or("Choose a window ID from windows first")?;
             if !markits::window_capture::list_windows()?.iter().any(|item|item.id==window){return Err("Window ID was not found; refresh windows".into());}
@@ -99,6 +101,9 @@ mod tests{
         assert!(guide.contains("--studio-tools"));assert!(guide.contains("WINDOW_ID_FROM_WINDOWS"));
         assert!(fs::read_to_string(directory.join("markits-manual.md")).unwrap().contains("MarkIts AI Manual"));
         let manifest:Value=serde_json::from_slice(&fs::read(directory.join("tools.json")).unwrap()).unwrap();
+        assert!(manifest["actions"].as_array().unwrap().contains(&json!("operations-run")));
+        let schema:Value=serde_json::from_slice(&fs::read(directory.join("operation-script.schema.json")).unwrap()).unwrap();
+        assert_eq!(schema["properties"]["version"]["const"],1);
         assert_eq!(Path::new(manifest["project"].as_str().unwrap()).canonicalize().unwrap(),root.path().canonicalize().unwrap());
         assert_eq!(fs::read_to_string(root.path().join("AGENTS.md")).unwrap(),"Existing project instructions");
         let work=root.path().join("application source");fs::create_dir(&work).unwrap();

@@ -54,3 +54,41 @@ POSIX shell:
 新しい出力名を使い、原本を上書きしない。対象アプリを操作できない場合は、必要な画面をユーザーに開いてもらい、その画面を撮影する。撮影や検証ができなかったものを完了したと報告しない。
 
 アクセシビリティ情報を取得できないアプリでは、`capture`に`"detect_ui":false`を付けて撮影し、画像を見て座標で注釈を指定する。UIMap取得の失敗を、画面が撮影できた証拠として扱わない。
+
+## AIが操作を記述して自動撮影する
+
+`operations-schema`でJSON仕様を取得できます。同じ仕様はこのフォルダーの`operation-script.schema.json`にもあります。
+
+1. `windows`で対象のID・正確なタイトル・画面上のx/y・幅/高さを取得する。
+2. `capture`と`inspect`で実画面とUIMapを確認し、操作の対象を特定する。
+3. 次の形式の`script`を作り、`operations-validate`に渡して全手順を検証する。座標を使う場合のx/yは**ウィンドウ左上からの相対ピクセル**。観察していない座標や要素名は作らない。
+4. `operations-run`に同じscript、対象の現在のウィンドウID、新しい出力ディレクトリを渡す。クリック・入力・撮影が実行されるため、ユーザーが依頼したアプリと作業の範囲を守る。
+5. 応答の`captures`と生成された`run.json`を確認し、画像を見て原稿を書く。失敗時は`run.json`にエラーが残り、途中の画像は実行完了の証拠にしない。
+
+```json
+{
+  "root":"PROJECT_ABSOLUTE_PATH",
+  "action":"operations-validate",
+  "script":{
+    "version":1,
+    "window":{"title":"EXACT_OBSERVED_TITLE","bounds":[100,100,900,650]},
+    "steps":[
+      {"kind":"click","target":{"role":"button","name":"設定"}},
+      {"kind":"wait","milliseconds":500},
+      {"kind":"screenshot","name":"settings"},
+      {"kind":"click","target":{"role":"input","name":"表示名"}},
+      {"kind":"key","value":"Control+a"},
+      {"kind":"text","value":"サンプル"},
+      {"kind":"screenshot","name":"name-entered"}
+    ]
+  }
+}
+```
+
+実行時は`action`を`operations-run`にし、同じリクエストに`"window":"WINDOW_ID_FROM_WINDOWS"`、`"output":"docs/assets/setup-run-001"`を追加します。出力ディレクトリが存在する場合は実行せず、新しい名前を指定するよう求めます。対象タイトルが異なる場合も実行しません。既存の手動記録と同じく操作は対象アプリへ実際に入力されます。固定待機は画面到達の検証ではないので、取得画像を確認してください。
+
+各PNGには、その撮影地点までの操作を`markits:operations`として保存します。MarkItsで開き「再撮影」を使うと再生できます。`operations-inspect`に`image`を渡すと、手動記録を含むPNG内の操作をJSONで読めるため、既存手順の調査・新しいscriptの作成にも使えます。
+
+入力を実行せず、既存画像へ操作記録を付ける場合は`operations-attach`を使います。`script`に加えて`image`（元のPNG）と`output`（新しいPNG）を指定します。原本や既存出力は上書きしません。
+
+直接実行する撮影は現在カーソルなしです。`include_cursor:true`は`operations-attach`で保存し、MarkIts側で再生する場合に利用できます。待機は1回30秒、合計5分まで、手順は500件までです。クリック対象が曖昧な場合は座標へ推測で切り替えず失敗します。キーは`Control+a`などの修飾キー＋英数字・F1〜F12・Enter/Escape/Tab/Backspace/Delete/Space/方向キーです。任意コマンドやアプリ起動はscriptの操作として受け付けません。
