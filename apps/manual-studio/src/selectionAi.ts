@@ -4,7 +4,7 @@ import {consultationAgents} from './cliAiSettings';
 export interface SelectionDraft { text:string; apply:(content:string)=>void; }
 export interface SelectionAction {mode:'consult'|'rewrite';instruction:string;cliAgent?:string;includeScreenshots?:boolean}
 export function askSelectionAction(selected:string,agents:Array<{id:string;available:boolean}>=[],defaultAgent=''):Promise<SelectionAction|null>{
-  const {dialog,body}=featureDialog('AIで選択範囲を書き直す');dialog.id='selection-ai-action-dialog';
+  const {dialog,body}=featureDialog('AI文章');dialog.id='selection-ai-action-dialog';
   const preview=document.createElement('pre');preview.textContent=selected;preview.className='selection-ai-preview';
   const modeLabel=document.createElement('label');modeLabel.textContent='操作';
   const mode=document.createElement('select');mode.setAttribute('aria-label','AI操作');

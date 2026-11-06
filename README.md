@@ -1,12 +1,18 @@
 # Munin Manual Studio
 
-Munin Manual StudioはAIとの連携を目指したマークダウンエディタです。
+**「AIとつくる、壊さない。」マニュアル制作を劇的に効率化する次世代マークダウンエディタ**
 
-* AIにマニュアルを書かせたいけど、書き直してほしくない場所まで書き換えてしまう
-* スクリーンショットを自動で更新してほしい
-* APIドキュメントをもっと楽に作りたい
+マニュアルやドキュメントの作成で、こんな悩みはありませんか？
 
-これらの困りごとを解決します。
+* **「AIに任せたのに、変えてほしくない場所まで勝手に書き換えられた…」**
+* **「画面が変わるたびにスクリーンショットを撮り直すのが面倒…」**
+* **「日々のドキュメント作成・更新をもっとラクに終わらせたい！」**
+
+**Munin Manual Studio** なら、必要な箇所だけを安全にAI編集し、スクリーンショットの撮影・注釈・再撮影までこれひとつで完結できます。
+
+<br />
+
+<br />
 
 <br />
 
@@ -99,7 +105,7 @@ python3 start_manual_studio.py
 ## 関連ドキュメント
 
 * 利用者向けガイド:
-  *  [Munin Manual Studio 利用ガイド](manual_doc/index.md)
+  * [Munin Manual Studio 利用ガイド](manual_doc/index.md)
   * [準備と最初の原稿作成](manual_doc/getting-started.md)
   * [原稿編集とAI支援](manual_doc/editing-and-ai.md)
   * [画像とスクリーンショットの管理](manual_doc/images-and-screenshots.md)
