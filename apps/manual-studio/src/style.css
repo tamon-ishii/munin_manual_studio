@@ -227,8 +227,14 @@ button[data-toggle-approved].is-approved::before,
 .workspace-history-entry { display: grid; gap: 4px; text-align: left; padding: 12px; }
 .workspace-history-entry span { font-size: 12px; opacity: .75; overflow-wrap: anywhere; }
 
-#milkdown-editor{flex:1;min-height:0;overflow:auto;background:var(--input-bg);color:var(--input-text)}
+#milkdown-editor{flex:1;min-height:0;overflow:hidden;background:var(--input-bg);color:var(--input-text)}
+#milkdown-editor:not([data-source-mode=true])>.milkdown{height:100%;display:flex;flex-direction:column;min-height:0}
+#milkdown-editor .milkdown-top-bar{flex:none}
+#milkdown-editor:not([data-source-mode=true]) .milkdown>.ProseMirror{flex:1;min-height:0;overflow:auto}
 #milkdown-editor[hidden],#markdown-editor[hidden],.formatting-toolbar[hidden]{display:none}
+#milkdown-editor[data-source-mode=true]{flex:none;overflow:visible}
+#milkdown-editor[data-source-mode=true] .milkdown{min-height:0}
+#milkdown-editor[data-source-mode=true] .milkdown>:not(.milkdown-top-bar){display:none}
 #milkdown-editor .milkdown{min-height:100%;--crepe-color-background:var(--input-bg);--crepe-color-on-background:var(--input-text);--crepe-color-surface:var(--surface-soft);--crepe-color-surface-low:var(--surface-bg);--crepe-color-on-surface:var(--text-primary);--crepe-color-on-surface-variant:var(--text-muted);--crepe-color-outline:var(--text-muted);--crepe-color-primary:var(--accent);--crepe-color-hover:var(--surface-soft);--crepe-color-selected:var(--selection-bg);--crepe-color-inline-area:var(--surface-soft);--crepe-font-default:system-ui,sans-serif;--crepe-font-title:system-ui,sans-serif;--crepe-base-font-size:var(--editor-font-size,14px)}
 #milkdown-editor .milkdown .ProseMirror{padding:28px 34px;min-height:240px;overflow-wrap:anywhere}
 #milkdown-editor [data-type="html"]{font:11px/1.5 ui-monospace,monospace;color:var(--text-muted)}

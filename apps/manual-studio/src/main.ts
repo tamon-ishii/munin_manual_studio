@@ -30,6 +30,7 @@ import { setupControlIcons } from './controlIcons';
 import { setAiPhase } from './workflowPresentation';
 import { readAiCredential, saveAiCredential, hasUnassignedAiCredential, assignLegacyAiCredential } from "./aiCredentials";
 import { applyEditorFontSize, isEditorFontSize, setupEditorFontSize } from "./editorFontSize";
+import { applyPreviewFontSize, isPreviewFontSize, setupPreviewFontSize } from "./previewFontSize";
 import { setupMilkdownEditor, renderMermaid } from "./milkdownEditor";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -130,6 +131,12 @@ setupEditorFontSize(input("editor-font-size"), size => {
 });
 if (native) void listen<number>("manual-studio-editor-font-size-changed", ({ payload }) => {
   if (isEditorFontSize(payload)) applyEditorFontSize(payload, false);
+});
+setupPreviewFontSize(input("preview-font-size"), size => {
+  if (native) void emit("manual-studio-preview-font-size-changed", size);
+});
+if (native) void listen<number>("manual-studio-preview-font-size-changed", ({ payload }) => {
+  if (isPreviewFontSize(payload)) applyPreviewFontSize(payload, false);
 });
 const themePicker = element<HTMLSelectElement>("ui-theme");
 themePicker.value = currentTheme();
@@ -677,7 +684,7 @@ async function openImageTab(path: string): Promise<void> {
 
 function retainDocumentTab(): void {
   if (!documentState) return;
-  documentTabs.set(documentState.page, { document: documentState, content: editor.value, start: editor.selectionStart, end: editor.selectionEnd, scroll: editor.scrollTop, richScroll: milkdown.host.scrollTop, history: editHistory, richState: milkdown.captureState() });
+  documentTabs.set(documentState.page, { document: documentState, content: editor.value, start: editor.selectionStart, end: editor.selectionEnd, scroll: editor.scrollTop, richScroll: milkdown.scrollElement.scrollTop, history: editHistory, richState: milkdown.captureState() });
 }
 let documentTabsSignature = '';
 async function closeFileTabs(targets:FileTab[]):Promise<void>{
@@ -791,7 +798,7 @@ function syncScroll(source: Element, target: Element | null): void {
 }
 function onPreviewScroll(): void {
   const source = previewScrollElement();
-  if (source) syncScroll(source, editor.hidden ? milkdown.host : editor);
+  if (source) syncScroll(source, editor.hidden ? milkdown.scrollElement : editor);
 }
 let projectRequestVersion = 0;
 let documentRequestVersion = 0;
@@ -819,7 +826,7 @@ async function openPage(page: string, check = true, restored?: Document): Promis
   if (!cached) resetEditHistory();
   if (cached?.richState) milkdown.restoreState(cached.richState);
   editor.setSelectionRange(cached?.start || 0, cached?.end || 0);
-  editor.scrollTop = cached?.scroll || 0; milkdown.host.scrollTop = cached?.richScroll || 0;
+  editor.scrollTop = cached?.scroll || 0; milkdown.scrollElement.scrollTop = cached?.richScroll || 0;
   editor.disabled = false;
   dirty = editor.value !== opened.content;
   retainDocumentTab();
@@ -1515,7 +1522,7 @@ editor.addEventListener("input", (event) => {
   previewScheduler.schedule();
 });
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
-milkdown.host.addEventListener("scroll", () => syncScroll(milkdown.host, previewScrollElement()));
+milkdown.host.addEventListener("scroll", event => { if (event.target === milkdown.scrollElement) syncScroll(milkdown.scrollElement, previewScrollElement()); }, true);
 element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
   if (documentState && !previewRequestPending) previewNavigator.setStatus('ready');
   previewNavigator.setupIframeInterception(element<HTMLIFrameElement>("markdown-preview"));
@@ -1532,7 +1539,7 @@ element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
   previewScrollWindow?.removeEventListener("scroll", onPreviewScroll);
   previewScrollWindow = element<HTMLIFrameElement>("markdown-preview").contentWindow;
   previewScrollWindow?.addEventListener("scroll", onPreviewScroll);
-  syncScroll(editor.hidden ? milkdown.host : editor, previewScrollElement());
+  syncScroll(editor.hidden ? milkdown.scrollElement : editor, previewScrollElement());
 });
 editor.addEventListener("click", updateCursor); editor.addEventListener("keyup", updateCursor); editor.addEventListener("select", updateCursor);
 function replaceMarkdown(start: number, end: number, replacement: string, selectStart: number, selectEnd = selectStart): void {
@@ -1575,7 +1582,15 @@ function applyMarkdownFormat(format: string): void {
     const focusStart = selected ? label.length + 3 : 1;
     replaceMarkdown(start, end, replacement, focusStart, focusStart + (selected ? url.length : label.length));
   } else if (format === "heading") {
-    applyAssist(changeHeadingLevel(editor.value, start, end, Number(element<HTMLSelectElement>("heading-level").value)));
+    const level = Number(element<HTMLSelectElement>("heading-level").value);
+    if (level) applyAssist(changeHeadingLevel(editor.value, start, end, level));
+    else {
+      const from = editor.value.lastIndexOf('\n', start - 1) + 1;
+      const newline = editor.value.indexOf('\n', end);
+      const to = newline < 0 ? editor.value.length : newline;
+      const text = editor.value.slice(from, to).replace(/^(\s*)#{1,6}\s+/gm, '$1');
+      replaceMarkdown(from, to, text, 0, text.length);
+    }
   } else if (format === "bullet" || format === "numbered" || format === "quote") {
     const lineStart = editor.value.lastIndexOf("\n", start - 1) + 1;
     const nextNewline = editor.value.indexOf("\n", end);
@@ -1585,6 +1600,8 @@ function applyMarkdownFormat(format: string): void {
     replaceMarkdown(lineStart, lineEnd, replacement, replacement.length, replacement.length);
   } else if (format === "mermaid") {
     replaceMarkdown(start, end, "\n\n```mermaid\ngraph TD\n    A[開始] --> B[完了]\n```\n", 0);
+  } else if (format === "math") {
+    replaceMarkdown(start, end, `\n\n\`\`\`LaTeX\n${selected || 'x = y'}\n\`\`\`\n`, 0);
   } else if (format === "code-block" || format === "table" || format === "rule") {
     const before = editor.value.slice(0, start);
     const after = editor.value.slice(end);
@@ -1605,6 +1622,15 @@ function applyMarkdownFormat(format: string): void {
   }
 }
 document.querySelectorAll<HTMLButtonElement>("[data-format]").forEach((button) => button.addEventListener("click", () => applyMarkdownFormat(button.dataset.format!)));
+editor.addEventListener('source-toolbar-action', event => {
+  if (busy || !documentState || editor.readOnly || editor.disabled) return;
+  const {format, level, markdown} = (event as CustomEvent<{format:string;level?:number;markdown?:string}>).detail;
+  if (format === 'undo' || format === 'redo') {stepEditHistory(format === 'undo' ? -1 : 1); return;}
+  if (format === 'image') {element('insert-image').click(); return;}
+  if (format === 'alert' && markdown) {insertDocumentMarkdown(markdown); return;}
+  if (format === 'heading' && level !== undefined) element<HTMLSelectElement>('heading-level').value = String(level);
+  applyMarkdownFormat(format);
+});
 editor.addEventListener("keydown", (event) => {
   if (busy || !documentState) return;
   if (event.key === "Enter" && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && editor.selectionStart === editor.selectionEnd) {
@@ -1734,12 +1760,48 @@ for (const [label, id] of [['Markdownを作成','new-page'],['フォルダーを
 }
 const moveMenuItem=document.createElement('button');moveMenuItem.type='button';moveMenuItem.role='menuitem';moveMenuItem.textContent='移動してリンクを更新';moveMenuItem.hidden=true;
 moveMenuItem.onclick=()=>{treeContextMenu.hidden=true;if(contextMoveSource)void moveTreeFile(contextMoveSource);};treeContextMenu.append(moveMenuItem);
+const deleteMenuItem=document.createElement('button');deleteMenuItem.type='button';deleteMenuItem.role='menuitem';deleteMenuItem.textContent='削除';deleteMenuItem.hidden=true;
+deleteMenuItem.onclick=()=>{
+  treeContextMenu.hidden=true;
+  const source=contextMoveSource,root=projectRoot;if(!source||!root||busy)return;
+  void work(async()=>{
+    await savedBeforeOperation();retainDocumentTab();
+    for(const [page,tab] of documentTabs)if(tab.content!==tab.document.content)throw new Error(`${page}に未保存の変更があります。先に保存してください。`);
+    const plan=JSON.parse(await rpc('project-delete-file',{json:{source}},root)) as {source:string;references:string[];token:string};
+    if(root!==projectRoot)return;
+    const {dialog,body}=featureDialog('ファイルを削除');dialog.id='file-delete-dialog';
+    const description=document.createElement('p');description.textContent=`「${source}」を削除しますか？`;
+    const warning=document.createElement('p');warning.role=plan.references.length?'alert':'status';
+    warning.textContent=plan.references.length?'このファイルは次のファイルから参照されています。削除するとリンク切れになります。':'このファイルへの参照は見つかりませんでした。';
+    const list=document.createElement('ul');for(const path of plan.references){const item=document.createElement('li');item.textContent=path;list.append(item);}
+    const note=document.createElement('p');note.textContent='削除前のファイルを .munin/file-deletions/ にバックアップします。';
+    const message=document.createElement('p');message.role='alert';
+    const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
+    const apply=document.createElement('button');apply.type='button';apply.textContent=plan.references.length?'参照を確認して削除':'削除する';
+    let deleting=false;
+    dialog.addEventListener('cancel',event=>{if(deleting)event.preventDefault();});
+    apply.onclick=()=>{if(deleting||busy||root!==projectRoot||!dialog.open)return;deleting=true;apply.disabled=cancel.disabled=true;void work(async()=>{
+      try{
+        retainDocumentTab();
+        for(const [page,tab] of documentTabs)if(tab.content!==tab.document.content)throw new Error(`${page}に未保存の変更があります。先に保存してください。`);
+        await rpc('project-delete-file',{json:{source:plan.source,token:plan.token,apply:true}},root);
+        dialog.close();
+        const targets:FileTab[]=[...[...documentTabs.keys()].filter(page=>manuscriptPagePath(page)===source).map(path=>({kind:'document' as const,path})),...[...imageTabs].filter(path=>path===source).map(path=>({kind:'image' as const,path}))];
+        await closeFileTabs(targets);await refreshWorkspace(false,false);await markitsImages.refresh();renderPages();renderDocumentTabs();
+        status(`${source}を削除しました。`);
+      }catch(error){message.textContent=String(error);}
+      finally{deleting=false;apply.disabled=cancel.disabled=false;}
+    });};
+    const actions=document.createElement('div');actions.className='actions';actions.append(cancel,apply);body.append(description,warning,list,note,message,actions);cancel.focus();
+  });
+};treeContextMenu.append(deleteMenuItem);
 document.body.append(treeContextMenu);
 element('page-list').addEventListener('contextmenu', event => {
   if (!workspace || busy) return; event.preventDefault();
   const target = event.target as HTMLElement;
   const file = target.closest<HTMLElement>('[data-page],[data-image],[data-file]');
   contextMoveSource=file?(file.dataset.page||file.dataset.image||file.dataset.file||null):null;moveMenuItem.hidden=!contextMoveSource;
+  deleteMenuItem.hidden=!contextMoveSource;
   contextCreateParent = file ? (file.dataset.page || file.dataset.image || file.dataset.file || '').split('/').slice(0,-1).join('/') : target.closest<HTMLElement>('[data-folder]')?.dataset.folder || workspace.config.docs;
   contextCreateParent = contextCreateParent.replace(/\\/g, '/').split('/').filter(part => part && part !== '.').join('/');
   treeContextMenu.hidden = false;
@@ -1874,6 +1936,7 @@ let pendingImageOwner: {root:string;page:string;content:string;documentSession:n
 const toolbarImageInput = element<HTMLInputElement>("toolbar-image-input");
 element("insert-image").addEventListener("click", () => {
   if (!documentState) { status("先にMarkdown原稿を開いてください。", true); return; }
+  if (busy) return;
   pendingImageSelection = null;
   toolbarImageInput.click();
 });

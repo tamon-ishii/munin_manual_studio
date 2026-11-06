@@ -15,6 +15,8 @@ export function setupPreviewTheme(iframe: HTMLIFrameElement): void {
       style.textContent = `
         :root { color-scheme: ${palette.colorScheme || 'light'}; }
         html, body { background: ${color('--surface-bg', '#fff')}; color: ${color('--text-primary', '#26342f')}; }
+        body { font-size: ${color('--preview-font-size', '16px')}; }
+        h1 { font-size: 1.875em; }
         h2, td, th { border-color: ${color('--border-color', '#dbe4df')}; }
         a { color: ${color('--accent', '#246b54')}; }
         pre, code { background: ${color('--surface-soft', '#f2f5f3')}; color: ${color('--text-primary', '#26342f')}; }

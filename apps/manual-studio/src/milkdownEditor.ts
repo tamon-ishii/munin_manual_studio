@@ -169,6 +169,11 @@ export function setupMilkdownEditor(
     }
     const imgRect = activeImg.getBoundingClientRect();
     const hostRect = host.getBoundingClientRect();
+    const viewport = host.querySelector<HTMLElement>('.ProseMirror')?.getBoundingClientRect() || hostRect;
+    if (imgRect.bottom <= viewport.top || imgRect.top >= viewport.bottom) {
+      hideOverlay();
+      return;
+    }
     const top = imgRect.top - hostRect.top + host.scrollTop + 8;
     const right = hostRect.right - imgRect.right - host.scrollLeft + 8;
     overlay.style.top = `${Math.max(0, top)}px`;
@@ -216,7 +221,7 @@ export function setupMilkdownEditor(
 
   host.addEventListener('scroll', () => {
     if (activeImg) updateOverlayPosition();
-  }, { passive: true });
+  }, { passive: true, capture: true });
   window.addEventListener('resize', () => {
     if (activeImg) updateOverlayPosition();
   }, { passive: true });
@@ -279,17 +284,23 @@ export function setupMilkdownEditor(
   }
   function showSource() {
     hideOverlay();
-    sourceMode = true; host.hidden = true; source.hidden = false;
-    if (sourceToolbar) sourceToolbar.hidden = false;
-    if (sourceAiToolbar) sourceAiToolbar.hidden = false;
+    sourceMode = true; host.hidden = false; host.dataset.sourceMode = 'true'; source.hidden = false;
     toggle.textContent = 'Milkdown編集'; toggle.setAttribute('aria-pressed', 'true');
     source.dispatchEvent(new Event('editor-mode-change'));
   }
   toggle.addEventListener('click', () => {
     if (!sourceMode) { showSource(); source.focus(); }
-    else { refresh(true); if (sourceToolbar) sourceToolbar.hidden = true; if (sourceAiToolbar) sourceAiToolbar.hidden = true; sourceMode = false; host.hidden = false; source.hidden = true; toggle.textContent = 'Markdownソース'; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); }
+    else { refresh(true); sourceMode = false; delete host.dataset.sourceMode; host.hidden = false; source.hidden = true; toggle.textContent = 'Markdownソース'; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); }
   });
   source.addEventListener('input', () => { if (!syncing) refresh(); });
+  // Notify the existing top bar when source selection changes, without parsing
+  // partially written Markdown or adding an entry to the rich editor history.
+  const refreshSourceToolbar = () => {
+    if (sourceMode && ready && instance) instance.action(ctx => {
+      const view = ctx.get(editorViewCtx); view.dispatch(view.state.tr.setMeta('addToHistory', false));
+    });
+  };
+  for (const event of ['input', 'select', 'click', 'keyup', 'editor-mode-change']) source.addEventListener(event, refreshSourceToolbar);
   function updateReadonly() {
     if (!ready || !crepe || !instance) return;
     const next = source.disabled || source.readOnly;
@@ -367,7 +378,7 @@ export function setupMilkdownEditor(
     dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';dom.style.textAlign=configured?node.attrs.alignment:'';
   });});}
   function fitToolbarMenus() {
-    const bounds = host.getBoundingClientRect();
+    const bounds = (sourceMode ? source.parentElement! : host).getBoundingClientRect();
     host.querySelectorAll<HTMLElement>('.top-bar-heading-dropdown').forEach(menu => {
       const selector = menu.parentElement!.getBoundingClientRect();
       const below = Math.max(0, bounds.bottom - selector.bottom - 4);
@@ -384,7 +395,7 @@ export function setupMilkdownEditor(
   }
   const menuResizeObserver = new ResizeObserver(fitToolbarMenus);
   menuResizeObserver.observe(host);
-  host.addEventListener('scroll', fitToolbarMenus);
+  host.addEventListener('scroll', fitToolbarMenus, true);
   const toolbarObserver = new MutationObserver(() => {
     fitToolbarMenus();
     applyImageStyles();
@@ -419,6 +430,38 @@ export function setupMilkdownEditor(
             if (!groups[index].items.length) groups.splice(index, 1);
           }
           topBarLabels.splice(0, topBarLabels.length, ...builder.build().flatMap(group => group.items.filter(item => item.onRun).map(item => labels[item.key] || item.key)));
+          // Keep Milkdown's original UI in both modes; route only the operation
+          // to the Markdown source when it is being edited.
+          const sourceAction = (format: string, extra: Record<string, unknown> = {}) => {
+            source.dispatchEvent(new CustomEvent('source-toolbar-action', {detail: {format, ...extra}}));
+          };
+          const formats: Record<string, string> = {strikethrough:'strike', code:'inline-code', 'bullet-list':'bullet', 'ordered-list':'numbered', hr:'rule'};
+          for (const group of builder.build()) for (const item of group.items) {
+            const run = item.onRun;
+            if (run) item.onRun = ctx => sourceMode ? sourceAction(formats[item.key] || item.key) : run(ctx);
+            const active = item.active;
+            item.active = ctx => sourceMode ? false : active(ctx);
+            if (!item.selector) continue;
+            const selector = item.selector;
+            if (item.key === 'heading-selector') {
+              const label = selector.activeLabel;
+              selector.activeLabel = ctx => {
+                if (!sourceMode) return label(ctx);
+                const start = sourceValue().lastIndexOf('\n', source.selectionStart - 1) + 1;
+                const heading = /^(#{1,6})\s/.exec(sourceValue().slice(start));
+                return heading ? `見出し${heading[1].length}` : '本文';
+              };
+            }
+            selector.options = selector.options.map((option, index) => {
+              const select = option.onSelect;
+              return {...option, onSelect: ctx => {
+                if (!sourceMode) {select(ctx); return;}
+                if (item.key === 'heading-selector') sourceAction('heading', {level:index});
+                else if (item.key === 'gfm-alert') sourceAction('alert', {markdown:alertMarkdown(alertKinds[index][0])});
+                else if (item.key === 'insert') sourceAction(formats[advanced[index].key] || advanced[index].key);
+              }};
+            });
+          }
         },
       },
       [Crepe.Feature.Toolbar]: {
@@ -491,7 +534,14 @@ export function setupMilkdownEditor(
     instance = editor; ready = true; refresh(); updateReadonly();
     if (!sourceMode) source.hidden = true;
     source.dispatchEvent(new Event('editor-mode-change'));
-  }).catch(error => { showSource(); toggle.disabled = true; report(`Milkdownの起動に失敗しました: ${String(error)}`); });
+  }).catch(error => {
+    showSource();
+    // Retain the standalone source controls if Milkdown cannot create its UI.
+    if (sourceToolbar) sourceToolbar.hidden = false;
+    if (sourceAiToolbar) sourceAiToolbar.hidden = false;
+    toggle.disabled = true;
+    report(`Milkdownの起動に失敗しました: ${String(error)}`);
+  });
   function stepHistory(direction: number): boolean {
     if (sourceMode || !instance || !ready) return false;
     instance.action(ctx => { const view = ctx.get(editorViewCtx); if (direction < 0) undoOrCancel(ctx); else redo(view.state, view.dispatch); view.focus(); });
@@ -552,6 +602,7 @@ export function setupMilkdownEditor(
     });
   }
   return { showSource, refresh, refreshImages, host, stepHistory,imageSourceRange,runShortcut,
+    get scrollElement(): HTMLElement { return host.querySelector<HTMLElement>('.ProseMirror') || host; },
     selectedImageSourceRange:()=>{if(!ready||!instance||sourceMode)return;let image:HTMLImageElement|undefined;instance.action(ctx=>{const view=ctx.get(editorViewCtx);const dom=view.nodeDOM(view.state.selection.from);image=dom instanceof HTMLImageElement?dom:dom instanceof HTMLElement?dom.querySelector<HTMLImageElement>('img')||undefined:undefined;});return image?imageSourceRange(image):undefined;},
     replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.dispatch(closeHistory(view.state.tr));replaceAll(markdown,false)(ctx);view.dispatch(closeHistory(view.state.tr));});return true;},
     focus: () => { if (sourceMode) source.focus(); else instance?.action(ctx=>ctx.get(editorViewCtx).focus()); },

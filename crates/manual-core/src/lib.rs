@@ -155,6 +155,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "editor-preview",
         "project-search",
         "project-move-file",
+        "project-delete-file",
         "editor-batch-save",
         "editor-outline",
         "manuscript-git-status",
@@ -382,6 +383,10 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "manuscript-git-status" | "manuscript-git-init" | "manuscript-git-history" | "manuscript-git-version" | "manuscript-git-commit" => {
             let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
             serde_json::to_string(&manuscript_git::handle(root,action,&value)?).map_err(|e|e.to_string())
+        }
+        "project-delete-file" => {
+            let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
+            Ok(file_move::delete(root,&value)?.to_string())
         }
         "project-move-file" => {
             let value: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;

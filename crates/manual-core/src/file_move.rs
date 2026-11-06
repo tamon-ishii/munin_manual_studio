@@ -367,6 +367,39 @@ fn write_checked(root: &Path, path: &str, before: &[u8], after: &[u8]) -> Result
     tmp.persist(path).map_err(|e| e.to_string())?;
     Ok(())
 }
+/// Reuse the move planner's parsed references without applying any link rewrites.
+pub(crate) fn delete(root: &Path, options: &Value) -> Result<Value, String> {
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let source = options["source"].as_str().ok_or("削除するファイルを指定してください。")?.replace('\\', "/");
+    validate(&source)?;
+    let _move_lock = workflow::resource_lock(&root, ".munin/file-move")?;
+    let _asset_lock = workflow::resource_lock(&root, ".munin/screenshots")?;
+    let _source_lock = workflow::resource_lock(&root, &source)?;
+    let candidate = plan(&root, &source, &format!("{source}.munin-delete-preview"))?;
+    let token = hash(&serde_json::to_vec(&candidate).map_err(|e| e.to_string())?);
+    let references: Vec<_> = candidate.changes.iter().filter(|c| c.page != source).map(|c| c.page.clone()).collect();
+    if options["apply"].as_bool() != Some(true) {
+        return Ok(json!({"source":source,"references":references,"token":token}));
+    }
+    if options["token"].as_str() != Some(&token) {
+        return Err("ファイルまたは参照元が変更されています。リンクチェックをやり直してください。".into());
+    }
+    let path = project_path(&root, &source)?;
+    let original = fs::read(&path).map_err(|e| e.to_string())?;
+    if hash(&original) != candidate.source_hash {
+        return Err("削除対象が変更されています。".into());
+    }
+    let backup = format!(".munin/file-deletions/{}", crate::screenshots::new_id("delete"));
+    let home = project_path(&root, &backup)?;
+    fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    fs::write(home.join("source.bin"), &original).map_err(|e| e.to_string())?;
+    fs::write(home.join("manifest.json"), json!({"source":source,"references":references}).to_string()).map_err(|e| e.to_string())?;
+    if fs::read(&path).map_err(|e| e.to_string())? != original {
+        return Err("削除対象が変更されています。".into());
+    }
+    fs::remove_file(path).map_err(|e| e.to_string())?;
+    Ok(json!({"source":source,"backup":backup}))
+}
 pub(crate) fn execute(root: &Path, options: &Value) -> Result<Value, String> {
     let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
     let root = canonical_root.as_path();
@@ -483,6 +516,37 @@ pub(crate) fn execute(root: &Path, options: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deletion_checks_references_rejects_stale_confirmation_and_backs_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("image.png"), b"image").unwrap();
+        fs::write(root.join("guide.md"), "![image](image.png)\n").unwrap();
+        fs::write(root.join("code.md"), "```md\n![image](image.png)\n```\n").unwrap();
+        let preview = delete(root, &json!({"source":"image.png"})).unwrap();
+        assert_eq!(preview["references"], json!(["guide.md"]));
+        assert!(root.join("image.png").exists());
+        fs::write(root.join("guide.md"), "<img src=\"image.png\">\n").unwrap();
+        assert!(delete(root, &json!({"source":"image.png","apply":true,"token":preview["token"]})).is_err());
+        assert!(root.join("image.png").exists());
+        let preview = delete(root, &json!({"source":"image.png"})).unwrap();
+        let result = delete(root, &json!({"source":"image.png","apply":true,"token":preview["token"]})).unwrap();
+        assert!(!root.join("image.png").exists());
+        assert_eq!(fs::read(root.join(result["backup"].as_str().unwrap()).join("source.bin")).unwrap(), b"image");
+        assert_eq!(fs::read_to_string(root.join("guide.md")).unwrap(), "<img src=\"image.png\">\n");
+        assert!(delete(root, &json!({"source":"../outside"})).is_err());
+        assert!(delete(root, &json!({"source":"manual_setting.json"})).is_err());
+    }
+
+    #[test]
+    fn deletion_without_references_and_changed_source() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), "# A\n").unwrap();
+        let preview = delete(dir.path(), &json!({"source":"a.md"})).unwrap();
+        assert_eq!(preview["references"], json!([]));
+        fs::write(dir.path().join("a.md"), "# Changed\n").unwrap();
+        assert!(delete(dir.path(), &json!({"source":"a.md","apply":true,"token":preview["token"]})).is_err());
+    }
     fn move_file(root: &Path, from: &str, to: &str) -> Value {
         let preview = execute(root, &json!({"source":from,"destination":to})).unwrap();
         execute(
