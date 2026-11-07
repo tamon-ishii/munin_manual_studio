@@ -16,6 +16,9 @@ use super::window_capture::{self, WindowInfo};
 fn nonempty(value: &Value) -> Option<&str> {
     value.as_str().filter(|text| !text.trim().is_empty())
 }
+fn condition_satisfied(state:&str,visible:bool,actual:Option<&str>,expected:Option<&str>)->bool {
+    match state {"hidden"=>!visible,"visible"=>visible,"value"=>visible&&expected.is_some()&&actual==expected,_=>false}
+}
 
 fn retry_unavailable_ui_element<T>(
     timeout: Duration,
@@ -226,6 +229,11 @@ pub(crate) fn validate_with_tasks(
                     serde_json::from_value::<super::semantic_target::Target>(target.clone())
                         .map_err(|error| error.to_string())?.validate()?;
                 }
+            }
+            "wait_target" => {
+                serde_json::from_value::<super::semantic_target::Target>(value["target"].clone()).map_err(|e|e.to_string())?.validate()?;
+                let state=value["state"].as_str().unwrap_or("");
+                if !matches!(state,"visible"|"hidden"|"value") || value["timeout_ms"].as_u64().is_none_or(|ms|ms==0||ms>30000) || (state=="value"&&value["value"].as_str().is_none()) {return Err("状態確認の指定が不正です。".into());}
             }
             "wait_ms" => {
                 if value.as_u64().is_none_or(|ms| ms > 30_000) {
@@ -1108,6 +1116,25 @@ pub fn run(
                         thread::sleep(Duration::from_millis(100));
                     }
                 }
+                "wait_target" => {
+                    let target:super::semantic_target::Target=serde_json::from_value(value["target"].clone()).map_err(|e|e.to_string())?;
+                    let state=value["state"].as_str().unwrap();
+                    let deadline=Instant::now()+Duration::from_millis(value["timeout_ms"].as_u64().unwrap());
+                    loop {
+                        super::agent::check_cancelled(root,&checkpoint)?;
+                        if started.elapsed()>=timeout {return Err("状態確認が実行の制限時間を超えました。".into());}
+                        let native=selected.native()?;
+                        let elements=super::semantic_target::observe_window(&native.id)?;
+                        let visible=target.resolve(&elements)?.is_some();
+                        let actual=if state=="value"&&visible {super::semantic_target::input_value(&native.id,&target)?}else{None};
+                        let matched=condition_satisfied(state,visible,actual.as_deref(),value["value"].as_str());
+                        super::agent::check_cancelled(root,&checkpoint)?;
+                        if Instant::now()>deadline || started.elapsed()>=timeout {return Err(format!("状態確認がタイムアウトしました：{} ({state})",target.name));}
+                        if matched {super::agent::log_progress(root,&format!("状態確認に成功：{} ({state})",target.name));break;}
+                        if Instant::now()>=deadline {return Err(format!("状態確認がタイムアウトしました：{} ({state})",target.name));}
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                }
                 "wait_ms" => {
                     let end=std::time::Instant::now()+Duration::from_millis(value.as_u64().unwrap());
                     while std::time::Instant::now()<end {
@@ -1153,6 +1180,14 @@ pub fn run(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn state_checks_require_observed_matches_and_validate_parameters(){
+        assert!(condition_satisfied("visible",true,None,None));assert!(!condition_satisfied("visible",false,None,None));
+        assert!(condition_satisfied("hidden",false,None,None));assert!(!condition_satisfied("hidden",true,None,None));
+        assert!(condition_satisfied("value",true,Some("Saved"),Some("Saved")));assert!(!condition_satisfied("value",true,Some("Old"),Some("Saved")));assert!(!condition_satisfied("value",false,Some("Saved"),Some("Saved")));
+        let root=tempdir().unwrap();assert!(validate(&[serde_json::json!({"wait_target":{"target":{"role":"text","name":"Saved"},"state":"visible","timeout_ms":1000}})],root.path()).is_ok());assert!(validate(&[serde_json::json!({"wait_target":{"target":{"role":"text","name":"Saved"},"state":"value","timeout_ms":0}})],root.path()).is_err());
+    }
 
     #[test]
     fn named_click_validation_keeps_legacy_and_rejects_mixed_targets() {

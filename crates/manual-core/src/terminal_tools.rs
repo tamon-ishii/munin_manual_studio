@@ -26,7 +26,7 @@ pub fn prepare_in(root:&Path,working_directory:Option<&str>)->Result<Value,Strin
     fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
     let config=read_config(&root);
     let executable=std::env::current_exe().map_err(|e|e.to_string())?;
-    let manifest=json!({"project":root,"working_directory":working_directory,"executable":executable,"docs":config.docs,"assets":config.assets,"actions":["windows","capture","inspect","annotate","operations-schema","operations-validate","operations-inspect","operations-attach","operations-run"]});
+    let manifest=json!({"project":root,"working_directory":working_directory,"executable":executable,"docs":config.docs,"assets":config.assets,"target_application":crate::target_application::context(&root),"actions":["windows","capture","inspect","annotate","target-launch","operations-schema","operations-validate","operations-inspect","operations-attach","operations-run","operations-resume"]});
     fs::write(directory.join("tools.json"),serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     fs::write(directory.join("guide.md"),include_str!("terminal_guide.md")).map_err(|e|e.to_string())?;
     fs::write(directory.join("operation-script.schema.json"),include_str!("operation_script.schema.json")).map_err(|e|e.to_string())?;
@@ -50,8 +50,9 @@ pub fn execute(request:&Value)->Result<Value,String>{
     let root=Path::new(request["root"].as_str().ok_or("root is required")?);
     if !root.is_dir(){return Err("Project directory does not exist".into());}
     match request["action"].as_str().unwrap_or(""){
+        "target-launch"=>crate::target_application::launch(root),
         "windows"=>serde_json::to_value(markits::window_capture::list_windows()?).map_err(|e|e.to_string()),
-        action @ ("operations-schema" | "operations-validate" | "operations-inspect" | "operations-attach" | "operations-run") => crate::operation_script::execute(root,action,request),
+        action @ ("operations-schema" | "operations-validate" | "operations-inspect" | "operations-attach" | "operations-run" | "operations-resume") => crate::operation_script::execute(root,action,request),
         "capture"=>{
             let window=request["window"].as_str().filter(|s|!s.trim().is_empty()).ok_or("Choose a window ID from windows first")?;
             if !markits::window_capture::list_windows()?.iter().any(|item|item.id==window){return Err("Window ID was not found; refresh windows".into());}

@@ -7,6 +7,7 @@ import {currentLine} from './editorLineCommands';
 import {setupCliAiSettings} from './cliAiSettings';
 import { setupFileMove, type FileMoveResult } from './fileMove';
 import { PreviewScheduler } from './previewScheduler';
+import {rememberPreviewContent,rememberPreviewReplacement,updatePreviewContent} from './previewContent';
 import { DocumentPersistence } from './documentPersistence';
 import {OperationTiming,stageLabels,operationProgress} from './operationTimings';
 import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
@@ -15,6 +16,7 @@ import {applyReviewCorrections} from './reviewCorrections';
 import {askReader,showReaderReport,type ReaderReport,type ReviewCapabilities} from './readerReview';
 import {reviewDraft,type DraftCandidate} from './draftReview';
 import {askTemplateDestination} from './templateCreation';
+import {configureTargetApplication,type TargetApplication} from './targetApplication';
 import {setupPathPickers,addPathBrowse} from './pathPicker';
 import {setupFileTabMenu,type FileTab} from './fileTabMenu';
 import { AiProgressManager } from './aiProgressManager';
@@ -371,6 +373,8 @@ function startAiProgress(action: string,cliAgent?:string): void {
   const operation = ({
     draft: "原稿の下書きを生成中",
     "draft-propose": "原稿の下書き候補を生成中",
+    "draft-plan": "操作計画の候補を生成中",
+    "operation-workbench": "操作・再撮影を実行中",
     "document-review": "文章をレビュー・校正中",
   } as Record<string, string>)[action] || "AI文書の候補を作成中";
   activeGenerationRoot = projectRoot;
@@ -471,7 +475,7 @@ element("progress-open").addEventListener("click", () => {
 });
 async function rpc(action: string, options: Record<string, unknown> = {}, root = projectRoot): Promise<string> {
   const mergedOptions = { ...options };
-  const aiActions = new Set(["selection-generate", "document-review", "draft", "draft-propose", "fact-check", "scenario-save"]);
+  const aiActions = new Set(["selection-generate", "document-review", "draft", "draft-propose", "draft-plan", "operation-workbench", "fact-check", "scenario-save"]);
   if (aiActions.has(action) && mergedOptions.api_key === undefined) {
     mergedOptions.api_key = root === projectRoot ? readAiCredential(root, workspace?.config.endpoint_url || "") : "";
   }
@@ -586,10 +590,10 @@ function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
   }
   else button.disabled = disabled;
 }
-async function savedBeforeOperation(): Promise<void> {
+async function savedBeforeOperation(allowUnsaved=false): Promise<void> {
   await saveBriefSettings();
   await documentPersistence.wait();
-  if (dirty) throw new Error('原稿に未保存の変更があります。保存ボタンまたはCtrl/Cmd+Sで保存してください。');
+  if (dirty&&!allowUnsaved) throw new Error('原稿に未保存の変更があります。保存ボタンまたはCtrl/Cmd+Sで保存してください。');
 }
 async function work(operation: () => Promise<void>): Promise<void> {
   if (busy) return;
@@ -769,13 +773,21 @@ function updateSaveState(): void {
   updateEditorEmptyState();
 }
 type PreviewSnapshot = { root: string; page: string; body: string; version: number };
+let previewContentKey='';
+let renderedPreviewDocument:HTMLDocument|null=null;
 const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
   snapshot: () => documentState ? {root: projectRoot, page: documentState.page, body: editor.value, version: documentRequestVersion} : null,
   key: snapshot => JSON.stringify(snapshot),
   visible: () => element('panel-editor').dataset.editorView !== 'edit' && !activeImageTab && Boolean(element('markdown-preview').getClientRects().length),
   generate: snapshot => rpc('editor-preview', {page: snapshot.page, body: snapshot.body}, snapshot.root),
   loading: () => { previewRequestPending = true; previewNavigator.setStatus('loading'); },
-  apply: html => { previewRequestPending = false; element<HTMLIFrameElement>('markdown-preview').srcdoc = html; previewNavigator.updateToolbarState(); },
+  apply: html => {
+    previewRequestPending=false;
+    const frame=element<HTMLIFrameElement>('markdown-preview');const key=JSON.stringify([projectRoot,documentState?.page]);
+    if(key===previewContentKey&&frame.contentDocument===renderedPreviewDocument&&renderedPreviewDocument?.body&&renderedPreviewDocument.head.querySelector('meta[http-equiv="Content-Security-Policy"]')){updatePreviewContent(renderedPreviewDocument,html);initializePreview();}
+    else{previewContentKey=key;renderedPreviewDocument=null;frame.srcdoc=html;}
+    previewNavigator.updateToolbarState();
+  },
   error: error => { previewRequestPending = false; previewNavigator.setStatus('error', String(error)); status(`プレビュー: ${String(error)}`, true); },
 });
 function renderPreview(force = false): Promise<void> { return previewScheduler.request(force); }
@@ -1523,24 +1535,28 @@ editor.addEventListener("input", (event) => {
 });
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 milkdown.host.addEventListener("scroll", event => { if (event.target === milkdown.scrollElement) syncScroll(milkdown.scrollElement, previewScrollElement()); }, true);
-element<HTMLIFrameElement>("markdown-preview").addEventListener("load", () => {
+function initializePreview():void {
+  const content=element<HTMLIFrameElement>('markdown-preview').contentDocument;
+  if(content?.body){renderedPreviewDocument=content;rememberPreviewContent(content);}
   if (documentState && !previewRequestPending) previewNavigator.setStatus('ready');
   previewNavigator.setupIframeInterception(element<HTMLIFrameElement>("markdown-preview"));
   previewNavigator.updateToolbarState();
   const previewDocument = element<HTMLIFrameElement>("markdown-preview").contentDocument;
+  previewDocument?.removeEventListener('keydown', handleDocumentShortcut);
   previewDocument?.addEventListener('keydown', handleDocumentShortcut);
   previewDocument?.querySelectorAll<HTMLElement>('code.language-mermaid, pre.mermaid, .highlight.language-mermaid pre').forEach(code => {
     const target = previewDocument.createElement("div");
     target.className = "mermaid-preview";
     target.style.cssText = "overflow:auto;background:#fff;padding:12px";
-    (code.closest("pre") || code).replaceWith(target);
+    const original=code.closest("pre")||code;rememberPreviewReplacement(original,target);original.replaceWith(target);
     void renderMermaid(target, code.textContent || "");
   });
   previewScrollWindow?.removeEventListener("scroll", onPreviewScroll);
   previewScrollWindow = element<HTMLIFrameElement>("markdown-preview").contentWindow;
   previewScrollWindow?.addEventListener("scroll", onPreviewScroll);
   syncScroll(editor.hidden ? milkdown.scrollElement : editor, previewScrollElement());
-});
+}
+element<HTMLIFrameElement>("markdown-preview").addEventListener("load",initializePreview);
 editor.addEventListener("click", updateCursor); editor.addEventListener("keyup", updateCursor); editor.addEventListener("select", updateCursor);
 function replaceMarkdown(start: number, end: number, replacement: string, selectStart: number, selectEnd = selectStart): void {
   milkdown.showSource();
@@ -2439,35 +2455,50 @@ function loadDraftCandidate(root: string): DraftCandidate | null {
 }
 async function createFullDraft(templateMode=false):Promise<void>{
   if(busy)return;
-  const options=templateMode?await askTemplateDestination(workspace?.config.docs||'docs',async()=>JSON.parse(await rpc('list-windows',{},projectRoot)) as Array<{id:string;title:string}>,()=>rpc('template-guide',{},projectRoot)):null;
+  const options=templateMode?await askTemplateDestination(workspace?.config.docs||'docs',async()=>JSON.parse(await rpc('target-application',{},projectRoot)) as TargetApplication,()=>rpc('template-guide',{},projectRoot),showTargetApplication):null;
   if(templateMode&&!options)return;
-  await savedBeforeOperation();
+  await savedBeforeOperation(true);retainDocumentTab();
   const root=projectRoot;
-  let candidate:DraftCandidate|undefined = templateMode?undefined:loadDraftCandidate(root) || undefined;
+  const snapshots=Array.from(documentTabs,([page,tab])=>({page,content:tab.content,revision:tab.document.revision,dirty:tab.content!==tab.document.content}));
+  const valid=()=>{retainDocumentTab();return root===projectRoot&&snapshots.every(item=>{const tab=documentTabs.get(item.page);return tab?.content===item.content&&tab.document.revision===item.revision;})&&!Array.from(documentTabs).some(([page,tab])=>tab.content!==tab.document.content&&!snapshots.some(item=>item.page===page));};
+  const documents=snapshots.filter(item=>item.dirty);
+  let candidate:DraftCandidate|undefined = templateMode||documents.length?undefined:loadDraftCandidate(root) || undefined;
   if (!candidate) {
     await work(async()=>{
       await ensureAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('draft-propose',root);let success=false;
-      try{candidate=JSON.parse(await rpc('draft-propose',options?{json:options}:{},root)) as DraftCandidate;success=true;if(!templateMode)saveDraftCandidate(root,candidate);}
+      try{candidate=JSON.parse(await rpc('draft-propose',{json:{...options,documents}},root)) as DraftCandidate;success=true;if(!templateMode&&!documents.length)saveDraftCandidate(root,candidate);}
       catch(error){logAiFailure(error);throw error;}
       finally{await stopAiProgress(success);}
     });
   }
   if(!candidate||root!==projectRoot)return;
-  const pages=await reviewDraft(candidate,()=>root===projectRoot&&!dirty&&!Array.from(documentTabs.values()).some(tab=>tab.content!==tab.document.content),path=>rpc('preview-asset',{page:`${candidate!.docs}/${candidate!.pages[0].path}`,asset:path},root));
+  const pages=await reviewDraft(candidate,valid,path=>rpc('preview-asset',{page:`${candidate!.docs}/${candidate!.pages[0].path}`,asset:path},root));
   if(!pages){if(!templateMode)clearDraftCandidate(root);status('下書き候補を破棄しました。原稿は変更していません。');return;}
   await work(async()=>{
-    if(root!==projectRoot||dirty)throw new Error('原稿が変更されました。候補を作り直してください。');
-    const result=JSON.parse(await rpc('draft-apply',{json:{docs:candidate!.docs,pages,template:templateMode}},root)) as {applied:number};
-    if(!templateMode)clearDraftCandidate(root);
+    if(!valid())throw new Error('原稿が変更されました。候補を作り直してください。');
     const outputPath=(path:string)=>candidate!.docs==='.'?path:`${candidate!.docs.replace(/\/$/,'')}/${path}`;
-    for(const page of pages){documentTabs.delete(page.path);documentTabs.delete(outputPath(page.path));}
+    const tabKey=(path:string)=>{const prefix=(workspace?.config.docs||'docs').replace(/\/$/,'')+'/';return path.startsWith(prefix)&&workspace?.pages.includes(path.slice(prefix.length))?path.slice(prefix.length):path;};
+    const inEditor=pages.filter(page=>documents.some(item=>item.page===tabKey(outputPath(page.path))));
+    const persisted=pages.filter(page=>!inEditor.includes(page));
+    if(persisted.length)await rpc('draft-apply',{json:{docs:candidate!.docs,pages:persisted,template:templateMode}},root);
+    if(!templateMode)clearDraftCandidate(root);
+    for(const page of persisted){documentTabs.delete(tabKey(outputPath(page.path)));documentTabs.delete(outputPath(page.path));}
+    for(const page of inEditor){await openPage(tabKey(outputPath(page.path)));replaceMarkdown(0,editor.value.length,page.content,0,0);retainDocumentTab();}
     await refreshWorkspace();
     const selectedPage=pages.find(page=>page.path==='index.md')||pages[0];
-    if(selectedPage){await openPage(outputPath(selectedPage.path),false);chooseTab('editor');}
-    status(`${result.applied}ページへ選んだ変更を反映しました。変更前の原稿はバックアップしました。`);
+    if(selectedPage){await openPage(outputPath(selectedPage.path),inEditor.includes(selectedPage));chooseTab('editor');}
+    status(`${pages.length}ページへ選んだ変更を反映しました。${inEditor.length?'編集中の原稿は未保存のまま保持しています。':'変更前の原稿はバックアップしました。'}`);
   });
 }
 element('create-ai-template').addEventListener('click',()=>{void createFullDraft(true).catch(error=>status(String(error),true));});
+async function showTargetApplication(){
+  const root=projectRoot;if(!root||busy)return false;
+  return configureTargetApplication(async(action,settings)=>{
+    if(root!==projectRoot)throw new Error('プロジェクトが切り替わりました。');
+    return JSON.parse(await rpc('target-application',{json:{action,settings}},root)) as TargetApplication;
+  });
+}
+element('target-application-open').addEventListener('click',()=>{void showTargetApplication().catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
 setBusy(false);
 updateSaveState();
@@ -2493,7 +2524,7 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
   let instruction=action?.instruction || await askSelectionInstruction(selection.text,initial);
   if(!instruction)return;
   if(root!==projectRoot||documentState?.page!==owner.page||editor.value!==captured)throw new Error('原稿が変更されました。範囲を選び直してください。');
-  await savedBeforeOperation();
+  await savedBeforeOperation(true);
   const expected=editor.value,page=owner.page,revision=documentState?.revision;
   let previousCandidate:{content:string;accepted:number[];feedback:string}|undefined;
   while(instruction){
@@ -2502,7 +2533,7 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
     let candidate:string|undefined,failure="",cancelled=false;
     await work(async()=>{
       await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('selection-generate',root,action?.cliAgent);let succeeded=false;
-      try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{selected:selection.text,mode:action?.mode==='consult'?'consult':selection.text?"replace":"insert",cli_agent:action?.cliAgent,include_screenshots:includeScreenshots,insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
+      try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{body:expected,selected:selection.text,mode:action?.mode==='consult'?'consult':selection.text?"replace":"insert",cli_agent:action?.cliAgent,include_screenshots:includeScreenshots,insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
       catch(error){failure=String(error);logAiFailure(error);throw error;}
       finally{cancelled=Boolean(generationCancelRequest);await stopAiProgress(succeeded);}
     });
@@ -2624,15 +2655,15 @@ async function reviewCurrentDocument():Promise<void>{
   if(busy||!documentState||activeImageTab)return;
   const root=projectRoot,page=documentState.page,captured=editor.value;
   const start=editor.selectionStart,end=editor.selectionEnd;
-  await savedBeforeOperation();await saveAiSettings();
-  const choices=await askReader(workspace?.brief||'',start!==end,async scope=>JSON.parse(await rpc('document-review-capabilities',{page,json:{range:scope==='selection'?{start,end}:undefined}},root)) as ReviewCapabilities,reopenReaderReview?()=>{if(!reopenReaderReview?.())status('原稿が変更されています。レビューを実行し直してください。',true);}:undefined,element('manuscript-check'));if(choices===null)return;
+  await savedBeforeOperation(true);await saveAiSettings();
+  const choices=await askReader(workspace?.brief||'',start!==end,async scope=>JSON.parse(await rpc('document-review-capabilities',{page,json:{body:captured,revision:documentState?.revision,range:scope==='selection'?{start,end}:undefined}},root)) as ReviewCapabilities,reopenReaderReview?()=>{if(!reopenReaderReview?.())status('原稿が変更されています。レビューを実行し直してください。',true);}:undefined,element('manuscript-check'));if(choices===null)return;
   if(root!==projectRoot||documentState?.page!==page||editor.value!==captured)throw new Error('原稿が変更されました。レビューを実行し直してください。');
-  await savedBeforeOperation();let expected=editor.value;const revision=documentState?.revision;
+  await savedBeforeOperation(true);let expected=editor.value;const revision=documentState?.revision;
   const range=choices.scope==='selection'?{start,end}:undefined;
   let report:ReaderReport|undefined;
   await work(async()=>{
     await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('document-review',root);let success=false;
-    try{report=JSON.parse(await rpc('document-review',{page,json:{reader:choices.reader,revision,range}},root)) as ReaderReport;success=true;}
+    try{report=JSON.parse(await rpc('document-review',{page,json:{body:expected,reader:choices.reader,revision,range}},root)) as ReaderReport;success=true;}
     catch(error){logAiFailure(error);throw error;}
     finally{await stopAiProgress(success);}
   });

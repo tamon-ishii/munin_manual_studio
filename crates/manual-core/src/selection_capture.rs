@@ -34,8 +34,9 @@ fn generate_with(root:&Path,page:&str,context:&Value,windows:&Value,mut capture:
         images.push(json!({"index":index+1,"caption":item["caption"],"link":link,"width":info.width,"height":info.height,"uimap":info.uimap}));
         sources.push(bytes);destinations.push(destination);
     }
-    let schema=json!({"type":"object","properties":{"content":{"type":"string"},"images":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer"},"annotations":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["rect","badge","callout","arrow"]},"target":{"type":"string"},"step":{"type":"integer"},"text":{"type":"string"},"style":{"type":"string"}},"required":["type","target"],"additionalProperties":false}}},"required":["index","annotations"],"additionalProperties":false}}},"required":["content","images"],"additionalProperties":false});
+    let schema=json!({"type":"object","properties":{"content":{"type":"string"},"images":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer"},"annotations":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["rect","badge","callout","arrow","mosaic"]},"target":{"type":"string"},"step":{"type":"integer"},"text":{"type":"string"},"style":{"type":"string"},"block_size":{"type":"integer","minimum":2,"maximum":64}},"required":["type","target"],"additionalProperties":false}}},"required":["index","annotations"],"additionalProperties":false}}},"required":["content","images"],"additionalProperties":false});
     crate::agent::log_progress(root,"撮影した画面に合わせて本文とマークを作成中。");
+    let context=json!({"manuscript":context,"annotation_policy":"AI manages the existing MarkIts mosaic feature. For observed passwords, tokens or personal information, return a mosaic annotation targeting the exact UIMap name with block_size:16. Never repeat secret values in manuscript/callouts. Do not guess a target or claim masking succeeded without evidence."});
     let generated=ai(&format!("Use ONLY supplied manuscript and screenshot metadata. Do not call tools, execute commands, capture screens, or write files. Actual screenshots have already been captured by Studio. Return replacement Markdown in content, linking the supplied image link paths. Return one images entry per screenshot with its index and MarkIts annotations targeting actual UIMap names. Use numbered badges and rectangles for relevant controls. Never guess coordinates or invent UI targets. If a screenshot has no suitable UIMap targets, use an empty annotations array. Preserve factual accuracy and only rewrite the selected fragment.\nInput: {}",json!({"context":context,"screenshots":images})),&schema)?;
     check()?;
     let mut content=generated["content"].as_str().filter(|s|!s.trim().is_empty()).ok_or("AIから本文が返されませんでした。")?.to_string();
@@ -47,7 +48,7 @@ fn generate_with(root:&Path,page:&str,context:&Value,windows:&Value,mut capture:
         let annotations=entries[0]["annotations"].as_array().filter(|items|items.len()<=30).ok_or("AIの注釈が不正です。")?;
         if annotations.is_empty(){crate::agent::log_progress(root,&format!("画像{}は注釈対象を特定できなかったため、マークなしで候補に含めます。",index+1));}
         let scene=json!({"annotations":normalize_annotations(annotations)});
-        rendered.push(markits::raster::render_composed_png_bytes(&scene.to_string(),&sources[index]).map_err(|e|format!("MarkItsの注釈を描画できません: {e}"))?);
+        rendered.push(crate::markits_scene::render_tracked(&scene,&sources[index]).map_err(|e|format!("MarkItsの注釈を描画できません: {e}"))?);
         let link=image["link"].as_str().unwrap_or("");
         if !content.contains(link){content.push_str(&format!("\n\n![撮影画像{}](<{link}>)\n",index+1));}
     }
@@ -70,6 +71,7 @@ pub(crate) fn normalize_annotations(annotations:&[Value])->Vec<Value>{
         for key in ["type","target","style"] {
             if let Some(value)=annotation.get(key).filter(|v|!v.is_null()){shape.insert(key.into(),value.clone());}
         }
+        if kind=="mosaic" {if let Some(size)=annotation.get("block_size").filter(|value|!value.is_null()){shape.insert("block_size".into(),size.clone());}}
         if matches!(kind,"badge"|"arrow"|"callout") {
             if let Some(text)=annotation.get("text").filter(|v|!v.is_null()){shape.insert("text".into(),text.clone());}
         }

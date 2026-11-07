@@ -3,7 +3,7 @@ use std::path::Path;
 
 pub(crate) fn generate(root: &Path, page: &str, options: &str) -> Result<String, String> {
     let value: Value = serde_json::from_str(options).map_err(|e| e.to_string())?;
-    let document = crate::editor::read(root, page)?;
+    let document = crate::editor::read_for_ai(root, page,&value)?;
     if value["revision"].as_str() != Some(document.revision.as_str()) {
         return Err("原稿が更新されました。範囲を選び直してください。".into());
     }

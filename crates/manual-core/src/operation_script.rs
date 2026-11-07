@@ -48,6 +48,14 @@ enum Step {
     Wait {
         milliseconds: u64,
     },
+    WaitFor {
+        target: crate::semantic_target::Target,
+        state: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+        #[serde(default = "default_condition_timeout")]
+        timeout_ms: u64,
+    },
     Screenshot {
         name: String,
         #[serde(default)]
@@ -59,6 +67,9 @@ struct Plan {
     script: Script,
     recording: OperationRecording,
     captures: Vec<(String, usize)>,
+}
+fn default_condition_timeout() -> u64 {
+    10_000
 }
 
 fn chord(value: &str) -> Result<String, String> {
@@ -215,6 +226,22 @@ fn compile(value: &Value) -> Result<Plan, String> {
                 }
                 continue;
             }
+            Step::WaitFor {
+                target,
+                state,
+                value,
+                timeout_ms,
+            } => {
+                target.validate()?;
+                if !matches!(state.as_str(), "visible" | "hidden" | "value")
+                    || !(1..=30_000).contains(timeout_ms)
+                    || (state == "value" && value.is_none())
+                    || (state != "value" && value.is_some())
+                {
+                    return Err("wait_for requires visible/hidden or value with an expected string, and a 1–30000 ms timeout".into());
+                }
+                continue;
+            }
             Step::Screenshot {
                 name,
                 include_cursor,
@@ -288,6 +315,12 @@ pub(crate) fn execute(root: &Path, action: &str, request: &Value) -> Result<Valu
     if action == "operations-inspect" {
         let path = project_path(root, request["image"].as_str().ok_or("image is required")?)?;
         let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        if request["script_only"] == true {
+            let raw = markits::raster::read_png_text_chunk(&bytes, "markits:operation_script")
+                .map_err(|e| e.to_string())?
+                .ok_or("This PNG has no condition-aware Studio script")?;
+            return serde_json::from_str(&raw).map_err(|e| e.to_string());
+        }
         let raw = markits::raster::read_png_text_chunk(&bytes, OPERATIONS_KEY)
             .map_err(|e| e.to_string())?
             .ok_or("No MarkIts recording in this PNG")?;
@@ -326,12 +359,24 @@ pub(crate) fn execute(root: &Path, action: &str, request: &Value) -> Result<Valu
                 &crate::screenshots::new_id("script"),
             )
             .map_err(|e| e.to_string())?;
+            let bytes = markits::raster::embed_png_text_chunk(
+                &bytes,
+                "markits:operation_script",
+                &serde_json::to_string(&plan.script).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
             write_new(&output, &bytes)?;
             Ok(
                 json!({"output":request["output"],"captures":plan.captures.len(),"replay":"Open this PNG in MarkIts and use recapture"}),
             )
         }
-        "operations-run" => run(root, request, &plan),
+        "operations-run" | "operations-resume" => {
+            let mut request = request.clone();
+            if action == "operations-resume" {
+                request["resume"] = json!(true);
+            }
+            run(root, &request, &plan)
+        }
         _ => Err(format!("Unknown operation script action: {action}")),
     }
 }
@@ -361,6 +406,7 @@ fn runtime_steps(
             Step::Key {value} => json!({"key":value}),
             Step::Scroll {x,y,dx,dy} => {let (x,y) = coordinates(*x,*y)?;json!({"scroll":{"x":x,"y":y,"dx":dx,"dy":dy}})},
             Step::Wait {milliseconds} => json!({"wait_ms":milliseconds}),
+            Step::WaitFor {target,state,value,timeout_ms} => json!({"wait_target":{"target":target,"state":state,"value":value,"timeout_ms":timeout_ms}}),
             Step::Screenshot {name,include_cursor} => {
                 if *include_cursor {return Err("Direct execution currently captures without the cursor; use include_cursor:false or MarkIts playback".into());}
                 json!({"screenshot":{"task":name}})
@@ -381,7 +427,13 @@ fn run(root: &Path, request: &Value, plan: &Plan) -> Result<Value, String> {
     if window.title != plan.script.window.title {
         return Err("The window title differs from the observed script target".into());
     }
-    run_with(root, request, plan, &window, desktop_scenario::run)
+    run_with(
+        root,
+        request,
+        plan,
+        &window,
+        crate::operation_checkpoint::run,
+    )
 }
 
 fn run_with(
@@ -415,7 +467,47 @@ fn run_with(
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::create_dir(&output).map_err(|e| format!("Choose a new output directory: {e}"))?;
+    if request["resume"] == true {
+        let previous: Value = serde_json::from_slice(
+            &fs::read(output.join("checkpoint.json")).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        if request["retry_failed"] != true {
+            return Err(
+                "対象の状態を確認してから、失敗した手順の再実行を指定してください。".into(),
+            );
+        }
+        let done = previous["next_step"]
+            .as_u64()
+            .ok_or("Invalid checkpoint")?
+            .saturating_sub(1) as usize;
+        let current = serde_json::to_value(&plan.script).map_err(|e| e.to_string())?;
+        let old = previous["script"]["steps"]
+            .as_array()
+            .ok_or("Invalid stored script")?;
+        let new = current["steps"].as_array().unwrap();
+        if done > old.len()
+            || done > new.len()
+            || old[..done] != new[..done]
+            || previous["script"]["window"]["bounds"] != current["window"]["bounds"]
+        {
+            return Err(
+                "完了した操作や観察時の座標は変更できません。新しい実行として開始してください。"
+                    .into(),
+            );
+        }
+        let mut previous = previous;
+        previous["script"] = current;
+        crate::operation_checkpoint::save(&output, &previous)?;
+    } else {
+        fs::create_dir(&output).map_err(|e| format!("Choose a new output directory: {e}"))?;
+        fs::write(
+            output.join("checkpoint.json"),
+            json!({"script":plan.script,"next_step":0,"trace":[]}).to_string(),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    fs::write(output.join("run.json"),json!({"ok":false,"status":"running","run":format!("{relative}/run.json"),"window":window.id,"script":plan.script,"captures":[],"error":"処理が中断された可能性があります。対象の状態を確認して再開してください。"}).to_string()).map_err(|e|e.to_string())?;
     let completed = (|| {
         let result = runner(root, &window.id, &steps, &output)?;
         if result.steps != steps.len() {
@@ -440,24 +532,32 @@ fn run_with(
                 &saved(&prefix.recording).to_string(),
             )
             .map_err(|e| e.to_string())?;
+            let bytes = markits::raster::embed_png_text_chunk(
+                &bytes,
+                "markits:operation_script",
+                &serde_json::to_string(&prefix.script).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
             let bytes =
                 markits::raster::embed_png_text_chunk(&bytes, "markits:operation_group", &group)
                     .map_err(|e| e.to_string())?;
             fs::write(path, bytes).map_err(|e| e.to_string())?;
-            captures.push(json!({"name":name,"image":format!("{relative}/{name}.png")}));
+            captures
+                .push(json!({"name":name,"step":index+1,"image":format!("{relative}/{name}.png")}));
         }
         Ok(
-            json!({"ok":true,"script":plan.script,"steps":plan.script.steps.len(),"captures":captures}),
+            json!({"ok":true,"window":window.id,"run":format!("{relative}/run.json"),"script":plan.script,"steps":plan.script.steps.len(),"captures":captures,"trace":crate::operation_checkpoint::trace(&output)}),
         )
     })();
     let manifest = match completed {
         Ok(manifest) => manifest,
         Err(error) => {
-            fs::write(
-                output.join("run.json"),
-                json!({"ok":false,"error":error,"script":plan.script}).to_string(),
-            )
-            .map_err(|e| e.to_string())?;
+            let partial:Vec<_>=plan.captures.iter().filter(|(name,_)|output.join(format!("{name}.png")).is_file()).map(|(name,index)|json!({"name":name,"step":index+1,"image":format!("{relative}/{name}.png")})).collect();
+            let failure = json!({"ok":false,"window":window.id,"run":format!("{relative}/run.json"),"error":error,"script":plan.script,"captures":partial,"trace":crate::operation_checkpoint::trace(&output)});
+            fs::write(output.join("run.json"), failure.to_string()).map_err(|e| e.to_string())?;
+            if request["return_failure"] == true {
+                return Ok(failure);
+            }
             return Err(format!("{error}; partial results: {relative}/run.json"));
         }
     };
@@ -511,6 +611,64 @@ mod tests {
         ));
         assert_eq!(stored["window_id"], "");
         assert_eq!(stored["pid"], 0);
+    }
+
+    #[test]
+    fn resume_rejects_completed_edits_and_condition_script_roundtrips() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("run");
+        fs::create_dir(&output).unwrap();
+        let mut original = script();
+        original["steps"].as_array_mut().unwrap().insert(1,json!({"kind":"wait_for","target":{"role":"button","name":"Open"},"state":"visible","timeout_ms":1000}));
+        let original = compile(&original).unwrap();
+        crate::operation_checkpoint::save(
+            &output,
+            &json!({"script":original.script,"next_step":2,"trace":[]}),
+        )
+        .unwrap();
+        let window = markits::window_capture::WindowInfo {
+            id: "fixture".into(),
+            title: "Fixture".into(),
+            x: 100,
+            y: 200,
+            width: 800,
+            height: 600,
+        };
+        let mut edited = serde_json::to_value(&original.script).unwrap();
+        edited["steps"][0]["target"]["name"] = json!("Other");
+        let edited = compile(&edited).unwrap();
+        assert!(run_with(
+            root.path(),
+            &json!({"output":"run","resume":true,"retry_failed":true}),
+            &edited,
+            &window,
+            |_, _, _, _| panic!("must not replay changed completed input")
+        )
+        .is_err());
+        image::DynamicImage::new_rgb8(20, 10)
+            .save(root.path().join("source.png"))
+            .unwrap();
+        execute(
+            root.path(),
+            "operations-attach",
+            &json!({"script":original.script,"image":"source.png","output":"with-conditions.png"}),
+        )
+        .unwrap();
+        let inspected = execute(
+            root.path(),
+            "operations-inspect",
+            &json!({"image":"with-conditions.png","script_only":true}),
+        )
+        .unwrap();
+        assert_eq!(inspected["steps"][1]["kind"], "wait_for");
+        for bad in [
+            json!({"kind":"wait_for","target":{"role":"button","name":"Open"},"state":"value"}),
+            json!({"kind":"wait_for","target":{"role":"button","name":"Open"},"state":"visible","timeout_ms":30001}),
+        ] {
+            let mut value = script();
+            value["steps"].as_array_mut().unwrap().push(bad);
+            assert!(compile(&value).is_err());
+        }
     }
 
     #[test]

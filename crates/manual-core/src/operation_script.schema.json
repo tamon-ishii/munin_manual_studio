@@ -28,7 +28,8 @@
         {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "key"}, "value": {"type": "string", "description": "Control/Alt/Shift/Meta modifiers plus ASCII letter, digit, f1–f12, enter, escape, tab, backspace, delete, space, up/down/left/right; e.g. Control+a"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "x", "y", "dx", "dy"], "properties": {"kind": {"const": "scroll"}, "x": {"type": "number", "minimum": 0}, "y": {"type": "number", "minimum": 0}, "dx": {"type": "integer"}, "dy": {"type": "integer"}}},
         {"type": "object", "additionalProperties": false, "required": ["kind", "milliseconds"], "properties": {"kind": {"const": "wait"}, "milliseconds": {"type": "integer", "minimum": 0, "maximum": 30000}}},
-        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"const": "screenshot"}, "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "include_cursor": {"type": "boolean", "default": false, "description": "Direct operations-run currently requires false; true is supported when attached and replayed in MarkIts"}}}
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"const": "screenshot"}, "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "include_cursor": {"type": "boolean", "default": false, "description": "Direct operations-run currently requires false; true is supported when attached and replayed in MarkIts"}}},
+        {"type":"object","additionalProperties":false,"required":["kind","target","state"],"properties":{"kind":{"const":"wait_for"},"target":{"$ref":"#/$defs/target"},"state":{"enum":["visible","hidden","value"]},"value":{"type":"string"},"timeout_ms":{"type":"integer","minimum":1,"maximum":30000,"default":10000}}}
       ]
     }
   }

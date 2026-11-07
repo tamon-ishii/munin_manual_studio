@@ -50,6 +50,9 @@ steps.push({group:'ui',name:'folder creation through menus and context menus',co
 
 
 steps.push(
+  {group:'generation',name:'stable live preview and AI from unsaved manuscripts',command:process.execPath,args:['scripts/test_manual_studio_live_preview_ai.mjs'],timeoutMs:120_000},
+  {group:'generation',name:'reviewed operation plan and rich template adoption',command:process.execPath,args:['scripts/test_manual_studio_rich_template.mjs'],timeoutMs:120_000},
+  {group:'generation',name:'target application settings and automatic template entry',command:process.execPath,args:['scripts/test_manual_studio_target_application.mjs'],timeoutMs:120_000},
   {group:'ui',name:'manuscript search real-backend contracts',command:process.execPath,args:['scripts/test_manual_studio_manuscript_tools.mjs'],timeoutMs:120_000},
   {group:'ui',name:'manuscript Git real-backend contracts',command:process.execPath,args:['scripts/test_manual_studio_manuscript_git.mjs'],timeoutMs:120_000},
   ...[['tools','P17.contracts'],['git','P19.contracts']].map(([name,cases])=>({group:'ui',name:`manuscript ${name} evidence gate`,command:process.execPath,args:['scripts/check_manual_studio_coverage.mjs','--cases',cases,'--report',`ui-coverage-results/manuscript-${name}/result.json`,'--require-complete'],timeoutMs:60_000})),

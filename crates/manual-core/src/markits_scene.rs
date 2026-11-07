@@ -1,7 +1,28 @@
 //! Scale saved MarkIts annotations when a screenshot changes dimensions.
 use serde_json::{json, Value};
 
-pub(crate) fn scale_markits_scene(scene: &mut Value, width: u32, height: u32) -> Result<(), String> {
+/// Keep the editable scene alongside rendered pixels for later recapture.
+pub(crate) fn render_tracked(scene: &Value, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let image = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    let uimap = markits::raster::extract_png_uimap(bytes);
+    let scene = markits::raster::with_image_canvas_and_uimap(
+        &scene.to_string(),
+        image.width(),
+        image.height(),
+        uimap.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    let rendered =
+        markits::raster::render_composed_png_bytes(&scene, bytes).map_err(|e| e.to_string())?;
+    markits::raster::embed_png_text_chunk(&rendered, "markits:annotations", &scene)
+        .map_err(|e| e.to_string())
+}
+
+pub(crate) fn scale_markits_scene(
+    scene: &mut Value,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
     let canvas = scene
         .get("canvas")
         .and_then(Value::as_object)
@@ -73,22 +94,30 @@ mod tests {
         scale_markits_scene(&mut scene, 200, 25).unwrap();
         assert_eq!(scene["canvas"], json!({"width":200,"height":25}));
         let annotation = &scene["annotations"][0];
-        assert_eq!(annotation["target"], json!([20.0,2.5,40.0,7.5]));
-        assert_eq!(annotation["start"], json!([20.0,2.5]));
-        assert_eq!(annotation["control"], json!([40.0,5.0]));
-        assert_eq!(annotation["end"], json!([60.0,7.5]));
+        assert_eq!(annotation["target"], json!([20.0, 2.5, 40.0, 7.5]));
+        assert_eq!(annotation["start"], json!([20.0, 2.5]));
+        assert_eq!(annotation["control"], json!([40.0, 5.0]));
+        assert_eq!(annotation["end"], json!([60.0, 7.5]));
         assert_eq!(annotation["stroke_width"], json!(2.0));
         assert_eq!(annotation["rx"], json!(20.0));
         assert_eq!(annotation["ry"], json!(2.5));
         assert_eq!(annotation["max_width"], json!(80.0));
         assert_eq!(annotation["label"], "Keep me");
         assert_eq!(annotation["custom"], true);
-        assert_eq!(scene["annotations"][2], json!({"target":[1,2,3],"start":[1]}));
+        assert_eq!(
+            scene["annotations"][2],
+            json!({"target":[1,2,3],"start":[1]})
+        );
     }
 
     #[test]
     fn invalid_canvas_fails_without_modifying_the_scene() {
-        for mut scene in [Value::Null, json!({}), json!({"canvas":{"width":0,"height":50}}), json!({"canvas":{"width":100,"height":-1}})] {
+        for mut scene in [
+            Value::Null,
+            json!({}),
+            json!({"canvas":{"width":0,"height":50}}),
+            json!({"canvas":{"width":100,"height":-1}}),
+        ] {
             let before = scene.clone();
             assert!(scale_markits_scene(&mut scene, 200, 100).is_err());
             assert_eq!(scene, before);

@@ -147,8 +147,7 @@ export function createPreviewNavigator(options: {
   function setupIframeInterception(iframe: HTMLIFrameElement): void {
     try {
       const doc = iframe.contentDocument;
-      if (!doc || interceptedDocuments.has(doc)) return;
-      interceptedDocuments.add(doc);
+      if (!doc) return;
       // pulldown-cmark emits headings without IDs. Assign stable fragment targets.
       const usedIds = new Set(Array.from(doc.querySelectorAll('[id]'), node => node.id));
       doc.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(heading => {
@@ -170,6 +169,8 @@ export function createPreviewNavigator(options: {
         element?.scrollIntoView({ behavior: 'instant', block: 'start' });
       }
 
+      if(interceptedDocuments.has(doc))return;
+      interceptedDocuments.add(doc);
       doc.addEventListener('keydown', event => {
         const anchor = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a[data-preview-href]');
         if (event.key === 'Enter' && anchor) { event.preventDefault(); anchor.click(); }

@@ -23,6 +23,7 @@ try{
   await writeFile(path.join(root,'docs/index.md'),'# Original manuscript\n');
   await writeFile(path.join(root,'docs/assets/fixture.png'),await readFile('apps/manual-studio/src-tauri/icons/icon.png'));
   await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',assets:'docs/assets',targets:['docs'],connection_type:'api',endpoint_url:`http://127.0.0.1:${api.address().port}/v1`,agent:'agy',model:'fixture'}));
+  await mkdir(path.join(root,'.munin'),{recursive:true});await writeFile(path.join(root,'.munin/target-application.json'),JSON.stringify({command:'fixture-app',arguments:[],working_directory:'.',information:'Fixture app'}));
   browser=await chromium.launch({headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -47,13 +48,12 @@ try{
   const dialog=page.locator('#template-creation-dialog');
   await page.waitForFunction(()=>document.querySelector('.template-ai-guide pre')?.textContent.includes('AI向け：Manual Studio・MarkIts'));
   assert.equal(await dialog.locator('[name=include_screenshots]').isChecked(),true);
-  await dialog.locator('[name=window]').selectOption('fixture');
+  await dialog.getByText('対象アプリ：fixture-app',{exact:true}).waitFor();
   await dialog.locator('[name=destination]').fill('guide');
   await dialog.locator('[name=instruction]').fill('Explain saving with screenshots');
-  await dialog.locator('[name=automate_steps]').check();
   await dialog.getByRole('button',{name:'雛形の候補を作成',exact:true}).click();
   await page.locator('#draft-diff-dialog').waitFor();
-  assert.equal(capturedOptions.include_screenshots,true);assert.equal(capturedOptions.automate_steps,true);assert.equal(capturedOptions.window,'fixture');
+  assert.equal(capturedOptions.include_screenshots,true);assert.equal(capturedOptions.target_application,true);assert.equal(capturedOptions.window,undefined);assert.equal(await page.locator('#operation-workbench-dialog').count(),0);
   assert.equal(capturedOptions.instruction,'Explain saving with screenshots');
   const image=page.locator('#draft-diff-dialog .draft-screenshots img');
   await image.waitFor();await page.waitForFunction(()=>document.querySelector('.draft-screenshots img')?.naturalWidth>0);

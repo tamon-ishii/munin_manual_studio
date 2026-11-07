@@ -9,10 +9,25 @@ use std::{collections::HashSet, fs, path::Path};
 pub(crate) struct Candidate {
     pub pages: Vec<(String, String)>,
     pub screenshots: Vec<Value>,
+    pub plan: Option<Value>,
 }
 
 pub(crate) fn guide() -> &'static str {
     include_str!("template_ai_guide.md")
+}
+
+pub(crate) fn plan(root: &Path, options: &Value) -> Result<Value, String> {
+    let mut options = options.clone();
+    options["plan_only"] = json!(true);
+    options["automate_steps"] = json!(true);
+    let instruction = options["instruction"]
+        .as_str()
+        .unwrap_or("依頼された操作を説明するマニュアルを作る")
+        .to_string();
+    let candidate = generate(root, &options, &read_config(root).docs, None, &instruction)?;
+    let mut result = candidate.plan.ok_or("操作計画を作成できませんでした。")?;
+    result["window"] = options["window"].clone();
+    Ok(result)
 }
 
 fn exchange(
@@ -68,7 +83,7 @@ pub(crate) fn generate(
     instruction: &str,
 ) -> Result<Candidate, String> {
     let config = read_config(root);
-    generate_with(
+    generate_automatic_with(
         root,
         options,
         docs,
@@ -78,6 +93,93 @@ pub(crate) fn generate(
         |prompt, schema| {
             agent::agent_json_candidate(root, prompt, schema, &config.agent, &config.model)
         },
+    )
+}
+
+fn generate_automatic_with(
+    root: &Path,
+    options: &Value,
+    docs: &str,
+    filename: Option<&str>,
+    instruction: &str,
+    mut tool: impl FnMut(&Value) -> Result<Value, String>,
+    mut ai: impl FnMut(&str, &Value) -> Result<Value, String>,
+) -> Result<Candidate, String> {
+    let checkpoint = agent::cancellation_checkpoint(root);
+    let mut options = options.clone();
+    if options["target_application"] == true && options["capture_run"].is_null() {
+        let launch = call_tool(
+            root,
+            json!({"root":root,"action":"target-launch"}),
+            &mut tool,
+        )?;
+        agent::check_cancelled(root, &checkpoint)?;
+        let candidates = launch["windows"]
+            .as_array()
+            .filter(|items| !items.is_empty())
+            .ok_or("対象アプリの画面が見つかりません。起動コマンドと引数を確認してください。")?;
+        let window = if candidates.len() == 1
+            && launch["existing_window"] != true
+            && launch["identify_window"] != true
+        {
+            candidates[0]["id"]
+                .as_str()
+                .ok_or("対象画面のIDがありません。")?
+                .to_string()
+        } else {
+            let prompt=format!("Identify the target application's actual window using the user-provided launch information and observed window titles. Return its exact id. If no window can confidently be identified, return an empty id. Do not execute tools or select an unrelated application. Input: {launch}");
+            let answer = exchange(
+                root,
+                &prompt,
+                &json!({"type":"object","properties":{"window":{"type":"string"}},"required":["window"],"additionalProperties":false}),
+                &mut ai,
+            )?;
+            answer["window"].as_str().filter(|id|!id.is_empty()&&candidates.iter().any(|candidate|candidate["id"].as_str()==Some(id))).ok_or("AIが対象アプリの画面を特定できませんでした。「AIに伝える情報」にアプリ名や起動後の画面を追加してください。")?.to_string()
+        };
+        options["window"] = json!(window);
+        options["automate_steps"] = json!(true);
+        let mut planning = options.clone();
+        planning["target_application"] = json!(false);
+        planning["plan_only"] = json!(true);
+        let plan = generate_with(
+            root,
+            &planning,
+            docs,
+            filename,
+            instruction,
+            &mut tool,
+            &mut ai,
+        )?
+        .plan
+        .ok_or("AIが操作手順を作成できませんでした。")?;
+        agent::check_cancelled(root, &checkpoint)?;
+        agent::log_progress(root, "AIが作成した手順で対象アプリを操作・撮影しています。");
+        let output = format!(
+            ".munin/operation-runs/{}",
+            crate::screenshots::new_id("run")
+        );
+        let run = call_tool(
+            root,
+            json!({"root":root,"action":"operations-run","script":plan["script"],"window":window,"output":output}),
+            &mut tool,
+        )?;
+        agent::check_cancelled(root, &checkpoint)?;
+        if run["ok"] != true {
+            return Err(
+                "対象アプリの操作を完了できませんでした。実行ログを確認してください。".into(),
+            );
+        }
+        options["capture_run"] = run["run"].clone();
+        options["reviewed_script"] = run["script"].clone();
+    }
+    generate_with(
+        root,
+        &options,
+        docs,
+        filename,
+        instruction,
+        &mut tool,
+        &mut ai,
     )
 }
 
@@ -97,7 +199,28 @@ fn generate_with(
         .filter(|id| !id.is_empty())
         .ok_or("撮影対象のウィンドウを選択してください。")?;
     check()?;
-    let windows = call_tool(root, json!({"root":root,"action":"windows"}), &mut tool)?;
+    let prior = options["capture_run"]
+        .as_str()
+        .map(|path| -> Result<Value, String> {
+            let run: Value = serde_json::from_slice(
+                &fs::read(project_path(root, path)?).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            if run["ok"] != true || run["script"] != options["reviewed_script"] {
+                return Err("確認済みの操作計画と撮影結果が一致しません。".into());
+            }
+            Ok(run)
+        })
+        .transpose()?;
+    if options["automate_steps"] == true && options["plan_only"] != true && prior.is_none() {
+        return Err("先に操作計画を確認・実行し、その撮影結果から雛形を作成してください。".into());
+    }
+    let windows = if let Some(run) = &prior {
+        let w = &run["script"]["window"];
+        json!([{"id":id,"title":w["title"],"x":w["bounds"][0],"y":w["bounds"][1],"width":w["bounds"][2],"height":w["bounds"][3]}])
+    } else {
+        call_tool(root, json!({"root":root,"action":"windows"}), &mut tool)?
+    };
     check()?;
     let window = windows
         .as_array()
@@ -121,11 +244,13 @@ fn generate_with(
     };
     let initial = temporary.path().join("initial.png");
     agent::log_progress(root, "対象アプリの実画面を撮影しています。");
-    call_tool(
-        root,
-        json!({"root":root,"action":"capture","window":id,"output":relative(&initial)?}),
-        &mut tool,
-    )?;
+    if prior.is_none() {
+        call_tool(
+            root,
+            json!({"root":root,"action":"capture","window":id,"output":relative(&initial)?}),
+            &mut tool,
+        )?;
+    }
     check()?;
     let context = crate::context::build_application_context(root);
     let brief = fs::read_to_string(root.join("manual/brief.md"))
@@ -134,7 +259,21 @@ fn generate_with(
         initial,
         window["title"].as_str().unwrap_or("対象画面").to_string(),
     )];
-    if options["automate_steps"] == true {
+    if let Some(run) = &prior {
+        captures = run["captures"]
+            .as_array()
+            .filter(|items| !items.is_empty() && items.len() <= 8)
+            .ok_or("撮影画像がありません。")?
+            .iter()
+            .map(|item| {
+                Ok((
+                    project_path(root, item["image"].as_str().ok_or("画像パスが不正です。")?)?,
+                    item["name"].as_str().unwrap_or("撮影画像").to_string(),
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+    }
+    if options["plan_only"] == true {
         let (_, initial_info) =
             markits::raster::read_image(&captures[0].0).map_err(|e| e.to_string())?;
         let observed = json!({"title":window["title"],"bounds":[window["x"],window["y"],window["width"],window["height"]]});
@@ -156,26 +295,20 @@ fn generate_with(
         }
         crate::operation_script::execute(root, "operations-validate", &json!({"script":script}))?;
         check()?;
-        agent::log_progress(root, "対象アプリを操作し、手順ごとの画面を撮影しています。");
-        let result = call_tool(
-            root,
-            json!({"root":root,"action":"operations-run","window":id,"output":relative(&temporary.path().join("run"))?,"script":script}),
-            &mut tool,
-        )?;
-        if result["ok"] != true {
-            return Err("自動操作の撮影を完了できませんでした。".into());
-        }
-        captures.clear();
-        for item in result["captures"]
-            .as_array()
-            .filter(|items| !items.is_empty() && items.len() <= 8)
-            .ok_or("操作後の撮影画像がありません。")?
-        {
-            captures.push((
-                project_path(root, item["image"].as_str().ok_or("画像パスが不正です。")?)?,
-                item["name"].as_str().unwrap_or("撮影画像").to_string(),
-            ));
-        }
+        let observation = format!(
+            ".munin/operation-plans/{}.png",
+            crate::screenshots::new_id("plan")
+        );
+        let destination = project_path(root, &observation)?;
+        fs::create_dir_all(destination.parent().unwrap()).map_err(|e| e.to_string())?;
+        fs::copy(&captures[0].0, destination).map_err(|e| e.to_string())?;
+        return Ok(Candidate {
+            pages: Vec::new(),
+            screenshots: Vec::new(),
+            plan: Some(
+                json!({"script":script,"observation":{"image":observation,"uimap":initial_info.uimap}}),
+            ),
+        });
     }
     check()?;
     let mut sources = Vec::new();
@@ -190,7 +323,7 @@ fn generate_with(
         destinations.push((destination, name));
         sources.push(bytes);
     }
-    let annotation = json!({"type":"object","properties":{"type":{"type":"string","enum":["rect","badge","callout","arrow"]},"target":{"type":"string"},"step":{"type":"integer"},"text":{"type":"string"},"style":{"type":"string"}},"required":["type","target"],"additionalProperties":false});
+    let annotation = json!({"type":"object","properties":{"type":{"type":"string","enum":["rect","badge","callout","arrow","mosaic"]},"target":{"type":"string"},"step":{"type":"integer"},"text":{"type":"string"},"style":{"type":"string"},"block_size":{"type":"integer","minimum":2,"maximum":64}},"required":["type","target"],"additionalProperties":false});
     let schema = json!({"type":"object","properties":{
         "pages":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}},
         "images":{"type":"array","items":{"type":"object","properties":{"index":{"type":"integer"},"annotations":{"type":"array","items":annotation}},"required":["index","annotations"],"additionalProperties":false}}
@@ -233,9 +366,13 @@ fn generate_with(
             .ok_or("画像の注釈が不正です。")?;
         let scene =
             json!({"annotations":crate::selection_capture::normalize_annotations(annotations)});
-        let mut image = markits::raster::render_composed_png_bytes(&scene.to_string(), bytes)
+        let mut image = crate::markits_scene::render_tracked(&scene, bytes)
             .map_err(|e| format!("注釈を描画できません: {e}"))?;
-        for key in ["markits:operations", "markits:operation_group"] {
+        for key in [
+            "markits:operations",
+            "markits:operation_group",
+            "markits:operation_script",
+        ] {
             if let Some(value) =
                 markits::raster::read_png_text_chunk(bytes, key).map_err(|e| e.to_string())?
             {
@@ -311,7 +448,23 @@ fn generate_with(
             screenshots.len()
         ),
     );
-    Ok(Candidate { pages, screenshots })
+    if let (Some(mut run), Some(path)) = (prior, options["capture_run"].as_str()) {
+        run["published"] = json!(screenshots
+            .iter()
+            .enumerate()
+            .map(|(index, shot)| json!({"name":captures[index].1,"image":shot["path"]}))
+            .collect::<Vec<_>>());
+        fs::write(
+            project_path(root, path)?,
+            serde_json::to_vec_pretty(&run).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(Candidate {
+        pages,
+        screenshots,
+        plan: None,
+    })
 }
 
 #[cfg(test)]
@@ -382,6 +535,78 @@ mod tests {
     }
 
     #[test]
+    fn configured_application_runs_from_launch_to_candidate_without_manual_plan_review() {
+        for fail in [false, true] {
+            let root = fixture();
+            crate::target_application::handle(root.path(),&json!({"action":"save","settings":{"command":"fixture-app","working_directory":".","information":"Save a document in Fixture app"}})).unwrap();
+            let mut calls = Vec::new();
+            let mut answers = 0;
+            let result = generate_automatic_with(
+                root.path(),
+                &json!({"target_application":true}),
+                "docs",
+                None,
+                "Create a save manual",
+                |request| {
+                    let action = request["action"].as_str().unwrap();
+                    calls.push(action.to_string());
+                    if action == "target-launch" {
+                        return Ok(
+                            json!({"windows":windows(),"application":crate::target_application::context(root.path())}),
+                        );
+                    }
+                    if action == "operations-run" {
+                        assert_eq!(request["window"], "fixture");
+                        crate::operation_script::execute(
+                            root.path(),
+                            "operations-validate",
+                            &json!({"script":request["script"]}),
+                        )?;
+                        if fail {
+                            return Err("fixture operation failure".into());
+                        }
+                        let image = format!("{}/step-one.png", request["output"].as_str().unwrap());
+                        write_capture(&project_path(root.path(), &image)?, true);
+                        let path = format!("{}/run.json", request["output"].as_str().unwrap());
+                        let run = json!({"ok":true,"run":path,"window":"fixture","script":request["script"],"captures":[{"name":"step-one","image":image}]});
+                        fs::write(project_path(root.path(), &path)?, run.to_string())
+                            .map_err(|e| e.to_string())?;
+                        return Ok(run);
+                    }
+                    tools(root.path(), request)
+                },
+                |prompt, _| {
+                    answers += 1;
+                    assert!(prompt.contains("fixture-app"));
+                    if answers == 1 {
+                        Ok(
+                            json!({"version":1,"window":{"title":"Fixture app","bounds":[100,100,200,120]},"steps":[{"kind":"click","target":{"role":"button","name":"Save"}},{"kind":"screenshot","name":"step-one"}]}),
+                        )
+                    } else {
+                        Ok(answer())
+                    }
+                },
+            );
+            if fail {
+                assert!(result.err().unwrap().contains("fixture operation failure"));
+                assert_eq!(answers, 1);
+                assert!(!root.path().join("docs/assets").exists());
+            } else {
+                assert_eq!(result.unwrap().screenshots.len(), 1);
+                assert_eq!(answers, 2);
+            }
+            assert_eq!(
+                calls,
+                vec!["target-launch", "windows", "capture", "operations-run"]
+            );
+            assert_eq!(
+                fs::read_to_string(root.path().join("docs/index.md")).unwrap(),
+                "Original manuscript"
+            );
+        }
+    }
+
+    #[test]
     fn rich_pages_have_real_marked_images_and_correct_nested_links_without_adopting() {
         let root = fixture();
         let result = generate_with(
@@ -428,14 +653,18 @@ mod tests {
     #[test]
     fn automatic_capture_is_validated_and_preserves_markits_replay_metadata() {
         let root = fixture();
-        let mut calls = 0;
-        let result = generate_with(root.path(),&json!({"window":"fixture","automate_steps":true}),".",Some("Readme.md"),"Create only index.md",
-            |request|tools(root.path(),request),|_,_| {
-                calls+=1;
-                if calls==1 {Ok(json!({"version":1,"window":{"title":"Fixture app","bounds":[100,100,200,120]},"steps":[{"kind":"screenshot","name":"step-one"}]}))}
-                else {let mut result=answer();result["pages"].as_array_mut().unwrap().truncate(1);Ok(result)}
-            }).unwrap();
-        assert_eq!(calls, 2);
+        let script = json!({"version":1,"window":{"title":"Fixture app","bounds":[100,100,200,120]},"steps":[{"kind":"screenshot","name":"step-one"}]});
+        let image = ".munin/operation-runs/test/step-one.png";
+        write_capture(&project_path(root.path(), image).unwrap(), true);
+        let run = ".munin/operation-runs/test/run.json";
+        fs::write(
+            project_path(root.path(), run).unwrap(),
+            json!({"ok":true,"script":script,"captures":[{"name":"step-one","image":image}]})
+                .to_string(),
+        )
+        .unwrap();
+        let result = generate_with(root.path(),&json!({"window":"fixture","automate_steps":true,"capture_run":run,"reviewed_script":script}),".",Some("Readme.md"),"Create only index.md",
+            |_|panic!("approved captures must be reused without repeating input"),|_,_| {let mut result=answer();result["pages"].as_array_mut().unwrap().truncate(1);Ok(result)}).unwrap();
         assert!(result.pages[0].1.contains("docs/assets/template-"));
         let bytes = fs::read(
             project_path(root.path(), result.screenshots[0]["path"].as_str().unwrap()).unwrap(),
@@ -446,6 +675,20 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn planning_returns_an_editable_plan_and_observation_without_running_input() {
+        let root = fixture();
+        let result=generate_with(root.path(),&json!({"window":"fixture","automate_steps":true,"plan_only":true}),"docs",None,"manual",|request|{assert_ne!(request["action"],"operations-run");tools(root.path(),request)},|_,_|Ok(json!({"version":1,"window":{"title":"Fixture app","bounds":[100,100,200,120]},"steps":[{"kind":"wait_for","target":{"role":"button","name":"Save"},"state":"visible"},{"kind":"screenshot","name":"step-one"}]}))).unwrap();
+        let plan = result.plan.unwrap();
+        assert_eq!(plan["script"]["steps"][0]["kind"], "wait_for");
+        assert!(
+            project_path(root.path(), plan["observation"]["image"].as_str().unwrap())
+                .unwrap()
+                .is_file()
+        );
+        assert!(!root.path().join("docs/assets").exists());
     }
 
     #[test]

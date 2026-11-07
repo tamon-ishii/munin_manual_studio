@@ -96,6 +96,15 @@ pub fn read(root: &Path, page: &str) -> Result<Document, String> {
 }
 
 /// Original markup is needed only by explicit legacy migration and history readers.
+pub(crate) fn read_for_ai(root:&Path,page:&str,options:&serde_json::Value)->Result<Document,String>{
+    let mut document=read(root,page)?;
+    if let Some(body)=options.get("body"){
+        if options["revision"].as_str()!=Some(document.revision.as_str()){return Err("原稿が外部で更新されました。編集内容を確認してください。".into());}
+        document.content=body.as_str().filter(|text|text.len()<=300_000).ok_or("AIへ渡す原稿が長すぎるか、不正です。")?.to_string();
+    }
+    Ok(document)
+}
+
 pub(crate) fn read_raw(root: &Path, page: &str) -> Result<Document, String> {
     let path = document_path(root, page)?;
     let bytes = fs::read(&path).map_err(|error| format!("原稿を開けません: {error}"))?;
@@ -257,6 +266,13 @@ pub fn render_html(root: &Path, page: &str, content: &str) -> Result<String, Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ai_reads_unsaved_snapshot_without_writing_and_rejects_external_changes(){
+        let root=tempfile::tempdir().unwrap();std::fs::create_dir(root.path().join("docs")).unwrap();std::fs::write(root.path().join("docs/index.md"),"Saved").unwrap();
+        let original=super::read(root.path(),"index.md").unwrap();let options=serde_json::json!({"body":"Unsaved 😀\nNew paragraph","revision":original.revision});
+        let snapshot=super::read_for_ai(root.path(),"index.md",&options).unwrap();assert_eq!(snapshot.content,"Unsaved 😀\nNew paragraph");assert_eq!(std::fs::read_to_string(root.path().join("docs/index.md")).unwrap(),"Saved");
+        std::fs::write(root.path().join("docs/index.md"),"External edit").unwrap();assert!(super::read_for_ai(root.path(),"index.md",&options).is_err());
+    }
     use super::*;
 
     #[test]

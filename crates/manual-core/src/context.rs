@@ -121,6 +121,8 @@ pub fn build_application_context(root: &Path) -> ApplicationContext {
         p.push('\n');
     }
 
+    let target=crate::target_application::context(root);
+    if !target.is_null(){p.push_str(&format!("## 対象アプリケーション（利用者が設定した起動情報）\n{target}\n\n"));}
     ApplicationContext {
         name,
         version,

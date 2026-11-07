@@ -31,6 +31,9 @@ pub mod preview;
 pub mod pty;
 pub mod terminal_tools;
 mod operation_script;
+mod operation_checkpoint;
+mod operation_workflow;
+mod target_application;
 pub mod quality;
 pub mod scenario;
 pub mod screenshots;
@@ -105,6 +108,9 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "document-review",
         "document-review-capabilities",
         "draft-propose",
+        "draft-plan",
+        "operation-workbench",
+        "target-application",
         "draft-apply",
         "selection-generate",
         "screenshots-migration-plan",
@@ -538,6 +544,18 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "document-review" => document_review::review(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "document-review-capabilities" => document_review::capabilities(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "draft-propose" => match json_opt { Some(options) => draft_review::propose_options(root, options), None => draft_review::propose(root) },
+        "draft-plan" => {
+            let options:serde_json::Value=serde_json::from_str(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?;
+            Ok(rich_template::plan(root,&options)?.to_string())
+        },
+        "target-application" => {
+            let options:serde_json::Value=serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
+            Ok(target_application::handle(root,&options)?.to_string())
+        },
+        "operation-workbench" => {
+            let options:serde_json::Value=serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?;
+            Ok(operation_workflow::handle(root,&options)?.to_string())
+        },
         "draft-apply" => draft_review::apply(root, json_opt.unwrap_or("{}")),
         "selection-generate" => selection_ai::generate(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "draft" => {

@@ -91,4 +91,12 @@ POSIX shell:
 
 入力を実行せず、既存画像へ操作記録を付ける場合は`operations-attach`を使います。`script`に加えて`image`（元のPNG）と`output`（新しいPNG）を指定します。原本や既存出力は上書きしません。
 
+状態確認には`{"kind":"wait_for","target":{"role":"button","name":"保存"},"state":"visible","timeout_ms":10000}`を指定します。`hidden`は対象の消失、`value`は入力値の一致（期待値を`value`に指定）を待ちます。曖昧な対象・観察エラー・タイムアウトでは停止します。条件を含む記録はPNGの`markits:operation_script`にも保存され、`operations-inspect`の`script_only:true`で取得できます。従来のMarkIts再生はこの条件を実行しません。
+
+停止した実行には`checkpoint.json`が残ります。対象画面と失敗した操作の部分反映を利用者が確認した後、同じ`output`と`script`で`operations-resume`に`retry_failed:true`を指定します。完了済み入力は再実行しません。完了済み手順は編集できません。
+
+Studioの入口は「対象アプリケーションの設定」です。利用者が設定した起動コマンド・引数配列・ワーキングフォルダ・補足情報は`tools.json`の`target_application`にあります。`{"root":"PROJECT_ABSOLUTE_PATH","action":"target-launch"}`で保存済みのアプリを起動し、画面候補を取得できます。AIは起動コマンドを書き換えず、実在する画面から対象を特定してください。雛形作成ではホストが起動→観察→計画の検証→操作・撮影→原稿候補まで進めます。利用者にJSON編集やウィンドウ選択を求めません。
+
+秘密情報を隠す際は既存MarkItsの`mosaic`注釈をAIが指定します。観察したUIMap名をtargetとして`{"type":"mosaic","target":"トークン","block_size":16}`を使います。位置を推測したり、隠蔽を確認せず完了したと主張してはいけません。
+
 直接実行する撮影は現在カーソルなしです。`include_cursor:true`は`operations-attach`で保存し、MarkIts側で再生する場合に利用できます。待機は1回30秒、合計5分まで、手順は500件までです。クリック対象が曖昧な場合は座標へ推測で切り替えず失敗します。キーは`Control+a`などの修飾キー＋英数字・F1〜F12・Enter/Escape/Tab/Backspace/Delete/Space/方向キーです。任意コマンドやアプリ起動はscriptの操作として受け付けません。

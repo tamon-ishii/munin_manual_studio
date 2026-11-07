@@ -5,7 +5,7 @@ use std::{fs, path::Path};
 
 pub(crate) fn capabilities(root: &Path, page: &str, options: &str) -> Result<String, String> {
     let options: Value = serde_json::from_str(options).map_err(|e| e.to_string())?;
-    let document = crate::editor::read(root, page)?;
+    let document = crate::editor::read_for_ai(root, page,&options)?;
     let (reviewed, _) = review_range(&document.content, &options["range"])?;
     let config = crate::config::read_config(root);
     let supports_images = config.connection_type == "api" || config.connection_type == "local_llm";
@@ -15,7 +15,7 @@ pub(crate) fn capabilities(root: &Path, page: &str, options: &str) -> Result<Str
 
 pub(crate) fn review(root: &Path, page: &str, options: &str) -> Result<String, String> {
     let options: Value = serde_json::from_str(options).map_err(|e| e.to_string())?;
-    let document = crate::editor::read(root, page)?;
+    let document = crate::editor::read_for_ai(root, page,&options)?;
     if options["revision"].as_str() != Some(&document.revision) {
         return Err("原稿が更新されました。レビューを実行し直してください。".into());
     }
