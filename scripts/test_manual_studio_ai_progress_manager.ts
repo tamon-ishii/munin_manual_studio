@@ -34,4 +34,10 @@ assert.equal(outcome.cancelled, true);
 assert.equal(manager.isRunning, false);
 assert.equal(manager.root, null);
 
+manager.start({connection:'API',operation:'雛形作成',root:'/test-project'});
+assert.equal(manager.recordAgentLogs([{time:'12:00:00',message:'AIへ送信',detail:'実画面を含む雛形を作る'}],1),true);
+assert.ok(manager.logs[0].includes('\n実画面を含む雛形を作る'));
+assert.equal(manager.currentStage,'AIへ送信','request details must not replace the progress summary');
+assert.equal(manager.recordAgentLogs([{time:'12:00:00',message:'AIへ送信',detail:'実画面を含む雛形を作る'}],1),false,'polling must not duplicate exchanges');
+
 console.log('AiProgressManager unit tests passed successfully!');

@@ -65,7 +65,16 @@ pub(crate) fn propose_options(root: &Path, options: &str) -> Result<String, Stri
         originals.insert(relative, existing(&safe)?.ok_or("原稿が削除されました。")?);
     }
     let checkpoint = crate::agent::cancellation_checkpoint(root);
-    let generated = if template.is_some() { crate::author::draft_pages_with_instruction(root, instruction)? } else { crate::author::draft_pages(root)? };
+    let instruction = if let Some(extra) = value["instruction"].as_str().filter(|text|!text.trim().is_empty()) {
+        if extra.len()>20_000 {return Err("作成指示は20,000文字以内にしてください。".into());}
+        format!("{instruction}\n利用者の作成指示: {extra}")
+    } else {instruction.to_string()};
+    let (generated,screenshots) = if value["include_screenshots"] == true {
+        let candidate = crate::rich_template::generate(root,&value,&config.docs,filename.as_deref(),&instruction)?;
+        (candidate.pages,candidate.screenshots)
+    } else {
+        (if template.is_some() {crate::author::draft_pages_with_instruction(root,&instruction)?} else {crate::author::draft_pages(root)?},Vec::new())
+    };
     if filename.is_some() && (generated.len() != 1 || generated[0].0 != "index.md") {
         return Err("READMEは一つのページで作成してください。".into());
     }
@@ -86,7 +95,7 @@ pub(crate) fn propose_options(root: &Path, options: &str) -> Result<String, Stri
         });
     }
     crate::agent::log_progress(root, &format!("{}ページの候補を作成しました。原稿は変更していません。", pages.len()));
-    serde_json::to_string(&serde_json::json!({"docs":config.docs,"pages":pages})).map_err(|e| e.to_string())
+    serde_json::to_string(&serde_json::json!({"docs":config.docs,"pages":pages,"screenshots":screenshots})).map_err(|e| e.to_string())
 }
 
 pub(crate) fn apply(root: &Path, options: &str) -> Result<String, String> {

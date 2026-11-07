@@ -62,7 +62,7 @@ fn generate_with(root:&Path,page:&str,context:&Value,windows:&Value,mut capture:
 
 // The AI schema has shared optional fields, whereas MarkIts rejects fields
 // belonging to a different shape. Preserve numbering as a separate badge.
-fn normalize_annotations(annotations:&[Value])->Vec<Value>{
+pub(crate) fn normalize_annotations(annotations:&[Value])->Vec<Value>{
     let mut result=Vec::new();
     for annotation in annotations {
         let kind=annotation["type"].as_str().unwrap_or("");

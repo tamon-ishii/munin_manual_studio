@@ -25,6 +25,7 @@ mod selection_ai;
 mod selection_capture;
 mod document_review;
 mod draft_review;
+mod rich_template;
 pub mod platform;
 pub mod preview;
 pub mod pty;
@@ -141,6 +142,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "save",
         "draft",
         "init-template",
+        "template-guide",
         "build",
         "build-mkdocs",
         "deps",
@@ -543,6 +545,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
+        "template-guide" => Ok(crate::rich_template::guide().to_string()),
         "init-template" => {
             let tmpl_type = template_opt.unwrap_or("manual");
             template::init_template(

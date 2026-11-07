@@ -95,11 +95,11 @@ export class AiProgressManager {
     return this.failureMessage;
   }
 
-  recordAgentLogs(entries: Array<{ time: string; message: string }>, total?: number): boolean {
+  recordAgentLogs(entries: Array<{ time: string; message: string; detail?: string }>, total?: number): boolean {
     const reportTotal = total ?? entries.length;
     if (reportTotal > this.agentTotal) {
       const newItems = entries.slice(-(reportTotal - this.agentTotal));
-      this.displayLogs.push(...newItems.map(e => `[${e.time}] ${e.message}`));
+      this.displayLogs.push(...newItems.map(e => `[${e.time}] ${e.message}${e.detail ? '\n' + e.detail : ''}`));
       this.agentTotal = reportTotal;
       this.lastEventAt = Date.now();
       if (this.running && entries.length) {

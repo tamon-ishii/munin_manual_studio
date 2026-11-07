@@ -339,7 +339,7 @@ function pollAgentProgress(): Promise<void> {
 }
 async function readAgentProgress(generation: number): Promise<void> {
   try {
-    const result = JSON.parse(await rpc("agent-progress", {}, activeGenerationRoot || projectRoot)) as { logs: Array<{ time: string; message: string }>; total?: number };
+    const result = JSON.parse(await rpc("agent-progress", {}, activeGenerationRoot || projectRoot)) as { logs: Array<{ time: string; message: string; detail?: string }>; total?: number };
     if (generation !== progressGeneration) return;
     if (aiProgress.recordAgentLogs(result.logs, result.total)) {
       progressDisplayLogs = aiProgress.logs;
@@ -2439,7 +2439,7 @@ function loadDraftCandidate(root: string): DraftCandidate | null {
 }
 async function createFullDraft(templateMode=false):Promise<void>{
   if(busy)return;
-  const options=templateMode?await askTemplateDestination(workspace?.config.docs||'docs'):null;
+  const options=templateMode?await askTemplateDestination(workspace?.config.docs||'docs',async()=>JSON.parse(await rpc('list-windows',{},projectRoot)) as Array<{id:string;title:string}>,()=>rpc('template-guide',{},projectRoot)):null;
   if(templateMode&&!options)return;
   await savedBeforeOperation();
   const root=projectRoot;
@@ -2453,7 +2453,7 @@ async function createFullDraft(templateMode=false):Promise<void>{
     });
   }
   if(!candidate||root!==projectRoot)return;
-  const pages=await reviewDraft(candidate,()=>root===projectRoot&&!dirty&&!Array.from(documentTabs.values()).some(tab=>tab.content!==tab.document.content));
+  const pages=await reviewDraft(candidate,()=>root===projectRoot&&!dirty&&!Array.from(documentTabs.values()).some(tab=>tab.content!==tab.document.content),path=>rpc('preview-asset',{page:`${candidate!.docs}/${candidate!.pages[0].path}`,asset:path},root));
   if(!pages){if(!templateMode)clearDraftCandidate(root);status('下書き候補を破棄しました。原稿は変更していません。');return;}
   await work(async()=>{
     if(root!==projectRoot||dirty)throw new Error('原稿が変更されました。候補を作り直してください。');

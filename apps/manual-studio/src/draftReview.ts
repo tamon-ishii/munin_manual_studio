@@ -1,9 +1,9 @@
 import {featureDialog} from './imageDialogs';
 import {diffParts,acceptDiff} from './selectableDiff';
 export interface DraftPage {path:string;before:string;content:string;revision:string|null;}
-export interface DraftCandidate {docs:string;pages:DraftPage[];}
+export interface DraftCandidate {docs:string;pages:DraftPage[];screenshots?:Array<{path:string;caption:string}>;}
 
-export function reviewDraft(candidate:DraftCandidate,valid:()=>boolean):Promise<DraftPage[]|null>{
+export function reviewDraft(candidate:DraftCandidate,valid:()=>boolean,loadImage?:(path:string)=>Promise<string>):Promise<DraftPage[]|null>{
   const {dialog,body}=featureDialog('全文下書きの変更を確認');dialog.id='draft-diff-dialog';
   const note=document.createElement('p');note.textContent='原稿はまだ変更していません。ページと変更箇所を選んで反映してください。候補にない既存ページは保持します。';
   const controls=document.createElement('div');controls.className='actions';
@@ -14,6 +14,12 @@ export function reviewDraft(candidate:DraftCandidate,valid:()=>boolean):Promise<
   const selected=()=>states.filter(state=>state.enabled&&acceptDiff(state.parts,state.accepted)!==state.page.before).map(state=>({...state.page,content:acceptDiff(state.parts,state.accepted)}));
   const update=()=>{const pages=selected();count.textContent=`${pages.length} / ${states.length}ページを反映`;apply.disabled=pages.length===0;};
   body.append(note,controls,count,error);
+  if(candidate.screenshots?.length&&loadImage){
+    const gallery=document.createElement('section');gallery.className='draft-screenshots';const title=document.createElement('h3');title.textContent='雛形に含めた実画面';gallery.append(title);
+    const captureNote=document.createElement('p');captureNote.textContent='本文は採用後に保存します。撮影画像はプロジェクトに保存済みです。';gallery.append(captureNote);
+    for(const shot of candidate.screenshots){const figure=document.createElement('figure');const image=document.createElement('img');image.alt=shot.caption;const caption=document.createElement('figcaption');caption.textContent=shot.caption;figure.append(image,caption);gallery.append(figure);void loadImage(shot.path).then(source=>{if(dialog.open)image.src=source;}).catch(e=>{caption.textContent=`画像を表示できません：${String(e)}`;});}
+    body.append(gallery);
+  }
   for(const state of states){
     const card=document.createElement('section');card.className='card draft-page';card.dataset.draftPage=state.page.path;
     const label=document.createElement('label');state.checkbox.type='checkbox';state.checkbox.checked=true;state.checkbox.dataset.draftEnabled=state.page.path;label.append(state.checkbox,document.createTextNode(`${state.page.path}（${state.page.revision===null?'新規':'変更'}）を採用`));card.append(label);

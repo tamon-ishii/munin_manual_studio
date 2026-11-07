@@ -113,15 +113,44 @@ pub fn log_progress(root: &Path, message: &str) {
     append_progress(&progress_log_path(root), message);
 }
 
+/// Log observable requests/results, never provider reasoning or raw CLI streams.
+pub(crate) fn log_exchange(root: &Path, kind: &str, message: &str, value: &Value) {
+    let mut detail = value.as_str().map(str::to_owned).unwrap_or_else(|| serde_json::to_string_pretty(value).unwrap_or_default());
+    REQUEST_API_KEY.with(|key| {
+        if let Some(key) = key.borrow().as_ref().filter(|key| !key.is_empty()) {detail = detail.replace(key, "[REDACTED]");}
+    });
+    let bearer = regex::Regex::new(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*").unwrap();
+    detail = bearer.replace_all(&detail,"Bearer [REDACTED]").into_owned();
+    let secrets = regex::Regex::new(r#"(?i)("?(?:api[_-]?key|authorization|password|access_token|refresh_token|secret)"?\s*[:=]\s*)(?:"[^"\n]*"|[^\s,}]+)"#).unwrap();
+    detail = secrets.replace_all(&detail, "${1}\"[REDACTED]\"").into_owned();
+    if detail.chars().count() > 32_000 {detail = detail.chars().take(32_000).collect::<String>() + "\n…（ログは32,000文字まで表示）";}
+    let entry = json!({"time":chrono::Local::now().format("%H:%M:%S").to_string(),"message":message,"kind":kind,"detail":detail});
+    append_event(&progress_log_path(root),&entry);
+}
+
+pub(crate) fn traced_candidate(root: &Path, prompt: &str, schema: &Value, agent: &str, model: &str) -> Result<Value,String> {
+    log_exchange(root,"request","AIへ送信：雛形作成の指示",&json!({"instruction":prompt,"response_schema":schema}));
+    let result = agent_json_candidate(root,prompt,schema,agent,model);
+    match &result {
+        Ok(value) => log_exchange(root,"response","AIからの応答：雛形の候補・操作計画",value),
+        Err(error) => log_exchange(root,"error","AIへの依頼に失敗",&json!({"error":error})),
+    }
+    result
+}
+
 fn append_progress(path: &Path, message: &str) {
     let entry = json!({
         "time": chrono::Local::now().format("%H:%M:%S").to_string(),
         "message": message,
     });
-    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
-        if serde_json::to_writer(&mut file, &entry).is_ok() {
-            let _ = file.write_all(b"\n");
-            let _ = file.flush();
+    append_event(path,&entry);
+}
+
+fn append_event(path: &Path, entry: &Value) {
+    if let Ok(mut bytes) = serde_json::to_vec(entry) {
+        bytes.push(b'\n');
+        if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = file.write_all(&bytes);let _ = file.flush();
         }
     }
 }
@@ -1175,6 +1204,23 @@ fn bounded_failure_message(message: &str) -> &str {
 #[cfg(test)]
 mod failure_tests {
     use super::*;
+
+    #[test]
+    fn exchange_logs_show_observable_content_and_redact_credentials() {
+        let root = tempfile::tempdir().unwrap();
+        clear_progress(root.path());
+        let _scope = request_api_key(Some("request-key-secret"));
+        log_exchange(root.path(),"request","AIへ送信",&json!({"instruction":"Create a manual with request-key-secret","password":"hidden-password","api_key":"another-secret"}));
+        let state:Value = serde_json::from_str(&progress(root.path())).unwrap();
+        let detail = state["logs"][0]["detail"].as_str().unwrap();
+        assert!(detail.contains("Create a manual"));
+        for secret in ["request-key-secret","hidden-password","another-secret"] {assert!(!detail.contains(secret));}
+        assert_eq!(state["logs"][0]["kind"],"request");
+        log_exchange(root.path(),"response","AIからの応答",&json!("あ".repeat(33_000)));
+        let state:Value = serde_json::from_str(&progress(root.path())).unwrap();
+        assert!(state["logs"][1]["detail"].as_str().unwrap().contains("32,000文字"));
+        clear_progress(root.path());
+    }
 
     #[test]
     fn headless_permission_denial_reports_reason_instead_of_empty_json_error(){

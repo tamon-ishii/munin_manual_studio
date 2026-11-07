@@ -97,7 +97,7 @@ pub(crate) fn draft_pages_with_instruction(root: &Path, instruction: &str) -> Re
     log_progress(root, "プロジェクトの構造と画面情報を調べています");
     let app_context = super::context::build_application_context(root);
 
-    let draft_prompt = format!("{instruction} Return JSON pages, with index.md required and at most eight pages. Write actual prose and Mermaid directly as ordinary Markdown. Do not use AI tags, metadata comments or screenshot tasks. Do not invent UI labels or product facts.\nInput JSON: {}",json!({"context":app_context.prompt_summary,"brief":brief}));
+    let draft_prompt = format!("{}\n\n今回の依頼（スクリーンショットなし）:\n{instruction} Return JSON pages, with index.md required and at most eight pages. Write actual prose and Mermaid directly as ordinary Markdown. Do not use AI tags, metadata comments or screenshot tasks. Do not invent UI labels or product facts.\nInput JSON: {}",crate::rich_template::guide(),json!({"context":app_context.prompt_summary,"brief":brief}));
 
     let schema = json!({
         "type": "object",
@@ -120,15 +120,19 @@ pub(crate) fn draft_pages_with_instruction(root: &Path, instruction: &str) -> Re
     });
 
     log_progress(root, "AIに章立てと原稿案を依頼しています");
-    let result = super::agent::agent_json_candidate(root, &draft_prompt, &schema, &config.agent, &config.model)?;
+    let result = super::agent::traced_candidate(root, &draft_prompt, &schema, &config.agent, &config.model)?;
     log_progress(root, "AIの回答を検査し、原稿ファイルを準備しています");
+    validate_draft_pages(&result, &config.agent)
+}
+
+pub(crate) fn validate_draft_pages(result: &Value, agent: &str) -> Result<Vec<(String,String)>,String> {
     let pages = result
         .get("pages")
         .and_then(|p| p.as_array())
-        .ok_or_else(|| format!("{} returned an invalid page list", config.agent))?;
+        .ok_or_else(|| format!("{agent} returned an invalid page list"))?;
 
     if pages.is_empty() || pages.len() > 8 {
-        return Err(format!("{} returned an invalid page list", config.agent));
+        return Err(format!("{agent} returned an invalid page list"));
     }
 
     let mut validated = Vec::new();
@@ -152,7 +156,7 @@ pub(crate) fn draft_pages_with_instruction(root: &Path, instruction: &str) -> Re
     }
 
     if !has_index {
-        return Err(format!("{} draft must include index.md", config.agent));
+        return Err(format!("{agent} draft must include index.md"));
     }
 
     Ok(validated)
