@@ -2564,7 +2564,10 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
 window.addEventListener('manual-studio-selection-ai',()=>{
   if(busy||!documentState||activeImageTab)return;
   const root=projectRoot,page=documentState.page,expected=editor.value,selection=captureAiSelection();
-  if(!selection?.text.trim())return;
+  if(!selection)return;
+  if(!selection.text.trim()){
+    void createSelectionDocument('',selection).catch(error=>status(String(error),true));return;
+  }
   void (async()=>{
     const action=await askSelectionAction(selection.text,workspace?.agents,workspace?.config.connection_type==='cli'?workspace.config.agent:'');
     if(!action)return;

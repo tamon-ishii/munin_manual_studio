@@ -101,7 +101,7 @@ try {
   await page.locator('.ProseMirror p').filter({hasText:'Generated body'}).click();await page.keyboard.press('Control+z');assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/rich draft/);
   // Display customization persists and can be reset.
   await page.getByRole('button',{name:'外観',exact:true}).click();await page.locator('#toolbar-customization>summary').click();
-  const bold=page.locator('#toolbar-customization-list label').filter({hasText:/^太字$/}).locator('input');await bold.uncheck();assert.equal(await page.locator('.milkdown-top-bar button[aria-label="太字"]').isVisible(),false);
+  const bold=page.locator('#toolbar-customization-list').getByLabel('太字を表示',{exact:true});await bold.uncheck();assert.equal(await page.locator('.milkdown-top-bar button[aria-label="太字"]').isVisible(),false);
   await page.locator('#reset-toolbar-customization').click();assert.equal(await bold.isChecked(),true);await page.locator('[data-close-dialog=panel-appearance]').click();
   // Shared originals and reusable scene/crop templates create independent candidates.
   const registered=JSON.parse(await rpc('screenshots-register',{json:{source:`data:image/png;base64,${png.toString('base64')}`,scene:{canvas:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)},annotations:[]},name:'Template source'}}));const id=registered.screenshot.id;

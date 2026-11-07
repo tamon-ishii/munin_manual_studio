@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {chromium} from 'playwright-core';
+const base=process.env.MANUAL_STUDIO_TEST_URL||'http://127.0.0.1:5174';
+const root=await mkdtemp(path.join(os.tmpdir(),'munin-toolbar-settings-'));let browser;
+try{
+ await mkdir(path.join(root,'docs'));await writeFile(path.join(root,'docs/index.md'),'# Guide\n\nOriginal text');await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',targets:['docs'],connection_type:'none'}));
+ browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.route('**/__manual/rpc',async route=>{const response=await route.fetch({headers:{...route.request().headers(),origin:'http://127.0.0.1:5174'}});await route.fulfill({response});});
+ const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false'&&document.querySelector('#markdown-editor')?.value.includes('Original text'));
+ const settings=async()=>{await page.locator('#application-settings').click();await page.locator('#settings-tab-appearance').click();await page.locator('#toolbar-customization').evaluate(node=>node.open=true);};
+ const list=page.locator('#toolbar-customization-list');const bar=page.locator('.top-bar-inner');
+ const order=()=>bar.locator(':scope > [data-toolbar-key]').evaluateAll(nodes=>nodes.map(node=>node.dataset.toolbarKey));
+ await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=index.md`);await idle();await bar.locator('[data-toolbar-key=mermaid]').waitFor();const defaults=await order();assert.equal(defaults.at(-1),'insert');
+ await settings();const labels=await list.locator('.toolbar-setting').allTextContents();assert.equal(new Set(labels).size,labels.length);assert.ok(!labels.includes('??'));assert.ok(labels.includes('注釈'));assert.ok(labels.includes('見出し'));assert.ok(labels.includes('挿入・その他'));assert.ok(!labels.includes('リンクを挿入'));assert.ok(!labels.includes('画像を挿入'));assert.ok(!labels.includes('表を作成・編集'));assert.equal(labels.length,defaults.length);
+ assert.equal(await list.locator('.toolbar-setting').first().evaluate(node=>getComputedStyle(node).flexDirection),'row');
+ await list.getByLabel('Mermaidの図を挿入を表示',{exact:true}).uncheck();assert.equal(await bar.locator('[data-toolbar-key=mermaid]').getAttribute('data-toolbar-hidden'),'true');await list.getByLabel('Mermaidの図を挿入を表示',{exact:true}).check();assert.equal(await bar.locator('[data-toolbar-key=mermaid]').getAttribute('data-toolbar-hidden'),'false');
+ await list.getByLabel('注釈を表示',{exact:true}).uncheck();assert.equal(await bar.locator('[data-toolbar-key=gfm-alert]').getAttribute('data-toolbar-hidden'),'true');assert.equal(await bar.locator('[data-toolbar-key=heading-selector]').getAttribute('data-toolbar-hidden'),'false');assert.equal(await bar.locator('[data-toolbar-key=insert]').getAttribute('data-toolbar-hidden'),'false');
+ const aiRow=list.locator('[data-toolbar-setting=ai-insert]');await aiRow.getByRole('button',{name:'AI操作を前へ',exact:true}).click();let moved=await order();assert.notDeepEqual(moved,defaults);assert.equal(moved.indexOf('ai-insert'),defaults.indexOf('ai-insert')-1);assert.deepEqual(await list.locator('[data-toolbar-setting]').evaluateAll(nodes=>nodes.map(node=>node.dataset.toolbarSetting)),moved);
+ await list.getByLabel('元に戻すを移動対象に選択',{exact:true}).check();await list.getByLabel('AI操作を移動対象に選択',{exact:true}).check();assert.equal(await list.locator('[data-selected=true]').count(),2);assert.equal(await list.getByLabel('元に戻すを表示',{exact:true}).isChecked(),true);
+ const target=list.locator('[data-toolbar-setting=insert]');await target.scrollIntoViewIfNeeded();const grip=await aiRow.locator('.toolbar-setting-grip').boundingBox(),drop=await target.boundingBox();assert.ok(grip&&drop);await page.mouse.move(grip.x+grip.width/2,grip.y+grip.height/2);await page.mouse.down();await page.mouse.move(drop.x+drop.width/2,drop.y+drop.height-5,{steps:12});assert.equal(await list.locator('[data-dragging=true]').count(),2);assert.equal(await target.getAttribute('data-drop-position'),'after');await page.mouse.up();
+ const group=moved.filter(key=>['undo','ai-insert'].includes(key));moved=[...moved.filter(key=>!group.includes(key)),...group];assert.deepEqual(await order(),moved);assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('manual-studio-toolbar-order'))),moved);assert.equal(await list.locator('[data-selected=true]').count(),2);assert.equal(await list.getByLabel('注釈を表示',{exact:true}).isChecked(),false);
+ if(process.env.TOOLBAR_SETTINGS_SCREENSHOT)await page.screenshot({path:process.env.TOOLBAR_SETTINGS_SCREENSHOT});
+ await page.reload();await idle();await page.waitForFunction(expected=>JSON.stringify(Array.from(document.querySelectorAll('.top-bar-inner > [data-toolbar-key]'),node=>node.dataset.toolbarKey))===JSON.stringify(expected),moved);
+ await page.getByRole('button',{name:'Markdownソース',exact:true}).click();await bar.getByRole('button',{name:'Mermaidの図を挿入',exact:true}).click();assert.match(await page.locator('#markdown-editor').inputValue(),/```mermaid/);assert.deepEqual(await order(),moved);
+ await settings();assert.equal(await list.getByLabel('注釈を表示',{exact:true}).isChecked(),false);await page.locator('#reset-toolbar-customization').click();assert.deepEqual(await order(),defaults);assert.equal(await list.getByLabel('注釈を表示',{exact:true}).isChecked(),true);assert.equal(await page.evaluate(()=>localStorage.getItem('manual-studio-toolbar-order')),null);
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),'# Guide\n\nOriginal text');assert.deepEqual(errors,[]);
+ console.log('Toolbar settings passed: exact active inventory, independent visibility, Mermaid insertion, multi-selection pointer drag preserving selected order, live toolbar/persisted order/reload/reset, unchanged disk.');
+}finally{for(const context of browser?.contexts()||[])for(const page of context.pages())await page.unrouteAll({behavior:'ignoreErrors'});await browser?.close();await rm(root,{recursive:true,force:true});}

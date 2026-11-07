@@ -85,6 +85,22 @@ jobs:
           python -m unittest discover -s scripts -p "test_package_release.py"
           python -m unittest discover -s scripts -p "test_cargo_rustc_command.py"
           python -m unittest discover -s scripts -p "test_start_manual_studio.py"
+      - name: Build editor regression backend
+        if: runner.os == 'Windows' && !inputs.linux_native_only
+        run: cargo build --locked -p manual-core --bin manualctl
+      - name: Install browser for required editor checks
+        if: runner.os == 'Windows' && !inputs.linux_native_only
+        run: npx playwright-core install chromium
+      - name: Check editor cursor, selection, history, preview, AI and toolbar
+        if: runner.os == 'Windows' && !inputs.linux_native_only
+        run: npm run manual:check-editor
+      - name: Save editor regression results
+        if: always() && runner.os == 'Windows' && !inputs.linux_native_only
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-editor-regression
+          path: ui-coverage-results/editor-smoke/
+          if-no-files-found: ignore
       - name: Prepare Windows native checks
         id: windows_native_build
         if: runner.os == 'Windows' && inputs.windows_native_smoke

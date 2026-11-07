@@ -49,7 +49,8 @@ export function askSelectionInstruction(selected:string,initial="",failure=""):P
   const presets=document.createElement('div');presets.className='actions';for(const text of ['簡潔にする','初心者向けに説明する','操作手順にする','誤字脱字・文法を校正する']){const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=()=>{instruction.value=text;instruction.focus();};presets.append(button);}
   const run=document.createElement('button');run.type='button';run.className='primary';run.textContent='候補を作成';run.dataset.uiIcon='sparkle';run.disabled=!initial.trim();instruction.oninput=()=>{run.disabled=!instruction.value.trim();};presets.addEventListener('click',()=>{run.disabled=!instruction.value.trim();});
   const error=document.createElement('p');error.role='alert';error.textContent=failure;
-  body.append(help,error,preview,label,presets,run);
+  const actions=document.createElement('div');actions.className='actions selection-instruction-actions';actions.append(run);
+  body.append(help,error,preview,label,presets,actions);
   return new Promise(resolve=>{let answer:string|null=null;run.onclick=()=>{if(!instruction.value.trim())return;answer=instruction.value.trim();dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
 }
 export interface SelectionReviewState {accepted:number[];feedback:string;}

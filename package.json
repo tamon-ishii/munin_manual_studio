@@ -11,6 +11,7 @@
     "manual:test-markits": "node scripts/test_markits_selection.mjs && node scripts/test_markits_recording_ui.mjs",
     "manual:check": "node scripts/check_manual_studio.mjs",
     "manual:check-ui": "node scripts/check_manual_studio.mjs --group ui",
+    "manual:check-editor": "node scripts/check_manual_studio_editor.mjs",
     "manual:check-generation": "node scripts/check_manual_studio.mjs --group generation",
     "manual:check-capture": "node scripts/check_manual_studio.mjs --group capture",
     "manual:check-coverage": "node scripts/check_manual_studio_coverage.mjs --require-complete",

@@ -369,7 +369,7 @@ export function setupMilkdownEditor(
   }));
   const icon = (label: string) => `<span>${label}</span>`;
   const mermaidSource = '```mermaid\ngraph TD\n    A[開始] --> B[完了]\n```';
-  const topBarLabels: string[] = [];
+  const topBarControls:Array<{key:string;label:string}>=[];
   const labels: Record<string, string> = { bold: '太字', italic: '斜体', strikethrough: '取り消し線', code: 'インラインコード', link: 'リンク', image: '画像', table: '表', 'code-block': 'コードブロック', math: '数式', quote: '引用', hr: '区切り線', 'bullet-list': '箇条書き', 'ordered-list': '番号付きリスト', 'task-list': 'タスクリスト', undo: '元に戻す', redo: 'やり直す', mermaid: 'Mermaidの図を挿入' };
   function applyImageStyles(){if(!ready||!instance)return;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.state.doc.descendants((node,pos)=>{
     if(node.type.name!=='image-block')return;const dom=view.nodeDOM(pos);if(!(dom instanceof HTMLElement))return;
@@ -399,9 +399,21 @@ export function setupMilkdownEditor(
   const toolbarObserver = new MutationObserver(() => {
     fitToolbarMenus();
     applyImageStyles();
-    host.querySelectorAll<HTMLButtonElement>('.milkdown-top-bar .top-bar-item').forEach((button, index) => {
-      const label = topBarLabels[index];
-      if (label) { button.setAttribute('aria-label', label); button.title = label; }
+    host.querySelectorAll<HTMLButtonElement>('.top-bar-heading-button').forEach(button=>{
+      const label=button.querySelector<HTMLElement>('.top-bar-heading-label');
+      if(label?.textContent==='注釈'){
+        button.setAttribute('aria-label','注釈');button.title='注釈';label.innerHTML=uiIcon('annotation');
+      }
+    });
+    host.querySelectorAll<HTMLElement>('.milkdown-top-bar .top-bar-inner').forEach(bar=>{
+      Array.from(bar.children).forEach((node,index)=>{if(node instanceof HTMLElement&&node.dataset.toolbarPosition===undefined)node.dataset.toolbarPosition=String(index);});
+      bar.querySelectorAll<HTMLElement>(':scope > .top-bar-item,:scope > .top-bar-heading-selector').forEach((element,index)=>{
+        const control=element.dataset.toolbarKey?topBarControls.find(item=>item.key===element.dataset.toolbarKey):topBarControls[index];
+        if(!control)return;
+        if(element.dataset.toolbarKey!==control.key)element.dataset.toolbarKey=control.key;
+        if(element.dataset.toolbarLabel!==control.label)element.dataset.toolbarLabel=control.label;
+        if(element.matches('button')){element.setAttribute('aria-label',control.label);element.title=control.label;}
+      });
     });
   });
   toolbarObserver.observe(host, { childList: true, subtree: true });
@@ -410,17 +422,20 @@ export function setupMilkdownEditor(
     defaultValue: sourceValue(),
     features: { [Crepe.Feature.TopBar]: true },
     featureConfigs: {
+      // A native caret remains visible across focus, readonly and layout
+      // transitions without depending on a separately positioned DOM widget.
+      [Crepe.Feature.Cursor]: {virtual:false},
       [Crepe.Feature.TopBar]: {
         headingOptions: [{ label: '本文', level: null }, ...Array.from({ length: 6 }, (_, index) => ({ label: `見出し${index + 1}`, level: index + 1 }))],
         buildTopBar: builder => {
           builder.addGroup('history', '履歴')
             .addItem('undo', { icon: uiIcon('undo'), active: () => false, onRun: (ctx: Ctx) => { undoOrCancel(ctx); } })
             .addItem('redo', { icon: uiIcon('redo'), active: () => false, onRun: (ctx: Ctx) => { const view = ctx.get(editorViewCtx); redo(view.state, view.dispatch); } });
-          builder.getGroup('block').addItem('mermaid', { icon: icon('Mermaid'), active: () => false, onRun: (ctx: Ctx) => insert(mermaidSource)(ctx) });
-          const advancedKeys = new Set(['strikethrough', 'code', 'code-block', 'math', 'quote', 'hr', 'task-list', 'mermaid']);
+          builder.getGroup('block').addItem('mermaid', { icon: uiIcon('diagram'), active: () => false, onRun: (ctx: Ctx) => insert(mermaidSource)(ctx) });
+          const advancedKeys = new Set(['strikethrough', 'code', 'code-block', 'math', 'quote', 'hr', 'task-list']);
           const advanced = builder.build().flatMap(group => group.items).filter(item => advancedKeys.has(item.key) && item.onRun);
           for (const group of builder.build()) group.items = group.items.filter(item => !advancedKeys.has(item.key));
-          builder.addGroup('insert', '挿入').addItem('insert', {
+          builder.addGroup('extras', 'その他').addItem('insert', {
             icon: '', active: () => false,
             selector: { activeLabel: () => '挿入・その他', options: advanced.map(item => ({ label: labels[item.key] || item.key, onSelect: ctx => item.onRun!(ctx) })) },
           });
@@ -429,7 +444,6 @@ export function setupMilkdownEditor(
           for (let index = groups.length - 1; index >= 0; index--) {
             if (!groups[index].items.length) groups.splice(index, 1);
           }
-          topBarLabels.splice(0, topBarLabels.length, ...builder.build().flatMap(group => group.items.filter(item => item.onRun).map(item => labels[item.key] || item.key)));
           // Keep Milkdown's original UI in both modes; route only the operation
           // to the Markdown source when it is being edited.
           const sourceAction = (format: string, extra: Record<string, unknown> = {}) => {
@@ -462,13 +476,22 @@ export function setupMilkdownEditor(
               }};
             });
           }
+          builder.addGroup('ai-actions','AI操作').addItem('ai-insert',{
+            icon:uiIcon('aiInsert'),active:()=>false,
+            onRun:()=>{window.dispatchEvent(new Event('manual-studio-selection-ai'));},
+          });
+          const orderedGroups=builder.build();
+          const otherIndex=orderedGroups.findIndex(group=>group.items.some(item=>item.key==='insert'));
+          if(otherIndex>=0)orderedGroups.push(...orderedGroups.splice(otherIndex,1));
+          const selectorLabels:Record<string,string>={'heading-selector':'見出し','gfm-alert':'注釈',insert:'挿入・その他','ai-insert':'AI操作'};
+          topBarControls.splice(0,topBarControls.length,...builder.build().flatMap(group=>group.items.filter(item=>item.onRun||item.selector).map(item=>({key:item.key,label:selectorLabels[item.key]||labels[item.key]||item.key}))));
         },
       },
       [Crepe.Feature.Toolbar]: {
         boldLabel: '太字', italicLabel: '斜体', codeLabel: 'インラインコード', linkLabel: 'リンク', strikethroughLabel: '取り消し線', latexLabel: '数式',
         buildToolbar: builder => {
           builder.addGroup('selection-ai', 'AI操作').addItem('selection-ai', {
-            icon: '<span class="selection-ai-label">AI操作</span>', label: 'AI操作', active: () => false,
+            icon: uiIcon('aiInsert'), label: 'AI操作', active: () => false,
             onRun: () => { window.dispatchEvent(new Event('manual-studio-selection-ai')); },
           });
         },

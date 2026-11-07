@@ -1,4 +1,9 @@
 const paths = {
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  heading: '<path d="M4 4v16M15 4v16M4 12h11M19 14l2-1v7M19 20h4"/>',
+  diagram: '<rect x="8" y="2" width="8" height="5" rx="1"/><rect x="2" y="17" width="7" height="5" rx="1"/><rect x="15" y="17" width="7" height="5" rx="1"/><path d="M12 7v5M5.5 17v-5h13v5"/>',
+  aiInsert: '<path d="m17 2 1.3 3.7L22 7l-3.7 1.3L17 12l-1.3-3.7L12 7l3.7-1.3Z"/><path d="M3 5h5M3 11h7M3 17h8M17 15v7M13.5 18.5h7"/>',
+  annotation: '<path d="M21 11a8 8 0 0 1-8 8H7l-5 3V11a8 8 0 0 1 8-8h3a8 8 0 0 1 8 8Z"/><path d="M8 8h7M8 12h5"/>',
   newFile: '<path d="M14 2H6v20h12V6zM14 2v4h4M9 14h6M12 11v6"/>',
   newFolder: '<path d="M3 7V4h6l2 3h10v13H3zM9 13h6M12 10v6"/>',
   open: '<path d="M3 9V4h6l2 3h10v4M3 9h18l-3 11H3z"/>',

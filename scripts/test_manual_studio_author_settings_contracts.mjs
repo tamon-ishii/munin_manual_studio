@@ -143,7 +143,7 @@ try{
 
  await page.getByRole('button',{name:'外観',exact:true}).click();
  await page.locator('#toolbar-customization>summary').click();
- const bold=page.locator('#toolbar-customization-list label').filter({hasText:/^太字$/}).locator('input');
+ const bold=page.locator('#toolbar-customization-list').getByLabel('太字を表示',{exact:true});
  await bold.uncheck();
  assert.equal(await page.locator('[data-format="bold"]').getAttribute('data-toolbar-hidden'),'true');
  assert.ok((await page.evaluate(()=>JSON.parse(localStorage.getItem('manual-studio-toolbar-hidden')||'[]'))).includes('太字'));

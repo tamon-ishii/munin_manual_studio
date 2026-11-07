@@ -1,4 +1,5 @@
 import {defaultHandlers} from 'mdast-util-to-markdown';
+import {uiIcon} from './uiIcons';
 import {remarkStringifyOptionsCtx} from '@milkdown/kit/core';
 import {blockquoteSchema} from '@milkdown/kit/preset/commonmark';
 import {$remark} from '@milkdown/kit/utils';
@@ -39,7 +40,7 @@ export function alertMarkdown(kind:string,text='説明を入力してくださ�
   return `> [!${kind}]\n${text.split('\n').map(line=>`> ${line}`).join('\n')}\n\n`;
 }
 export function setupGfmSourceToolbar(host:HTMLElement,onInsert:(markdown:string)=>void):void{
-  const label=document.createElement('label');label.className='gfm-alert-control';label.textContent='注釈';
+  const label=document.createElement('label');label.className='gfm-alert-control';label.innerHTML=uiIcon('annotation');label.title='注釈';
   const select=document.createElement('select');select.setAttribute('aria-label','注釈を挿入');
   select.add(new Option('注釈を挿入',''));
   for(const [kind,title] of alertKinds)select.add(new Option(`${title} (${kind})`,kind));

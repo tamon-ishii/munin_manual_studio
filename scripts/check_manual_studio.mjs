@@ -50,6 +50,8 @@ steps.push({group:'ui',name:'folder creation through menus and context menus',co
 
 
 steps.push(
+  {group:'ui',name:'editor caret, focus, selection and history invariants',command:process.execPath,args:['scripts/test_manual_studio_editor_integrity.mjs'],timeoutMs:120_000},
+  {group:'ui',name:'actual toolbar inventory, visibility, Mermaid and saved ordering',command:process.execPath,args:['scripts/test_manual_studio_toolbar_customization.mjs'],timeoutMs:120_000},
   {group:'generation',name:'stable live preview and AI from unsaved manuscripts',command:process.execPath,args:['scripts/test_manual_studio_live_preview_ai.mjs'],timeoutMs:120_000},
   {group:'generation',name:'reviewed operation plan and rich template adoption',command:process.execPath,args:['scripts/test_manual_studio_rich_template.mjs'],timeoutMs:120_000},
   {group:'generation',name:'target application settings and automatic template entry',command:process.execPath,args:['scripts/test_manual_studio_target_application.mjs'],timeoutMs:120_000},
