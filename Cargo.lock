@@ -3486,7 +3486,7 @@ dependencies = [
 
 [[package]]
 name = "manual-studio"
-version = "0.9.25"
+version = "0.9.26"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -3510,7 +3510,7 @@ dependencies = [
 
 [[package]]
 name = "markits"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ashpd 0.13.13",
  "base64 0.22.1",
@@ -3534,7 +3534,7 @@ dependencies = [
 
 [[package]]
 name = "markits-desktop"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "arboard",
  "base64 0.22.1",
