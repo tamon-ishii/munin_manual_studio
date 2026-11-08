@@ -62,11 +62,17 @@ fn generate_with(root:&Path,page:&str,context:&Value,windows:&Value,mut capture:
 }
 
 // The AI schema has shared optional fields, whereas MarkIts rejects fields
-// belonging to a different shape. Preserve numbering as a separate badge.
+// belonging to a different shape. Combine numbered rectangles into editable badges.
 pub(crate) fn normalize_annotations(annotations:&[Value])->Vec<Value>{
     let mut result=Vec::new();
     for annotation in annotations {
         let kind=annotation["type"].as_str().unwrap_or("");
+        if kind == "rect" && (annotation.get("step").is_some_and(|v| !v.is_null()) || annotations.iter().any(|other| other["type"] == "badge" && other["target"] == annotation["target"])) {
+            if let Some(step) = annotation.get("step").filter(|v| !v.is_null() && !annotations.iter().any(|other| other["type"] == "badge" && other["target"] == annotation["target"])) {
+                result.push(json!({"type":"badge","target":annotation["target"],"step":step,"style":"step","target_box":true,"target_style":annotation.get("style").filter(|v|!v.is_null()).cloned().unwrap_or(json!("primary"))}));
+            }
+            continue;
+        }
         let mut shape=serde_json::Map::new();
         for key in ["type","target","style"] {
             if let Some(value)=annotation.get(key).filter(|v|!v.is_null()){shape.insert(key.into(),value.clone());}
@@ -77,6 +83,12 @@ pub(crate) fn normalize_annotations(annotations:&[Value])->Vec<Value>{
         }
         if matches!(kind,"badge"|"arrow") {
             if let Some(step)=annotation.get("step").filter(|v|!v.is_null()){shape.insert("step".into(),step.clone());}
+        }
+        if kind == "badge" {
+            shape.insert("style".into(), json!("step"));
+            shape.insert("target_box".into(), json!(true));
+            let rect = annotations.iter().find(|other| other["type"] == "rect" && other["target"] == annotation["target"]);
+            shape.insert("target_style".into(), rect.and_then(|r| r.get("style")).filter(|v|!v.is_null()).cloned().unwrap_or(json!("primary")));
         }
         result.push(Value::Object(shape));
         if matches!(kind,"rect"|"callout") {
@@ -91,6 +103,17 @@ pub(crate) fn normalize_annotations(annotations:&[Value])->Vec<Value>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn ai_rectangles_and_badges_use_one_editable_badge_with_target_formatting() {
+        for annotations in [
+            json!([{"type":"rect","target":"Save","step":1}]),
+            json!([{"type":"rect","target":"Save"},{"type":"badge","target":"Save","step":1}]),
+            json!([{"type":"badge","target":"Save","step":1}]),
+        ] {
+            let result = normalize_annotations(annotations.as_array().unwrap());
+            assert_eq!(result, vec![json!({"type":"badge","target":"Save","step":1,"style":"step","target_box":true,"target_style":"primary"})]);
+        }
+    }
     #[test]
     fn host_captures_and_marks_without_ai_commands_or_manuscript_changes(){
         let root=tempfile::tempdir().unwrap();fs::create_dir(root.path().join("docs")).unwrap();

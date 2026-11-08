@@ -1,5 +1,6 @@
 //! Scale saved MarkIts annotations when a screenshot changes dimensions.
 use serde_json::{json, Value};
+use base64::Engine;
 
 /// Keep the editable scene alongside rendered pixels for later recapture.
 pub(crate) fn render_tracked(scene: &Value, bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -14,7 +15,15 @@ pub(crate) fn render_tracked(scene: &Value, bytes: &[u8]) -> Result<Vec<u8>, Str
     .map_err(|e| e.to_string())?;
     let rendered =
         markits::raster::render_composed_png_bytes(&scene, bytes).map_err(|e| e.to_string())?;
-    markits::raster::embed_png_text_chunk(&rendered, "markits:annotations", &scene)
+    let rendered = markits::raster::embed_png_text_chunk(&rendered, "markits:annotations", &scene)
+        .map_err(|e| e.to_string())?;
+    // Reopening must draw the editable scene over the unmarked source pixels.
+    let mime = match image::guess_format(bytes).map_err(|e| e.to_string())? {
+        image::ImageFormat::Jpeg => "image/jpeg",
+        _ => "image/png",
+    };
+    let source = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+    markits::raster::embed_png_text_chunk(&rendered, "markits:source_image", &source)
         .map_err(|e| e.to_string())
 }
 
@@ -84,6 +93,40 @@ pub(crate) fn scale_markits_scene(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn badge_rectangle_formatting_preserves_annotation_indices_and_can_be_hidden() {
+        let scene = json!({"canvas":{"width":200,"height":150},"annotations":[
+            {"type":"badge","target":[30,50,60,30],"step":1,"target_box":true,"target_style":"danger","stroke_width":7},
+            {"type":"badge","target":[110,50,60,30],"step":2}
+        ]});
+        let svg = markits::renderer::render_from_json(&scene.to_string()).unwrap();
+        assert_eq!(svg.matches("data-badge-target=").count(), 1);
+        assert!(svg.contains("stroke-width=\"7\""));
+        assert!(svg.contains("data-badge-index=\"0\""));
+        assert!(svg.contains("data-badge-index=\"1\""));
+        let mut hidden = scene;
+        hidden["annotations"][0]["target_box"] = json!(false);
+        let svg = markits::renderer::render_from_json(&hidden.to_string()).unwrap();
+        assert!(!svg.contains("data-badge-target="));
+    }
+
+    #[test]
+    fn tracked_marks_can_be_removed_using_the_saved_source() {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(100, 80)
+            .write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let original = png.into_inner();
+        let scene = json!({"annotations":[{"type":"badge","target":[30,30,20,20],"step":1,"style":"step"}]});
+        let rendered = render_tracked(&scene, &original).unwrap();
+        assert_ne!(image::load_from_memory(&rendered).unwrap().to_rgba8(), image::load_from_memory(&original).unwrap().to_rgba8());
+        let source = markits::raster::extract_png_text_chunk(&rendered, "markits:source_image").unwrap();
+        let restored = base64::engine::general_purpose::STANDARD.decode(source.split_once(',').unwrap().1).unwrap();
+        assert_eq!(restored, original);
+        let cleared = render_tracked(&json!({"annotations":[]}), &restored).unwrap();
+        assert_eq!(image::load_from_memory(&cleared).unwrap().to_rgba8(), image::load_from_memory(&original).unwrap().to_rgba8());
+        let saved: Value = serde_json::from_str(&markits::raster::extract_png_text_chunk(&cleared, "markits:annotations").unwrap()).unwrap();
+        assert_eq!(saved["annotations"], json!([]));
+    }
 
     #[test]
     fn scales_geometry_and_preserves_labels_and_unknown_fields() {
