@@ -1276,6 +1276,11 @@ dialog.unified-dialog .ai-error-advice{background:var(--accent-soft);color:var(-
 dialog.unified-dialog .generation-task-choice,dialog.unified-dialog .generation-history-row{border-color:var(--border-color)}
 dialog.unified-dialog .diff-remove{background:color-mix(in srgb,var(--danger) 18%,var(--surface-bg));color:var(--text-primary)}
 dialog.unified-dialog .diff-add{background:color-mix(in srgb,var(--accent) 18%,var(--surface-bg));color:var(--text-primary)}
+dialog.unified-dialog[data-dialog-size="compact"]{resize:none;min-height:0;min-width:0}
+dialog[data-dialog-size="compact"] h1{font-size:18px}
+dialog[data-dialog-size="compact"] .panel-header{margin-bottom:12px}
+dialog[data-dialog-size="compact"] :is(p,ul){overflow-wrap:anywhere}
+#unsaved-changes-error:empty{display:none}
 dialog.unified-dialog.dialog-expanded{position:fixed!important;inset:8px!important;margin:0!important;transform:none!important;width:calc(100vw - 16px)!important;height:calc(100dvh - 16px)!important;max-width:calc(100vw - 16px)!important;max-height:calc(100dvh - 16px)!important}
 .dialog-auto-header{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .dialog-auto-header h1,.dialog-auto-header h2{margin:0}

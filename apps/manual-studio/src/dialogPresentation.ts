@@ -1,4 +1,5 @@
 /** Shared presentation for both static HTML dialogs and dynamically created dialogs. */
+import {isCompactDialog,canExpandDialog,removeNativeWindowControls} from './dialogSizing';
 let installed=false;
 const prepared=new WeakSet<HTMLDialogElement>();
 const pending=new WeakSet<HTMLDialogElement>();
@@ -16,19 +17,29 @@ function sizeDialog(dialog:HTMLDialogElement):void{
   const columns=dialog.querySelector('.proofreading-grid') as HTMLElement|null;
   const wide=dialog.querySelector('table,.selection-diff-columns,.generation-diff,.image-comparison-grid,.settings-grid');
   const rich=dialog.querySelector('textarea,pre,dl')||dialog.querySelectorAll('input,select').length>4;
-  let preferred=columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*280+48:wide?1040:rich?720:520;
+  let preferred=isCompactDialog(dialog)?480:columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*280+48:wide?1040:rich?720:520;
   const explicitLimit=widthLimits.get(dialog);
   if(explicitLimit!==undefined)preferred=Math.min(preferred,explicitLimit);
   dialog.style.setProperty('width',`${Math.min(preferred,innerWidth*0.92,maxWidth)}px`,'important');
-  dialog.style.height='auto';
+  // Modal dialogs have both block insets set by the browser. `auto` stretches
+  // between them; preserve content sizing instead of filling the viewport.
+  dialog.style.height='fit-content';
 }
 
 function schedule(dialog:HTMLDialogElement):void{
+  // Hide the source before the next paint, including while the child webview starts.
+  if('__TAURI_INTERNALS__' in window&&!document.body.matches('.proofreading-window,.native-dialog-window')&&dialog.open){
+    dialog.classList.add('native-dialog-source');
+  }
   if(pending.has(dialog))return;
   pending.add(dialog);requestAnimationFrame(()=>{
     pending.delete(dialog);sizeDialog(dialog);
     if('__TAURI_INTERNALS__' in window&&!document.body.matches('.proofreading-window,.native-dialog-window')&&dialog.open&&dialog.isConnected){
-      void import('./nativeDialogHost').then(({hostNativeDialog})=>hostNativeDialog(dialog)).catch(error=>console.error(error));
+      void import('./nativeDialogHost').then(({hostNativeDialog})=>hostNativeDialog(dialog)).catch(error=>{
+        dialog.classList.remove('native-dialog-source');
+        if(dialog.isConnected&&dialog.open){const message=document.createElement('p');message.role='alert';message.textContent=`独立ウィンドウを開けませんでした: ${String(error)}`;dialog.append(message);}
+        console.error(error);
+      });
     }
   });
 }
@@ -45,7 +56,9 @@ function prepare(dialog:HTMLDialogElement):void{
     dialog.classList.remove('dialog-expanded');
     const button=dialog.querySelector<HTMLButtonElement>('[data-dialog-expand]');if(button){button.textContent='最大化';button.setAttribute('aria-label','ダイアログを最大化');}
   });
-  if(!document.body.matches('.proofreading-window,.native-dialog-window')){
+  if(isCompactDialog(dialog))dialog.dataset.dialogSize='compact';
+  if('__TAURI_INTERNALS__' in window&&document.body.matches('.proofreading-window'))removeNativeWindowControls(dialog);
+  if(!('__TAURI_INTERNALS__' in window)&&canExpandDialog(dialog)&&!document.body.matches('.proofreading-window,.native-dialog-window')){
     const button=document.createElement('button');button.type='button';button.dataset.dialogExpand='true';button.textContent='最大化';button.setAttribute('aria-label','ダイアログを最大化');
     let savedWidth='',savedHeight='';
     button.onclick=()=>{

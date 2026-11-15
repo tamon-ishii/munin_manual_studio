@@ -1,6 +1,7 @@
 import {createWindowChannel} from './windowChannel';
 import {applyDialogFields,dialogFields,type DialogMessage} from './nativeDialogProtocol';
 import {currentTheme} from './theme';
+import {isCompactDialog,removeNativeWindowControls} from './dialogSizing';
 
 const hosts=new WeakSet<HTMLDialogElement>();
 const disposers=new WeakMap<HTMLDialogElement,()=>void>();
@@ -33,6 +34,7 @@ export async function hostNativeDialog(dialog:HTMLDialogElement):Promise<void>{
     assignIds();
     const clone=dialog.cloneNode(true) as HTMLDialogElement;
     clone.classList.remove('native-dialog-source','dialog-expanded');
+    removeNativeWindowControls(clone);
     const focused=document.activeElement instanceof Element?ids.get(document.activeElement):undefined;
     channel.postMessage({type:'snapshot',snapshot:{html:clone.outerHTML,fields:dialogFields(dialog),theme:currentTheme(),focus:focused,ack}});
   };
@@ -87,8 +89,9 @@ export async function hostNativeDialog(dialog:HTMLDialogElement):Promise<void>{
   const title=dialog.querySelector('h1,h2')?.textContent||'Munin Manual Studio';
   const columns=dialog.querySelector('.proofreading-grid') as HTMLElement|null;
   const wide=dialog.querySelector('table,.selection-diff-columns,.generation-diff,.image-comparison-grid,.settings-grid');
-  const width=columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*300+48:wide?1040:dialog.querySelector('textarea,pre,dl')||dialog.querySelectorAll('input,select').length>4?760:560;
-  const height=Math.max(320,Math.min(900,dialog.scrollHeight+80));
+  const compact=isCompactDialog(dialog);
+  const width=compact?480:columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*300+48:wide?1040:dialog.querySelector('textarea,pre,dl')||dialog.querySelectorAll('input,select').length>4?760:560;
+  const height=compact?Math.max(240,Math.min(420,dialog.scrollHeight+16)):Math.max(320,Math.min(900,dialog.scrollHeight+80));
   try{
     const {invoke}=await import('@tauri-apps/api/core');
     await invoke('open_dialog_window',{session,title,width,height});

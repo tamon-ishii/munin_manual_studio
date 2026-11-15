@@ -73,10 +73,8 @@ try{
   await settings.mouse.move(dragStart.x+dragStart.width/2,dragStart.y+dragStart.height/2);await settings.mouse.down();
   await settings.mouse.move(dragEnd.x+120,dragEnd.y+dragEnd.height-4,{steps:12});await settings.mouse.up();
   await page.waitForFunction(key=>document.querySelector('.toolbar-setting-row')?.dataset.toolbarSetting!==key,draggedKey);
-  await settings.getByRole('button',{name:'ダイアログを最大化',exact:true}).click();
-  await page.waitForFunction(label=>window.__TAURI_INTERNALS__.invoke('plugin:window|is_maximized',{label}),label);
-  await settings.getByRole('button',{name:'ダイアログを元のサイズに戻す',exact:true}).click();
-  await page.waitForFunction(async label=>!await window.__TAURI_INTERNALS__.invoke('plugin:window|is_maximized',{label}),label);
+  assert.equal(await settings.locator('[data-dialog-expand]').count(),0);
+  assert.equal(await settings.getByRole('button',{name:'閉じる',exact:true}).count(),0);
   await settings.getByRole('tab',{name:'文章・図のAI',exact:true}).click();
   await settings.locator('#ai-connection-type').selectOption('local_llm');
   await settings.locator('#ai-endpoint-url').fill('http://127.0.0.1:11434/v1');
@@ -89,8 +87,39 @@ try{
   const after=await page.evaluate(label=>window.__TAURI_INTERNALS__.invoke('plugin:window|inner_size',{label}),label);
   assert.ok(after.width>before.main.width&&after.height>before.main.height);
   await mkdir('ui-coverage-results',{recursive:true});await settings.screenshot({path:'ui-coverage-results/settings-native.png'});
-  await settings.getByRole('button',{name:'閉じる',exact:true}).first().click();
+  await page.evaluate(label=>window.__TAURI_INTERNALS__.invoke('plugin:window|close',{label}),label);
   await page.waitForFunction(()=>!document.querySelector('#panel-settings').open);
+  // Unsaved confirmation appears only in its child, once, and cancellation keeps the draft.
+  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
+  const draft='# Dialog fixture\n\nUnchanged manuscript.\nUnsaved draft.\n';
+  await page.locator('#markdown-editor').fill(draft);
+  await page.getByRole('button',{name:'index.mdを閉じる',exact:true}).click();
+  const unsaved=await findChild('unsaved-changes-dialog');
+  assert.equal(await page.evaluate(async()=> (await window.__TAURI_INTERNALS__.invoke('plugin:window|get_all_windows')).filter(label=>label.startsWith('dialog-')).length),1);
+  assert.equal(await page.locator('#unsaved-changes-dialog').isVisible(),false);
+  assert.equal(await unsaved.locator('[data-dialog-expand]').count(),0);
+  assert.equal(await unsaved.getByRole('button',{name:'閉じる',exact:true}).count(),0);
+  const confirmationBox=await unsaved.locator('#unsaved-changes-dialog').boundingBox();
+  assert.ok(confirmationBox.width<=480&&confirmationBox.height<=300,JSON.stringify(confirmationBox));
+  await unsaved.screenshot({path:'ui-coverage-results/unsaved-native.png'});
+  await unsaved.getByRole('button',{name:'キャンセル',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#unsaved-changes-dialog'));
+  assert.equal(await page.locator('#markdown-editor').inputValue(),draft);
+  await page.getByRole('button',{name:'index.mdを閉じる',exact:true}).click();
+  const discarded=await findChild('unsaved-changes-dialog');
+  await discarded.getByRole('button',{name:'変更を破棄する',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#unsaved-changes-dialog'));
+  assert.equal(await page.locator('#unsaved-changes-dialog').count(),0);
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),'# Dialog fixture\n\nUnchanged manuscript.\n');
+  await page.locator('[data-page="docs/index.md"]').click();
+  await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('Unchanged manuscript.'));
+  const savedDraft='# Dialog fixture\n\nSaved from the confirmation.\n';
+  await page.locator('#markdown-editor').fill(savedDraft);
+  await page.getByRole('button',{name:'index.mdを閉じる',exact:true}).click();
+  const saved=await findChild('unsaved-changes-dialog');
+  await saved.getByRole('button',{name:'保存する',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#unsaved-changes-dialog')&&!document.querySelector('[data-document-page="index.md"]'));
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),savedDraft);
   // Removing a dialog or its containing panel must not leave an orphan OS window.
   for(const ancestor of [false,true]){
     await page.evaluate(()=>{
@@ -134,7 +163,7 @@ try{
   const closeLabel=await titleClose.evaluate(()=>window.__TAURI_INTERNALS__.metadata.currentWindow.label);
   await page.evaluate(label=>window.__TAURI_INTERNALS__.invoke('plugin:window|close',{label}),closeLabel);
   await page.waitForFunction(()=>!document.querySelector('#panel-settings').open);
-  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),'# Dialog fixture\n\nUnchanged manuscript.\n');
+  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),savedDraft);
   assert.deepEqual(errors,[]);
   await writeFile('ui-coverage-results/settings-native.json',JSON.stringify({before,after,savedModel:config.model,errors},null,2));
   await page.locator('#application-settings').click();const owned=await findChild('panel-settings');

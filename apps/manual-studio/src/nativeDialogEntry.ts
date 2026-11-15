@@ -7,7 +7,7 @@ initializeTheme();
 const session=new URLSearchParams(location.search).get('session');
 if(session){
   const channel=await createWindowChannel<DialogMessage>(`dialog-${session}`);
-  let root:HTMLDialogElement|null=null,composing=false,maximized=false,sequence=0,rendering=false;
+  let root:HTMLDialogElement|null=null,composing=false,sequence=0,rendering=false;
   const emitEvent=(data:Omit<Extract<DialogMessage,{type:'event'}>,'sequence'>)=>channel.postMessage({...data,sequence:++sequence});
   /** Preserve control nodes, focus, selection and IME while updating the parent's live markup. */
   const reconcile=(current:Node,next:Node)=>{
@@ -44,7 +44,6 @@ if(session){
     // Revisions already exclude stale edits; accepted normalization and recorded
     // shortcut keys must also update a focused control.
     applyDialogFields(root,snapshot.fields);
-    root.querySelectorAll('[data-dialog-expand]').forEach(button=>{button.textContent=maximized?'元のサイズ':'最大化';button.setAttribute('aria-label',maximized?'ダイアログを元のサイズに戻す':'ダイアログを最大化');});
     if(first){const focused=snapshot.focus?[...root.querySelectorAll<HTMLElement>('[data-dialog-node]')].find(element=>element.dataset.dialogNode===snapshot.focus):null;(focused??root.querySelector<HTMLElement>('input:not([disabled]),textarea,select,button'))?.focus();}
     rendering=false;
   };
@@ -99,8 +98,6 @@ if(session){
   document.addEventListener('pointercancel',event=>{if(gripDrag){relayDrag(gripDrag.source,'dragend',event);gripDrag=undefined;}});
   document.addEventListener('click',event=>{
     const target=event.target instanceof Element?event.target:null;
-    const expand=target?.closest('[data-dialog-expand]');
-    if(expand){event.preventDefault();void import('@tauri-apps/api/window').then(async({getCurrentWindow})=>{const window=getCurrentWindow();await window.toggleMaximize();maximized=await window.isMaximized();expand.textContent=maximized?'元のサイズ':'最大化';expand.setAttribute('aria-label',maximized?'ダイアログを元のサイズに戻す':'ダイアログを最大化');});return;}
     const disclosure=target?.closest('summary')?.parentElement;
     if(disclosure instanceof HTMLDetailsElement&&!target?.closest('button,a,input')){
       event.preventDefault();disclosure.open=!disclosure.open;
