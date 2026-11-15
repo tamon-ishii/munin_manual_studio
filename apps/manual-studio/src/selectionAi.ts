@@ -1,8 +1,9 @@
 import {featureDialog} from './imageDialogs';
 import {diffParts,acceptDiff} from './selectableDiff';
 import {consultationAgents} from './cliAiSettings';
+import {proofreadingOptions,type ProofreadingOptions} from './proofreading';
 export interface SelectionDraft { text:string; apply:(content:string)=>void; }
-export interface SelectionAction {mode:'consult'|'rewrite';instruction:string;cliAgent?:string;includeScreenshots?:boolean}
+export interface SelectionAction {mode:'consult'|'rewrite';instruction:string;cliAgent?:string;includeScreenshots?:boolean;proofreading?:ProofreadingOptions}
 export function askSelectionAction(selected:string,agents:Array<{id:string;available:boolean}>=[],defaultAgent=''):Promise<SelectionAction|null>{
   const {dialog,body}=featureDialog('AI文章');dialog.id='selection-ai-action-dialog';
   const preview=document.createElement('pre');preview.textContent=selected;preview.className='selection-ai-preview';
@@ -21,13 +22,15 @@ export function askSelectionAction(selected:string,agents:Array<{id:string;avail
   const capture=document.createElement('input');capture.type='checkbox';capture.setAttribute('aria-label','起動済みアプリのスクリーンショットを含める');
   captureLabel.append(capture,document.createTextNode('起動済みアプリのスクリーンショットを含める'));
   let captureChosen=false;capture.onchange=()=>{captureChosen=true;};
+  const proofreading=proofreadingOptions();
+  const proofreadingHelp=document.createElement('p');proofreadingHelp.textContent='書き直し候補を、チェックしたスキルで推敲します。原文・書き直し候補・各推敲結果を横並びの差分画面で比較し、採用する文章を選べます。方針を相談する場合は、相談後の書き直しに適用します。';
   const help=document.createElement('p');const update=()=>{
     help.textContent=mode.value==='consult'?'選択範囲を書き直す前提で方針を相談します。回答を見てから、そのまま書き直し候補を作成できます。':'入力した指示を基に、選択範囲の書き直し候補を作成します。差分を確認してから原稿へ反映します。';
     instruction.placeholder=mode.value==='consult'?'例：初心者向けに書き直すには、どの説明を補うとよいですか？':'例：初心者向けに、短く分かりやすく書き直してください';
   };mode.onchange=update;update();
   const form=document.createElement('form');const run=document.createElement('button');run.type='submit';run.className='primary';run.textContent='AIに送信';run.disabled=true;
-  instruction.oninput=()=>{run.disabled=!instruction.value.trim();if(!captureChosen)capture.checked=/スクリーンショット|スクショ|撮影|screenshot|screen capture/i.test(instruction.value);};form.append(modeLabel,aiLabel,help,label,captureLabel,run);body.append(preview,form);instruction.focus();
-  return new Promise(resolve=>{let result:SelectionAction|null=null;form.onsubmit=event=>{event.preventDefault();if(!instruction.value.trim())return;result={mode:mode.value as SelectionAction['mode'],instruction:instruction.value.trim(),cliAgent:ai.value||undefined,includeScreenshots:capture.checked};dialog.close();};dialog.addEventListener('close',()=>resolve(result),{once:true});});
+  instruction.oninput=()=>{run.disabled=!instruction.value.trim();if(!captureChosen)capture.checked=/スクリーンショット|スクショ|撮影|screenshot|screen capture/i.test(instruction.value);};form.append(modeLabel,aiLabel,help,label,captureLabel,proofreadingHelp,proofreading.element,run);body.append(preview,form);instruction.focus();
+  return new Promise(resolve=>{let result:SelectionAction|null=null;form.onsubmit=event=>{event.preventDefault();if(!instruction.value.trim())return;result={mode:mode.value as SelectionAction['mode'],instruction:instruction.value.trim(),cliAgent:ai.value||undefined,includeScreenshots:capture.checked,proofreading:proofreading.read()};dialog.close();};dialog.addEventListener('close',()=>resolve(result),{once:true});});
 }
 export function showSelectionAdvice(content:string):Promise<string|null>{
   const {dialog,body}=featureDialog('AIからの回答');dialog.id='selection-ai-advice-dialog';
@@ -41,7 +44,7 @@ export function showSelectionAdvice(content:string):Promise<string|null>{
   const rewrite=document.createElement('button');rewrite.type='submit';rewrite.className='primary';rewrite.textContent='選択範囲を書き直す';actions.append(keep,rewrite);form.append(help,label,actions);body.append(form);
   return new Promise(resolve=>{let result:string|null=null;form.onsubmit=event=>{event.preventDefault();result=instruction.value.trim();dialog.close();};dialog.addEventListener('close',()=>resolve(result),{once:true});});
 }
-export function askSelectionInstruction(selected:string,initial="",failure=""):Promise<string|null>{
+export function askSelectionInstruction(selected:string,initial="",failure="",onProofreading?:(options:ProofreadingOptions)=>void):Promise<string|null>{
   const {dialog,body}=featureDialog(selected?'選択範囲をAIで修正':'カーソル位置へAI文書を挿入');
   const help=document.createElement('p');help.textContent=selected?'選択した文章だけを、下の指示に沿って修正します。差分を確認し、採用した変更だけを反映します。選択範囲外の文章は変更しません。':'カーソル位置に挿入する新しい文章を作成します。候補を確認してから挿入します。';
   const preview=document.createElement('pre');preview.textContent=selected||"挿入位置（選択範囲なし）";preview.style.maxHeight='160px';preview.style.overflow='auto';
@@ -50,8 +53,9 @@ export function askSelectionInstruction(selected:string,initial="",failure=""):P
   const run=document.createElement('button');run.type='button';run.className='primary';run.textContent='候補を作成';run.dataset.uiIcon='sparkle';run.disabled=!initial.trim();instruction.oninput=()=>{run.disabled=!instruction.value.trim();};presets.addEventListener('click',()=>{run.disabled=!instruction.value.trim();});
   const error=document.createElement('p');error.role='alert';error.textContent=failure;
   const actions=document.createElement('div');actions.className='actions selection-instruction-actions';actions.append(run);
-  body.append(help,error,preview,label,presets,actions);
-  return new Promise(resolve=>{let answer:string|null=null;run.onclick=()=>{if(!instruction.value.trim())return;answer=instruction.value.trim();dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
+  const proofreading=proofreadingOptions();
+  body.append(help,error,preview,label,presets,...(onProofreading?[proofreading.element]:[]),actions);
+  return new Promise(resolve=>{let answer:string|null=null;run.onclick=()=>{if(!instruction.value.trim())return;answer=instruction.value.trim();onProofreading?.(proofreading.read());dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
 }
 export interface SelectionReviewState {accepted:number[];feedback:string;}
 export function reviewSelection(page:string,before:string,after:string,previous?:SelectionReviewState,failure='',allowRetry=true):Promise<{action:'restore'|'retry'|'adopt';feedback:string;content:string;accepted:number[]}>{

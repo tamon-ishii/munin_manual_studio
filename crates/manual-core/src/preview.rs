@@ -40,6 +40,29 @@ pub fn render_page_markdown(
         .replace("{{BUILD_TIMESTAMP}}", &utc_now()))
 }
 
+fn inline_asset_path(output: &Path, reference: &str) -> PathBuf {
+    let clean = reference.split(['?', '#']).next().unwrap_or(reference);
+    let direct = output.join(clean.trim_start_matches(|c| c == '.' || c == '/'));
+    if direct.is_file() { return direct; }
+    if let Some(name) = Path::new(clean).file_name() {
+        for entry in WalkDir::new(output).into_iter().filter_map(|entry| entry.ok()) {
+            if entry.file_type().is_file() && entry.file_name() == name { return entry.path().to_path_buf(); }
+        }
+    }
+    direct
+}
+
+fn built_page_path(output: &Path, page: &Path) -> PathBuf {
+    let direct = output.join(page);
+    if !direct.is_file() {
+        if let Some(parent) = page.parent() {
+            let nested = output.join(parent).join(page.file_stem().unwrap_or_default()).join("index.html");
+            if nested.is_file() { return nested; }
+        }
+    }
+    direct
+}
+
 pub fn inline_html_assets(output: &Path, html_text: &str) -> String {
     let css_pattern = Regex::new(
         r#"(?i)<link\s+[^>]*rel=["']stylesheet["'][^>]*href=["'](?P<href>[^"']+)["'][^>]*>"#,
@@ -52,27 +75,7 @@ pub fn inline_html_assets(output: &Path, html_text: &str) -> String {
         let m = cap.get(0).unwrap();
         step1.push_str(&html_text[last_idx..m.start()]);
         let href = cap.name("href").unwrap().as_str();
-        let clean = href
-            .split('?')
-            .next()
-            .unwrap_or(href)
-            .split('#')
-            .next()
-            .unwrap_or(href);
-        let clean_rel = clean.trim_start_matches(|c| c == '.' || c == '/');
-
-        let mut css_path = output.join(clean_rel);
-        if !css_path.is_file() {
-            let name = Path::new(clean).file_name();
-            if let Some(n) = name {
-                for entry in WalkDir::new(output).into_iter().filter_map(|e| e.ok()) {
-                    if entry.file_type().is_file() && entry.file_name() == n {
-                        css_path = entry.path().to_path_buf();
-                        break;
-                    }
-                }
-            }
-        }
+        let css_path = inline_asset_path(output, href);
 
         if css_path.is_file() {
             if let Ok(css_content) = fs::read_to_string(&css_path) {
@@ -96,27 +99,7 @@ pub fn inline_html_assets(output: &Path, html_text: &str) -> String {
         let m = cap.get(0).unwrap();
         step2.push_str(&step1[last_idx..m.start()]);
         let src = cap.name("src").unwrap().as_str();
-        let clean = src
-            .split('?')
-            .next()
-            .unwrap_or(src)
-            .split('#')
-            .next()
-            .unwrap_or(src);
-        let clean_rel = clean.trim_start_matches(|c| c == '.' || c == '/');
-
-        let mut img_path = output.join(clean_rel);
-        if !img_path.is_file() {
-            let name = Path::new(clean).file_name();
-            if let Some(n) = name {
-                for entry in WalkDir::new(output).into_iter().filter_map(|e| e.ok()) {
-                    if entry.file_type().is_file() && entry.file_name() == n {
-                        img_path = entry.path().to_path_buf();
-                        break;
-                    }
-                }
-            }
-        }
+        let img_path = inline_asset_path(output, src);
 
         if img_path.is_file() {
             let ext = img_path
@@ -205,29 +188,11 @@ pub fn preview_html(root: &Path, page: &str) -> Result<String, String> {
         page_rel.set_extension("html");
     }
 
-    let mut target = output.join(&page_rel);
-    if !target.is_file() {
-        if let Some(parent) = page_rel.parent() {
-            let stem = page_rel.file_stem().unwrap_or_default();
-            let dir_target = output.join(parent).join(stem).join("index.html");
-            if dir_target.is_file() {
-                target = dir_target;
-            }
-        }
-    }
+    let mut target = built_page_path(&output, &page_rel);
 
     if !target.is_file() {
         let _ = build(&templates, &generated, &output, true, Some(root));
-        target = output.join(&page_rel);
-        if !target.is_file() {
-            if let Some(parent) = page_rel.parent() {
-                let stem = page_rel.file_stem().unwrap_or_default();
-                let dir_target = output.join(parent).join(stem).join("index.html");
-                if dir_target.is_file() {
-                    target = dir_target;
-                }
-            }
-        }
+        target = built_page_path(&output, &page_rel);
     }
 
     if !target.is_file() {
@@ -493,6 +458,33 @@ fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Val
 #[cfg(test)]
 mod state_read_tests {
     use super::*;
+
+    #[test]
+    fn inlined_assets_keep_query_fallback_and_missing_reference_behavior() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("nested/site.css"), "body{color:red}").unwrap();
+        fs::write(root.join("nested/image.png"), b"image bytes").unwrap();
+        let html = r#"<link rel="stylesheet" href="site.css?v=1#theme"><img src="nested/image.png#preview"><img src="missing.png">"#;
+        let result = inline_html_assets(root, html);
+        assert!(result.contains("body{color:red}"));
+        assert!(result.contains(&format!("data:image/png;base64,{}", BASE64.encode(b"image bytes"))));
+        assert!(result.contains(r#"<img src="missing.png">"#));
+    }
+
+    #[test]
+    fn publication_preview_prefers_direct_html_then_directory_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::create_dir_all(root.join("published/guide")).unwrap();
+        fs::write(root.join("manual_setting.json"), r#"{"docs":"docs","output":"published"}"#).unwrap();
+        fs::write(root.join("published/guide/index.html"), "nested page").unwrap();
+        assert!(preview_html(root, "guide.md").unwrap().starts_with("nested page"));
+        fs::write(root.join("published/guide.html"), "direct page").unwrap();
+        assert!(preview_html(root, "guide.md").unwrap().starts_with("direct page"));
+    }
 
     #[test]
     fn cached_images_refresh_after_replacement_and_reject_deleted_files() {

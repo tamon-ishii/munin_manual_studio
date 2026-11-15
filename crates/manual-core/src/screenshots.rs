@@ -39,13 +39,16 @@ fn directory(root: &Path, id: &str) -> Result<PathBuf, String> {
     valid_id(id)?;
     project_path(root, &format!(".munin/screenshots/{id}"))
 }
-fn atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path.parent().ok_or("Invalid image storage")?;
+fn staged_image_file(path: &Path, bytes: &[u8], missing_parent: &str) -> Result<NamedTempFile, String> {
+    let parent = path.parent().ok_or(missing_parent)?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let mut temp = NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     temp.write_all(bytes).map_err(|e| e.to_string())?;
     temp.as_file().sync_all().map_err(|e| e.to_string())?;
-    temp.persist(path).map_err(|e| e.to_string())?;
+    Ok(temp)
+}
+fn atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    staged_image_file(path, bytes, "Invalid image storage")?.persist(path).map_err(|e| e.to_string())?;
     Ok(())
 }
 fn immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -55,12 +58,7 @@ fn immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
         return Ok(());
     }
-    let parent = path.parent().ok_or("Invalid original storage")?;
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let mut temp = NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    temp.write_all(bytes).map_err(|e| e.to_string())?;
-    temp.as_file().sync_all().map_err(|e| e.to_string())?;
-    temp.persist_noclobber(path).map_err(|e| e.to_string())?;
+    staged_image_file(path, bytes, "Invalid original storage")?.persist_noclobber(path).map_err(|e| e.to_string())?;
     Ok(())
 }
 fn decode(data: &str) -> Result<Vec<u8>, String> {

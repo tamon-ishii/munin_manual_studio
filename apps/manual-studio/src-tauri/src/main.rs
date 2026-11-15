@@ -446,6 +446,58 @@ fn open_output(root: String) -> Result<(), String> {
     open::that(output).map_err(|error| error.to_string())
 }
 
+fn auxiliary_session(session: &str) -> Result<(), String> {
+    if session.len() != 36 || !session.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return Err("ウィンドウの識別子が不正です。".into());
+    }
+    Ok(())
+}
+
+fn open_auxiliary_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow, label: String, url: String, title: &str, preferred_width: f64, preferred_height: f64) -> Result<(), String> {
+    let monitor = window.current_monitor().map_err(|error| error.to_string())?;
+    let (available_width, available_height) = monitor.as_ref().map(|monitor| {
+        let area = monitor.work_area();
+        (area.size.width as f64 / monitor.scale_factor(), area.size.height as f64 / monitor.scale_factor())
+    }).unwrap_or((1440.0, 900.0));
+    let width = preferred_width.min(available_width * 0.92);
+    let height = preferred_height.min(available_height * 0.85);
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        app, label, tauri::WebviewUrl::App(url.into()),
+    ).title(title).disable_drag_drop_handler()
+        .inner_size(width, height).min_inner_size(480.0_f64.min(width), 300.0_f64.min(height)).resizable(true);
+    #[cfg(windows)]
+    { builder = builder.owner(window).map_err(|error| error.to_string())?; }
+    if let Some(monitor) = &monitor {
+        let area = monitor.work_area();
+        builder = builder.position(
+            area.position.x as f64 / monitor.scale_factor() + (available_width - width) / 2.0,
+            area.position.y as f64 / monitor.scale_factor() + (available_height - height) / 2.0,
+        );
+    }
+    // WebView2 windows sharing a profile must use the same browser arguments.
+    if let Some(main) = app.config().app.windows.iter().find(|window| window.label == "main") {
+        if let Some(directory) = &main.data_directory { builder = builder.data_directory(directory.clone()); }
+        if let Some(arguments) = &main.additional_browser_args { builder = builder.additional_browser_args(arguments); }
+    }
+    builder.build().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_proofreading_window(app: tauri::AppHandle, window: tauri::WebviewWindow, session: String, column_count: u32, line_count: u32) -> Result<(), String> {
+    auxiliary_session(&session)?;
+    open_auxiliary_window(&app, &window, format!("proofreading-{session}"), format!("proofreading.html?session={session}"), "推敲結果の差分比較 — Munin Manual Studio",
+        column_count.clamp(2, 8) as f64 * 300.0 + 48.0, (line_count.min(200) as f64 * 24.0 + 300.0).clamp(560.0, 900.0))
+}
+
+#[tauri::command]
+async fn open_dialog_window(app: tauri::AppHandle, window: tauri::WebviewWindow, session: String, title: String, width: f64, height: f64) -> Result<(), String> {
+    auxiliary_session(&session)?;
+    if !width.is_finite() || !height.is_finite() { return Err("ウィンドウのサイズが不正です。".into()); }
+    let title: String = title.chars().take(120).collect();
+    open_auxiliary_window(&app, &window, format!("dialog-{session}"), format!("dialog.html?session={session}"), &format!("{title} — Munin Manual Studio"), width.clamp(320.0, 2600.0), height.clamp(240.0, 1200.0))
+}
+
 #[tauri::command]
 fn open_editor(app: tauri::AppHandle, root: String, page: String) -> Result<(), String> {
     use tauri::Manager;
@@ -556,6 +608,8 @@ fn main() {
             read_clipboard_image,
             paste_clipboard_image,
             open_editor,
+            open_proofreading_window,
+            open_dialog_window,
             open_output,
         ])
         .run(context)

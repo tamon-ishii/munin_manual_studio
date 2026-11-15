@@ -12,12 +12,12 @@ export function setupShortcutSettings(host: HTMLElement): void {
       const fields = document.createElement('div');fields.className = 'shortcut-setting-keys';
       const keys = draft[command.id];
       const addField = (index: number) => {
-        const input = document.createElement('input');input.readOnly = true;input.placeholder = 'キーを押す';input.value = bindingLabel(keys[index] || '');input.setAttribute('aria-label', `${command.label}のキー ${index+1}`);
+        const input = document.createElement('input');input.readOnly = true;input.id=`shortcut-key-${command.id}-${index}`;input.dataset.keyRecorder='shortcut';input.placeholder = 'キーを押す';input.value = bindingLabel(keys[index] || '');input.setAttribute('aria-label', `${command.label}のキー ${index+1}`);
         let last = 0, prefix = '', recordTab = false;
         input.onfocus = () => {last=0;prefix='';};
         input.onkeydown = event => {
           if(event.key==='Tab'&&!recordTab)return;
-          recordTab=false;
+          recordTab=false;delete input.dataset.recordTab;
           event.preventDefault();event.stopPropagation();
           if(event.key==='Escape'){input.blur();return;}
           if(event.key==='Backspace'||event.key==='Delete'){keys[index]='';input.value='';last=0;return;}
@@ -28,7 +28,7 @@ export function setupShortcutSettings(host: HTMLElement): void {
         };
         const clear=document.createElement('button');clear.type='button';clear.textContent='解除';clear.setAttribute('aria-label',command.label+'のキーを解除');
         clear.onclick=()=>{keys.splice(index,1);render();message.textContent='未保存の変更があります。';};
-        const record=document.createElement('button');record.type='button';record.textContent='記録';record.title='Tab・Shift+Tabも記録できます';record.onclick=()=>{input.focus();recordTab=true;message.textContent='割り当てるキーを押してください。Escで終了します。';};
+        const record=document.createElement('button');record.type='button';record.textContent='記録';record.title='Tab・Shift+Tabも記録できます';record.dataset.focusTarget=input.id;record.onclick=()=>{input.focus();recordTab=true;input.dataset.recordTab='true';message.textContent='割り当てるキーを押してください。Escで終了します。';};
         const group=document.createElement('div');group.append(input,record,clear);fields.append(group);
       };
       keys.forEach((_,index)=>addField(index));

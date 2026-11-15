@@ -438,6 +438,15 @@ fn init_manual_template(_root: &Path, templates: &Path, project_name: &str) -> R
     Ok(())
 }
 
+fn append_api_entry(content: &mut String, name: &str, docstring: Option<&str>) {
+    content.push_str(&format!("- **`{name}`**"));
+    if let Some(doc) = docstring {
+        let first_line = doc.lines().next().unwrap_or("").trim();
+        if !first_line.is_empty() { content.push_str(&format!(": {first_line}")); }
+    }
+    content.push('\n');
+}
+
 fn init_api_template(root: &Path, templates: &Path, project_name: &str) -> Result<(), String> {
     let index_md = format!(
         r#"# {project_name} アーキテクチャ & API リファレンス
@@ -496,28 +505,14 @@ fn init_api_template(root: &Path, templates: &Path, project_name: &str) -> Resul
                 if !m.classes.is_empty() {
                     api_content.push_str("### クラス一覧\n");
                     for c in &m.classes {
-                        api_content.push_str(&format!("- **`{}`**", c.name));
-                        if let Some(ref doc) = c.docstring {
-                            let first_line = doc.lines().next().unwrap_or("").trim();
-                            if !first_line.is_empty() {
-                                api_content.push_str(&format!(": {}", first_line));
-                            }
-                        }
-                        api_content.push('\n');
+                        append_api_entry(&mut api_content, &c.name, c.docstring.as_deref());
                     }
                     api_content.push('\n');
                 }
                 if !m.functions.is_empty() {
                     api_content.push_str("### 関数一覧\n");
                     for f in &m.functions {
-                        api_content.push_str(&format!("- **`{}()`**", f.name));
-                        if let Some(ref doc) = f.docstring {
-                            let first_line = doc.lines().next().unwrap_or("").trim();
-                            if !first_line.is_empty() {
-                                api_content.push_str(&format!(": {}", first_line));
-                            }
-                        }
-                        api_content.push('\n');
+                        append_api_entry(&mut api_content, &format!("{}()", f.name), f.docstring.as_deref());
                     }
                     api_content.push('\n');
                 }

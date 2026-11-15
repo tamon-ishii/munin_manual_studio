@@ -19,7 +19,7 @@ export default defineConfig({
     // cannot split internally. Keep headroom for this upstream module.
     chunkSizeWarningLimit: 700,
     rollupOptions: {
-      input: { main: path.resolve("apps/manual-studio/index.html") },
+      input: { main: path.resolve("apps/manual-studio/index.html"), proofreading: path.resolve("apps/manual-studio/proofreading.html"), dialog: path.resolve("apps/manual-studio/dialog.html") },
       output: {
         // Keep optional diagram and language modules separate from the editor.
         onlyExplicitManualChunks: true,

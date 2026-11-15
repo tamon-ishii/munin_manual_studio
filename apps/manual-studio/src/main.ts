@@ -48,6 +48,7 @@ import { setupPreviewTheme } from "./themePreview";
 import { setupMarkdownTableEditor } from "./markdownTable";
 import { jumpToSource } from "./editorNavigation";
 import {askSelectionAction,showSelectionAdvice,askSelectionInstruction,reviewSelection,type SelectionDraft,type SelectionAction} from "./selectionAi";
+import {reviewProofreading,type ProofreadingOptions} from './proofreading';
 import { showUnsavedChangesDialog } from "./unsavedChangesDialog";
 import { loadWorkspaceHistory, recordWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
 import { changeHeadingLevel, toggleStrikethrough, toggleTaskList, changeIndent, continueMarkdownList, type MarkdownEdit } from "./markdownAssists";
@@ -92,6 +93,7 @@ const selectSettingsCategory=setupSettingsTabs();
 setupShortcutSettings(element('keyboard-shortcut-settings'));
 element('application-settings').addEventListener('click',()=>chooseTab('settings'));
 const markitsCaptureKey=input('markits-capture-key');
+markitsCaptureKey.dataset.keyRecorder='all';
 const defaultIncludeCursor=input('capture-default-include-cursor');
 defaultIncludeCursor.checked=cursorCapturePreference();
 defaultIncludeCursor.addEventListener('change',()=>{
@@ -2521,7 +2523,8 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
   const selection=capturedSelection||captureAiSelection();
   if(!selection){status('挿入する位置を選択してください。',true);return;}
   const captured=editor.value;
-  let instruction=action?.instruction || await askSelectionInstruction(selection.text,initial);
+  let proofreading:ProofreadingOptions|undefined=action?.proofreading;
+  let instruction=action?.instruction || await askSelectionInstruction(selection.text,initial,'',options=>{proofreading=options;});
   if(!instruction)return;
   if(root!==projectRoot||documentState?.page!==owner.page||editor.value!==captured)throw new Error('原稿が変更されました。範囲を選び直してください。');
   await savedBeforeOperation(true);
@@ -2531,9 +2534,23 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
     const includeScreenshots=action?.includeScreenshots??/スクリーンショット|スクショ|撮影|screenshot|screen capture/i.test(instruction);
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
     let candidate:string|undefined,failure="",cancelled=false;
+    const variants:Array<{id:string;content?:string;error?:string}>=[];
     await work(async()=>{
       await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('selection-generate',root,action?.cliAgent);let succeeded=false;
-      try{candidate=(JSON.parse(await rpc('selection-generate',{page,json:{body:expected,selected:selection.text,mode:action?.mode==='consult'?'consult':selection.text?"replace":"insert",cli_agent:action?.cliAgent,include_screenshots:includeScreenshots,insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;succeeded=true;}
+      try{
+        candidate=(JSON.parse(await rpc('selection-generate',{page,json:{body:expected,selected:selection.text,mode:action?.mode==='consult'?'consult':selection.text?"replace":"insert",cli_agent:action?.cliAgent,include_screenshots:includeScreenshots,insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;
+        if(proofreading?.enabled&&action?.mode!=='consult'){
+          for(const profile of proofreading.profiles){
+            if(generationCancelRequest)break;
+            try{
+              if(!profile.rules)throw new Error('推敲ルールが空です。');
+              const result=JSON.parse(await rpc('selection-generate',{page,json:{body:expected,selected:selection.text,mode:selection.text?'replace':'insert',insertion_at:insertionAt,instruction:'指定したルールで原文を推敲してください。',revision,cli_agent:action?.cliAgent,proofreading:{source:candidate,rules:profile.rules}}},root)) as {content:string};
+              variants.push({id:profile.id,content:result.content});
+            }catch(error){variants.push({id:profile.id,error:String(error)});logAiFailure(error);}
+          }
+        }
+        succeeded=true;
+      }
       catch(error){failure=String(error);logAiFailure(error);throw error;}
       finally{cancelled=Boolean(generationCancelRequest);await stopAiProgress(succeeded);}
     });
@@ -2544,6 +2561,12 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
       else{if(cancelled||action?.mode==='consult')return;instruction=await askSelectionInstruction(selection.text,instruction,failure||'候補を作成できませんでした。');continue;}
     }
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected)return;
+    if(cancelled)return;
+    if(variants.length){
+      const final=await reviewProofreading(selection.text||candidate,selection.text?[{id:'AI書き直し',content:candidate},...variants]:variants);
+      if(final===null)return;
+      candidate=final;
+    }
     if(action?.mode==='consult'){
       const followup=await showSelectionAdvice(candidate);
       if(followup===null)return;
@@ -2553,7 +2576,7 @@ async function createSelectionDocument(initial="",capturedSelection?:SelectionDr
       previousCandidate=undefined;
       continue;
     }
-    const decision=await reviewSelection(page,selection.text,candidate,failure?previousCandidate:undefined,failure);
+    const decision=variants.length?{action:'adopt' as const,content:candidate,accepted:[],feedback:''}:await reviewSelection(page,selection.text,candidate,failure?previousCandidate:undefined,failure);
     if(decision.action==='restore')return;
     if(decision.action==='retry'){previousCandidate={content:candidate,accepted:decision.accepted,feedback:decision.feedback};instruction=decision.feedback||instruction;continue;}
     if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}

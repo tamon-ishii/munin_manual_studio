@@ -237,12 +237,16 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
       detail: { id: taskId, kind: taskKind }
     }));
   });
-  confirmBtn.addEventListener('click', event => {
-    event.preventDefault();
+  const editableTask = () => {
     if (!view.editable) return;
     const position = getPos();
     if (position === undefined) return;
-    const rawHeader = String(node.attrs.header);
+    return {position, rawHeader: String(node.attrs.header)};
+  };
+  confirmBtn.addEventListener('click', event => {
+    event.preventDefault();
+    const task = editableTask(); if (!task) return;
+    const {position, rawHeader} = task;
     const approved = attribute(rawHeader, 'approved-at') !== undefined;
     const empty = node.childCount === 1 && node.firstChild?.type.name === 'paragraph' && !node.firstChild.content.size;
     if (empty && !approved) return;
@@ -253,10 +257,8 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
   });
   deleteBtn.addEventListener('click', event => {
     event.preventDefault();
-    if (!view.editable) return;
-    const position = getPos();
-    if (position === undefined) return;
-    const rawHeader = String(node.attrs.header);
+    const task = editableTask(); if (!task) return;
+    const {position, rawHeader} = task;
     const taskId = attribute(rawHeader, 'id') || 'AIタグ';
     view.dispatch(closeHistory(view.state.tr).delete(position, position + node.nodeSize));
     window.dispatchEvent(new CustomEvent('manual-studio-status', {
@@ -264,8 +266,8 @@ const aiTaskView = $view(aiTaskNode, () => (initialNode, view, getPos) => {
     }));
   });
   const editName = () => {
-    if (!view.editable) return; const position = getPos(); if (position === undefined) return;
-    const raw = String(node.attrs.header);
+    const task = editableTask(); if (!task) return;
+    const {position, rawHeader: raw} = task;
     const next = attribute(raw, 'name') === undefined ? raw.replace(/\s*-->$/, ` name="${encode(displayName.value)}" -->`) : raw.replace(attributes, (token, key: string) => key === 'name' ? ` name="${encode(displayName.value)}"` : token);
     view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, header: next }));
   };

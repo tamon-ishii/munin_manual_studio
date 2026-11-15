@@ -1,3 +1,5 @@
+import {setupDialogPresentation} from './dialogPresentation';
+
 export const themeOptions = [
   { id: "forest", label: "フォレスト（白）" },
   { id: "blue", label: "ブルー（白）" },
@@ -74,6 +76,7 @@ export function applyTheme(theme: ThemeId, persist = true): void {
 }
 
 export function initializeTheme(): void {
+  setupDialogPresentation();
   const saved = localStorage.getItem(storageKey);
   applyTheme(isThemeId(saved) ? saved : "forest", false);
   window.addEventListener("storage", (event) => {
