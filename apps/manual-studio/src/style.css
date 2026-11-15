@@ -1276,7 +1276,7 @@ dialog.unified-dialog .ai-error-advice{background:var(--accent-soft);color:var(-
 dialog.unified-dialog .generation-task-choice,dialog.unified-dialog .generation-history-row{border-color:var(--border-color)}
 dialog.unified-dialog .diff-remove{background:color-mix(in srgb,var(--danger) 18%,var(--surface-bg));color:var(--text-primary)}
 dialog.unified-dialog .diff-add{background:color-mix(in srgb,var(--accent) 18%,var(--surface-bg));color:var(--text-primary)}
-dialog.unified-dialog[data-dialog-size="compact"]{resize:none;min-height:0;min-width:0}
+dialog.unified-dialog[data-dialog-size="compact"]{resize:none;min-height:0;min-width:0;padding:16px}
 dialog[data-dialog-size="compact"] h1{font-size:18px}
 dialog[data-dialog-size="compact"] .panel-header{margin-bottom:12px}
 dialog[data-dialog-size="compact"] :is(p,ul){overflow-wrap:anywhere}

@@ -101,6 +101,12 @@ try{
   assert.equal(await unsaved.getByRole('button',{name:'閉じる',exact:true}).count(),0);
   const confirmationBox=await unsaved.locator('#unsaved-changes-dialog').boundingBox();
   assert.ok(confirmationBox.width<=480&&confirmationBox.height<=300,JSON.stringify(confirmationBox));
+  const spacing=await unsaved.locator('#unsaved-changes-dialog').evaluate(dialog=>{
+    const actions=dialog.querySelector('.actions').getBoundingClientRect(),box=dialog.getBoundingClientRect();
+    return {bottom:box.bottom-actions.bottom,padding:parseFloat(getComputedStyle(dialog).paddingBottom),overflow:dialog.scrollHeight-dialog.clientHeight};
+  });
+  assert.ok(Math.abs(spacing.bottom-spacing.padding)<=2,JSON.stringify(spacing));
+  assert.ok(spacing.overflow<=1,JSON.stringify(spacing));
   await unsaved.screenshot({path:'ui-coverage-results/unsaved-native.png'});
   await unsaved.getByRole('button',{name:'キャンセル',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('#unsaved-changes-dialog'));

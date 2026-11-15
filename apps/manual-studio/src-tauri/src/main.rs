@@ -495,7 +495,7 @@ async fn open_dialog_window(app: tauri::AppHandle, window: tauri::WebviewWindow,
     auxiliary_session(&session)?;
     if !width.is_finite() || !height.is_finite() { return Err("ウィンドウのサイズが不正です。".into()); }
     let title: String = title.chars().take(120).collect();
-    open_auxiliary_window(&app, &window, format!("dialog-{session}"), format!("dialog.html?session={session}"), &format!("{title} — Munin Manual Studio"), width.clamp(320.0, 2600.0), height.clamp(240.0, 1200.0))
+    open_auxiliary_window(&app, &window, format!("dialog-{session}"), format!("dialog.html?session={session}"), &format!("{title} — Munin Manual Studio"), width.clamp(320.0, 2600.0), height.clamp(120.0, 1200.0))
 }
 
 #[tauri::command]
