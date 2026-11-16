@@ -9,7 +9,7 @@ import { setupFileMove, type FileMoveResult } from './fileMove';
 import { PreviewScheduler } from './previewScheduler';
 import {rememberPreviewContent,rememberPreviewReplacement,updatePreviewContent} from './previewContent';
 import { DocumentPersistence } from './documentPersistence';
-import {OperationTiming,stageLabels,operationProgress} from './operationTimings';
+import {OperationTiming} from './operationTimings';
 import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
 import {setupEditorContextMenu} from './editorContextMenu';
 import {applyReviewCorrections} from './reviewCorrections';
@@ -27,6 +27,7 @@ import { setupImageGeneration } from './imageGeneration';
 import { setupToolbarCustomization } from './toolbarCustomization';
 import { chooseDestination,featureDialog } from './imageDialogs';
 import { setupMarkitsImages, cursorCapturePreference } from "./markitsImages";
+import {setupCaptureResources} from './captureResources';
 import { uiIcon } from './uiIcons';
 import { setupControlIcons } from './controlIcons';
 import { setAiPhase } from './workflowPresentation';
@@ -919,6 +920,7 @@ const markitsImages = setupMarkitsImages({
   root: () => projectRoot,
   refreshAssets: async root => {
     if (root !== projectRoot) return;
+    await captureDock.refresh();
     previewScheduler.invalidate();
     if (documentState) await Promise.all([renderPreview(), milkdown.refreshImages()]);
     const image = activeImageTab;
@@ -927,6 +929,13 @@ const markitsImages = setupMarkitsImages({
       if (root === projectRoot && activeImageTab === image) element<HTMLImageElement>('image-tab-preview').src = src;
     }
   },
+});
+const captureDock=setupCaptureResources({root:()=>projectRoot,rpc,
+  capture:()=>insertScreenshotHere(),
+  insert:async path=>{const root=projectRoot;if(!await chooseImageDestination()||!documentState||root!==projectRoot)return;insertDocumentMarkdown(`![撮影画像](<${relativeProjectAsset(path,documentState.page)}>)`);status('文書用画像を挿入しました。');},
+  edited:async path=>{await handleEditDocumentImage(path,element<HTMLImageElement>('image-tab-preview'));},
+  changed:async()=>{previewScheduler.invalidate();if(documentState)await Promise.all([renderPreview(),milkdown.refreshImages()]);},
+  usage:usage=>openResourceUsage({...usage,snippet:usage.snippet||'',end:usage.start+(usage.snippet?.length||0)}),status,
 });
 setupToolbarCustomization();
 const imageAiSettings=setupImageAiSettings({root:()=>projectRoot,request:rpc,prepare:saveAiSettings});
@@ -969,7 +978,8 @@ async function handleEditDocumentImage(imageSource:string,img:HTMLImageElement,r
   documentImageEditing=true;
   try{
     status(recapture?'MarkItsの履歴で再撮影し、完成画像を選んでください。':'選択した画像をMarkItsの編集画面で開いています。保存すると編集結果を取り込みます。');
-    const imported=recapture?await markitsImages.recordForInsertion():await markitsImages.editImage(imageSource,page);
+    if(recapture){chooseTab('capture-resources');status('撮影リソース一覧の「再撮影」から関連画像を更新できます。');return;}
+    const imported=await markitsImages.editImage(imageSource,page);
     if(!imported||root!==projectRoot)return;
     if(selected&&page===documentState?.page&&editor.value===expected){
       changeImageMarkdown(replaceDocumentImage(expected,selected,relativeProjectAsset(imported.path,page!)),expected);
@@ -1280,6 +1290,8 @@ async function openProject(root: string, check = true): Promise<void> {
   }
   if(version!==projectRequestVersion)return;
   const restoredDocument = documentState as Document | null;
+  await captureDock.refresh();
+  if(version!==projectRequestVersion)return;
   if (restoredDocument) status(`プロジェクトを開きました。${restoredDocument.page}を編集できます。`);
   if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は上部の「設定 → 文章・図のAI」で設定できます。");
 
@@ -1486,7 +1498,8 @@ function updateEditorEmptyState(): void {
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
   element('panel-editor').classList.toggle('editor-is-empty', empty);
-  for (const id of ['reader-review','generate-ai-image','save-page','editor-screenshot-ai']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),!projectRoot||captureInsertionRunning);
+  for (const id of ['reader-review','generate-ai-image','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
@@ -1876,23 +1889,28 @@ function relativeProjectAsset(asset: string, page: string): string {
 }
 for (const target of [editor,milkdown.host] as HTMLElement[]) {
   target.addEventListener('dragover',event=>{if(event.dataTransfer?.types.includes('application/x-munin-image')){event.preventDefault();event.dataTransfer.dropEffect='copy';}});
-  target.addEventListener('drop',event=>{
+  target.addEventListener('drop',async event=>{
     const data = event.dataTransfer?.getData('application/x-munin-image'); if (!data) return;
     event.preventDefault();event.stopImmediatePropagation();
     if (!documentState || activeImageTab || busy) { status('画像を挿入する原稿を開いてください。',true);return; }
-    let asset:{root:string;path:string;screenshot_id?:string};
+    let asset:{root:string;path:string;screenshot_id?:string;resource_id?:string};
     try{asset=JSON.parse(data);if(typeof asset.path!=='string'||!asset.path)throw new Error();}catch{status('画像のドラッグ情報を読み込めません。',true);return;}
     if (asset.root !== projectRoot) {status('同じプロジェクトの画像を選択してください。',true);return;}
     const page=documentState.page,root=projectRoot,start=editor.selectionStart,end=editor.selectionEnd,left=event.clientX,top=event.clientY;
     const expected=editor.value;const droppedImage=(event.target as Element).closest<HTMLImageElement>('img');
     const existing=target===milkdown.host?(droppedImage?milkdown.imageSourceRange(droppedImage):undefined):imageAtSelection(expected,start,end);
+    const origin=captureInsertionContext(insertionState());
+    const richDrop=target===milkdown.host&&!existing?milkdown.captureSelectionEdit(true,{left,top}):undefined;
+    try{
+      const action=asset.resource_id?'capture-resources-generate':'capture-resources-resolve';
+      const json=asset.resource_id?{id:asset.resource_id}:{path:asset.path};
+      asset.path=(JSON.parse(await rpc(action,{json},root)) as {path:string}).path;
+      if(!isInsertionCurrent(origin,insertionState())||activeImageTab)throw Error('原稿が変更されました。挿入位置を選び直してください。');
+    }catch(error){status(String(error),true);return;}
     if(existing){
       const next=replaceDocumentImage(expected,existing,relativeProjectAsset(asset.path,page),asset.screenshot_id);
       try{changeImageMarkdown(next,expected);void milkdown.refreshImages();status('画像の参照を置き換えました。説明と表示設定は保持しています。');}catch(error){status(String(error),true);}return;
     }
-    const origin=captureInsertionContext(insertionState());
-    // Resolve rich viewport coordinates before awaiting a reference or changing readonly layout.
-    const richDrop=target===milkdown.host?milkdown.captureSelectionEdit(true,{left,top}):undefined;
     const insert=(markdown:string)=>{
       if(!isInsertionCurrent(origin,insertionState())||activeImageTab)throw new Error('原稿が変更されました。挿入位置を選び直してください。');
       if(target===milkdown.host){if(!richDrop)throw new Error('挿入する位置を選択してください。');richDrop.apply(markdown,true);}
@@ -2706,35 +2724,21 @@ element('reader-review').addEventListener('click',()=>{void reviewCurrentDocumen
 
 let captureInsertionRunning=false;
 async function insertScreenshotHere():Promise<void>{
-  if(busy||!documentState||activeImageTab||captureInsertionRunning)return;
+  if(busy||captureInsertionRunning||!projectRoot)return;
   captureInsertionRunning=true;
   setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),true);
-  const root=projectRoot,page=documentState.page,position=editor.selectionStart;
+  const root=projectRoot;
   const timing=new OperationTiming(rpc,root);
-  const progress=operationProgress(root,()=>projectRoot);
   let outcome:'success'|'cancelled'|'error'='cancelled';
-  const stage=(code:string)=>{if(code==='error')outcome='error';if(stageLabels[code])timing.stage(code);progress.stage(code);};
   try {
-    const origin=captureInsertionContext(insertionState());
-    const rich=milkdown.isRichEditing?milkdown.captureSelectionEdit(true):undefined;
-    if(milkdown.isRichEditing&&!rich)throw new Error('挿入する位置を選択してください。');
-    const valid=()=>isInsertionCurrent(origin,insertionState())&&!activeImageTab;
-    await documentPersistence.wait();
-    if(!valid())throw new Error('原稿が変更されました。挿入位置を選び直してください。');
-    stage('select');
-    const imported=await markitsImages.recordForInsertion(stage);
-    if(!imported)return;
-    if(!valid()){status('完成画像は画像フォルダーに保存しました。原稿が変更されたため挿入していません。',true);return;}
-    const markdown='![撮影画像](<'+relativeProjectAsset(imported.path,page)+'>)';
-    stage('insert');
-    if(rich)rich.apply(markdown,true);else replaceMarkdown(position,position,'\n\n'+markdown+'\n\n',0,markdown.length+4);
-    updateHistoryButtons();stage('refresh');await markitsImages.refresh();outcome='success';status('MarkItsの完成画像を指定位置に挿入しました。');
-  } catch(error) {outcome='error';throw error;}
-  finally {
-    progress.close();captureInsertionRunning=false;
-    setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),false);
-    await timing.finish(outcome).catch(error=>console.warn('処理時間を記録できません',error));
-  }
+    status('MarkItsで撮影しています。完了すると撮影リソースへ登録します。');
+    timing.stage('capture');
+    const resource=await markitsImages.captureResource();
+    if(!resource||root!==projectRoot)return;
+    captureDock.upsert(resource);chooseTab('capture-resources');outcome='success';
+    status('撮影リソースを登録しました。一覧から文書用画像を生成・挿入できます。');
+  }catch(error){outcome='error';throw error;}
+  finally{captureInsertionRunning=false;setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),!projectRoot);await timing.finish(outcome).catch(error=>console.warn(error));}
 }
 
 element('editor-screenshot-ai').addEventListener('click',()=>{void insertScreenshotHere().catch(error=>status(String(error),true));});

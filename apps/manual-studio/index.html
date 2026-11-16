@@ -12,10 +12,16 @@
   <nav class="workspace-tabs" aria-label="作業">
     <button type="button" id="create-ai-template" data-ui-icon="sparkle" aria-haspopup="dialog">AIで雛形作成</button>
     <button type="button" id="target-application-open" data-ui-icon="settings" aria-haspopup="dialog">対象アプリケーションの設定</button>
-    <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影してカーソル位置に挿入">撮影</button><button type="button" id="reader-review" data-ui-icon="review">AIレビュー</button><button type="button" id="generate-ai-image" data-ui-icon="image" title="AIで画像を作成し、プレビューして原稿へ挿入" aria-haspopup="dialog">AI作画</button></div>
+    <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影して撮影リソース一覧へ登録">撮影</button><button type="button" id="reader-review" data-ui-icon="review">AIレビュー</button><button type="button" id="generate-ai-image" data-ui-icon="image" title="AIで画像を作成し、プレビューして原稿へ挿入" aria-haspopup="dialog">AI作画</button></div>
   </nav>
   <div class="app-layout" id="app-layout"></div>
   <div id="layout-panel-pool" style="display:none">
+    <section id="panel-capture-resources" class="panel capture-resource-panel" aria-label="撮影リソース一覧">
+      <div class="capture-resource-toolbar"><button type="button" id="capture-resource-new">撮影</button><label class="capture-import">画像を登録<input type="file" id="capture-resource-import" accept="image/png" /></label><button type="button" id="capture-resource-migrate">既存画像を変換</button><button type="button" id="capture-resource-refresh">更新</button></div>
+      <input id="capture-resource-search" type="search" placeholder="名前・使用原稿を検索" aria-label="撮影リソースを検索" />
+      <div class="capture-resource-toolbar"><select id="capture-resource-usage" aria-label="撮影リソースの使用状況"><option value="all">すべて</option><option value="used">使用中</option><option value="unused">未使用</option></select><span id="capture-resource-count">0件</span></div>
+      <div id="capture-resource-list" class="capture-resource-list"></div>
+    </section>
     <aside id="panel-tree" class="sidebar">
       <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><details id="tree-create-menu" class="editor-more"><summary>＋ 作成 ▾</summary><div class="editor-more-menu"><button type="button" id="new-page" data-ui-icon="newFile">原稿を作成</button><button type="button" id="new-folder" data-ui-icon="newFolder">フォルダーを作成</button></div></details></div>
       <div id="tree-filters" class="tree-filters" hidden><input id="tree-search" type="search" aria-label="ファイル名・パスを検索" placeholder="ファイル名・パスを検索" /><select id="tree-filter" aria-label="ファイルの表示範囲"><option value="all">すべて</option><option value="markdown">原稿のみ</option></select></div>

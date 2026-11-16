@@ -1,4 +1,5 @@
 import {invoke} from '@tauri-apps/api/core';
+import type {CaptureResource} from './captureResources';
 
 export function cursorCapturePreference(): boolean {
   try {return localStorage.getItem('manual-studio-capture-include-cursor')==='true';}catch{return false;}
@@ -24,10 +25,14 @@ export function setupMarkitsImages(options: Options) {
 
   return {
     refresh: () => options.refreshAssets(options.root()),
-    recordForInsertion: async (stage?: (stage: string) => void) => {
+    captureResource: async (stage?: (stage: string) => void) => {
       stage?.('capture');
+      const root=options.root();
+      if(!root)throw Error('プロジェクトを開いてください。');
+      if(!('__TAURI_INTERNALS__' in window))throw Error('撮影はデスクトップ版で利用できます。');
       const shortcut = await options.captureShortcut?.();
-      return importImage('capture_markits_image', {includeCursor:cursorCapturePreference(),shortcut:shortcut||null});
+      const resource=await invoke<CaptureResource|null>('capture_markits_image',{root,includeCursor:cursorCapturePreference(),shortcut:shortcut||null});
+      return root===options.root()?resource:undefined;
     },
     editImage: (asset: string, page?: string) => importImage('edit_markits_image', {asset, page: page || null}),
   };

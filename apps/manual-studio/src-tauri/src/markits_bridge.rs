@@ -1,9 +1,15 @@
-//! MarkIts owns capture and editing. Its integration PNG is kept byte-for-byte
-//! so editable metadata travels with the project asset without extra sidecars.
+//! MarkIts owns capture and editing. Studio stores private resources and public derivatives.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{fs, io::Write, path::Path};
+
+fn markits_command()->Result<std::process::Command,String>{
+    let mut command=std::process::Command::new(std::env::current_exe().map_err(|e|e.to_string())?);
+    // Independent apps must not share Studio's WebView2 profile or test debugger.
+    command.env_remove("WEBVIEW2_USER_DATA_FOLDER").env_remove("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+    Ok(command)
+}
 
 #[tauri::command]
 pub fn get_markits_capture_shortcut() -> String { markits_desktop_lib::saved_capture_shortcut() }
@@ -21,12 +27,18 @@ struct ImageEdit {
 }
 
 #[tauri::command]
-pub async fn capture_markits_image(root: String, include_cursor: Option<bool>, shortcut: Option<String>) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn capture_markits_image(app:tauri::AppHandle,root: String, include_cursor: Option<bool>, shortcut: Option<String>) -> Result<Option<manual_core::capture_resources::Resource>, String> {
+    if RESOURCE_OPERATION.swap(true,std::sync::atomic::Ordering::SeqCst){return Err("撮影処理が実行中です。".into());}
+    let guard=ResourceOperation;
+    use tauri::Manager;
+    let main=app.get_webview_window("main");
+    if let Some(window)=&main{let _=window.hide();}
+    let result=tauri::async_runtime::spawn_blocking(move || {
+        let _guard=guard;
         let temporary = tempfile::Builder::new().prefix("munin-markits-capture-").tempdir().map_err(|e| e.to_string())?;
         let output = temporary.path().join("capture.png");
         let completion = temporary.path().join("complete.done");
-        let mut command = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+        let mut command = markits_command()?;
         let shortcut = shortcut.unwrap_or_else(markits_desktop_lib::saved_capture_shortcut);
         markits_desktop_lib::LaunchCaptureOptions::parse(&["--capture-shortcut".into(), shortcut.clone()])?;
         command.args(["--munin-markits", "--capture", "--capture-shortcut"]).arg(shortcut);
@@ -38,8 +50,10 @@ pub async fn capture_markits_image(root: String, include_cursor: Option<bool>, s
         if !completion.is_file() { return Ok(None); }
         let bytes = fs::read(&output).map_err(|e| format!("撮影結果を読めません: {e}"))?;
         markits_desktop_lib::metadata::load_image_with_metadata(&bytes).map_err(|e| e.to_string())?;
-        save_render(Path::new(&root), &bytes).map(Some)
-    }).await.map_err(|e| e.to_string())?
+        manual_core::capture_resources::register(Path::new(&root), &bytes,"撮影画像").map(Some)
+    }).await.map_err(|e| e.to_string()).and_then(|r|r);
+    if let Some(window)=main{let _=window.show();let _=window.set_focus();}
+    result
 }
 
 fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<ImageEdit, String> {
@@ -47,6 +61,9 @@ fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<Im
         manual_core::preview::resolve_asset_path(root, page, asset)
             .or_else(|_| manual_core::config::project_path(root, asset))?
     } else { manual_core::config::project_path(root, asset)? };
+    let canonical_root=root.canonicalize().map_err(|e|e.to_string())?;
+    let relative=input.strip_prefix(&canonical_root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
+    let input=manual_core::capture_resources::editing_source(root,&relative)?.unwrap_or(input);
     let bytes = fs::read(&input).map_err(|e| format!("編集する画像を読めません: {e}"))?;
     image::load_from_memory(&bytes).map_err(|e| format!("画像を読めません: {e}"))?;
     let temporary = tempfile::Builder::new().prefix("munin-markits-edit-").tempdir().map_err(|e| e.to_string())?;
@@ -62,7 +79,7 @@ pub async fn edit_markits_image(root: String, asset: String, page: Option<String
     tauri::async_runtime::spawn_blocking(move || {
         let root = Path::new(&root);
         let edit = prepare_image_edit(root, &asset, page.as_deref())?;
-        let status = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
+        let status = markits_command()?
             .arg("--munin-markits")
             .arg("--manual-studio-input").arg(&edit.input)
             .arg("--manual-studio-output").arg(&edit.output)
@@ -72,7 +89,12 @@ pub async fn edit_markits_image(root: String, asset: String, page: Option<String
         if !edit.completion.is_file() { return Ok(None); }
         let bytes = fs::read(&edit.output).map_err(|e| format!("編集結果を読めません: {e}"))?;
         markits_desktop_lib::metadata::load_image_with_metadata(&bytes).map_err(|e| e.to_string())?;
-        save_render(root, &bytes).map(Some)
+        let existing=fs::read(&edit.input).map_err(|e|e.to_string())?;
+        let resource=manual_core::capture_resources::resource_id(&existing)
+            .and_then(|id|manual_core::capture_resources::load(root,&id).ok())
+            .or_else(||manual_core::capture_resources::catalog(root).ok()?.into_iter().find(|r|r.derived.iter().any(|d|manual_core::config::project_path(root,&d.editing).ok().as_ref()==Some(&edit.input))));
+        let resource=match resource {Some(r)=>r,None=>manual_core::capture_resources::register(root,&bytes,"編集画像")?};
+        manual_core::capture_resources::generate(root,&resource.id,None,Some(&bytes)).map(|d|Some(d.path))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -88,7 +110,7 @@ pub struct Capture {
 
 #[tauri::command]
 pub fn open_markits(capture: Option<bool>) -> Result<(), String> {
-    let mut command = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+    let mut command = markits_command()?;
     command.arg("--munin-markits");
     if capture.unwrap_or(false) { command.arg("--capture"); }
     let mut child = command.spawn()
@@ -171,9 +193,91 @@ pub async fn import_markits_image(root: String, source: String) -> Result<String
     }).await.map_err(|e| e.to_string())?
 }
 
+static RESOURCE_OPERATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+struct ResourceOperation;
+impl Drop for ResourceOperation {fn drop(&mut self){RESOURCE_OPERATION.store(false,std::sync::atomic::Ordering::SeqCst);}}
+
+/// Rebuild an independently editable derivative on the freshly captured source.
+fn recompose_variant(old:&[u8],fresh:&[u8])->Result<Vec<u8>,String> {
+    use markits_desktop_lib::{metadata,commands};
+    let state=metadata::load_image_with_metadata(old).map_err(|e|e.to_string())?;
+    let base=metadata::load_image_with_metadata(fresh).map_err(|e|e.to_string())?;
+    let base_url=base.base_image_data_url.as_ref().unwrap_or(&base.image_data_url);
+    let raw=STANDARD.decode(base_url.split_once(',').ok_or("原本を読めません。")?.1).map_err(|e|e.to_string())?;
+    let full=image::load_from_memory(&raw).map_err(|e|e.to_string())?;
+    let background=if let Some(crop)=&state.crop_info {
+        let x=crop.offset_x as u32;let y=crop.offset_y as u32;
+        if x.checked_add(state.width).is_none_or(|end|end>full.width())||y.checked_add(state.height).is_none_or(|end|end>full.height()) {return Err("新しい撮影画像にクロップ範囲が収まりません。".into());}
+        let mut output=std::io::Cursor::new(vec![]);
+        full.crop_imm(x,y,state.width,state.height).write_to(&mut output,image::ImageFormat::Png).map_err(|e|e.to_string())?;
+        markits_desktop_lib::playback::copy_metadata(&output.into_inner(),&raw).map_err(|e|e.to_string())?
+    }else{raw};
+    let scene=state.annotations_json.unwrap_or_else(||format!(r#"{{"canvas":{{"width":{},"height":{}}},"annotations":[]}}"#,full.width(),full.height()));
+    let temp=tempfile::tempdir().map_err(|e|e.to_string())?;let output=temp.path().join("variant.png");
+    let previous_render=image::load_from_memory(old).map_err(|e|e.to_string())?;
+    commands::cmd_compose_and_save(format!("data:image/png;base64,{}",STANDARD.encode(background)),scene,output.to_string_lossy().into(),base.ui_elements,Some(previous_render.width()),Some(previous_render.height()),false,Some(base_url.clone()),state.crop_info,Some(commands::EditingMetadata{base_ui_elements:base.base_ui_elements} ))?;
+    fs::read(output).map_err(|e|e.to_string())
+}
+
+fn apply_recapture(root:&Path,id:&str,expected:&str,fresh:&[u8],force:bool)->Result<manual_core::capture_resources::Resource,String> {
+    let r=manual_core::capture_resources::load(root,id)?;
+    let previous=fs::read(manual_core::capture_resources::source(root,id)?).map_err(|e|e.to_string())?;
+    let old=markits_desktop_lib::metadata::load_image_with_metadata(&previous).map_err(|e|e.to_string())?;
+    let new=markits_desktop_lib::metadata::load_image_with_metadata(fresh).map_err(|e|e.to_string())?;
+    let size=|v:&markits_desktop_lib::metadata::LoadedImageResult|(v.base_width.unwrap_or(v.width),v.base_height.unwrap_or(v.height));
+    // UI target shifts need review even at an unchanged window size.
+    let aligned=size(&old)==size(&new) && serde_json::to_value(&old.ui_elements).ok()==serde_json::to_value(&new.ui_elements).ok();
+    let review=!force && !aligned && r.derived.iter().any(|d|!d.protected);
+    let variants=if review {vec![]} else {r.derived.iter().filter(|d|!d.protected).map(|d|{
+        let old=fs::read(manual_core::config::project_path(root,&d.editing)?).map_err(|e|e.to_string())?;
+        Ok((d.id.clone(),recompose_variant(&old,fresh)?))
+    }).collect::<Result<Vec<_>,String>>()?};
+    manual_core::capture_resources::update(root,id,expected,fresh,variants,review)
+}
+
+#[tauri::command]
+pub async fn recapture_capture_resource(app:tauri::AppHandle,root:String,id:String)->Result<Option<manual_core::capture_resources::Resource>,String> {
+    if RESOURCE_OPERATION.swap(true,std::sync::atomic::Ordering::SeqCst){return Err("撮影処理が実行中です。".into());}
+    let guard=ResourceOperation;
+    use tauri::Manager;
+    let main=app.get_webview_window("main");
+    if let Some(window)=&main{let _=window.hide();}
+    let result=tauri::async_runtime::spawn_blocking(move||{
+        let _guard=guard;let root=Path::new(&root);let r=manual_core::capture_resources::load(root,&id)?;
+        if !r.recorded{return Err("このリソースには操作記録がありません。".into());}
+        let input=manual_core::capture_resources::source(root,&id)?;
+        let temp=tempfile::tempdir().map_err(|e|e.to_string())?;let output=temp.path().join("recapture.png");let complete=temp.path().join("complete.done");
+        let status=markits_command()?.arg("--munin-markits")
+            .arg("--manual-studio-recapture").arg("--manual-studio-input").arg(input).arg("--manual-studio-output").arg(&output).arg("--manual-studio-completion").arg(&complete).status().map_err(|e|e.to_string())?;
+        if !status.success(){return Err(format!("MarkItsが異常終了しました: {status}"));}
+        if !complete.exists(){return Ok(None);}
+        let fresh=fs::read(output).map_err(|e|e.to_string())?;
+        apply_recapture(root,&id,&r.revision,&fresh,false).map(Some)
+    }).await.map_err(|e|e.to_string()).and_then(|r|r);
+    if let Some(window)=main{let _=window.show();let _=window.set_focus();}
+    result
+}
+
+#[tauri::command]
+pub async fn adopt_capture_resource(root:String,id:String)->Result<manual_core::capture_resources::Resource,String> {
+    tauri::async_runtime::spawn_blocking(move||{
+        let root=Path::new(&root);let r=manual_core::capture_resources::load(root,&id)?;
+        let pending=r.pending.as_ref().ok_or("比較する候補がありません。")?;
+        let path=manual_core::config::project_path(root,&format!(".munin/capture-resources/{id}/revisions/{pending}.png"))?;
+        apply_recapture(root,&id,&r.revision,&fs::read(path).map_err(|e|e.to_string())?,true)
+    }).await.map_err(|e|e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn child_markits_does_not_inherit_studio_webview_profile(){
+        let command=markits_command().unwrap();
+        for key in ["WEBVIEW2_USER_DATA_FOLDER","WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] {
+            assert!(command.get_envs().any(|(name,value)|name==key&&value.is_none()));
+        }
+    }
     #[test]
     fn repeated_edit_roundtrip_preserves_uimap_crop_original_scene_and_operations() {
         use markits_desktop_lib::{commands, metadata, ui_elements::DetectedUiElement};
@@ -288,5 +392,34 @@ mod tests {
         for id in ["../private", "a/b", "a\\b", "", "C:secret"] {
             assert!(tauri::async_runtime::block_on(import_markits_capture("unused".into(), id.into())).is_err());
         }
+    }
+
+    #[test]
+    fn recapture_preserves_each_crop_scene_output_size_and_editable_base() {
+        use markits_desktop_lib::{commands,metadata};
+        let temp=tempfile::tempdir().unwrap();
+        let encode=|value:u8|{let image=image::RgbaImage::from_pixel(160,120,image::Rgba([value,20,30,255]));let mut c=std::io::Cursor::new(vec![]);image.write_to(&mut c,image::ImageFormat::Png).unwrap();c.into_inner()};
+        let previous=encode(80);let fresh=encode(160);
+        let data=|bytes:&[u8]|format!("data:image/png;base64,{}",STANDARD.encode(bytes));
+        let scene=r#"{"canvas":{"width":80,"height":60},"annotations":[{"type":"rect","target":[5,5,25,20],"style":"primary"}]}"#;
+        let cropped=image::load_from_memory(&previous).unwrap().crop_imm(20,10,80,60);let mut c=std::io::Cursor::new(vec![]);cropped.write_to(&mut c,image::ImageFormat::Png).unwrap();
+        let file=temp.path().join("old.png");
+        commands::cmd_compose_and_save(data(c.get_ref()),scene.into(),file.to_string_lossy().into(),None,Some(40),Some(30),false,Some(data(&previous)),Some(metadata::CropInfo{is_auto_cropped:false,offset_x:20.0,offset_y:10.0,base_width:160,base_height:120}),Some(commands::EditingMetadata{base_ui_elements:None})).unwrap();
+        let old=fs::read(&file).unwrap();let result=recompose_variant(&old,&fresh).unwrap();
+        assert_eq!((image::load_from_memory(&result).unwrap().width(),image::load_from_memory(&result).unwrap().height()),(40,30));
+        let loaded=metadata::load_image_with_metadata(&result).unwrap();assert_eq!(loaded.annotations_json.as_deref(),Some(scene));assert_eq!((loaded.base_width,loaded.base_height),(Some(160),Some(120)));assert_eq!(loaded.crop_info.unwrap().offset_x,20.0);
+        assert_ne!(image::load_from_memory(&result).unwrap().to_rgba8(),image::load_from_memory(&old).unwrap().to_rgba8());
+        assert_eq!(fs::read(file).unwrap(),old);
+    }
+
+    #[test]
+    fn recapture_updates_compatible_images_and_holds_changed_dimensions_for_review(){
+        use manual_core::capture_resources as resources;
+        let root=tempfile::tempdir().unwrap();let encode=|width,value|{let image=image::RgbaImage::from_pixel(width,60,image::Rgba([value,20,30,255]));let mut c=std::io::Cursor::new(vec![]);image.write_to(&mut c,image::ImageFormat::Png).unwrap();c.into_inner()};
+        let original=encode(80,20);let r=resources::register(root.path(),&original,"").unwrap();let d=resources::generate(root.path(),&r.id,None,None).unwrap();
+        let updated=apply_recapture(root.path(),&r.id,&r.revision,&encode(80,40),false).unwrap();assert!(updated.pending.is_none());
+        let path=manual_core::config::project_path(root.path(),&d.path).unwrap();let bytes=fs::read(&path).unwrap();assert_eq!(resources::resource_id(&bytes).as_deref(),Some(r.id.as_str()));
+        let pending=apply_recapture(root.path(),&r.id,&updated.revision,&encode(100,60),false).unwrap();assert!(pending.pending.is_some());assert_eq!(fs::read(path).unwrap(),bytes);
+        assert!(apply_recapture(root.path(),&r.id,"stale",&encode(80,70),false).is_err());
     }
 }

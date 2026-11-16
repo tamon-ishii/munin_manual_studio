@@ -593,6 +593,8 @@ fn main() {
             markits_bridge::set_markits_capture_shortcut,
             markits_bridge::edit_markits_image,
             markits_bridge::capture_markits_image,
+            markits_bridge::recapture_capture_resource,
+            markits_bridge::adopt_capture_resource,
             markits_bridge::markits_captures,
             markits_bridge::import_markits_capture,
             markits_bridge::import_markits_image,

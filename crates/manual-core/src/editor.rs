@@ -204,6 +204,11 @@ pub fn save_asset(root: &Path, target_path: &str, data: &str) -> Result<SavedAss
         .decode(base64_str.trim().as_bytes())
         .map_err(|error| format!("画像データのデコードに失敗しました: {error}"))?;
 
+    if crate::capture_resources::has_private_metadata(&bytes) {
+        crate::capture_resources::store_upload(root,&clean_path,&bytes)?;
+        return Ok(SavedAsset{path:clean_path});
+    }
+
     let mut temporary = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
     temporary
         .write_all(&bytes)

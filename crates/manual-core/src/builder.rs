@@ -15,7 +15,8 @@ fn copy_public_asset(source: &Path, destination: &Path) -> Result<(), String> {
     if source.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png")) {
         let bytes = fs::read(source).map_err(|e| e.to_string())?;
         if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-            let public = markits::image_metadata::strip_markits_metadata(&bytes)?;
+            let id=crate::capture_resources::resource_id(&bytes);
+            let public = crate::capture_resources::document_png(&bytes,id.as_deref())?;
             return fs::write(destination, public).map_err(|e| e.to_string());
         }
     }
@@ -662,6 +663,12 @@ mod site_tests {
         assert!(markits::raster::extract_png_text_chunk(&public, "markits:base_image").is_none());
         assert!(markits::raster::extract_png_text_chunk(&public, "markits:ui_elements").is_none());
         assert_eq!(image::load_from_memory(&public).unwrap().to_rgba8(), original.to_rgba8());
+        let managed=crate::capture_resources::document_png(&private,Some("capture-publication")).unwrap();
+        fs::write(&source,&managed).unwrap();copy_public_asset(&source,&output).unwrap();
+        let published=fs::read(&output).unwrap();
+        assert_eq!(crate::capture_resources::resource_id(&published).as_deref(),Some("capture-publication"));
+        assert!(!crate::capture_resources::has_private_metadata(&published));
+        assert_eq!(published,managed);
     }
 
     #[test]

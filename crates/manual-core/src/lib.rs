@@ -6,6 +6,7 @@ pub mod audience;
 pub mod author;
 pub mod builder;
 pub mod capture_source;
+pub mod capture_resources;
 pub mod capture_validation;
 pub mod config;
 mod operation_settings;
@@ -104,6 +105,11 @@ pub fn run(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String
 }
 
 fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<String, String> {
+    if action.starts_with("capture-resources-") {
+        if !root.is_dir() { return Err("プロジェクトがありません。".into()); }
+        let raw=options.iter().find(|(k,_)|*k=="--json").map(|(_,v)|*v).unwrap_or("{}");
+        return capture_resources::rpc(root,action,&serde_json::from_str(raw).map_err(|e|e.to_string())?);
+    }
     let allowed = [
         "document-review",
         "document-review-capabilities",

@@ -18,6 +18,7 @@ export interface PanelDef {
 
 export const PANELS: PanelDef[] = [
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
+  { id: "capture-resources", name: "撮影リソース一覧", elementId: "panel-capture-resources" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
 ];
@@ -50,6 +51,7 @@ export const defaultLayoutJson: IJsonModel = {
             component: "file-tree",
             enableClose: true,
           },
+          {type:"tab",id:"capture-resources",name:"撮影リソース一覧",component:"capture-resources",enableClose:true},
         ],
       },
       {
@@ -204,6 +206,10 @@ export const FlexLayoutApp: React.FC<{
 
       if (!shouldShow) {
         if (existing) {
+          if(componentId==='capture-resources'){
+            const parent=existing.getParent();
+            if(parent instanceof TabSetNode)try{localStorage.setItem('manual-studio-capture-dock-parent',parent.getId());}catch{/* Optional layout preference. */}
+          }
           model.doAction(Actions.deleteTab(componentId));
         }
         return;
@@ -219,7 +225,9 @@ export const FlexLayoutApp: React.FC<{
 
       // Find an appropriate tabset to add to
       let targetTabsetId = "";
-      const preferredTabset = model.getNodeById(componentId === "file-tree" ? "tabset-left" : "tabset-editor");
+      let savedParent:ReturnType<Model['getNodeById']>;
+      if(componentId==='capture-resources')try{savedParent=model.getNodeById(localStorage.getItem('manual-studio-capture-dock-parent')||'');}catch{/* Use the default group. */}
+      const preferredTabset = savedParent instanceof TabSetNode?savedParent:model.getNodeById(componentId === "file-tree" || componentId === "capture-resources" ? "tabset-left" : "tabset-editor");
       const activeTabset = preferredTabset instanceof TabSetNode ? preferredTabset : model.getActiveTabset();
       if (activeTabset) {
         targetTabsetId = activeTabset.getId();
