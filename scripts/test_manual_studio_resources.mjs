@@ -97,7 +97,7 @@ try{
   const caption='説明 <安全> & "引用"';await presentation.getByRole('textbox',{name:'画像のキャプション'}).fill(caption);await presentation.getByRole('button',{name:'表示設定を適用'}).click();
   assert.match(await page.locator('#markdown-editor').inputValue(),/data-width="80"/);assert.match(await page.locator('#markdown-editor').inputValue(),/data-align="right"/);
   await page.frameLocator('#markdown-preview').locator('figcaption').waitFor();assert.equal(await page.frameLocator('#markdown-preview').locator('figcaption').textContent(),caption);
-  await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();const figureImage=page.locator('#milkdown-editor [data-image-presentation=true] img').first();await figureImage.waitFor();
+  await page.locator('#editor-mode-toggle[aria-pressed=true]').click();const figureImage=page.locator('#milkdown-editor [data-image-presentation=true] img').first();await figureImage.waitFor();
   assert.equal(await figureImage.evaluate(image=>image.closest('[data-image-presentation]').style.width),'80%');
   assert.ok(await figureImage.evaluate(image=>Math.abs(image.getBoundingClientRect().width-image.closest('[data-image-presentation]').getBoundingClientRect().width)<2),'image fills the configured width');
   assert.equal(await page.locator('#milkdown-editor [data-image-presentation=true] .caption-input').first().evaluate(el=>getComputedStyle(el).textAlign),'right');

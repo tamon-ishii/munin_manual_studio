@@ -93,7 +93,7 @@ try {
   await page.getByRole('menuitem',{name:'フォルダーを作成',exact:true}).click();assert.equal(await page.locator('#new-folder-path').inputValue(),'docs/nested/');await page.locator('#new-folder-path').fill('docs/nested/new-folder');await page.locator('#new-folder-form button[type=submit]').click();await idle();
   await readFile(path.join(root,'docs/index.md'));assert.equal((await rpc('state')).includes('docs/nested/new-folder'),true);
   await page.locator('[data-folder="docs/nested"]>summary').click({button:'right'});await page.getByRole('menuitem',{name:'Markdownを作成',exact:true}).click();await page.locator('#new-page-path').fill('docs/nested/new-page.md');await page.locator('#new-page-title').fill('New page');await page.locator('#new-page-form button[type=submit]').click();await idle();assert.match(await readFile(path.join(root,'docs/nested/new-page.md'),'utf8'),/# New page/);
-  await tree('docs/output.md');await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+  await tree('docs/output.md');await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
   assert.equal(await page.locator('.milkdown-ai-task').count(),0);assert.match(await page.locator('.ProseMirror').textContent(),/Generated body/);assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(),/ai:generated|ai:task/);
   // Preserve rich editor undo state when switching between document tabs.
   await page.locator('.ProseMirror p').filter({hasText:'Generated body'}).click();await page.keyboard.press('End');await page.keyboard.type(' rich draft');const richDraft=await page.locator('#markdown-editor').inputValue();

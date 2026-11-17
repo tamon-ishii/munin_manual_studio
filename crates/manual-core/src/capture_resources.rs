@@ -300,7 +300,9 @@ pub fn editing_source(root: &Path, path: &str) -> Result<Option<PathBuf>, String
         d
     } else {
         let mut matches = r.derived.iter().filter(|d| d.sha256 == digest);
-        let d = matches.next().ok_or("派生の編集状態が見つかりません。")?;
+        // An ID-only image still belongs to the resource even when its public
+        // pixels were re-encoded or it has no registered derivative path.
+        let Some(d) = matches.next() else { return source(root, &id).map(Some); };
         if matches.any(|other| other.editing != d.editing) {
             return Err(
                 "一致する編集状態が複数あります。一覧から派生画像を選択してください。".into(),
@@ -677,6 +679,20 @@ pub fn rpc(root: &Path, action: &str, options: &Value) -> Result<String, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn id_only_images_reopen_the_resource_even_without_a_matching_derivative() {
+        let root=tempfile::tempdir().unwrap();
+        let original=private(1);
+        let resource=register(root.path(),&original,"source").unwrap();
+        let public=document_png(&private(2),Some(&resource.id)).unwrap();
+        fs::write(root.path().join("pasted.png"),&public).unwrap();
+        assert!(!has_private_metadata(&public));
+        let input=editing_source(root.path(),"pasted.png").unwrap().unwrap();
+        assert_eq!(fs::read(input).unwrap(),original);
+        assert_eq!(fs::read(root.path().join("pasted.png")).unwrap(),public);
+        fs::remove_file(home(root.path(),&resource.id).unwrap().join("manifest.json")).unwrap();
+        assert!(editing_source(root.path(),"pasted.png").is_err(),"A missing resource must not silently flatten the image");
+    }
     #[test]
     fn uploaded_markits_images_are_registered_and_public_path_has_only_id() {
         let root = tempfile::tempdir().unwrap();

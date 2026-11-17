@@ -280,7 +280,7 @@ try {
   await saveContent(lateDrop); await editor.press('Control+z'); assert.equal(await editor.inputValue(), initial); await saveContent(initial);
   for (const [asset, hash] of assetHashes) assert.equal(fingerprint(await readFile(path.join(root, asset))), hash);
   records.push({ entry: 'source resource drag insertion', caseId: 'P03.resource-drop-source', steps: ['collect actual card drag payload for registered screenshot assets', 'end drag without drop and retain manuscript', 'drop each kind at the shared source cursor', 'verify selected asset path in each actual reference', 'save actual references and Undo each insertion', 'fail screenshot reference and retain manuscript', 'retry same payload without duplicate reference', 'hold real reference response', 'verify source readonly and navigation disabled while waiting', 'move readonly source selection and insert at original drop cursor', 'save and Undo delayed insertion', 'verify all original asset bytes'], assertions: { visible: true, stored: true, preserved: true, returnTarget: true } });
-  await reset(); await page.getByRole('button', { name: 'Milkdown編集', exact: true }).click();
+  await reset(); await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
   async function dropRich(payload) {
     const paragraph = page.locator('.ProseMirror p').filter({ hasText: 'After text.' });
     await paragraph.click(); await page.keyboard.press('Home');
@@ -317,7 +317,7 @@ try {
   await page.getByRole('button', { name: 'Markdownソース', exact: true }).click();
   for (const mode of ['source', 'rich']) {
     await reset();
-    if (mode === 'rich') await page.getByRole('button', { name: 'Milkdown編集', exact: true }).click();
+    if (mode === 'rich') await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
     await page.locator('.flexlayout__tab_button').filter({ hasText: 'ファイルツリー' }).click();
     await page.locator('#tree-search').fill('imported.png');
     const treeImage = page.locator('[data-image="docs/assets/imported.png"]');
@@ -350,7 +350,7 @@ try {
     await page.waitForFunction(() => document.querySelector('#status').textContent.includes('同じプロジェクト'));
     assert.equal((await editor.inputValue()).trim(), initial.trim());
     for (const alternate of [false, true]) {
-      if (alternate) { await openDocument('tree-target.md'); if (mode === 'rich' && await page.getByRole('button', { name: 'Milkdown編集', exact: true }).count()) await page.getByRole('button', { name: 'Milkdown編集', exact: true }).click(); }
+      if (alternate) { await openDocument('tree-target.md'); if (mode === 'rich' && await page.locator('#editor-mode-toggle[aria-pressed=true]').count()) await page.locator('#editor-mode-toggle[aria-pressed=true]').click(); }
       const before = await editor.inputValue(); await treeDrop(payload, alternate); await idle();
       const value = await editor.inputValue(); assertReference(value, 'docs/assets/imported.png'); assert.equal((value.match(/!\[/g) || []).length, 1);
       if (!alternate) assert.ok(value.indexOf('Before text.') < value.indexOf('![') && value.indexOf('![') < value.indexOf('After text.'));
@@ -368,7 +368,7 @@ try {
   // viewport coordinates against a new part of the rich document.
   const longManuscript = initial + '\n' + Array.from({ length: 40 }, (_, index) => `Later paragraph ${index}: Preserve this text.`).join('\n\n') + '\n';
   await editor.fill(longManuscript); await saveContent(longManuscript);
-  await page.getByRole('button', { name: 'Milkdown編集', exact: true }).click();
+  await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
   holdReference = true;
   const richPendingReference = new Promise(resolve => referenceStarted = resolve);
   await dropRich(payloads.get('screenshot'));

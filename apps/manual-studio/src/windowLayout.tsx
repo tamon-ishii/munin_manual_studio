@@ -154,6 +154,73 @@ export const FlexLayoutApp: React.FC<{
   const [model, setModel] = useState<Model>(() => loadStoredModel());
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    const container=document.getElementById('app-layout');
+    if(!container)return;
+    let drag:{id:string;pointer:number;x:number;y:number;tab:HTMLElement;draggable:boolean;moved:boolean}|undefined;
+    let destination:{id:string;location:DockLocation;index:number}|undefined;
+    const outline=document.createElement('div');
+    outline.className='dock-pointer-outline';
+    const finish=()=>{
+      const previous=drag;
+      drag=undefined;destination=undefined;outline.remove();
+      if(previous){previous.tab.draggable=previous.draggable;if(container.hasPointerCapture(previous.pointer))container.releasePointerCapture(previous.pointer);}
+    };
+    const down=(event:PointerEvent)=>{
+      if(event.button!==0||!(event.target instanceof Element)||event.target.closest('button,.flexlayout__tab_button_trailing,input'))return;
+      const tab=event.target.closest<HTMLElement>('[id^="flexlayout-tabbutton-"]');
+      if(!tab)return;
+      const id=tab.id.slice('flexlayout-tabbutton-'.length);
+      if(!(model.getNodeById(id) instanceof TabNode))return;
+      drag={id,pointer:event.pointerId,x:event.clientX,y:event.clientY,tab,draggable:tab.draggable,moved:false};
+      // Native HTML dragging uses Windows OLE and can cancel before a drop.
+      tab.draggable=false;container.setPointerCapture(event.pointerId);
+      model.doAction(Actions.selectTab(id));
+      event.preventDefault();event.stopPropagation();
+    };
+    const move=(event:PointerEvent)=>{
+      if(!drag||event.pointerId!==drag.pointer)return;
+      if(!drag.moved&&Math.hypot(event.clientX-drag.x,event.clientY-drag.y)<5)return;
+      drag.moved=true;destination=undefined;outline.remove();
+      const hit=document.elementFromPoint(event.clientX,event.clientY);
+      const group=hit?.closest<HTMLElement>('.flexlayout__tabset')||[...container.querySelectorAll<HTMLElement>('.flexlayout__tabset')].find(element=>{const r=element.getBoundingClientRect();return event.clientX>=r.left&&event.clientX<r.right&&event.clientY>=r.top&&event.clientY<r.bottom;});
+      if(!group)return;
+      let target:TabSetNode|undefined;
+      model.visitNodes(node=>{if(node instanceof TabSetNode&&node.getPath()===group.dataset.layoutPath)target=node;});
+      if(!target||!target.isEnableDrop())return;
+      const rect=group.getBoundingClientRect(),root=container.getBoundingClientRect();
+      const x=(event.clientX-rect.x)/rect.width,y=(event.clientY-rect.y)/rect.height;
+      const strip=hit?.closest('.flexlayout__tabset_tabbar_outer');
+      let location=DockLocation.CENTER;
+      if(!strip&&!target.isMaximized()){
+        const nearest=Math.min(x,1-x,y,1-y);
+        if(nearest<0.25)location=nearest===x?DockLocation.LEFT:nearest===1-x?DockLocation.RIGHT:nearest===y?DockLocation.TOP:DockLocation.BOTTOM;
+      }
+      const hovered=hit?.closest<HTMLElement>('[id^="flexlayout-tabbutton-"]');
+      const index=hovered?target.getTabNodes().findIndex(node=>`flexlayout-tabbutton-${node.getId()}`===hovered.id):-1;
+      destination={id:target.getId(),location,index};
+      let left=rect.x-root.x,top=rect.y-root.y,width=rect.width,height=rect.height;
+      if(location===DockLocation.LEFT||location===DockLocation.RIGHT){width/=2;if(location===DockLocation.RIGHT)left+=width;}
+      if(location===DockLocation.TOP||location===DockLocation.BOTTOM){height/=2;if(location===DockLocation.BOTTOM)top+=height;}
+      Object.assign(outline.style,{left:`${left}px`,top:`${top}px`,width:`${width}px`,height:`${height}px`});
+      container.append(outline);event.preventDefault();
+    };
+    const up=(event:PointerEvent)=>{
+      if(!drag||event.pointerId!==drag.pointer)return;
+      const id=drag.id,drop=destination,moved=drag.moved;finish();
+      if(moved&&drop)model.doAction(Actions.moveNode(id,drop.id,drop.location,drop.index,true));
+    };
+    const cancel=()=>finish();
+    const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&drag){finish();event.preventDefault();}};
+    container.addEventListener('pointerdown',down,true);
+    container.addEventListener('pointermove',move);
+    container.addEventListener('pointerup',up);
+    container.addEventListener('pointercancel',cancel);
+    container.addEventListener('lostpointercapture',cancel);
+    document.addEventListener('keydown',key);
+    return()=>{finish();container.removeEventListener('pointerdown',down,true);container.removeEventListener('pointermove',move);container.removeEventListener('pointerup',up);container.removeEventListener('pointercancel',cancel);container.removeEventListener('lostpointercapture',cancel);document.removeEventListener('keydown',key);};
+  },[model]);
+
   const saveModel = useCallback((m: Model) => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(() => {
@@ -342,6 +409,13 @@ export function setupWindowLayout(containerId = "app-layout"): WindowLayoutManag
   if (!container) {
     throw new Error(`FlexLayout container #${containerId} not found`);
   }
+  // Image/file drags, including hovering a hidden editor's tab, belong to the
+  // document. FlexLayout otherwise retains an active session after editor drop.
+  const documentDrag = (event: DragEvent) => {
+    if ([...(event.dataTransfer?.types || [])].some(type=>type.startsWith('application/x-munin-'))) event.stopPropagation();
+  };
+  container.addEventListener('dragenter',documentDrag,true);
+  container.addEventListener('dragleave',documentDrag,true);
 
   // Setup View Menu button toggle
   const viewMenuBtn = document.getElementById("view-menu-button");

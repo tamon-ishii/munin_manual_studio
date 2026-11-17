@@ -17,8 +17,7 @@
   <div class="app-layout" id="app-layout"></div>
   <div id="layout-panel-pool" style="display:none">
     <section id="panel-capture-resources" class="panel capture-resource-panel" aria-label="撮影リソース一覧">
-      <div class="capture-resource-toolbar"><button type="button" id="capture-resource-new">撮影</button><label class="capture-import">画像を登録<input type="file" id="capture-resource-import" accept="image/png" /></label><button type="button" id="capture-resource-migrate">既存画像を変換</button><button type="button" id="capture-resource-refresh">更新</button></div>
-      <input id="capture-resource-search" type="search" placeholder="名前・使用原稿を検索" aria-label="撮影リソースを検索" />
+      <div class="capture-resource-toolbar"><button type="button" id="capture-resource-import-button" title="画像を登録" aria-label="画像を登録"></button><input type="file" id="capture-resource-import" accept="image/png" hidden /></div>
       <div class="capture-resource-toolbar"><select id="capture-resource-usage" aria-label="撮影リソースの使用状況"><option value="all">すべて</option><option value="used">使用中</option><option value="unused">未使用</option></select><span id="capture-resource-count">0件</span></div>
       <div id="capture-resource-list" class="capture-resource-list"></div>
     </section>

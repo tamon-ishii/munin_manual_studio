@@ -7,6 +7,7 @@ import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePre
 import { Slice } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { uploadConfig, uploadPlugin } from '@milkdown/kit/plugin/upload';
+import { dropIndicatorState } from '@milkdown/kit/plugin/cursor';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { uiIcon } from './uiIcons';
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
@@ -65,6 +66,9 @@ export function setupMilkdownEditor(
   const toggle = document.createElement('button');
   toggle.type = 'button'; toggle.textContent = 'Markdownソース';
   toggle.id = 'editor-mode-toggle';
+  toggle.setAttribute('aria-pressed','false');
+  toggle.setAttribute('aria-controls',source.id);
+  toggle.title='Markdownソース表示を切り替え';
   const modeControls = source.closest('#panel-editor')?.querySelector('.editor-mode-controls') || source.parentElement!;
   modeControls.append(toggle);
   const pendingUploads: Array<{ cancelled: boolean }> = [];
@@ -89,6 +93,16 @@ export function setupMilkdownEditor(
   let syncing = false;
   let sourceMode = false;
   let ready = false;
+  // Studio consumes resource drops before ProseMirror sees them. Drag end can
+  // also target the resource panel, so the editor's own cleanup never runs.
+  const clearDropIndicator=()=>{if(ready&&instance)instance.action(ctx=>ctx.set(dropIndicatorState.key,null));};
+  document.addEventListener('drop',clearDropIndicator,true);
+  document.addEventListener('dragend',clearDropIndicator,true);
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')clearDropIndicator();},true);
+  document.addEventListener('dragleave',event=>{
+    if(event.target instanceof Node&&host.contains(event.target)&&!(event.relatedTarget instanceof Node&&host.contains(event.relatedTarget)))clearDropIndicator();
+  },true);
+  window.addEventListener('blur',clearDropIndicator);
   let imageRefreshVersion = 0;
   let readonly = source.disabled || source.readOnly;
   const valueProperty = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!;
@@ -285,12 +299,12 @@ export function setupMilkdownEditor(
   function showSource() {
     hideOverlay();
     sourceMode = true; host.hidden = false; host.dataset.sourceMode = 'true'; source.hidden = false;
-    toggle.textContent = 'Milkdown編集'; toggle.setAttribute('aria-pressed', 'true');
+    toggle.setAttribute('aria-pressed', 'true');
     source.dispatchEvent(new Event('editor-mode-change'));
   }
   toggle.addEventListener('click', () => {
     if (!sourceMode) { showSource(); source.focus(); }
-    else { refresh(true); sourceMode = false; delete host.dataset.sourceMode; host.hidden = false; source.hidden = true; toggle.textContent = 'Markdownソース'; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); }
+    else { refresh(true); sourceMode = false; delete host.dataset.sourceMode; host.hidden = false; source.hidden = true; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); }
   });
   source.addEventListener('input', () => { if (!syncing) refresh(); });
   // Notify the existing top bar when source selection changes, without parsing

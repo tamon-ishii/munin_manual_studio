@@ -30,11 +30,11 @@ try{
  assert.equal(writes,1);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft);assert.doesNotMatch(await tab.textContent(),/\*$/);
  await editor.press('ControlOrMeta+z');assert.equal(await editor.inputValue(),original);assert.match(await tab.textContent(),/\*$/);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),draft);
  await editor.press('ControlOrMeta+Shift+z');await editor.press('ControlOrMeta+s');await idle();
- await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+ await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
  const paragraph=page.locator('.ProseMirror p').filter({hasText:'Original text'});await paragraph.click();await page.keyboard.press('End');await page.keyboard.type(' rich change');
  await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('rich change'));await page.waitForTimeout(1200);const beforeSave=writes;
  await page.keyboard.press('ControlOrMeta+s');await idle();assert.equal(writes,beforeSave+1);
- await page.getByRole('button',{name:'Markdownソース',exact:true}).click();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+ await page.getByRole('button',{name:'Markdownソース',exact:true}).click();await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.doesNotMatch(await editor.inputValue(),/rich change/);assert.match(await tab.textContent(),/\*$/);
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'やり直す',exact:true}).click();assert.match(await editor.inputValue(),/rich change/);
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();await editor.fill(draft+'Keep me\n');

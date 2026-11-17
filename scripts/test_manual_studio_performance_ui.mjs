@@ -114,7 +114,7 @@ try {
 
   const gfm='# GFM\n\n> [!NOTE]\n> Alert content\n\n~~deleted~~\n\n- [x] done\n\n| A | B |\n| - | - |\n| x | y |\n\nhttps://example.com\n';
   await page.locator('#markdown-editor').fill(gfm);
-  await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+  await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
   await page.waitForFunction(()=>document.querySelector('[data-gfm-alert="NOTE"]'));
   await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
   assert.match(await page.locator('#markdown-editor').inputValue(),/> \[!NOTE\]/);

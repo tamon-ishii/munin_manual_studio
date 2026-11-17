@@ -24,6 +24,7 @@ struct ImageEdit {
     input: std::path::PathBuf,
     output: std::path::PathBuf,
     completion: std::path::PathBuf,
+    resource_id: Option<String>,
 }
 
 #[tauri::command]
@@ -63,6 +64,7 @@ fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<Im
     } else { manual_core::config::project_path(root, asset)? };
     let canonical_root=root.canonicalize().map_err(|e|e.to_string())?;
     let relative=input.strip_prefix(&canonical_root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
+    let resource_id=manual_core::capture_resources::resource_id(&fs::read(&input).map_err(|e|e.to_string())?);
     let input=manual_core::capture_resources::editing_source(root,&relative)?.unwrap_or(input);
     let bytes = fs::read(&input).map_err(|e| format!("編集する画像を読めません: {e}"))?;
     image::load_from_memory(&bytes).map_err(|e| format!("画像を読めません: {e}"))?;
@@ -70,7 +72,7 @@ fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<Im
     Ok(ImageEdit {
         output: temporary.path().join("edited.png"),
         completion: temporary.path().join("complete.done"),
-        input, _temporary: temporary,
+        input, resource_id, _temporary: temporary,
     })
 }
 
@@ -89,11 +91,10 @@ pub async fn edit_markits_image(root: String, asset: String, page: Option<String
         if !edit.completion.is_file() { return Ok(None); }
         let bytes = fs::read(&edit.output).map_err(|e| format!("編集結果を読めません: {e}"))?;
         markits_desktop_lib::metadata::load_image_with_metadata(&bytes).map_err(|e| e.to_string())?;
-        let existing=fs::read(&edit.input).map_err(|e|e.to_string())?;
-        let resource=manual_core::capture_resources::resource_id(&existing)
-            .and_then(|id|manual_core::capture_resources::load(root,&id).ok())
-            .or_else(||manual_core::capture_resources::catalog(root).ok()?.into_iter().find(|r|r.derived.iter().any(|d|manual_core::config::project_path(root,&d.editing).ok().as_ref()==Some(&edit.input))));
-        let resource=match resource {Some(r)=>r,None=>manual_core::capture_resources::register(root,&bytes,"編集画像")?};
+        let resource=match &edit.resource_id {
+            Some(id)=>manual_core::capture_resources::load(root,id)?,
+            None=>manual_core::capture_resources::register(root,&bytes,"編集画像")?,
+        };
         manual_core::capture_resources::generate(root,&resource.id,None,Some(&bytes)).map(|d|Some(d.path))
     }).await.map_err(|e| e.to_string())?
 }
@@ -271,6 +272,36 @@ pub async fn adopt_capture_resource(root:String,id:String)->Result<manual_core::
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn document_resource_id_restores_private_editing_state_and_survives_reopening() {
+        use manual_core::capture_resources as resources;
+        let root=tempfile::tempdir().unwrap();
+        let mut png=std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(80,60).write_to(&mut png,image::ImageFormat::Png).unwrap();
+        let original=markits::raster::embed_png_text_chunk(png.get_ref(),"markits:annotations",r#"{"canvas":{"width":80,"height":60},"annotations":[]}"#).unwrap();
+        let original=markits::raster::embed_png_text_chunk(&original,"markits:operations","private operation history").unwrap();
+        let r=resources::register(root.path(),&original,"capture").unwrap();
+        let d=resources::generate(root.path(),&r.id,None,None).unwrap();
+        let public=fs::read(manual_core::config::project_path(root.path(),&d.path).unwrap()).unwrap();
+        assert!(!resources::has_private_metadata(&public));
+        let edit=prepare_image_edit(root.path(),&d.path,None).unwrap();
+        assert_eq!(edit.resource_id.as_deref(),Some(r.id.as_str()));
+        assert_eq!(fs::read(&edit.input).unwrap(),original);
+        let changed=markits::raster::embed_png_text_chunk(&original,"markits:annotations",r#"{"canvas":{"width":80,"height":60},"annotations":[{"type":"rect","target":[5,5,20,20]}]}"#).unwrap();
+        let variant=resources::generate(root.path(),edit.resource_id.as_deref().unwrap(),None,Some(&changed)).unwrap();
+        let reopened=prepare_image_edit(root.path(),&variant.path,None).unwrap();
+        assert_eq!(reopened.resource_id,edit.resource_id);
+        assert_eq!(fs::read(&reopened.input).unwrap(),changed);
+        assert_eq!(resources::catalog(root.path()).unwrap().len(),1,"Editing retains the original resource identity");
+        fs::create_dir_all(root.path().join("docs")).unwrap();
+        let mut resized=std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(40,30).write_to(&mut resized,image::ImageFormat::Png).unwrap();
+        let id_only=resources::document_png(resized.get_ref(),Some(&r.id)).unwrap();
+        fs::write(root.path().join("docs/copied.png"),&id_only).unwrap();
+        let copied=prepare_image_edit(root.path(),"copied.png",Some("index.md")).unwrap();
+        assert_eq!(copied.resource_id.as_deref(),Some(r.id.as_str()));
+        assert_eq!(fs::read(copied.input).unwrap(),original);
+    }
     #[test]
     fn child_markits_does_not_inherit_studio_webview_profile(){
         let command=markits_command().unwrap();

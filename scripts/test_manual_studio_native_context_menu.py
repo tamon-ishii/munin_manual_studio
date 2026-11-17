@@ -130,7 +130,7 @@ def session():
             chord(65507, ord('z'))
             wait(lambda: Atspi.Text.get_text(editor, 0, -1) == INITIAL, 'Undo preserves existing history')
             bounds = editor.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
-            ui.click('Milkdown編集')
+            ui.click('Markdownソース')
             ui.front(app.pid)
             ui.t.XTestFakeMotionEvent(ui.display, -1, bounds.x + 65, bounds.y + 210, 0)
             ui.t.XTestFakeButtonEvent(ui.display, 1, True, 0)

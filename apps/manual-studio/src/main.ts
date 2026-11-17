@@ -931,8 +931,6 @@ const markitsImages = setupMarkitsImages({
   },
 });
 const captureDock=setupCaptureResources({root:()=>projectRoot,rpc,
-  capture:()=>insertScreenshotHere(),
-  insert:async path=>{const root=projectRoot;if(!await chooseImageDestination()||!documentState||root!==projectRoot)return;insertDocumentMarkdown(`![撮影画像](<${relativeProjectAsset(path,documentState.page)}>)`);status('文書用画像を挿入しました。');},
   edited:async path=>{await handleEditDocumentImage(path,element<HTMLImageElement>('image-tab-preview'));},
   changed:async()=>{previewScheduler.invalidate();if(documentState)await Promise.all([renderPreview(),milkdown.refreshImages()]);},
   usage:usage=>openResourceUsage({...usage,snippet:usage.snippet||'',end:usage.start+(usage.snippet?.length||0)}),status,
@@ -962,9 +960,11 @@ function showImagePresentation(image?:HTMLImageElement){
   const help=document.createElement('p');help.textContent='「指定なし」で表示幅の指定を解除できます。配置とキャプションは引き続き設定できます。';
   const feedback=document.createElement('p');feedback.role='status';const apply=document.createElement('button');apply.type='button';apply.className='primary';apply.textContent='表示設定を適用';
   apply.onclick=()=>{try{if(root!==projectRoot||documentState?.page!==page)throw new Error('原稿が切り替わりました。');const value=width.value===''?null:Number(width.value);if(width.validity.badInput||(value!==null&&(!Number.isInteger(value)||value<1||value>100)))throw new Error('表示幅は空欄、または1〜100の整数で指定してください。');
-    const raw=renderFigure({...selected,width:value,align:align.value as DocumentImage['align'],caption:caption.value,configured:true});const before=expected.slice(0,selected.start),after=expected.slice(selected.end);const gapBefore=before&&!before.endsWith('\n\n')?(before.endsWith('\n')?'\n':'\n\n'):'';const gapAfter=after&&!after.startsWith('\n\n')?(after.startsWith('\n')?'\n':'\n\n'):'';changeImageMarkdown(before+gapBefore+raw+gapAfter+after,expected);dialog.close();void milkdown.refreshImages();status('画像の表示設定を更新しました。');
+    const raw=renderFigure({...selected,width:value,align:align.value as DocumentImage['align'],caption:caption.value,configured:true});const before=expected.slice(0,selected.start),after=expected.slice(selected.end);const gapBefore=before&&!before.endsWith('\n\n')?(before.endsWith('\n')?'\n':'\n\n'):'';const gapAfter=after&&!after.startsWith('\n\n')?(after.startsWith('\n')?'\n':'\n\n'):'';changeImageMarkdown(before+gapBefore+raw+gapAfter+after,expected);dialog.close();void milkdown.refreshImages();previewScheduler.invalidate();void renderPreview();status('画像の表示設定を更新しました。');
   }catch(error){feedback.textContent=String(error);}};
-  body.append(widthControls,alignLabel,captionLabel,help,feedback,apply);
+  body.classList.add('image-presentation-fields');
+  body.append(widthControls,alignLabel,captionLabel,help,feedback);
+  const actions=document.createElement('div');actions.className='image-presentation-actions';actions.append(apply);dialog.append(actions);
 }
 async function recaptureDocumentImage(imageSource:string):Promise<void>{
   await handleEditDocumentImage(imageSource,element<HTMLImageElement>('image-tab-preview'),true);
@@ -1862,6 +1862,7 @@ element('page-list').addEventListener('dragleave', event => {
 element('page-list').addEventListener('dragstart', event => {
   const file=(event.target as HTMLElement).closest<HTMLElement>('[data-page],[data-image],[data-file]');
   if(!file||!event.dataTransfer||busy)return;
+  event.stopPropagation();
   const path=file.dataset.page||file.dataset.image||file.dataset.file;
   event.dataTransfer.setData('application/x-munin-file',JSON.stringify({root:projectRoot,path}));
   event.dataTransfer.effectAllowed='copyMove';
@@ -1923,14 +1924,15 @@ for (const target of [editor,milkdown.host] as HTMLElement[]) {
   },true);
 }
 let resourceDragHover:ReturnType<typeof setTimeout>|undefined;
-const editorNavigation=document.querySelector<HTMLElement>('[data-tab="editor"]');
-editorNavigation?.addEventListener('dragover',event=>{
+const editorNavigationSelector='#flexlayout-tabbutton-editor';
+document.addEventListener('dragover',event=>{
+  if(!(event.target instanceof Element)||!event.target.closest(editorNavigationSelector))return;
   if(!event.dataTransfer?.types.includes('application/x-munin-image'))return;
   event.preventDefault();event.dataTransfer.dropEffect='copy';
   resourceDragHover??=setTimeout(()=>{resourceDragHover=undefined;if(documentState&&!busy)chooseTab('editor');},400);
 });
 function clearResourceDragHover(){if(resourceDragHover)clearTimeout(resourceDragHover);resourceDragHover=undefined;}
-editorNavigation?.addEventListener('dragleave',clearResourceDragHover);document.addEventListener('dragend',clearResourceDragHover);document.addEventListener('drop',clearResourceDragHover);
+document.addEventListener('dragleave',event=>{if(event.target instanceof Element&&event.target.closest(editorNavigationSelector)&&!(event.relatedTarget instanceof Element&&event.relatedTarget.closest(editorNavigationSelector)))clearResourceDragHover();},true);document.addEventListener('dragend',clearResourceDragHover);document.addEventListener('drop',clearResourceDragHover);
 element("cancel-new-page").addEventListener("click", () => element<HTMLDialogElement>("new-page-dialog").close());
 element("new-page-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2728,15 +2730,26 @@ async function insertScreenshotHere():Promise<void>{
   captureInsertionRunning=true;
   setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),true);
   const root=projectRoot;
+  const origin=captureInsertionContext(insertionState());
+  const hadManuscript=Boolean(documentState&&!activeImageTab);
   const timing=new OperationTiming(rpc,root);
   let outcome:'success'|'cancelled'|'error'='cancelled';
   try {
-    status('MarkItsで撮影しています。完了すると撮影リソースへ登録します。');
+    status('MarkItsで撮影しています。完了すると撮影リソースへ登録し、原稿に画像を挿入します。');
     timing.stage('capture');
     const resource=await markitsImages.captureResource();
     if(!resource||root!==projectRoot)return;
-    captureDock.upsert(resource);chooseTab('capture-resources');outcome='success';
-    status('撮影リソースを登録しました。一覧から文書用画像を生成・挿入できます。');
+    captureDock.upsert(resource);
+    timing.stage('generate');
+    const {path}=JSON.parse(await rpc('capture-resources-generate',{json:{id:resource.id}},root)) as {path:string};
+    if(root!==projectRoot)return;
+    if(hadManuscript){
+      if(!isInsertionCurrent(origin,insertionState())||activeImageTab)throw Error('原稿が変更されました。撮影リソース一覧から画像を挿入してください。');
+    }else if(!await chooseImageDestination()||root!==projectRoot)return;
+    if(!documentState)return;
+    insertDocumentMarkdown(`![撮影画像](<${relativeProjectAsset(path,documentState.page)}>)`);
+    await captureDock.refresh();outcome='success';
+    status('撮影リソースを登録し、メタデータを除去した文書用画像を原稿に挿入しました。保存ボタンまたはCtrl/Cmd+Sで保存してください。');
   }catch(error){outcome='error';throw error;}
   finally{captureInsertionRunning=false;setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),!projectRoot);await timing.finish(outcome).catch(error=>console.warn(error));}
 }

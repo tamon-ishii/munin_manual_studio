@@ -135,11 +135,11 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  await resetSource();records.find(r=>r.entry==='source file drop').steps.push('cancel save dialog without creating file','inject failed save and retain description','retry same file and cursor','Undo');
  // Rich editor's actual upload entry shares document identity
  // protection, with native ProseMirror Undo.
- await editor.fill(initial);await editor.press('Control+s');await idle();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();await page.locator('.ProseMirror p').filter({hasText:'After text.'}).click();await page.keyboard.press('Home');const richBefore=await editor.inputValue();await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();await page.locator('.milkdown-image-block input[type=file]').setInputFiles(file);await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'));const richPath=(await editor.inputValue()).match(/(?:\.\.\/)*assets\/image-[A-Za-z0-9._-]+/)?.[0];assert.ok(richPath,'uploaded asset reference must be serialized');assert.deepEqual(await readFile(path.join(root,'docs',richPath)),png);await verifySaved(await editor.inputValue());await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.ok((await editor.inputValue()).includes('![]()'));await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal((await editor.inputValue()).trim(),richBefore.trim());await verifySaved(await editor.inputValue());
+ await editor.fill(initial);await editor.press('Control+s');await idle();await page.locator('#editor-mode-toggle[aria-pressed=true]').click();await page.locator('.ProseMirror p').filter({hasText:'After text.'}).click();await page.keyboard.press('Home');const richBefore=await editor.inputValue();await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();await page.locator('.milkdown-image-block input[type=file]').setInputFiles(file);await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('assets/image-'));const richPath=(await editor.inputValue()).match(/(?:\.\.\/)*assets\/image-[A-Za-z0-9._-]+/)?.[0];assert.ok(richPath,'uploaded asset reference must be serialized');assert.deepEqual(await readFile(path.join(root,'docs',richPath)),png);await verifySaved(await editor.inputValue());await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.ok((await editor.inputValue()).includes('![]()'));await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal((await editor.inputValue()).trim(),richBefore.trim());await verifySaved(await editor.inputValue());
  // Slow upload must survive an explicit manuscript save.
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
  await editor.fill(initial);await editor.press('Control+s');await idle();
- await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+ await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
  await page.locator('.ProseMirror p').filter({hasText:'After text.'}).click();await page.keyboard.press('Home');
  const autosaved=page.waitForResponse(response=>response.url().includes('/__manual/rpc')&&response.request().postDataJSON()?.action==='editor-save'&&response.request().postDataJSON()?.options?.json?.content?.includes('![]()'));
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();
@@ -155,7 +155,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'元に戻す',exact:true}).click();
  assert.equal((await editor.inputValue()).trim(),initial.trim());
  async function richPlaceholder(){
-  await resetSource();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+  await resetSource();await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
   await page.locator('.ProseMirror p').filter({hasText:'After text.'}).click();await page.keyboard.press('Home');
   await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();
   return page.locator('.milkdown-image-block input[type=file]');
@@ -185,7 +185,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
  for(const gesture of ['paste','drop']){
   const entry=`rich image ${gesture}`;
   async function richGesture(){
-   await resetSource();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+   await resetSource();await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
    const paragraph=page.locator('.ProseMirror p').filter({hasText:'After text.'});
    return async()=>{
     // Every new user gesture selects the same semantic insertion point. Upload
@@ -251,7 +251,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
   assert.equal(heldSaves.length, count, `timed out waiting for heldSaves to reach ${count}`);
  };
  for(const gesture of ['paste','drop']){
-  await resetSource();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();holdNextSaves=1;
+  await resetSource();await page.locator('#editor-mode-toggle[aria-pressed=true]').click();holdNextSaves=1;
   await pendingRichGesture(gesture);await page.waitForFunction(()=>document.querySelector('.ProseMirror')?.textContent.includes('Upload in progress...'));
   await waitForHeldSaves(1);
   assert.equal(heldSaves.length,1);const cancelled=heldSaves.shift();await page.locator('.ProseMirror').press('Control+z');
@@ -261,7 +261,7 @@ await select();await page.evaluate(data=>{const f=new File([Uint8Array.from(atob
   assert.deepEqual(await readFile(path.join(root,cancelled.path)),png,`cancelled ${gesture} retains its saved PNG`);
   records.find(r=>r.entry===`rich image ${gesture}`).steps.push(`physical Ctrl+Z cancels pending rich ${gesture} after real file gesture and preserves saved PNG`);
  }
- await resetSource();await page.getByRole('button',{name:'Milkdown編集',exact:true}).click();
+ await resetSource();await page.locator('#editor-mode-toggle[aria-pressed=true]').click();
  holdNextSaves=2;await page.locator('.milkdown-top-bar').getByRole('button',{name:'画像',exact:true}).click();
  await page.locator('.milkdown-image-block input[type=file]').setInputFiles(file);
  await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('![]()'));

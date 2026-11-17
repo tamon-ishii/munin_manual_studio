@@ -520,6 +520,7 @@ fn open_editor(app: tauri::AppHandle, root: String, page: String) -> Result<(), 
         tauri::WebviewUrl::App(format!("index.html?{query}").into()),
     )
     .title(format!("{page} — Munin Manual Studio"))
+    .disable_drag_drop_handler()
     .inner_size(1250.0, 850.0)
     .build()
     .map_err(|error| error.to_string())?;
