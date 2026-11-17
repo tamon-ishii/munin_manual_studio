@@ -19,6 +19,16 @@ export function setupToolbarCustomization():void {
   const saveOrder=(keys:string[])=>{order=keys;localStorage.setItem(orderKey,JSON.stringify(order));update();};
   const beginDrag=(key:string)=>{if(!selected.has(key)){selected.clear();selected.add(key);}dragging=ordered(controls()).filter(control=>selected.has(control.key)).map(control=>control.key);showSelection();for(const source of list.querySelectorAll<HTMLElement>('[data-toolbar-setting]'))if(dragging.includes(source.dataset.toolbarSetting!))source.dataset.dragging='true';};
   const markDrop=(row:HTMLElement|undefined,y:number)=>{for(const other of list.querySelectorAll<HTMLElement>('[data-drop-position]'))delete other.dataset.dropPosition;if(row&&!dragging.includes(row.dataset.toolbarSetting!))row.dataset.dropPosition=y<row.getBoundingClientRect().top+row.offsetHeight/2?'before':'after';};
+  const pointerDropTarget=(x:number,y:number)=>{
+    const bounds=list.getBoundingClientRect();
+    const viewport=list.closest<HTMLElement>('.settings-category-panel')?.getBoundingClientRect()||bounds;
+    if(x<bounds.left||x>bounds.right||y<viewport.top||y>viewport.bottom)return;
+    const rows=[...list.querySelectorAll<HTMLElement>('[data-toolbar-setting]')];
+    // Pointer capture and scrolling can put a child overlay under the pointer.
+    // Use the actual row rectangles, including the space after the final row.
+    return rows.find(row=>{const box=row.getBoundingClientRect();return y>=box.top&&y<box.bottom;})
+      ||(y>=bounds.bottom?rows.at(-1):y<bounds.top?rows[0]:undefined);
+  };
   const dropAt=(key:string,after:boolean)=>{const moving=[...dragging];clearDrag();if(!moving.length||moving.includes(key))return;const keys=ordered(controls()).map(control=>control.key).filter(value=>!moving.includes(value));const at=keys.indexOf(key);if(at<0)return;keys.splice(at+(after?1:0),0,...moving);saveOrder(keys);};
   let inventory='';
   function controls():Control[]{
@@ -61,7 +71,7 @@ export function setupToolbarCustomization():void {
       // handling intercepts HTML drag events.
       let pointer:{id:number;x:number;y:number;moving:boolean}|undefined;
       grip.onpointerdown=event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();pointer={id:event.pointerId,x:event.clientX,y:event.clientY,moving:false};grip.setPointerCapture(event.pointerId);};
-      grip.onpointermove=event=>{if(!pointer||event.pointerId!==pointer.id)return;if(!pointer.moving){if(Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)<5)return;pointer.moving=true;beginDrag(item.key);}const target=document.elementFromPoint(event.clientX,event.clientY)?.closest<HTMLElement>('[data-toolbar-setting]');markDrop(target&&list.contains(target)?target:undefined,event.clientY);const scroller=list.closest<HTMLElement>('.settings-category-panel');if(scroller){const box=scroller.getBoundingClientRect();if(event.clientY<box.top+32)scroller.scrollTop-=12;else if(event.clientY>box.bottom-32)scroller.scrollTop+=12;}};
+      grip.onpointermove=event=>{if(!pointer||event.pointerId!==pointer.id)return;if(!pointer.moving){if(Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)<5)return;pointer.moving=true;beginDrag(item.key);}const scroller=list.closest<HTMLElement>('.settings-category-panel');if(scroller){const box=scroller.getBoundingClientRect();if(event.clientY<box.top+32)scroller.scrollTop-=12;else if(event.clientY>box.bottom-32)scroller.scrollTop+=12;}markDrop(pointerDropTarget(event.clientX,event.clientY),event.clientY);};
       grip.onpointerup=event=>{if(!pointer||event.pointerId!==pointer.id)return;const moving=pointer.moving;pointer=undefined;if(!moving)return;const target=list.querySelector<HTMLElement>('[data-drop-position]');if(target)dropAt(target.dataset.toolbarSetting!,target.dataset.dropPosition==='after');else clearDrag();};
       grip.onpointercancel=grip.onlostpointercapture=()=>{pointer=undefined;clearDrag();};grip.onkeydown=event=>{if(event.key==='Escape'){pointer=undefined;clearDrag();}};
       const label=document.createElement('div');label.className='toolbar-setting';
