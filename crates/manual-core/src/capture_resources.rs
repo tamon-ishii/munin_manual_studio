@@ -69,6 +69,8 @@ pub struct Resource {
     pub created_at: String,
     pub revision: String,
     pub recorded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_recapture: Option<bool>,
     pub derived: Vec<Derived>,
     #[serde(default)]
     pub pending: Option<String>,
@@ -84,13 +86,17 @@ pub fn load(root: &Path, id: &str) -> Result<Resource, String> {
     if path.join("transaction.json").exists() {
         return Err("撮影画像の更新または回復が必要です。一覧を更新してください。".into());
     }
-    let r: Resource =
+    let mut r: Resource =
         serde_json::from_slice(&fs::read(path.join("manifest.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
     if r.id != id || r.version != 1 {
         return Err("撮影リソースの形式が不正です。".into());
     }
     valid(&r.revision)?;
+    if r.window_recapture.is_none() && !r.recorded {
+        r.window_recapture = Some(fs::read(revision_path(root, id, &r.revision)?).ok()
+            .and_then(|bytes| window_recapture_target(&bytes)).is_some());
+    }
     for d in &r.derived {
         valid(&d.id)?;
         valid(&d.revision)?;
@@ -103,6 +109,15 @@ pub fn source(root: &Path, id: &str) -> Result<PathBuf, String> {
     let r = load(root, id)?;
     revision_path(root, id, &r.revision)
 }
+
+pub fn window_recapture_target(bytes: &[u8]) -> Option<markits::ui_elements::DetectedUiElement> {
+    let json = markits::raster::extract_png_text_chunk(bytes, markits::metadata::MARKITS_CAPTURE_TARGET_KEYWORD)?;
+    let target: markits::ui_elements::DetectedUiElement = serde_json::from_str(&json).ok()?;
+    (target.role == "window"
+        && (target.window_id.as_ref().is_some_and(|id| !id.is_empty()) && target.pid.is_some()
+            || target.name.as_ref().is_some_and(|name| !name.trim().is_empty())))
+        .then_some(target)
+}
 fn revision_path(root: &Path, id: &str, revision: &str) -> Result<PathBuf, String> {
     valid(revision)?;
     Ok(home(root, id)?.join(format!("revisions/{revision}.png")))
@@ -111,6 +126,29 @@ pub fn resource_id(bytes: &[u8]) -> Option<String> {
     let id = markits::raster::extract_png_text_chunk(bytes, ID_KEY)?;
     valid(&id).ok()?;
     Some(id)
+}
+
+pub fn registered_id(root: &Path, bytes: &[u8]) -> Result<Option<String>, String> {
+    let Some(id) = resource_id(bytes) else { return Ok(None); };
+    match home(root, &id)?.try_exists() {
+        Ok(true) => Ok(Some(id)),
+        Ok(false) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn delete(root: &Path, id: &str) -> Result<(), String> {
+    let _lock = workflow::resource_lock(root, HOME)?;
+    let source = home(root, id)?;
+    if !source.try_exists().map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    load(root, id)?;
+    let parent = project_path(root, HOME)?;
+    let staging = tempfile::Builder::new().prefix(".delete-").tempdir_in(parent)
+        .map_err(|e| e.to_string())?;
+    fs::rename(source, staging.path().join("resource")).map_err(|e| e.to_string())?;
+    Ok(())
 }
 /// Keep encoded pixel/color chunks intact. Drop all text and non-display payloads.
 pub fn document_png(bytes: &[u8], id: Option<&str>) -> Result<Vec<u8>, String> {
@@ -189,6 +227,7 @@ pub fn register(root: &Path, bytes: &[u8], name: &str) -> Result<Resource, Strin
         created_at: crate::task::utc_now(),
         revision,
         recorded: markits::raster::extract_png_text_chunk(bytes, "markits:operations").is_some(),
+        window_recapture: Some(window_recapture_target(bytes).is_some()),
         derived: vec![],
         pending: None,
     };
@@ -291,7 +330,7 @@ pub fn generate(
 }
 pub fn editing_source(root: &Path, path: &str) -> Result<Option<PathBuf>, String> {
     let bytes = resources::image_bytes(root, path)?;
-    let Some(id) = resource_id(&bytes) else {
+    let Some(id) = registered_id(root, &bytes)? else {
         return Ok(None);
     };
     let r = load(root, &id)?;
@@ -315,7 +354,7 @@ pub fn editing_source(root: &Path, path: &str) -> Result<Option<PathBuf>, String
 /// All Studio insertion routes use this before exposing a path to Markdown.
 pub fn resolve(root: &Path, path: &str) -> Result<String, String> {
     let bytes = resources::image_bytes(root, path)?;
-    if let Some(id) = resource_id(&bytes) {
+    if let Some(id) = registered_id(root, &bytes)? {
         load(root, &id)?;
         return Ok(path.into());
     }
@@ -561,6 +600,7 @@ pub fn update(
     next.pending = None;
     next.recorded =
         markits::raster::extract_png_text_chunk(original, "markits:operations").is_some();
+    next.window_recapture = Some(window_recapture_target(original).is_some());
     commit(root, old, next.clone(), writes)?;
     Ok(next)
 }
@@ -643,6 +683,10 @@ pub fn rpc(root: &Path, action: &str, options: &Value) -> Result<String, String>
             json!({"items":all["items"].as_array().into_iter().flatten().filter(|v|v["path"].as_str().is_some_and(|path|resources::image_bytes(root,path).is_ok_and(|bytes|has_private_metadata(&bytes)))).collect::<Vec<_>>()})
         }
         "capture-resources-list" => list(root)?,
+        "capture-resources-delete" => {
+            delete(root, id)?;
+            json!({"deleted": true})
+        }
         "capture-resources-thumbnail" => return thumbnail(root, id, options["pending"] == true),
         "capture-resources-generate" => {
             json!(generate(root, id, options["variant"].as_str(), None)?)

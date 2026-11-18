@@ -1,12 +1,7 @@
 ﻿import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import vm from 'node:vm';
-import ts from 'typescript';
-const source=fs.readFileSync('crates/markits/apps/desktop/src/editor.ts','utf8');
-const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-const exports={};
-vm.runInNewContext(compiled,{exports});
-const editor=Object.create(exports.AnnotationEditor.prototype);
+import { tsImport } from 'tsx/esm/api';
+const { AnnotationEditor } = await tsImport('../crates/markits/apps/desktop/src/editor.ts', import.meta.url);
+const editor=Object.create(AnnotationEditor.prototype);
 editor.selection=new Set(); editor.primary=null;
 editor.svgLayerEl={querySelectorAll:()=>[]};
 editor.scene={canvas:{width:800,height:600},annotations:[

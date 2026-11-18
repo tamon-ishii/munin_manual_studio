@@ -203,6 +203,37 @@ try{
  await source.fill(unsaved);
  await rpc('capture-resources-generate',{id:resource.id});
  assert.equal(await source.inputValue(),unsaved);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),savedBefore);
+ await page.locator('#flexlayout-tabbutton-capture-resources').click();
+ const deleteButton=card.getByRole('button',{name:'撮影リソースを削除',exact:true});
+ const confirmSelector='dialog[data-confirm-action]';
+ const confirmation=page.locator(confirmSelector);
+ const assets=await rpc('capture-resources-list');
+ const publicImages=await Promise.all(assets.items[0].derived.map(async ({path:asset})=>[asset,await readFile(path.join(root,asset))]));
+ await deleteButton.click();
+ let confirmPage=await findDialog(confirmSelector);
+ if(native){
+  const size=await confirmPage.evaluate(()=>window.__TAURI_INTERNALS__.invoke('plugin:window|inner_size',{label:window.__TAURI_INTERNALS__.metadata.currentWindow.label}));
+  assert(size.width<800,'Delete confirmation must use a compact window');
+  assert.equal(await confirmPage.getByRole('button',{name:'閉じる',exact:true}).count(),0);
+ }
+ await confirmPage.getByRole('button',{name:'キャンセル',exact:true}).click();
+ await confirmation.waitFor({state:'detached'});
+ assert.equal((await rpc('capture-resources-list')).items.length,1);
+ await deleteButton.click();confirmPage=await findDialog(confirmSelector);
+ await confirmPage.keyboard.press('Escape');
+ await confirmation.waitFor({state:'detached'});
+ assert.equal((await rpc('capture-resources-list')).items.length,1);
+ await deleteButton.click();confirmPage=await findDialog(confirmSelector);
+ await confirmPage.getByRole('button',{name:'削除する',exact:true}).click();
+ await card.waitFor({state:'detached'});
+ assert.equal((await rpc('capture-resources-list')).items.length,0);
+ await assert.rejects(readFile(path.join(root,'.munin/capture-resources',resource.id,'manifest.json')),{code:'ENOENT'});
+ for(const [asset,bytes] of publicImages){
+  assert.deepEqual(await readFile(path.join(root,asset)),bytes);
+  assert.equal((await rpc('capture-resources-resolve',{path:asset})).path,asset);
+ }
+ assert.equal(await source.inputValue(),unsaved);
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),savedBefore);
  assert.deepEqual(errors,[]);
  if(native)await writeFile('reviews/native-capture-session.json',JSON.stringify({root,pid:app.pid,url:page.url()}));
  console.log((native?'Windows WebView2: ':'Browser capture auto-insertion/cancel: ')+'metadata, drag insertion in both editors, save, and Dock placement on all sides/restore passed.');

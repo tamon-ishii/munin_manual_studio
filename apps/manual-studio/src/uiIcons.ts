@@ -33,6 +33,7 @@ const paths = {
   settings: '<path d="M4 7h16M4 17h16M8 4v6M16 14v6"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/>',
   zoom: '<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6"/>',
 };
 export type UiIconName = keyof typeof paths;

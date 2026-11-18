@@ -64,7 +64,7 @@ fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<Im
     } else { manual_core::config::project_path(root, asset)? };
     let canonical_root=root.canonicalize().map_err(|e|e.to_string())?;
     let relative=input.strip_prefix(&canonical_root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
-    let resource_id=manual_core::capture_resources::resource_id(&fs::read(&input).map_err(|e|e.to_string())?);
+    let resource_id=manual_core::capture_resources::registered_id(root,&fs::read(&input).map_err(|e|e.to_string())?)?;
     let input=manual_core::capture_resources::editing_source(root,&relative)?.unwrap_or(input);
     let bytes = fs::read(&input).map_err(|e| format!("編集する画像を読めません: {e}"))?;
     image::load_from_memory(&bytes).map_err(|e| format!("画像を読めません: {e}"))?;
@@ -226,9 +226,9 @@ fn apply_recapture(root:&Path,id:&str,expected:&str,fresh:&[u8],force:bool)->Res
     let old=markits_desktop_lib::metadata::load_image_with_metadata(&previous).map_err(|e|e.to_string())?;
     let new=markits_desktop_lib::metadata::load_image_with_metadata(fresh).map_err(|e|e.to_string())?;
     let size=|v:&markits_desktop_lib::metadata::LoadedImageResult|(v.base_width.unwrap_or(v.width),v.base_height.unwrap_or(v.height));
-    // UI target shifts need review even at an unchanged window size.
-    let aligned=size(&old)==size(&new) && serde_json::to_value(&old.ui_elements).ok()==serde_json::to_value(&new.ui_elements).ok();
-    let review=!force && !aligned && r.derived.iter().any(|d|!d.protected);
+    // Derivatives store pixel coordinates. Recomposition checks that each crop
+    // fits the new source and preserves its annotation scene and output size.
+    let review=!force && size(&old)!=size(&new) && r.derived.iter().any(|d|!d.protected);
     let variants=if review {vec![]} else {r.derived.iter().filter(|d|!d.protected).map(|d|{
         let old=fs::read(manual_core::config::project_path(root,&d.editing)?).map_err(|e|e.to_string())?;
         Ok((d.id.clone(),recompose_variant(&old,fresh)?))
@@ -245,13 +245,27 @@ pub async fn recapture_capture_resource(app:tauri::AppHandle,root:String,id:Stri
     if let Some(window)=&main{let _=window.hide();}
     let result=tauri::async_runtime::spawn_blocking(move||{
         let _guard=guard;let root=Path::new(&root);let r=manual_core::capture_resources::load(root,&id)?;
-        if !r.recorded{return Err("このリソースには操作記録がありません。".into());}
         let input=manual_core::capture_resources::source(root,&id)?;
+        if !r.recorded {
+            use markits_desktop_lib::playback;
+            let source = fs::read(&input).map_err(|e| e.to_string())?;
+            let target = manual_core::capture_resources::window_recapture_target(&source)
+                .ok_or("このリソースには操作記録や撮影先ウィンドウの情報がありません。")?;
+            let window = playback::resolve_window(target.window_id.as_deref(), target.pid, target.name.as_deref())?;
+            let fresh = playback::snapshot(&window.id)?;
+            return apply_recapture(root, &id, &r.revision, &fresh, false).map(Some);
+        }
         let temp=tempfile::tempdir().map_err(|e|e.to_string())?;let output=temp.path().join("recapture.png");let complete=temp.path().join("complete.done");
         let status=markits_command()?.arg("--munin-markits")
             .arg("--manual-studio-recapture").arg("--manual-studio-input").arg(input).arg("--manual-studio-output").arg(&output).arg("--manual-studio-completion").arg(&complete).status().map_err(|e|e.to_string())?;
         if !status.success(){return Err(format!("MarkItsが異常終了しました: {status}"));}
-        if !complete.exists(){return Ok(None);}
+        let completion = match fs::read_to_string(&complete) {
+            Ok(completion) => completion,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+        if let Some(error) = completion.strip_prefix("error:") { return Err(error.into()); }
+        if completion != "saved" { return Err("再撮影の完了通知が不正です。".into()); }
         let fresh=fs::read(output).map_err(|e|e.to_string())?;
         apply_recapture(root,&id,&r.revision,&fresh,false).map(Some)
     }).await.map_err(|e|e.to_string()).and_then(|r|r);
@@ -447,8 +461,16 @@ mod tests {
     fn recapture_updates_compatible_images_and_holds_changed_dimensions_for_review(){
         use manual_core::capture_resources as resources;
         let root=tempfile::tempdir().unwrap();let encode=|width,value|{let image=image::RgbaImage::from_pixel(width,60,image::Rgba([value,20,30,255]));let mut c=std::io::Cursor::new(vec![]);image.write_to(&mut c,image::ImageFormat::Png).unwrap();c.into_inner()};
-        let original=encode(80,20);let r=resources::register(root.path(),&original,"").unwrap();let d=resources::generate(root.path(),&r.id,None,None).unwrap();
-        let updated=apply_recapture(root.path(),&r.id,&r.revision,&encode(80,40),false).unwrap();assert!(updated.pending.is_none());
+        let with_ui=|png:&[u8],name:&str|{
+            let elements=[markits::ui_elements::DetectedUiElement {
+                role:"button".into(),name:Some(name.into()),window_id:None,pid:None,x:1.0,y:2.0,width:30.0,height:15.0,
+            }];
+            markits::metadata::embed_ui_elements(png,&elements).unwrap()
+        };
+        let original=with_ui(&encode(80,20),"23:28");let r=resources::register(root.path(),&original,"").unwrap();let d=resources::generate(root.path(),&r.id,None,None).unwrap();
+        let fresh=with_ui(&encode(80,40),"27:54");
+        let updated=apply_recapture(root.path(),&r.id,&r.revision,&fresh,false).unwrap();assert!(updated.pending.is_none());
+        assert_ne!(updated.revision,r.revision);
         let path=manual_core::config::project_path(root.path(),&d.path).unwrap();let bytes=fs::read(&path).unwrap();assert_eq!(resources::resource_id(&bytes).as_deref(),Some(r.id.as_str()));
         let pending=apply_recapture(root.path(),&r.id,&updated.revision,&encode(100,60),false).unwrap();assert!(pending.pending.is_some());assert_eq!(fs::read(path).unwrap(),bytes);
         assert!(apply_recapture(root.path(),&r.id,"stale",&encode(80,70),false).is_err());

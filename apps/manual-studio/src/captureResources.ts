@@ -1,8 +1,9 @@
 import {invoke} from '@tauri-apps/api/core';
 import {uiIcon, type UiIconName} from './uiIcons';
+import {confirmAction} from './imageDialogs';
 
 export interface CaptureResource {
-  id:string;name:string;created_at:string;revision:string;recorded:boolean;missing?:boolean;pending?:string;
+  id:string;name:string;created_at:string;revision:string;recorded:boolean;window_recapture?:boolean;missing?:boolean;pending?:string;
   derived:{id:string;path:string}[];
   usages:{page:string;line:number;start:number;snippet?:string}[];
 }
@@ -34,7 +35,7 @@ export function setupCaptureResources(options:Options) {
       const card=document.createElement('article');card.className='capture-resource-card';card.dataset.captureResource=r.id;
       const img=document.createElement('img');img.alt=r.name||'撮影画像';img.dataset.id=r.id;img.width=240;img.height=150;observer.observe(img);
       const title=document.createElement('strong');title.textContent=r.name||r.created_at;
-      const state=document.createElement('p');state.textContent=`${r.missing?'元画像が欠落':r.recorded?'操作記録あり':'操作記録なし'} · 派生 ${r.derived.length}件 · 使用 ${r.usages.length}箇所`;
+      const state=document.createElement('p');state.textContent=`${r.missing?'元画像が欠落':r.recorded?'操作記録あり':r.window_recapture?'ウィンドウを再撮影可能':'操作記録なし'} · 派生 ${r.derived.length}件 · 使用 ${r.usages.length}箇所`;
       const controls=document.createElement('div');controls.className='capture-resource-actions';
       const button=(label:string,icon:UiIconName,action:()=>Promise<void>,disabled=false)=>{const b=document.createElement('button');b.type='button';b.innerHTML=uiIcon(icon);b.title=label;b.setAttribute('aria-label',label);b.disabled=disabled;b.onclick=()=>void run(action);controls.append(b);};
       button('MarkItsで編集','annotation',async()=>{await options.edited(await generate(r.id));await refresh();},r.missing);
@@ -44,7 +45,7 @@ export function setupCaptureResources(options:Options) {
         if(root!==options.root())return;
         await refresh();await options.changed();
         options.status(updated?.pending?'新しい撮影を保存しました。画像を比較して採用してください。':updated?'再撮影し、文書用画像を更新しました。':'再撮影をキャンセルしました。');
-      },r.missing||!r.recorded);
+      },r.missing||!(r.recorded||r.window_recapture));
       if(r.pending)button('候補を比較','review',async()=>{
         const root=options.root();const dialog=document.createElement('dialog');dialog.className='capture-comparison';
         const heading=document.createElement('h2');heading.textContent='再撮影の比較';
@@ -54,6 +55,15 @@ export function setupCaptureResources(options:Options) {
         const cancel=document.createElement('button');cancel.textContent='閉じる';cancel.onclick=()=>dialog.close();
         const adopt=document.createElement('button');adopt.textContent='候補を採用して画像を更新';adopt.onclick=()=>{adopt.disabled=true;void invoke('adopt_capture_resource',{root,id:r.id}).then(async()=>{if(root===options.root()){await refresh();await options.changed();}dialog.close();}).catch(e=>{feedback.textContent=String(e);adopt.disabled=false;});};
         dialog.append(heading,images,feedback,cancel,adopt);document.body.append(dialog);dialog.onclose=()=>dialog.remove();dialog.showModal();
+      });
+      button('撮影リソースを削除','trash',async()=>{
+        const root=options.root();
+        if(!await confirmAction(`「${title.textContent}」の元画像、編集データ、再撮影候補を削除しますか？\n文書用に生成した画像は保持します。`,'削除する'))return;
+        if(root!==options.root())return;
+        await rpc('capture-resources-delete',{id:r.id},root);
+        if(root!==options.root())return;
+        await refresh();
+        options.status('撮影リソースを削除しました。');
       });
       const usages=document.createElement('div');for(const u of r.usages){const link=document.createElement('button');link.type='button';link.className='capture-usage';link.textContent=`${u.page}:${u.line}`;link.onclick=()=>void run(()=>options.usage(u));usages.append(link);}
       // The drag payload identifies a resource; the drop path resolves it asynchronously.
