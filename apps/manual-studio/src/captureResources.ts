@@ -30,6 +30,11 @@ export function setupCaptureResources(options:Options) {
     if(!('__TAURI_INTERNALS__' in window))throw Error('再撮影はデスクトップ版で利用できます。');
     const root=options.root();
     if(!root)return;
+    const confirmed=await confirmAction(
+      '再撮影すると、この撮影リソースを使っている文書の画像が更新されます。\n比較が必要な場合は、再撮影結果を候補として保存し、採用したときに更新します。',
+      '再撮影する',
+    );
+    if(!confirmed||root!==options.root())return;
     options.status('再撮影を準備しています。');
     const updated=await invoke<CaptureResource|null>('recapture_capture_resource',{root,...target});
     if(root!==options.root())return;
