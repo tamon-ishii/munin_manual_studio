@@ -26,6 +26,21 @@ export function setupCaptureResources(options:Options) {
   const observer=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){const img=e.target as HTMLImageElement;observer.unobserve(img);const root=options.root(),version=generation;void rpc('capture-resources-thumbnail',{id:img.dataset.id},root).then(src=>{if(root===options.root()&&version===generation)img.src=src;}).catch(()=>{img.alt='画像が見つかりません';});}},{root:list,rootMargin:'100px'});
   async function run(action:()=>Promise<void>){if(running)return;running=true;panel.setAttribute('aria-busy','true');try{await action();}catch(e){options.status(String(e),true);}finally{running=false;panel.removeAttribute('aria-busy');}}
   async function generate(id:string){const root=options.root();const d=JSON.parse(await rpc('capture-resources-generate',{id},root)) as {path:string};if(root!==options.root())throw Error('プロジェクトが切り替わりました。');return d.path;}
+  async function recapture(target:{id:string}|{asset:string;page?:string}){
+    if(!('__TAURI_INTERNALS__' in window))throw Error('再撮影はデスクトップ版で利用できます。');
+    const root=options.root();
+    if(!root)return;
+    options.status('再撮影を準備しています。');
+    const updated=await invoke<CaptureResource|null>('recapture_capture_resource',{root,...target});
+    if(root!==options.root())return;
+    if(updated){
+      await refresh();
+      if(root!==options.root())return;
+      await options.changed();
+    }
+    if(root!==options.root())return;
+    options.status(updated?.pending?'新しい撮影を保存しました。画像を比較して採用してください。':updated?'再撮影し、文書用画像を更新しました。':'再撮影をキャンセルしました。');
+  }
   function render(){
     observer.disconnect();list.replaceChildren();
     const shown=items.filter(r=>(filter.value==='all'||(filter.value==='used')===(r.usages.length>0)));
@@ -39,13 +54,7 @@ export function setupCaptureResources(options:Options) {
       const controls=document.createElement('div');controls.className='capture-resource-actions';
       const button=(label:string,icon:UiIconName,action:()=>Promise<void>,disabled=false)=>{const b=document.createElement('button');b.type='button';b.innerHTML=uiIcon(icon);b.title=label;b.setAttribute('aria-label',label);b.disabled=disabled;b.onclick=()=>void run(action);controls.append(b);};
       button('MarkItsで編集','annotation',async()=>{await options.edited(await generate(r.id));await refresh();},r.missing);
-      button('再撮影','camera',async()=>{
-        if(!('__TAURI_INTERNALS__' in window))throw Error('再撮影はデスクトップ版で利用できます。');
-        const root=options.root();const updated=await invoke<CaptureResource|null>('recapture_capture_resource',{root,id:r.id});
-        if(root!==options.root())return;
-        await refresh();await options.changed();
-        options.status(updated?.pending?'新しい撮影を保存しました。画像を比較して採用してください。':updated?'再撮影し、文書用画像を更新しました。':'再撮影をキャンセルしました。');
-      },r.missing||!(r.recorded||r.window_recapture));
+      button('再撮影','camera',()=>recapture({id:r.id}),r.missing||!(r.recorded||r.window_recapture));
       if(r.pending)button('候補を比較','review',async()=>{
         const root=options.root();const dialog=document.createElement('dialog');dialog.className='capture-comparison';
         const heading=document.createElement('h2');heading.textContent='再撮影の比較';
@@ -75,5 +84,5 @@ export function setupCaptureResources(options:Options) {
   filter.onchange=render;
   importButton.onclick=()=>panel.querySelector<HTMLInputElement>('#capture-resource-import')!.click();
   panel.querySelector<HTMLInputElement>('#capture-resource-import')!.onchange=event=>{const input=event.target as HTMLInputElement;const file=input.files?.[0];input.value='';if(!file)return;void run(async()=>{const root=options.root();const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);await rpc('capture-resources-register',{source:btoa(binary),name:file.name},root);if(root===options.root())await refresh();});};
-  return {refresh,upsert(resource:CaptureResource){generation++;const found=items.findIndex(r=>r.id===resource.id);const item={...resource,usages:resource.usages||[]};if(found>=0)items[found]=item;else items.unshift(item);render();}};
+  return {refresh,recaptureImage(asset:string,page?:string){return run(()=>recapture({asset,page}));},upsert(resource:CaptureResource){generation++;const found=items.findIndex(r=>r.id===resource.id);const item={...resource,usages:resource.usages||[]};if(found>=0)items[found]=item;else items.unshift(item);render();}};
 }

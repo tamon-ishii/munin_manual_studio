@@ -967,9 +967,13 @@ function showImagePresentation(image?:HTMLImageElement){
   const actions=document.createElement('div');actions.className='image-presentation-actions';actions.append(apply);dialog.append(actions);
 }
 async function recaptureDocumentImage(imageSource:string):Promise<void>{
-  await handleEditDocumentImage(imageSource,element<HTMLImageElement>('image-tab-preview'),true);
+  if(documentImageEditing||!projectRoot)return;
+  documentImageEditing=true;
+  try{
+    await captureDock.recaptureImage(imageSource,documentState?.page);
+  }finally{documentImageEditing=false;}
 }
-async function handleEditDocumentImage(imageSource:string,img:HTMLImageElement,recapture=false):Promise<void>{
+async function handleEditDocumentImage(imageSource:string,img:HTMLImageElement):Promise<void>{
   if(documentImageEditing||!projectRoot)return;
   if(!native){status('MarkItsはデスクトップ版で利用できます。',true);return;}
   const root=projectRoot,page=documentState?.page,expected=editor.value;
@@ -977,8 +981,7 @@ async function handleEditDocumentImage(imageSource:string,img:HTMLImageElement,r
   const selected=!activeImageTab&&candidate?.src===imageSource?candidate:undefined;
   documentImageEditing=true;
   try{
-    status(recapture?'MarkItsの履歴で再撮影し、完成画像を選んでください。':'選択した画像をMarkItsの編集画面で開いています。保存すると編集結果を取り込みます。');
-    if(recapture){chooseTab('capture-resources');status('撮影リソース一覧の「再撮影」から関連画像を更新できます。');return;}
+    status('選択した画像をMarkItsの編集画面で開いています。保存すると編集結果を取り込みます。');
     const imported=await markitsImages.editImage(imageSource,page);
     if(!imported||root!==projectRoot)return;
     if(selected&&page===documentState?.page&&editor.value===expected){

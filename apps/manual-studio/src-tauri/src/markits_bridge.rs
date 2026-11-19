@@ -57,11 +57,15 @@ pub async fn capture_markits_image(app:tauri::AppHandle,root: String, include_cu
     result
 }
 
-fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<ImageEdit, String> {
-    let input = if let Some(page) = page {
+fn resolve_document_image(root: &Path, asset: &str, page: Option<&str>) -> Result<std::path::PathBuf, String> {
+    if let Some(page) = page {
         manual_core::preview::resolve_asset_path(root, page, asset)
-            .or_else(|_| manual_core::config::project_path(root, asset))?
-    } else { manual_core::config::project_path(root, asset)? };
+            .or_else(|_| manual_core::config::project_path(root, asset))
+    } else { manual_core::config::project_path(root, asset) }
+}
+
+fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<ImageEdit, String> {
+    let input = resolve_document_image(root, asset, page)?;
     let canonical_root=root.canonicalize().map_err(|e|e.to_string())?;
     let relative=input.strip_prefix(&canonical_root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
     let resource_id=manual_core::capture_resources::registered_id(root,&fs::read(&input).map_err(|e|e.to_string())?)?;
@@ -237,26 +241,42 @@ fn apply_recapture(root:&Path,id:&str,expected:&str,fresh:&[u8],force:bool)->Res
 }
 
 #[tauri::command]
-pub async fn recapture_capture_resource(app:tauri::AppHandle,root:String,id:String)->Result<Option<manual_core::capture_resources::Resource>,String> {
+pub async fn recapture_capture_resource(app:tauri::AppHandle,root:String,id:Option<String>,asset:Option<String>,page:Option<String>)->Result<Option<manual_core::capture_resources::Resource>,String> {
     if RESOURCE_OPERATION.swap(true,std::sync::atomic::Ordering::SeqCst){return Err("撮影処理が実行中です。".into());}
     let guard=ResourceOperation;
     use tauri::Manager;
     let main=app.get_webview_window("main");
     if let Some(window)=&main{let _=window.hide();}
     let result=tauri::async_runtime::spawn_blocking(move||{
-        let _guard=guard;let root=Path::new(&root);let r=manual_core::capture_resources::load(root,&id)?;
+        let _guard=guard;
+        let root=Path::new(&root);
+        let id=match (id,asset) {
+            (Some(id),None)=>id,
+            (None,Some(asset))=>{
+                let path=resolve_document_image(root,&asset,page.as_deref())?;
+                let bytes=fs::read(path).map_err(|e| format!("再撮影する画像を読めません: {e}"))?;
+                manual_core::capture_resources::registered_id(root,&bytes)?
+                    .ok_or("この画像は撮影リソースに関連付けられていないため、再撮影できません。")?
+            }
+            _=>return Err("再撮影する画像を一つ指定してください。".into()),
+        };
+        let r=manual_core::capture_resources::load(root,&id)?;
         let input=manual_core::capture_resources::source(root,&id)?;
+        let mut command=markits_command()?;
+        command.arg("--munin-markits");
         if !r.recorded {
             use markits_desktop_lib::playback;
             let source = fs::read(&input).map_err(|e| e.to_string())?;
             let target = manual_core::capture_resources::window_recapture_target(&source)
                 .ok_or("このリソースには操作記録や撮影先ウィンドウの情報がありません。")?;
-            let window = playback::resolve_window(target.window_id.as_deref(), target.pid, target.name.as_deref())?;
-            let fresh = playback::snapshot(&window.id)?;
-            return apply_recapture(root, &id, &r.revision, &fresh, false).map(Some);
+            if let Some(window) = playback::resolve_window(target.window_id.as_deref(), target.pid, target.name.as_deref())? {
+                let fresh = playback::snapshot(&window.id)?;
+                return apply_recapture(root, &id, &r.revision, &fresh, false).map(Some);
+            }
+            command.arg("--manual-studio-recapture-window").arg(serde_json::to_string(&target).map_err(|e| e.to_string())?);
         }
         let temp=tempfile::tempdir().map_err(|e|e.to_string())?;let output=temp.path().join("recapture.png");let complete=temp.path().join("complete.done");
-        let status=markits_command()?.arg("--munin-markits")
+        let status=command
             .arg("--manual-studio-recapture").arg("--manual-studio-input").arg(input).arg("--manual-studio-output").arg(&output).arg("--manual-studio-completion").arg(&complete).status().map_err(|e|e.to_string())?;
         if !status.success(){return Err(format!("MarkItsが異常終了しました: {status}"));}
         let completion = match fs::read_to_string(&complete) {
