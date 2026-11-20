@@ -563,9 +563,10 @@ element('terminal-choose-directory').addEventListener('click',()=>{
 });
 element('terminal-project-directory').addEventListener('click',()=>{input('terminal-working-directory').value=projectRoot;});
 
-function setBusy(value: boolean): void {
+function setBusy(value: boolean, lockControls = true): void {
   busy = value;
   document.body.setAttribute("aria-busy", String(value));
+  if (!lockControls) return;
   if (value && !busyButtonStates) {
     busyButtonStates = new Map([...document.querySelectorAll<HTMLButtonElement>("button:not(.progress-control)")]
       .map((button) => [button, button.disabled]));
@@ -598,11 +599,11 @@ async function savedBeforeOperation(allowUnsaved=false): Promise<void> {
   await documentPersistence.wait();
   if (dirty&&!allowUnsaved) throw new Error('原稿に未保存の変更があります。保存ボタンまたはCtrl/Cmd+Sで保存してください。');
 }
-async function work(operation: () => Promise<void>): Promise<void> {
+async function work(operation: () => Promise<void>, { lockControls = true } = {}): Promise<void> {
   if (busy) return;
-  setBusy(true);
+  setBusy(true, lockControls);
   try { await operation(); } catch (error) { status(String(error), true); }
-  finally { setBusy(false); previewNavigator.updateToolbarState(); }
+  finally { setBusy(false, lockControls); previewNavigator.updateToolbarState(); }
 }
 async function confirmDiscard(): Promise<boolean> {
   return !dirty || showUnsavedChangesDialog(documentState?.page || "原稿", async () => {
@@ -1005,14 +1006,61 @@ async function refreshWorkspace(reloadPage = false, refreshResources = true): Pr
   if (root !== projectRoot || version !== workspaceRequestVersion) return;
   workspace = loaded;
   renderPages();
-  if (refreshResources) await markitsImages.refresh();
-  if (reloadPage && current) {
-    if (documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
+  if (reloadPage && current && documentState === current &&
+      documentVersion === documentRequestVersion && editor.value === content) {
     const opened = JSON.parse(await rpc("editor-read", { page: current.page }, root)) as Document;
-    if (root !== projectRoot || documentState !== current || documentVersion !== documentRequestVersion || editor.value !== content) return;
-    documentState = opened; editor.value = opened.content; resetEditHistory(); dirty = false; updateSaveState();  await Promise.all([renderPreview(), milkdown.refreshImages()]);
+    if (root === projectRoot && version === workspaceRequestVersion && documentState === current &&
+        documentVersion === documentRequestVersion && editor.value === content) {
+      documentState = opened; editor.value = opened.content; resetEditHistory(); dirty = false; updateSaveState();
+      await Promise.all([renderPreview(), milkdown.refreshImages()]);
+    }
+  }
+  if (refreshResources && root === projectRoot && version === workspaceRequestVersion) await markitsImages.refresh();
+}
+
+let treeRefreshPending = false;
+async function refreshFileTree(): Promise<void> {
+  const root = projectRoot;
+  const current = workspace;
+  if (!root || !current || document.hidden || treeRefreshPending) return;
+  const version = workspaceRequestVersion;
+  treeRefreshPending = true;
+  try {
+    const next = JSON.parse(await rpc("workspace-tree", {}, root)) as Pick<State, "pages" | "project_entries">;
+    if (root !== projectRoot || current !== workspace || version !== workspaceRequestVersion) return;
+    if (next.pages.length === current.pages.length &&
+        next.pages.every((page, index) => page === current.pages[index]) &&
+        next.project_entries.length === current.project_entries.length &&
+        next.project_entries.every((entry, index) => {
+          const previous = current.project_entries[index];
+          return entry.path === previous.path && entry.directory === previous.directory;
+        })) return;
+
+    const tree = element("page-list");
+    const focused = document.activeElement;
+    const row = focused instanceof HTMLElement && tree.contains(focused)
+      ? focused.closest<HTMLElement>("[data-page], [data-file], [data-folder]")
+      : null;
+    const key = row?.dataset.page ?? row?.dataset.file ?? row?.dataset.folder;
+    current.pages = next.pages;
+    current.project_entries = next.project_entries;
+    renderPages();
+    if (key !== undefined) {
+      const escaped = CSS.escape(key);
+      const replacement = row?.dataset.folder !== undefined
+        ? tree.querySelector<HTMLElement>(`[data-folder="${escaped}"] > summary`)
+        : tree.querySelector<HTMLElement>(`[data-page="${escaped}"], [data-file="${escaped}"]`);
+      replacement?.focus({ preventScroll: true });
+    }
+  } catch {
+    // A missing or temporarily inaccessible folder can be read on the next poll.
+  } finally {
+    treeRefreshPending = false;
   }
 }
+window.setInterval(() => { void refreshFileTree(); }, 4000);
+document.addEventListener("visibilitychange", () => { void refreshFileTree(); });
+
 function updateAiSettingsVisibility(): void {
   const connectionType = element<HTMLSelectElement>("ai-connection-type").value;
   const agentLabel = element<HTMLElement>("ai-agent-label");
@@ -1302,6 +1350,12 @@ async function openProject(root: string, check = true): Promise<void> {
 function saveDocument(refresh = true): Promise<void> {
   return documentPersistence.save(refresh);
 }
+
+function saveFromEditor(refresh = true): Promise<void> {
+  if (!documentState || activeImageTab) return Promise.resolve();
+  // Toggling read-only rebuilds ProseMirror plugin views and resets its viewport.
+  return work(() => saveDocument(refresh), { lockControls: false });
+}
 async function runAction(action: string, options: Record<string, unknown> = {}, resultId?: string): Promise<void> {
   await savedBeforeOperation();
   const isAiAction = action === "draft";
@@ -1507,8 +1561,8 @@ function updateEditorEmptyState(): void {
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
 element('empty-select-page').addEventListener('click', () => { layoutManager?.focusPanel('file-tree'); element('page-list').tabIndex = -1; element('page-list').focus(); });
-element('save-page').addEventListener('click',()=>{if(documentState&&!activeImageTab)void work(saveDocument);});
-element('save-retry').addEventListener('click', () => { void work(() => saveDocument(false)); });
+element('save-page').addEventListener('click', () => { void saveFromEditor(); });
+element('save-retry').addEventListener('click', () => { void saveFromEditor(false); });
 element('save-conflict').addEventListener('click', () => { void work(async () => {
   if (!documentState) return;
   const owner = documentState, root = projectRoot, draft = editor.value;
@@ -1685,7 +1739,7 @@ function runKeyboardCommand(command: ShortcutCommand, event: KeyboardEvent): voi
   }
   if(command==='search'){element('manuscript-search-open').click();return;}
   if(busy||!documentState||activeImageTab)return;
-  if(command==='save'){void work(saveDocument);return;}
+  if(command==='save'){void saveFromEditor();return;}
   if(command==='preview'){
     const views:EditorView[]=['edit','split','preview'];
     const next=views[(views.indexOf(element('panel-editor').dataset.editorView as EditorView)+1)%views.length];

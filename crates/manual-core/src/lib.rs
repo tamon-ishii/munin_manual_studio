@@ -30,6 +30,7 @@ mod rich_template;
 pub mod platform;
 pub mod preview;
 pub mod pty;
+pub mod mcp;
 pub mod terminal_tools;
 mod operation_script;
 mod operation_checkpoint;
@@ -144,6 +145,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "screenshots-recapture",
         "screenshots-recapture-history",
         "state",
+        "workspace-tree",
         "agent-progress",
         "agent-progress-clear",
         "agent-cancel",
@@ -200,6 +202,9 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         return Err(format!("Manual project does not exist: {}", root.display()));
     }
 
+    if action == "workspace-tree" {
+        return preview::workspace_tree(root).map(|tree| tree.to_string());
+    }
     if action.starts_with("pty-") {
         let mut map = serde_json::Map::new();
         for (k, v) in options {

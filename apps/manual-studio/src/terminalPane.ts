@@ -409,6 +409,7 @@ export function setupTerminalPane(
         command,
         args:initialPrompt?[...args,...(command==='agy'?['--prompt-interactive']:[]),initialPrompt]:args,
         ownerId: spawningOwner,
+        studio_mcp: true,
         working_directory:workingDirectory,
         cols: terminal.cols || 80,
         rows: terminal.rows || 24,

@@ -11,6 +11,7 @@ try {
   browser=await chromium.launch({channel:process.env.MUNIN_TEST_BROWSER||(process.platform==='win32'?'msedge':'chrome'),headless:true});
   const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const requests=[],terminalWrites=[];let concurrentWrites=0,maxConcurrentWrites=0,resolveAnswer;
+  let failResourceRefresh=false;
   const answerReceived=new Promise(resolve=>resolveAnswer=resolve);
   const state={has_config:true,config:{docs:'docs',assets:'docs/assets',output:'site',agent:'codex',model:'',connection_type:'none',mkdocs:{site_name:'Test',theme:'material',language:'ja',use_directory_urls:true}},brief:'',pages:['index.md'],project_entries:[{path:'docs/index.md',directory:false}],image_assets:{},agents:[]};
   state.agents=[{id:'codex',label:'Codex',available:true},{id:'claude',label:'Claude',available:true},{id:'agy',label:'Agy',available:true}];
@@ -21,6 +22,10 @@ try {
     let output={};
     switch(request.action){
       case 'state': output=state;break;
+      case 'workspace-tree': output={pages:state.pages,project_entries:state.project_entries};break;
+      case 'capture-resources-list':
+        if(failResourceRefresh){failResourceRefresh=false;await route.fulfill({status:500,json:{error:'Resource refresh failed in test'}});return;}
+        output={items:[]};break;
       case 'editor-read': output={page:'index.md',content:text,revision:'r1'};break;
       case 'editor-save': text=request.options.json.content;output={page:'index.md',content:text,revision:'r1'};break;
       case 'image-generation-settings': output={connection_type:'none',endpoint_url:'',model:''};break;
@@ -43,12 +48,13 @@ try {
   await page.goto(base+'/?root=test-project');
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false'&&document.querySelector('#save-page')&&!document.querySelector('#save-page').disabled);
   assert.equal(await page.locator('#tree-filters').isVisible(),false);
-  await page.keyboard.press('Control+f');await page.locator('#tree-search').waitFor({state:'visible'});
+  await page.keyboard.press('Control+p');await page.locator('#tree-search').waitFor({state:'visible'});
   await page.locator('#tree-search').fill('missing');assert.equal(await page.locator('[data-page="docs/index.md"]').count(),0);
   await page.keyboard.press('Escape');assert.equal(await page.locator('#tree-filters').isVisible(),false);assert.equal(await page.locator('#tree-search').inputValue(),'');
   assert.equal(await page.locator('#panel-screenshots,#panel-applications,#editor-screenshot-options').count(),0);
   assert.equal(requests.some(r=>r.action==='resources-list'),false);
-  await page.locator('[data-tab="settings"]').click();
+  await page.locator('#application-settings').click();
+  await page.locator('#settings-tab-text-ai').click();
   await page.getByRole('textbox',{name:'Codexのモデル',exact:true}).fill('codex-custom');
   await page.getByRole('textbox',{name:'Claudeのモデル',exact:true}).fill('claude-custom');
   await page.getByRole('textbox',{name:'Agyのモデル',exact:true}).fill('agy-custom');
@@ -61,7 +67,9 @@ try {
   await page.waitForFunction(()=>document.querySelector('#ai-save-state').textContent==='保存済み');
   assert.deepEqual(state.config.cli_models,{codex:'codex-custom',claude:'claude-custom',agy:'agy-custom'});
   await page.locator('[data-close-dialog="panel-settings"]').click();
-  await page.locator('[data-tab="terminal"]').click();
+  await page.locator('#view-menu-button').click();
+  await page.locator('#view-menu-dropdown').getByRole('checkbox', { name: 'AIターミナル' }).check();
+  await page.locator('#view-menu-button').click();
   await page.locator('#terminal-container .xterm').waitFor();
   assert.equal(await page.locator('.terminal-guidance').count(),0);
   assert.equal(await page.locator('#terminal-badge').isVisible(),false);
@@ -98,8 +106,13 @@ try {
   assert.ok(requests.findIndex(r=>r.action==='terminal-prepare')<requests.findIndex(r=>r.action==='pty-spawn'),'briefing is prepared before CLI startup');
   assert.equal(await page.locator('#terminal-cli-agent').isDisabled(),true);
   text+='\nExternal terminal change.\n';
+  failResourceRefresh=true;
   await page.locator('#terminal-reload-files').click();
-  await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('External terminal change.'));
+  await page.waitForFunction(()=>document.querySelector('#markdown-editor').value.includes('External terminal change.'), undefined, {timeout:5000}).catch(async error=>{
+    const ui=await page.evaluate(()=>({status:document.querySelector('#status')?.textContent,save:document.querySelector('#save-state')?.dataset.state,dialogs:[...document.querySelectorAll('dialog[open]')].map(dialog=>dialog.id)}));
+    throw new Error(`File reload did not reach the editor: ${JSON.stringify({ui, requests:requests.slice(-12).map(request=>request.action)})}`,{cause:error});
+  });
+  await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Resource refresh failed in test'));
   await page.locator('#terminal-connect-btn').click();
   await page.waitForFunction(()=>document.querySelector('#terminal-badge').textContent.includes('未接続'));
   assert.equal(await page.locator('#terminal-connect-btn').getAttribute('aria-label'),'接続');

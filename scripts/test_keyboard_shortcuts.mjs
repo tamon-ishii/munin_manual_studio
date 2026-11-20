@@ -33,7 +33,7 @@ try {
  for(const category of ['capture','text-ai','image-ai','appearance','keyboard']){
    await page.locator('#settings-tab-'+category).click();
    const size=await page.locator('#panel-settings').boundingBox();
-   assert.ok(Math.abs(size.width-settingsSize.width)<1&&Math.abs(size.height-settingsSize.height)<1,'Settings size stays fixed across '+category);
+   assert.ok(Math.abs(size.width-settingsSize.width)<1&&Math.abs(size.height-settingsSize.height)<1,`Settings size across ${category}: ${settingsSize.width}×${settingsSize.height} → ${size.width}×${size.height}`);
  }
  const headerLayout=await page.evaluate(()=>{
    const dialog=document.querySelector('#panel-settings'),panel=document.querySelector('#settings-category-keyboard');

@@ -100,7 +100,9 @@ python3 start_manual_studio.py
 * **ローカルLLM**: OllamaやLM Studioなどを起動し、エンドポイントURLとモデルを指定します。
 * **クラウドAPI**: OpenAI互換APIのエンドポイントURL、APIキー、モデルを指定します。
 
-また、アプリ内の「**AIターミナル**」からAI CLIを起動すると、`.munin/ai-terminal/`に生成されるガイド（`guide.md`、`tools.json`、`markits-manual.md`）と同梱の`--studio-tools`を通じて、実画面の撮影・UIMap確認・MarkIts注釈・原稿執筆をAIに依頼できます。AIがファイルを更新した後は、Studioの「⋯ → 変更を読み直す」でファイルツリーと原稿へ反映できます。
+アプリ内の「**AIターミナル**」でCodexまたはClaude Codeを起動すると、StudioのローカルMCPサーバー `munin-studio` がそのセッションに追加されます。`/mcp` で接続を確認でき、ウィンドウ一覧、スクリーンショット撮影、画像のUIMap確認、MarkIts注釈、操作スクリプトの検証をAIに依頼できます。MCPの保存先はStudioで開いているプロジェクトです。
+
+`.munin/ai-terminal/` のガイドと同梱の `--studio-tools` は、Agyや操作スクリプトの実行にも利用できます。ファイルの追加・削除・名前変更はファイルツリーに自動で反映されます。外部で変更された原稿をエディターへ反映するには「⋯ → 変更を読み直す」を使います。
 
 ## 関連ドキュメント
 

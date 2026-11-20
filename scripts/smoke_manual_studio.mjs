@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -11,7 +11,7 @@ const base = process.env.MANUAL_STUDIO_URL || 'http://127.0.0.1:5174';
 const root = await mkdtemp(path.join(os.tmpdir(), 'manual-studio-smoke-'));
 let browser;
 let server;
-try {
+smoke: try {
   if (process.argv.includes('--start-server')) {
     server = spawn(process.execPath, [path.resolve('node_modules/vite/bin/vite.js'), '--config', 'apps/manual-studio/vite.config.ts'], {
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -43,7 +43,7 @@ try {
   const secondProject = path.join(root, 'second-project');
   await mkdir(path.join(secondProject, 'docs'), { recursive: true });
   await writeFile(path.join(secondProject, 'docs/only.md'), '# Second project document\n');
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+  browser = await chromium.launch({ channel: process.env.MUNIN_TEST_BROWSER || (process.platform === 'win32' ? 'msedge' : 'chrome'), headless: true });
   const context = await browser.newContext();
   context.setDefaultTimeout(30_000);
   await context.addInitScript(() => {
@@ -77,9 +77,82 @@ try {
   await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Original text'));
   await idle();
   await page.waitForSelector("#milkdown-editor .ProseMirror");
+  if (process.argv.includes('--save-scroll-only')) {
+    await page.locator('button[data-editor-view="split"]').click();
+    const rich = page.locator('#milkdown-editor .ProseMirror');
+    const source = page.locator('#markdown-editor');
+    const body = Array.from({ length: 120 }, (_, index) => `Paragraph ${index + 1}`).join('\n\n');
+    await rich.fill(body);
+    for (const surface of [rich, source]) {
+      if (surface === source) {
+        await page.getByRole('button', { name: 'Markdownソース', exact: true }).click();
+        await source.fill(body + '\n\nSource edit\n');
+      }
+      await surface.focus();
+      await page.frameLocator('#markdown-preview').getByText(surface === rich ? 'Paragraph 120' : 'Source edit', { exact: true }).waitFor({ state: 'attached' });
+      const before = await surface.evaluate(node => {
+        node.scrollTop = 520;
+        return node.scrollTop;
+      });
+      assert.ok(before > 400);
+      await page.keyboard.press('Control+s');
+      await page.waitForFunction(() => document.querySelector('#save-state').dataset.state === 'saved');
+      await idle();
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await surface.evaluate(node => node.scrollTop), before, `save preserves the ${surface === rich ? 'rich' : 'source'} editor viewport`);
+      assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /Paragraph 120/);
+    }
+    assert.deepEqual(errors, []);
+    console.log('Save scroll smoke passed in rich and Markdown source modes.');
+    break smoke;
+  }
+  if (process.argv.includes('--editor-splitter-only')) {
+    await page.setViewportSize({ width: 2400, height: 850 });
+    await page.locator('button[data-editor-view="split"]').click();
+    const splitter = page.locator('#editor-resizer');
+    assert.equal(await splitter.getAttribute('aria-valuenow'), '50', 'a new workspace starts with an even split');
+    const richEditor = page.locator('#milkdown-editor .ProseMirror');
+    await richEditor.fill(Array.from({ length: 100 }, (_, index) => `Line ${index + 1}`).join('\n'));
+    for (const [editor, direction] of [[richEditor, 260], [page.locator('#markdown-editor'), -210]]) {
+      if (direction < 0) await page.getByRole('button', { name: 'Markdownソース', exact: true }).click();
+      const before = await splitter.boundingBox();
+      await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(before.x + direction, before.y + before.height / 2, { steps: 8 });
+      const after = await splitter.boundingBox();
+      const viewport = await editor.boundingBox();
+      await page.mouse.up();
+      assert.ok((after.x - before.x) * Math.sign(direction) > 100, 'splitter moved as dragged');
+      if (direction > 0) assert.ok(after.x - viewport.x > 906, 'editor pane exceeds the old viewport width cap');
+      assert.ok(Math.abs(viewport.x + viewport.width - after.x) <= 2, 'scroll viewport reaches the splitter');
+      assert.ok(await editor.evaluate(node => {
+        node.scrollTop = 120;
+        return node.scrollTop > 0;
+      }), 'editor viewport scrolls');
+    }
+    assert.deepEqual(errors, []);
+    console.log('Editor splitter smoke passed in rich and Markdown source modes.');
+    break smoke;
+  }
   await page.locator('.ProseMirror p').filter({ hasText: 'Original text' }).click();
   await page.keyboard.press('End'); await page.keyboard.type(' rich edit');
   assert.match(await page.locator('#markdown-editor').inputValue(), /Original text rich edit/);
+  const draft = await page.locator('#markdown-editor').inputValue();
+  const external = path.join(root, 'generated.md');
+  const renamed = path.join(root, 'renamed.md');
+  await writeFile(external, '# Externally generated\n');
+  await page.locator('#page-list [data-page="generated.md"]').waitFor({ state: 'attached', timeout: 12000 });
+  await rename(external, renamed);
+  await page.locator('#page-list [data-page="renamed.md"]').waitFor({ state: 'attached', timeout: 12000 });
+  assert.equal(await page.locator('#page-list [data-page="generated.md"]').count(), 0);
+  await rm(renamed);
+  await page.locator('#page-list [data-page="renamed.md"]').waitFor({ state: 'detached', timeout: 12000 });
+  assert.equal(await page.locator('#markdown-editor').inputValue(), draft);
+  if (process.argv.includes('--file-tree-only')) {
+    assert.deepEqual(errors, []);
+    console.log('File tree smoke passed: external add, rename, delete, and draft preservation.');
+    break smoke;
+  }
   await page.locator('.milkdown-top-bar').getByRole('button', { name: '元に戻す', exact: true }).click();
   assert.doesNotMatch(await page.locator('#markdown-editor').inputValue(), /rich edit/);
   assert.match(await page.locator('#markdown-editor').inputValue(), /!\[Preview\]/, 'image survives text Undo');
@@ -122,39 +195,40 @@ try {
     return images.length === 2 && images.every(image => image.complete && image.naturalWidth > 0);
   });
   console.log("Smoke: editor and preview initialized");
+  const sourceTool = key => page.locator(`.milkdown-top-bar [data-toolbar-key="${key}"]`);
   const originalMarkdown = await page.locator('#markdown-editor').inputValue();
   await page.locator('#markdown-editor').focus();
   await page.locator('#markdown-editor').evaluate(node => {
     const start = node.value.indexOf('Original text');
     node.setSelectionRange(start, start + 'Original text'.length);
   });
-  await page.locator('[data-format="bold"]').click();
+  await sourceTool('bold').click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /\*\*Original text\*\*/);
   await page.frameLocator('#markdown-preview').locator('strong').filter({ hasText: 'Original text' }).waitFor();
-  assert.equal(await page.locator('#undo-edit').isEnabled(), true);
-  await page.locator('#undo-edit').click();
+  await sourceTool('undo').click();
   assert.equal(await page.locator('#markdown-editor').inputValue(), originalMarkdown);
-  assert.equal(await page.locator('#redo-edit').isEnabled(), true);
-  await page.locator('#redo-edit').click();
+  await sourceTool('redo').click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /\*\*Original text\*\*/);
   await page.locator('#markdown-editor').press('Control+z');
   assert.equal(await page.locator('#markdown-editor').inputValue(), originalMarkdown);
   await page.locator('#markdown-editor').press('Control+y');
   assert.match(await page.locator('#markdown-editor').inputValue(), /\*\*Original text\*\*/);
-  await page.locator('#undo-edit').click();
-  await page.locator('[data-format="italic"]').click();
-  assert.equal(await page.locator('#redo-edit').isEnabled(), false);
+  await sourceTool('undo').click();
+  await sourceTool('italic').click();
+  const afterItalic = await page.locator('#markdown-editor').inputValue();
+  await sourceTool('redo').click();
+  assert.equal(await page.locator('#markdown-editor').inputValue(), afterItalic);
   await (await sourceEditor(page)).fill(originalMarkdown);
   await page.locator('#markdown-editor').evaluate(node => {
     const start = node.value.indexOf('Original text');
     node.setSelectionRange(start, start + 'Original text'.length);
   });
-  await page.locator('[data-format="link"]').click();
+  await sourceTool('link').click();
   assert.match(await page.locator('#markdown-editor').inputValue(), /\[Original text\]\(https:\/\/example\.com\)/);
   assert.equal(await page.locator('#markdown-editor').evaluate(node => node.value.slice(node.selectionStart, node.selectionEnd)), 'https://example.com');
   await (await sourceEditor(page)).fill(originalMarkdown);
   await page.locator('#markdown-editor').evaluate(node => node.setSelectionRange(node.value.length, node.value.length));
-  await page.locator('[data-format="table"]').click();
+  await sourceTool('table').click();
   const tableDialog = page.locator('#markdown-table-dialog');
   await tableDialog.waitFor({ state: 'visible' });
   await tableDialog.getByRole('textbox', { name: '行1・列1', exact: true }).fill('名前 | 種別');
@@ -167,15 +241,15 @@ try {
   assert.match(await page.locator('#markdown-editor').inputValue(), /\| 項目 \| 内容 \| 備考 \|\n\| --- \| :---: \| --- \|/);
   await page.frameLocator('#markdown-preview').locator('table').waitFor();
   await page.locator('#markdown-editor').evaluate(node => { const start = node.value.indexOf('| 項目'); node.setSelectionRange(start, start); });
-  await page.locator('[data-format="table"]').click();
+  await sourceTool('table').click();
   assert.equal(await tableDialog.getByRole('textbox', { name: '行1・列1', exact: true }).inputValue(), '名前 | 種別');
   await tableDialog.getByRole('button', { name: '行3を削除', exact: true }).click();
   await tableDialog.getByRole('button', { name: '列3を削除', exact: true }).click();
   await tableDialog.locator('button[type="submit"]').click();
   assert.equal((await page.locator('#markdown-editor').inputValue()).includes('備考'), false);
-  await page.locator('#undo-edit').click();
+  await sourceTool('undo').click();
   assert.equal((await page.locator('#markdown-editor').inputValue()).includes('備考'), true);
-  await page.locator('[data-format="table"]').click();
+  await sourceTool('table').click();
   await tableDialog.locator('[data-table-cancel]').click();
   await (await sourceEditor(page)).fill(originalMarkdown);
   assert.equal(await page.locator('#page-list [data-page="docs/index.md"]').count(), 1);
@@ -187,7 +261,9 @@ try {
   if (await page.locator('#unsaved-changes-dialog').count()) await page.locator('[data-unsaved-action=discard]').click();
   await idle();
   assert.match(await page.locator('#markdown-editor').inputValue(), /Project note/);
-  assert.equal(await page.locator('#undo-edit').isEnabled(), false);
+  const openedNote = await page.locator('#markdown-editor').inputValue();
+  await sourceTool('undo').click();
+  assert.equal(await page.locator('#markdown-editor').inputValue(), openedNote);
   const originalNote = await page.locator('#markdown-editor').inputValue();
   await (await sourceEditor(page)).fill(originalNote + '\nUnsaved dialog check\n');
   await page.locator('#page-list [data-page="docs/index.md"]').click();
@@ -397,9 +473,11 @@ try {
   await page.frameLocator('#markdown-preview').locator('strong').waitFor();
   assert.equal(await page.locator('[data-tab="tasks"]').count(), 0);
   assert.equal(await page.locator('#generate-all-pages').count(), 0);
-  await page.locator('[data-tab="publish"]').click();
-  await page.locator('[data-close-dialog="panel-publish"]').click();
-  await page.locator('[data-tab="settings"]').dispatchEvent('click');
+  const openAiSettings = async () => {
+    await page.locator('#application-settings').click();
+    await page.locator('#settings-tab-text-ai').click();
+  };
+  await openAiSettings();
   assert.ok(['codex', 'claude', 'grok', 'agy'].includes(await page.locator('#ai-agent').inputValue()));
   // Saving a choice does not require running that CLI on the smoke machine.
   await page.locator('#ai-connection-type').selectOption('cli');
@@ -413,11 +491,11 @@ try {
   await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Saved content'));
   await idle();
   assert.equal(await page.locator('#ai-agent').inputValue(), 'claude', 'saved CLI is retained after reload even when unavailable');
-  await page.locator('[data-tab="settings"]').dispatchEvent('click');
-  assert.equal(await page.locator('#panel-publish #docs-path').count(), 0, 'workspace paths are not in AI settings');
+  await openAiSettings();
+  assert.equal(await page.locator('#panel-settings #docs-path').count(), 0, 'workspace paths are not in AI settings');
   await page.locator('[data-close-dialog="panel-settings"]').click();
   assert.equal(await page.locator('#project-menu,#workspace-settings-dialog').count(),0);
-  await page.locator('[data-tab="settings"]').dispatchEvent('click');
+  await openAiSettings();
   await page.locator('#ai-connection-type').selectOption('local_llm');
   await page.locator('#ai-model').fill('local-test-model');
   await page.locator('#ai-endpoint-url').fill('http://localhost:11434/v1');
@@ -521,7 +599,10 @@ try {
   await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'true');
   await idle();
   assert.equal(delayedSaveSeen, true);
-  assert.equal(await page.locator('#undo-edit').isEnabled(), true, 'saving must preserve undo history');
+  const savedMarkdown = await page.locator('#markdown-editor').inputValue();
+  await sourceTool('undo').click();
+  assert.notEqual(await page.locator('#markdown-editor').inputValue(), savedMarkdown, 'saving must preserve undo history');
+  await sourceTool('redo').click();
   await page.unroute('**/__manual/rpc');
 
   let generatedOnlyMarkdown = await readFile(path.join(project, 'new.md'), 'utf8');

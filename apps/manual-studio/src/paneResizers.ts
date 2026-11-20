@@ -5,7 +5,9 @@ const byId: ElementLookup = <T extends HTMLElement>(id: string) =>
 
 function readStoredNumber(key: string, fallback: number): number {
   try {
-    const value = Number(localStorage.getItem(key));
+    const stored = localStorage.getItem(key);
+    if (stored === null) return fallback;
+    const value = Number(stored);
     return Number.isFinite(value) ? value : fallback;
   } catch {
     return fallback;

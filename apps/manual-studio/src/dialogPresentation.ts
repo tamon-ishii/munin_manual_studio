@@ -12,8 +12,8 @@ function sizeDialog(dialog:HTMLDialogElement):void{
   dialog.style.setProperty('max-width',`${maxWidth}px`,'important');
   dialog.style.setProperty('max-height',`${maxHeight}px`,'important');
   if(dialog.dataset.dialogUserSized==='true')return;
-  // Reports docked alongside the editor retain their nonmodal panel layout.
-  if(dialog.matches('#reader-review-results,[data-resource-replacement]'))return;
+  // Settings and docked reports have CSS-defined layouts.
+  if(dialog.matches('#panel-settings,#reader-review-results,[data-resource-replacement]'))return;
   const columns=dialog.querySelector('.proofreading-grid') as HTMLElement|null;
   const wide=dialog.querySelector('table,.selection-diff-columns,.generation-diff,.image-comparison-grid,.settings-grid');
   const rich=dialog.querySelector('textarea,pre,dl')||dialog.querySelectorAll('input,select').length>4;

@@ -247,7 +247,7 @@ pub fn execute_pty_request(
                 .get("command")
                 .and_then(|v| v.as_str())
                 .unwrap_or_else(|| if cfg!(windows) { "cmd.exe" } else { "sh" });
-            let args: Vec<String> = options
+            let mut args: Vec<String> = options
                 .get("args")
                 .and_then(|v| {
                     if let Some(arr) = v.as_array() {
@@ -286,6 +286,11 @@ pub fn execute_pty_request(
                 .or_else(|| options.get("ownerId"))
                 .and_then(|v| v.as_str());
             let directory=working_directory(root,options["working_directory"].as_str())?;
+            if options["studio_mcp"] == true {
+                let mut connection = crate::mcp::terminal_args(command, root)?;
+                connection.append(&mut args);
+                args = connection;
+            }
             let session_id = pty_spawn_owned_in(command, &args, cols, rows, owner,&directory)?;
             serde_json::to_string(&serde_json::json!({ "session_id": session_id }))
                 .map_err(|e| e.to_string())

@@ -1,4 +1,14 @@
 fn main() {
+    let mut mcp_args = std::env::args_os().skip(1);
+    if mcp_args.next().as_deref() == Some(std::ffi::OsStr::new(manual_core::mcp::FLAG)) {
+        let result = mcp_args.next().ok_or("Studio project path is required".to_string())
+            .and_then(|root| manual_core::mcp::run(std::path::Path::new(&root)));
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+        return;
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--studio-tools") {
         let result=args.get(2).zip(args.get(3)).ok_or("--studio-tools requires request and response file paths".to_string())

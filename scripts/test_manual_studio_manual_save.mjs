@@ -6,22 +6,22 @@ import path from 'node:path';
 import {chromium} from 'playwright-core';
 const root=await mkdtemp(path.join(tmpdir(),'munin-manual-save-')),base='http://127.0.0.1:5189';
 const original='# First\n\nOriginal text\n',other='# Second\n\nOther text\n';
-let server,browser,writes=0;
+let server,browser,writes=0,holdSave;
 try{
  await mkdir(path.join(root,'docs'));await writeFile(path.join(root,'docs/index.md'),original);await writeFile(path.join(root,'docs/other.md'),other);
  await writeFile(path.join(root,'manual_setting.json'),JSON.stringify({docs:'docs',targets:['docs'],output:'manual',connection_type:'none'}));
  server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','apps/manual-studio/vite.config.ts','--port','5189','--strictPort'],{stdio:'ignore'});
  for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
- browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage({viewport:{width:1440,height:960}});page.setDefaultTimeout(30_000);
+ browser=await chromium.launch({channel:process.env.MUNIN_TEST_BROWSER||(process.platform==='win32'?'msedge':'chrome'),headless:true});const page=await browser.newPage({viewport:{width:1440,height:960}});page.setDefaultTimeout(30_000);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/__manual/rpc',async route=>{if(route.request().postDataJSON().action==='editor-save')writes++;const response=await route.fetch({headers:{...route.request().headers(),origin:'http://127.0.0.1:5174'}});await route.fulfill({response});});
+ await page.route('**/__manual/rpc',async route=>{if(route.request().postDataJSON().action==='editor-save'){writes++;await holdSave;}const response=await route.fetch({headers:{...route.request().headers(),origin:'http://127.0.0.1:5174'}});await route.fulfill({response});});
  const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
  await page.goto(`${base}/?root=${encodeURIComponent(root)}&page=index.md`);await page.waitForFunction(()=>document.querySelector('#markdown-editor')?.value.includes('Original text'));await idle();
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();
  const editor=page.locator('#markdown-editor'),tab=page.locator('[data-document-page="index.md"]');
  const draft=original+'Unsaved edit\n';await editor.fill(draft);await page.waitForTimeout(1400);
  assert.equal(writes,0);assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),original);assert.match(await tab.textContent(),/\*$/);
- await page.locator('#tree-search').fill('other.md');await page.locator('[data-page="docs/other.md"]').click();await idle();await page.locator('#tree-search').fill('');
+ await page.locator('[data-page="docs/other.md"]').click();await idle();
  assert.equal(writes,0);assert.match(await tab.textContent(),/\*$/);await tab.click();await idle();assert.equal(await editor.inputValue(),draft);
  await editor.press('ControlOrMeta+z');assert.equal(await editor.inputValue(),original);await editor.press('ControlOrMeta+Shift+z');assert.equal(await editor.inputValue(),draft);
  await page.evaluate(()=>{const panel=document.createElement('dialog');panel.id='modeless-test';panel.textContent='Review results';document.body.append(panel);panel.show();});
@@ -39,5 +39,19 @@ try{
  await page.locator('.milkdown-top-bar').getByRole('button',{name:'やり直す',exact:true}).click();assert.match(await editor.inputValue(),/rich change/);
  await page.getByRole('button',{name:'Markdownソース',exact:true}).click();await editor.fill(draft+'Keep me\n');
  await page.getByRole('button',{name:'index.mdを閉じる',exact:true}).click();await page.locator('#unsaved-changes-dialog').waitFor();await page.locator('[data-unsaved-action="cancel"]').click();await idle();assert.match(await editor.inputValue(),/Keep me/);assert.match(await tab.textContent(),/\*$/);
+ const pendingDraft=draft+'First save snapshot\n', nextDraft=draft+'Edited during save\n';
+ let releaseSave;
+ holdSave=new Promise(resolve=>{releaseSave=resolve;});
+ await editor.fill(pendingDraft);await editor.press('ControlOrMeta+s');
+ try{
+   await page.waitForFunction(()=>document.querySelector('#save-state').dataset.state==='saving');
+   await editor.fill(nextDraft);
+ }finally{releaseSave();holdSave=undefined;}
+ await idle();
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),pendingDraft);
+ assert.equal(await editor.inputValue(),nextDraft);
+ assert.match(await tab.textContent(),/\*$/);
+ await editor.press('ControlOrMeta+s');await idle();
+ assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),nextDraft);
  assert.deepEqual(errors,[]);console.log('Manual manuscript save: no idle/tab writes; drafts and stars survive tab changes; explicit Save/Ctrl+S; source and rich Undo/Redo survive save and mode changes; unsaved close cancellation passed.');
 }finally{await browser?.close();server?.kill();await rm(root,{recursive:true,force:true});}

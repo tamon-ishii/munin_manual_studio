@@ -339,14 +339,8 @@ pub(crate) fn get_editor_state(root: &Path) -> Result<serde_json::Value, String>
     workspace_state(root, false)
 }
 
-fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Value, String> {
-    let config = read_config(root);
-    project_path(root, &config.docs)?;
-    let output = project_path(root, &config.output)?;
-    let brief_path = root.join(&config.output).join("brief.md");
-    let legacy_brief = root.join("manual").join("brief.md");
-
-    let target_files = collect_target_markdown_files(root, &config);
+fn collect_workspace_tree(root: &Path, config: &crate::config::ManualConfig) -> (Vec<String>, Vec<serde_json::Value>) {
+    let target_files = collect_target_markdown_files(root, config);
     let mut pages: Vec<String> = target_files.into_iter().map(|(rel, _)| rel).collect();
     pages.sort();
     let project_entries: Vec<serde_json::Value> = WalkDir::new(root)
@@ -376,7 +370,23 @@ fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Val
             })
         })
         .collect();
+    (pages, project_entries)
+}
 
+pub(crate) fn workspace_tree(root: &Path) -> Result<serde_json::Value, String> {
+    let config = read_config(root);
+    project_path(root, &config.docs)?;
+    let (pages, project_entries) = collect_workspace_tree(root, &config);
+    Ok(json!({"pages": pages, "project_entries": project_entries}))
+}
+
+fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Value, String> {
+    let config = read_config(root);
+    project_path(root, &config.docs)?;
+    let output = project_path(root, &config.output)?;
+    let brief_path = root.join(&config.output).join("brief.md");
+    let legacy_brief = root.join("manual").join("brief.md");
+    let (pages, project_entries) = collect_workspace_tree(root, &config);
     let first_page = if pages.contains(&"index.md".to_string()) {
         "index.md"
     } else {
