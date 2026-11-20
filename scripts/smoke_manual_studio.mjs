@@ -77,6 +77,113 @@ smoke: try {
   await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Original text'));
   await idle();
   await page.waitForSelector("#milkdown-editor .ProseMirror");
+  if (process.argv.includes('--alert-icons-only')) {
+    const markdown = '# Alert icons\n\n> [!WARNING]\n> Warning body.\n\n> [!CAUTION]\n> Caution body.\n';
+    const manuscript = path.join(root, 'docs/index.md');
+    await writeFile(manuscript, markdown);
+    await page.reload();
+    await page.locator('button[data-editor-view="split"]').click();
+    const editor = page.locator('.ProseMirror [data-gfm-alert="WARNING"]');
+    const preview = page.frameLocator('#markdown-preview').locator('.markdown-alert-warning');
+    const previewMask = () => preview.evaluate(node => getComputedStyle(node, '::after').maskImage);
+    assert.equal(await previewMask(), 'none');
+    await page.locator('#application-settings').click();
+    await page.locator('#settings-tab-appearance').click();
+    await page.locator('#project-alert-icons').check();
+    await page.waitForFunction(() => document.documentElement.hasAttribute('data-alert-icons'));
+    await page.locator('[data-close-dialog="panel-settings"]').click();
+    const editorMask = await editor.evaluate(node => getComputedStyle(node, '::before').maskImage);
+    assert.match(editorMask, /data:image\/svg\+xml/);
+    assert.equal(await previewMask(), editorMask);
+    await page.reload();
+    await page.waitForFunction(() => document.documentElement.hasAttribute('data-alert-icons'));
+    assert.equal(await previewMask(), editorMask);
+    await page.locator('#application-settings').click();
+    await page.locator('#settings-tab-appearance').click();
+    await page.locator('#project-alert-icons').uncheck();
+    await page.waitForFunction(() => !document.documentElement.hasAttribute('data-alert-icons'));
+    await page.locator('[data-close-dialog="panel-settings"]').click();
+    assert.equal(await previewMask(), 'none');
+    assert.equal(await readFile(manuscript, 'utf8'), markdown);
+    assert.deepEqual(errors, []);
+    console.log('Project alert icons match in editor and preview, persist, and can be switched off.');
+    break smoke;
+  }
+  if (process.argv.includes('--image-sizing-only')) {
+    await page.setViewportSize({ width: 1800, height: 1050 });
+    await page.locator('button[data-editor-view="split"]').click();
+    await page.locator('#editor-mode-toggle').click();
+    const source = page.locator('#markdown-editor');
+    await writeFile(path.join(root, 'docs/assets/wide.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360"><rect width="1200" height="360" fill="steelblue"/></svg>');
+    await source.fill('# Original text\n\n![Unspecified](assets/wide.svg)\n\nMiddle\n\n<figure data-munin-image="true" data-width="50" data-align="right"><img src="assets/wide.svg" alt="Configured"></figure>\n\nDrop here\n');
+    await page.locator('#editor-mode-toggle').click();
+    const rich = page.locator('#milkdown-editor .ProseMirror');
+    const preview = page.frameLocator('#markdown-preview');
+    const size = locator => locator.evaluate(img => {
+      const {width, height} = img.getBoundingClientRect();
+      return {width, height};
+    });
+    const compare = async (name, expected) => {
+      const image = rich.getByAltText(name), rendered = preview.getByAltText(name);
+      await rendered.waitFor();
+      const editorSize = await size(image), previewSize = await size(rendered);
+      assert.ok(editorSize.width > 100);
+      assert.ok(Math.abs(editorSize.width - previewSize.width) < 2, JSON.stringify({editorSize, previewSize}));
+      assert.ok(Math.abs(editorSize.height - previewSize.height) < 2, JSON.stringify({editorSize, previewSize}));
+      if (expected) assert.ok(Math.abs(editorSize.width - expected.width) < 2);
+      return editorSize;
+    };
+    await page.waitForFunction(() => [...document.querySelectorAll('.ProseMirror img')].filter(img => img.naturalWidth === 1200).length === 2);
+    const unspecified = await compare('Unspecified');
+    const configured = await compare('Configured');
+    assert.ok(Math.abs(configured.width * 2 - unspecified.width) < 2);
+    await rich.getByAltText('Configured').dragTo(rich.getByText('Middle', { exact: true }), {
+      sourcePosition: { x: 10, y: 50 }, targetPosition: { x: 20, y: 2 },
+    });
+    const moved = await source.inputValue();
+    assert.ok(moved.indexOf('data-width="50"') < moved.indexOf('Middle'), moved);
+    await page.waitForFunction(() => {
+      const body = document.querySelector('#markdown-preview').contentDocument?.body;
+      const figure = body?.querySelector('figure[data-width="50"]');
+      const middle = [...(body?.querySelectorAll('p') || [])].find(node => node.textContent === 'Middle');
+      return !!(figure && middle && (figure.compareDocumentPosition(middle) & Node.DOCUMENT_POSITION_FOLLOWING));
+    });
+    await compare('Configured', configured);
+    await rich.press('Control+s');
+    await idle();
+    assert.match(await readFile(path.join(root, 'docs/index.md'), 'utf8'), /data-width="50"/);
+    assert.deepEqual(errors, []);
+    console.log('Editor and preview use the same image size, including after drag and save.');
+    break smoke;
+  }
+  if (process.argv.includes('--image-move-only')) {
+    const rich = page.locator('#milkdown-editor .ProseMirror');
+    await page.locator('button[data-editor-view="edit"]').click();
+    await page.locator('#editor-mode-toggle').click();
+    const source = page.locator('#markdown-editor');
+    await writeFile(path.join(root, 'docs/assets/capture.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="110"><rect width="320" height="110" fill="#385b80"/></svg>');
+    const original = '# Original text\n\n<!-- screenshot:ref id=test-shot -->\n![Capture](assets/capture.svg)\n<!-- /screenshot:ref -->\n\nBefore destination\n\nDrop here\n\nLast paragraph\n';
+    await source.fill(original);
+    await page.locator('#editor-mode-toggle').click();
+    const image = rich.locator('.milkdown-image-block img');
+    await page.waitForFunction(() => document.querySelector('.milkdown-image-block img')?.naturalWidth === 320);
+    const destination = rich.getByText('Drop here', { exact: true });
+    await image.dragTo(destination, { sourcePosition: { x: 10, y: 50 }, targetPosition: { x: 20, y: 2 } });
+    const moved = await source.inputValue();
+    assert.equal((moved.match(/assets\/capture\.svg/g) || []).length, 1, moved);
+    assert.ok(moved.indexOf('Before destination') < moved.indexOf('assets/capture.svg'), moved);
+    assert.match(moved, /<!-- screenshot:ref id=test-shot -->\s*!\[Capture\]\(assets\/capture\.svg\)\s*<!-- \/screenshot:ref -->/);
+    await rich.press('Control+s');
+    await idle();
+    assert.equal(await readFile(path.join(root, 'docs/index.md'), 'utf8'), moved);
+    await rich.press('Control+z');
+    const restored = await source.inputValue();
+    assert.ok(restored.indexOf('assets/capture.svg') < restored.indexOf('Before destination'));
+    assert.equal((restored.match(/assets\/capture\.svg/g) || []).length, 1);
+    assert.deepEqual(errors, []);
+    console.log('In-editor screenshot drag moves one image with its reference and supports Save and Undo.');
+    break smoke;
+  }
   if (process.argv.includes('--save-scroll-only')) {
     await page.locator('button[data-editor-view="split"]').click();
     const rich = page.locator('#milkdown-editor .ProseMirror');

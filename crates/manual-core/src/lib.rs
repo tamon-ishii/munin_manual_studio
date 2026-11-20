@@ -146,6 +146,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "screenshots-recapture-history",
         "state",
         "workspace-tree",
+        "save-alert-icons",
         "agent-progress",
         "agent-progress-clear",
         "agent-cancel",
@@ -204,6 +205,13 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
 
     if action == "workspace-tree" {
         return preview::workspace_tree(root).map(|tree| tree.to_string());
+    }
+    if action == "save-alert-icons" {
+        let raw = options.iter().find(|(key, _)| *key == "--json").map(|(_, value)| *value).unwrap_or("{}");
+        let json: serde_json::Value = serde_json::from_str(raw).map_err(|error| error.to_string())?;
+        let enabled = json["enabled"].as_bool().ok_or("Alert icon setting must be a boolean")?;
+        gfm::save_alert_icons(root, enabled)?;
+        return Ok(serde_json::json!({"enabled": enabled}).to_string());
     }
     if action.starts_with("pty-") {
         let mut map = serde_json::Map::new();

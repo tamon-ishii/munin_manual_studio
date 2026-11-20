@@ -448,6 +448,7 @@ fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Val
 
     Ok(json!({
         "has_config": has_cfg,
+        "alert_icons": crate::gfm::alert_icons_enabled(root),
         "config": config,
         "agents": get_agents(),
         "brief": brief,

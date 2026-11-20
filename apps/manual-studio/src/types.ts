@@ -1,6 +1,7 @@
 export type CaptureSource = { kind: "window"; title: string; inset: number } | { kind: "scenario"; input: string };
 export interface Task { name?: string; id: string; kind: string; page: string; prompt: string; status: string }
 export interface State {
+  alert_icons?: boolean;
   has_config: boolean;
   config: { docs: string; output: string; agent: string; model: string; cli_models?:Record<string,string>; connection_type?: string; endpoint_url?: string; assets?: string; mkdocs: { site_name: string; theme: string; language: string; use_directory_urls: boolean } };
   execution_results?: Record<string, {status:string;error?:string;run_id:string}>;

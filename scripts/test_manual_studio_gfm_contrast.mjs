@@ -12,7 +12,7 @@ try {
   await mkdir(path.join(root,'docs'));await writeFile(path.join(root,'docs/index.md'),markdown);
   server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','apps/manual-studio/vite.config.ts','--port','5188','--strictPort'],{stdio:'ignore'});
   for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
-  browser=await chromium.launch({channel:'chrome',headless:true});
+  browser=await chromium.launch({channel:process.env.MUNIN_TEST_BROWSER||(process.platform==='win32'?'msedge':'chrome'),headless:true});
   const page=await browser.newPage();page.setDefaultTimeout(30_000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/alert-contrast-test',route=>route.fulfill({contentType:'text/html',body:`<meta charset="UTF-8"><div><div class="column-label"></div><textarea id="source"></textarea></div><script type="module">
@@ -40,16 +40,26 @@ try {
         const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(c=>{c/=color.startsWith('color(srgb')?1:255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4;});
         return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;
       };
+      const contrast=(fg,bg)=>(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05);
       const alerts=[...document.querySelectorAll('.ProseMirror [data-gfm-alert]'),...document.querySelector('#alert-preview').contentDocument.querySelectorAll('blockquote[class^="markdown-alert-"]')];
       return alerts.map(alert=>{
-        const background=getComputedStyle(alert).backgroundColor,bg=luminance(background);
-        return {kind:alert.dataset.gfmAlert||`preview ${alert.className}`,background,ratios:[...alert.querySelectorAll('p,strong')].map(node=>{
-          const color=getComputedStyle(node).color,fg=luminance(color);
-          return {color,ratio:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05)};
-        })};
+        const style=getComputedStyle(alert), background=style.backgroundColor, bg=luminance(background);
+        const heading=alert.dataset.gfmAlert ? null : getComputedStyle(alert,'::before');
+        return {
+          kind:alert.dataset.gfmAlert||alert.className,
+          background,
+          title:heading && {label:heading.content,ratio:contrast(luminance(heading.color),bg),matchesBorder:heading.color===style.borderInlineStartColor},
+          ratios:[...alert.querySelectorAll('p,strong')].map(node=>{
+            const color=getComputedStyle(node).color;
+            return {color,ratio:contrast(luminance(color),bg)};
+          }),
+        };
       });
     },theme);
     assert.equal(results.length,10);
+    const titles=results.slice(5).map(alert=>alert.title);
+    assert.deepEqual(titles.map(title=>title.label.replaceAll('"','')),['メモ','ヒント','重要','警告','注意']);
+    for(const title of titles){assert.ok(title.ratio>=4.5,`${theme} ${title.label} contrast ${title.ratio}`);assert.ok(title.matchesBorder);}
     for(const alert of results)for(const text of alert.ratios)assert.ok(text.ratio>=4.5,`${theme} ${alert.kind}: ${text.color} on ${alert.background} contrast ${text.ratio.toFixed(2)}`);
   }
   assert.deepEqual(errors,[]);

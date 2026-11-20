@@ -1,6 +1,41 @@
 //! GFM rendering shared by preview and publication preparation.
 use pulldown_cmark::{CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
 use std::sync::LazyLock;
+use std::{fs, io::Write, path::Path};
+
+const ALERT_SETTINGS: &str = ".munin/alert-style.json";
+
+pub(crate) fn alert_icons_enabled(root: &Path) -> bool {
+    crate::config::project_path(root, ALERT_SETTINGS).ok()
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|data| serde_json::from_slice::<serde_json::Value>(&data).ok())
+        .and_then(|value| value["icons"].as_bool())
+        .unwrap_or(false)
+}
+
+pub(crate) fn save_alert_icons(root: &Path, enabled: bool) -> Result<(), String> {
+    let path = crate::config::project_path(root, ALERT_SETTINGS)?;
+    let directory = path.parent().ok_or("Invalid alert settings path")?;
+    fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+    let mut file = tempfile::NamedTempFile::new_in(directory).map_err(|error| error.to_string())?;
+    write!(file, "{}", serde_json::json!({"icons": enabled})).map_err(|error| error.to_string())?;
+    file.persist(path).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn mkdocs_alert_icons(build_dir: &Path) -> Result<String, String> {
+    let icons: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(include_str!("alert-icons.json")).map_err(|error| error.to_string())?;
+    let directory = build_dir.join("alert-theme/.icons/munin");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let mut config = String::from("  custom_dir: alert-theme\n  icon:\n    admonition:\n");
+    for (kind, shape) in icons {
+        let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{shape}"/></svg>"#);
+        fs::write(directory.join(format!("{kind}.svg")), svg).map_err(|error| error.to_string())?;
+        config.push_str(&format!("      {kind}: munin/{kind}\n"));
+    }
+    Ok(config)
+}
 
 pub fn options() -> Options {
     Options::ENABLE_TABLES

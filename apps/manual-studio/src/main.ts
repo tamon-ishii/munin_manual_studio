@@ -45,7 +45,8 @@ import { setupWindowLayout, type WindowLayoutManager } from "./windowLayout";
 import { createPreviewNavigator } from "./previewNavigation";
 import { sendManualRequest } from "./manualTransport";
 import { renderFileTree } from "./fileTree";
-import { setupPreviewTheme } from "./themePreview";
+import { setupPreviewImageSizing, setupPreviewTheme } from "./themePreview";
+import { alertIconStyles } from "./alertIcons";
 import { setupMarkdownTableEditor } from "./markdownTable";
 import { jumpToSource } from "./editorNavigation";
 import {askSelectionAction,showSelectionAdvice,askSelectionInstruction,reviewSelection,type SelectionDraft,type SelectionAction} from "./selectionAi";
@@ -88,6 +89,7 @@ const milkdown = setupMilkdownEditor(editor, message => status(message, true), s
   }
 }, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img),source=>{void recaptureDocumentImage(source);});
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
+setupPreviewImageSizing(element<HTMLIFrameElement>("markdown-preview"), milkdown.host);
 const native = "__TAURI_INTERNALS__" in window;
 setupDialogDragging();
 const selectSettingsCategory=setupSettingsTabs();
@@ -170,6 +172,37 @@ if (terminalFontFamilySelect) {
 }
 let projectRoot = "";
 let workspace: State | null = null;
+const alertIconsInput = document.createElement('input');
+alertIconsInput.type = 'checkbox';
+alertIconsInput.id = 'project-alert-icons';
+alertIconsInput.disabled = true;
+const alertIconsLabel = document.createElement('label');
+alertIconsLabel.className = 'setting-checkbox';
+alertIconsLabel.append(alertIconsInput, '原稿の注釈に共通アイコンを使う（Material for MkDocsにも適用）');
+themePicker.closest('.card')?.append(alertIconsLabel);
+const alertIconsStyle = document.createElement('style');
+alertIconsStyle.textContent = alertIconStyles(false);
+document.head.append(alertIconsStyle);
+function applyAlertIconSetting(): void {
+  const enabled = workspace?.alert_icons === true;
+  alertIconsInput.checked = enabled;
+  alertIconsInput.disabled = !projectRoot;
+  document.documentElement.toggleAttribute('data-alert-icons', enabled);
+}
+alertIconsInput.addEventListener('change', () => {
+  if (!projectRoot || !workspace || busy) { applyAlertIconSetting(); return; }
+  const root = projectRoot;
+  const enabled = alertIconsInput.checked;
+  void work(async () => {
+    try {
+      await rpc('save-alert-icons', { json: { enabled } }, root);
+      if (root === projectRoot && workspace) {
+        workspace.alert_icons = enabled;
+        status('注釈のアイコン設定を保存しました。');
+      }
+    } finally { applyAlertIconSetting(); }
+  });
+});
 setupPathPickers({root:()=>projectRoot,entries:()=>workspace?.project_entries||[]});
 addPathBrowse(input('new-page-path'),()=> 'file',()=>contextCreateParent!==null?'.':workspace?.config.docs||'docs');
 addPathBrowse(input('new-folder-path'),()=> 'folder',()=>contextCreateParent!==null?'.':workspace?.config.docs||'docs');
@@ -1091,6 +1124,7 @@ function updateAiSettingsVisibility(): void {
 }
 function renderSettings(): void {
   if (!workspace) return;
+  applyAlertIconSetting();
   void imageAiSettings.refresh();
   input("ai-model").value = workspace.config.model;
   cliAiSettings.load({...workspace.config.cli_models,...(workspace.config.connection_type==='cli'?{[workspace.config.agent]:workspace.config.model}:{})});

@@ -537,10 +537,15 @@ fn build_inner(
         ));
     }
 
+    let alert_theme = if theme_name == "material" && root.is_some_and(crate::gfm::alert_icons_enabled) {
+        crate::gfm::mkdocs_alert_icons(&temp_root)?
+    } else {
+        String::new()
+    };
     let config_yaml = format!(
         "site_name: {}\n\
         theme:\n  name: {}\n  language: {}\n\
-        use_directory_urls: {}\n\
+        {}use_directory_urls: {}\n\
         site_dir: {}\n\
         markdown_extensions:\n\
           - tables\n\
@@ -558,6 +563,7 @@ fn build_inner(
         serde_json::to_string(&site_name).unwrap(),
         theme_name,
         theme_lang,
+        alert_theme,
         if use_dir_urls { "true" } else { "false" },
         serde_json::to_string(&temp_site.to_string_lossy()).unwrap(),
         nav_lines

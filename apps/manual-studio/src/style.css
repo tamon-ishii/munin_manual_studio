@@ -1098,10 +1098,14 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 
 .quality-issue{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0;white-space:normal}.quality-issue span{overflow-wrap:anywhere}
 
-.milkdown-image-block[data-image-presentation="true"] img{width:100%!important;height:auto!important;max-width:100%!important}.milkdown-image-action-overlay{gap:4px;flex-wrap:wrap}.milkdown-image-action-overlay button{white-space:nowrap}
-.milkdown .milkdown-image-block[data-image-presentation="true"] > .image-wrapper{width:100%}
-.milkdown .milkdown-image-block[data-image-presentation="true"] > .caption-input{text-align:inherit}
-.milkdown .milkdown-image-block[data-image-presentation="true"] .image-resize-handle{display:none}
+#milkdown-editor .milkdown-image-block[data-image-presentation="true"]{max-width:calc(var(--munin-image-width,100%) * var(--munin-image-scale,1))}
+#milkdown-editor .milkdown-image-block > .image-wrapper{min-width:0;max-width:min(100%,var(--munin-image-width,100%))}
+#milkdown-editor .milkdown-image-block img{height:auto!important;min-height:0;max-width:100%!important}
+#milkdown-editor .milkdown-image-block[data-image-width] > .image-wrapper,
+#milkdown-editor .milkdown-image-block[data-image-width] img{width:100%}
+#milkdown-editor .milkdown-image-block[data-image-presentation="true"] > .caption-input{text-align:inherit}
+#milkdown-editor .milkdown-image-block .image-resize-handle{display:none}
+.milkdown-image-action-overlay{gap:4px;flex-wrap:wrap}.milkdown-image-action-overlay button{white-space:nowrap}
 #image-ai-settings [hidden],dialog[data-ai-image] [hidden]{display:none!important}
 
 .selectable-diff{max-height:50vh;overflow:auto}.diff-part{padding:10px;border-bottom:1px solid var(--border,#ccc)}.selection-diff-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.selection-diff-columns>div{min-width:0}.selection-diff-columns pre{white-space:pre-wrap;overflow-wrap:anywhere}.diff-change{background:color-mix(in srgb,var(--accent,#478) 8%,transparent)}@media(max-width:640px){.selection-diff-columns{grid-template-columns:1fr}}
@@ -1254,6 +1258,7 @@ footer>.document-save-status{flex:0 0 auto}
 .ProseMirror blockquote[data-gfm-alert=IMPORTANT]{border-color:#8250df}
 .ProseMirror blockquote[data-gfm-alert=WARNING]{border-color:#9a6700}
 .ProseMirror blockquote[data-gfm-alert=CAUTION]{border-color:#cf222e}
+.display-settings .setting-checkbox{flex-direction:row;align-items:center}
 
 /* Show the dragged file and the folder that will receive it. */
 .file-tree .tree-drag-source{opacity:.45}

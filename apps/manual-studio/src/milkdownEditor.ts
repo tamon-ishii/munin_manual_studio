@@ -5,10 +5,12 @@ import {sinkListItem,liftListItem} from '@milkdown/kit/prose/schema-list';
 import {lift} from '@milkdown/kit/prose/commands';
 import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePresentation} from './imagePresentation';
 import { Slice } from '@milkdown/kit/prose/model';
-import { TextSelection } from '@milkdown/kit/prose/state';
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
+import { dropPoint } from '@milkdown/kit/prose/transform';
 import { uploadConfig, uploadPlugin } from '@milkdown/kit/plugin/upload';
 import { dropIndicatorState } from '@milkdown/kit/plugin/cursor';
 import type { EditorState } from '@milkdown/kit/prose/state';
+import type { EditorView } from '@milkdown/kit/prose/view';
 import { uiIcon } from './uiIcons';
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
@@ -96,7 +98,9 @@ export function setupMilkdownEditor(
   // Studio consumes resource drops before ProseMirror sees them. Drag end can
   // also target the resource panel, so the editor's own cleanup never runs.
   const clearDropIndicator=()=>{if(ready&&instance)instance.action(ctx=>ctx.set(dropIndicatorState.key,null));};
-  document.addEventListener('drop',clearDropIndicator,true);
+  document.addEventListener('drop', event => {
+    if (event.dataTransfer?.types.includes('application/x-munin-image')) clearDropIndicator();
+  }, true);
   document.addEventListener('dragend',clearDropIndicator,true);
   document.addEventListener('keydown',event=>{if(event.key==='Escape')clearDropIndicator();},true);
   document.addEventListener('dragleave',event=>{
@@ -275,11 +279,6 @@ export function setupMilkdownEditor(
         const image = dom instanceof HTMLImageElement ? dom : dom instanceof HTMLElement ? dom.querySelector<HTMLImageElement>('img') : null;
         if (image) {
           image.dataset.originalSrc = String(node.attrs.src);
-          if(dom instanceof HTMLElement&&node.type.name==='image-block'){
-            const configured=Boolean(node.attrs.presentation);dom.style.width=configured?(node.attrs.displayWidth===null?'fit-content':`${node.attrs.displayWidth}%`):'';
-            dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';
-            if(configured){image.style.width=node.attrs.displayWidth===null?'auto':'100%';image.style.maxWidth='100%';image.style.height='auto';image.addEventListener('load',()=>{image.style.height='auto';},{once:true});}
-          }
           images.push({ image, source: String(node.attrs.src) });
         }
       });
@@ -289,10 +288,7 @@ export function setupMilkdownEditor(
       try {
         const resolved = await resolveImage(imageSource);
         if (version !== imageRefreshVersion || !image.isConnected) return;
-        if (image.src === resolved) {
-          image.src = '';
-        }
-        image.src = resolved;
+        if (image.src !== resolved) image.src = resolved;
       } catch (error) { if (version === imageRefreshVersion) report(`画像の更新に失敗しました: ${String(error)}`); }
     }));
   }
@@ -388,7 +384,13 @@ export function setupMilkdownEditor(
   function applyImageStyles(){if(!ready||!instance)return;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.state.doc.descendants((node,pos)=>{
     if(node.type.name!=='image-block')return;const dom=view.nodeDOM(pos);if(!(dom instanceof HTMLElement))return;
     const image=dom.querySelector('img');if(image)image.alt=String(node.attrs.alt||'');
-    const configured=Boolean(node.attrs.presentation);dom.dataset.imagePresentation=String(configured);dom.style.width=configured?(node.attrs.displayWidth===null?'fit-content':`${node.attrs.displayWidth}%`):'';
+    const configured=Boolean(node.attrs.presentation);
+    const width = configured ? node.attrs.displayWidth as number | null : null;
+    dom.dataset.imagePresentation = String(configured);
+    dom.toggleAttribute('data-image-width', width !== null);
+    if (width === null) dom.style.removeProperty('--munin-image-scale');
+    else dom.style.setProperty('--munin-image-scale', String(width / 100));
+    dom.style.width = configured ? (width === null ? 'fit-content' : `${width}%`) : '';
     dom.style.marginLeft=configured&&node.attrs.alignment!=='left'?'auto':'';dom.style.marginRight=configured&&node.attrs.alignment!=='right'?'auto':'';dom.style.textAlign=configured?node.attrs.alignment:'';
   });});}
   function fitToolbarMenus() {
@@ -550,7 +552,85 @@ export function setupMilkdownEditor(
         state.addNode(type, { src: String(node.url ?? ''), alt: String(node.alt ?? ''), title: String(node.title ?? '') });
       } } };
     });
-    ctx.update(editorViewOptionsCtx, previous => ({ ...previous, editable: () => !source.disabled && !source.readOnly, attributes: { role: 'textbox', 'aria-label': 'Markdown原稿', 'aria-multiline': 'true' } }));
+    let imageDrag: { view: EditorView; doc: EditorState['doc']; from: number; to: number; imageOffset: number; slice: Slice } | undefined;
+    ctx.update(editorViewOptionsCtx, previous => ({
+      ...previous,
+      editable: () => !source.disabled && !source.readOnly,
+      attributes: { role: 'textbox', 'aria-label': 'Markdown原稿', 'aria-multiline': 'true' },
+      handleDOMEvents: {
+        ...previous.handleDOMEvents,
+        dragstart(view, event) {
+          imageDrag = undefined;
+          const target = event.target;
+          const transfer = event.dataTransfer;
+          if (view.editable && transfer && target instanceof HTMLElement) {
+            const block = target.closest('.milkdown-image-block');
+            if (target instanceof HTMLImageElement || (block && !(target instanceof HTMLInputElement))) {
+              const { doc } = view.state;
+              doc.descendants((node, pos) => {
+                if (imageDrag) return false;
+                if (node.type.name !== 'image' && node.type.name !== 'image-block') return;
+                const dom = view.nodeDOM(pos);
+                if (!dom?.contains(target)) return false;
+                let from = pos, to = pos + node.nodeSize;
+                const before = doc.resolve(from).nodeBefore;
+                const after = doc.resolve(to).nodeAfter;
+                const comment = (adjacent: typeof before) => {
+                  const node = adjacent?.type.name === 'paragraph' && adjacent.childCount === 1 ? adjacent.firstChild : adjacent;
+                  return node?.type.name === 'html' ? String(node.attrs.value) : '';
+                };
+                if (before && after &&
+                    /^\s*<!--\s*screenshot:ref\s+id=[a-z0-9-]+\s*-->\s*$/.test(comment(before)) &&
+                    /^\s*<!--\s*\/screenshot:ref\s*-->\s*$/.test(comment(after))) {
+                  from -= before.nodeSize;
+                  to += after.nodeSize;
+                }
+                const slice = doc.slice(from, to);
+                // A DOM selection can change during a drag. Keep the exact image range.
+                imageDrag = { view, doc, from, to, imageOffset: pos - from, slice };
+                const { dom: clipboard, text } = view.serializeForClipboard(slice);
+                transfer.clearData();
+                transfer.setData('text/html', clipboard.innerHTML);
+                transfer.setData('text/plain', text);
+                transfer.effectAllowed = 'move';
+                view.dragging = { slice, move: true };
+                return false;
+              });
+              if (imageDrag) return true;
+            }
+          }
+          return previous.handleDOMEvents?.dragstart?.(view, event) ?? false;
+        },
+        dragend(view, event) {
+          imageDrag = undefined;
+          return previous.handleDOMEvents?.dragend?.(view, event) ?? false;
+        },
+      },
+      handleDrop(view, event, slice, move) {
+        const drag = imageDrag;
+        imageDrag = undefined;
+        if (!drag || drag.view !== view) return previous.handleDrop?.(view, event, slice, move) ?? false;
+        const indicator = ctx.get(dropIndicatorState.key);
+        clearDropIndicator();
+        if (!view.editable || view.state.doc !== drag.doc) return true;
+        const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+        const target = indicator?.view === view ? indicator.pos : coords?.pos;
+        if (target === undefined) return true;
+        const destination = dropPoint(drag.doc, target, drag.slice);
+        if (destination === null || (destination >= drag.from && destination <= drag.to)) return true;
+        const tr = closeHistory(view.state.tr).delete(drag.from, drag.to);
+        const insertAt = tr.mapping.map(destination);
+        const beforeInsert = tr.doc;
+        tr.replace(insertAt, insertAt, drag.slice);
+        if (tr.doc.eq(beforeInsert)) return true;
+        const imagePos = insertAt + drag.imageOffset;
+        const inserted = tr.doc.nodeAt(imagePos);
+        if (inserted && NodeSelection.isSelectable(inserted)) tr.setSelection(NodeSelection.create(tr.doc, imagePos));
+        view.dispatch(tr.setMeta('uiEvent', 'drop'));
+        view.focus();
+        return true;
+      },
+    }));
     ctx.update(imageBlockSchema.key, previous => ctx => {
       const schema = previous(ctx);
       return { ...schema, attrs: { ...schema.attrs, alt: { default: '', validate: 'string' }, displayWidth:{default:null},alignment:{default:'center'},presentation:{default:false} },
