@@ -14,6 +14,27 @@ MCPに `munin-studio` が表示される場合は、一覧にあるツールを�
 6. 完成画像への相対リンクを含むMarkdownを書き、操作手順、前提条件、操作後の結果を説明する。既存原稿を変更するときはユーザーの依頼範囲に留める。
 7. 生成・変更した原稿と完成画像のパス、未確認の操作を報告する。Studioの「変更を読み直す」からファイルツリーと原稿を更新できる。
 
+## 撮影した画像をStudioの撮影リソース一覧に残す
+
+1. 対象画面はMarkItsの `capture` で撮影し、最初は `detect_ui: true` を使う。操作の記録も必要な場合は、対象アプリで実行する手順を `operations-validate` で検証し、`operations-run` で撮影する。
+2. マニュアルに使う画像はすべて、撮影後すぐに `register-capture` で登録する。`image` には加工前のPNGのプロジェクト相対パス、`name` には画面や手順を識別できる名前を指定する。`operations-run` の画像は応答の `captures` から元PNGを選ぶ。登録後は `resource_id` を控える。
+3. UIMapの要素数は `uimap_elements`、操作記録の有無は `recorded` で確認する。必要なメタデータが元PNGにない場合も画像は登録し、不足を報告する。注釈に座標を使う場合は実画像で位置を確認する。
+4. 加工は登録後に行い、出力先は元PNGと別にする。登録した画像は撮影リソース一覧からMarkItsで編集したり、原稿へドラッグして挿入したりできる。完了報告には登録した画像の名前とIDを含める。
+
+バックグラウンドや別ツールで撮影した場合も、PNGをプロジェクト内に保存し、撮影直後に登録する。撮影時に同じ画像のUIMapを別ファイルで取得した場合は、まず `attach-uimap` で `image`、`uimap`、`output` を渡して編集用PNGを作り、その出力を `register-capture` に渡す。UIMapがなくても登録し、Studioの「撮影リソース一覧」からMarkItsで開けるようにする。UIMapの座標は撮影画像の左上を原点としたピクセル単位を使う。
+
+`attach-uimap` に渡すUIMap JSONの例（座標は実測値を使う）。
+
+```json
+[{"role":"button","name":"保存","x":120,"y":80,"width":96,"height":32}]
+```
+
+MCPの `register-capture` には `image` と `name` を渡す。MCPを使えない環境での `--studio-tools` リクエスト例は以下のとおり。
+
+```json
+{"root":"PROJECT_ABSOLUTE_PATH","action":"register-capture","image":"docs/assets/step-1-source.png","name":"設定画面"}
+```
+
 ## 同梱のMarkItsツールを呼び出す
 
 `tools.json`の`executable`が実行ファイルの絶対パスです。別途MarkIts CLIをインストールする必要はありません。このコマンドはStudio画面を開かず、MarkItsライブラリで処理します。

@@ -26,6 +26,7 @@ fn lists_and_executes_project_tools_over_stdio() {
         json!({"id": 3, "method": "tools/call", "params": {"name": "inspect", "arguments": {"image": "image.png"}}}),
         json!({"id": 4, "method": "tools/call", "params": {"name": "inspect", "arguments": {"image": "../image.png"}}}),
         json!({"id": 5, "method": "tools/call", "params": {"name": "target-launch"}}),
+        json!({"id": 6, "method": "tools/call", "params": {"name": "register-capture", "arguments": {"image": "image.png", "name":"Background screenshot"}}}),
     ] {
         let mut request = request;
         request["jsonrpc"] = json!("2.0");
@@ -39,7 +40,7 @@ fn lists_and_executes_project_tools_over_stdio() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(responses.len(), 5);
+    assert_eq!(responses.len(), 6);
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-06-18");
     assert!(responses[1]["result"]["tools"]
         .as_array()
@@ -56,4 +57,9 @@ fn lists_and_executes_project_tools_over_stdio() {
     assert_eq!(inspected["height"], 12);
     assert_eq!(responses[3]["result"]["isError"], true);
     assert_eq!(responses[4]["error"]["code"], -32602);
+    let registered: Value = serde_json::from_str(responses[5]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let catalog = manual_core::capture_resources::list(root.path()).unwrap();
+    assert_eq!(catalog["items"][0]["id"], registered["resource_id"]);
+    assert_eq!(catalog["items"][0]["name"], "Background screenshot");
+    assert_eq!(registered["uimap_elements"], 0);
 }

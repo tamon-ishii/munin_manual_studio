@@ -87,6 +87,18 @@ fn tools() -> Vec<Value> {
             &["image"],
         ),
         tool(
+            "attach-uimap",
+            "Embed a UIMap JSON file in a new MarkIts-editable PNG without modifying the input image.",
+            json!({"image":path,"uimap":path,"output":path}),
+            &["image","uimap","output"],
+        ),
+        tool(
+            "register-capture",
+            "Register an original PNG in Studio Capture Resources, preserving any MarkIts UIMap and operation metadata.",
+            json!({"image":path,"name":{"type":"string"}}),
+            &["image"],
+        ),
+        tool(
             "annotate",
             "Render MarkIts annotations into a new project PNG.",
             json!({

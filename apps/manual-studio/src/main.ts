@@ -1091,8 +1091,13 @@ async function refreshFileTree(): Promise<void> {
     treeRefreshPending = false;
   }
 }
-window.setInterval(() => { void refreshFileTree(); }, 4000);
-document.addEventListener("visibilitychange", () => { void refreshFileTree(); });
+function refreshExternalChanges(): void {
+  void refreshFileTree();
+  void captureDock.refreshVisible();
+}
+window.setInterval(refreshExternalChanges, 4000);
+document.addEventListener("visibilitychange", refreshExternalChanges);
+window.addEventListener('focus', refreshExternalChanges);
 
 function updateAiSettingsVisibility(): void {
   const connectionType = element<HTMLSelectElement>("ai-connection-type").value;

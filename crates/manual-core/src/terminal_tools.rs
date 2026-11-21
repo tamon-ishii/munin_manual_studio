@@ -26,12 +26,12 @@ pub fn prepare_in(root:&Path,working_directory:Option<&str>)->Result<Value,Strin
     fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
     let config=read_config(&root);
     let executable=std::env::current_exe().map_err(|e|e.to_string())?;
-    let manifest=json!({"project":root,"working_directory":working_directory,"executable":executable,"docs":config.docs,"assets":config.assets,"target_application":crate::target_application::context(&root),"actions":["windows","capture","inspect","annotate","target-launch","operations-schema","operations-validate","operations-inspect","operations-attach","operations-run","operations-resume"]});
+    let manifest=json!({"project":root,"working_directory":working_directory,"executable":executable,"docs":config.docs,"assets":config.assets,"target_application":crate::target_application::context(&root),"actions":["windows","capture","attach-uimap","register-capture","inspect","annotate","target-launch","operations-schema","operations-validate","operations-inspect","operations-attach","operations-run","operations-resume"]});
     fs::write(directory.join("tools.json"),serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     fs::write(directory.join("guide.md"),include_str!("terminal_guide.md")).map_err(|e|e.to_string())?;
     fs::write(directory.join("operation-script.schema.json"),include_str!("operation_script.schema.json")).map_err(|e|e.to_string())?;
     fs::write(directory.join("markits-manual.md"),include_str!("../../markits/docs/AI_MANUAL.md")).map_err(|e|e.to_string())?;
-    let prompt=format!("Read the guide at {} and the tools.json beside it before replying. Use bundled MarkIts tools for actual app screenshots, annotations and AI-authored operation scripts (operations-schema, operations-validate, operations-run). The current working directory may differ from the manual project; generate manuals in the project specified by tools.json. Ask which application and workflow to document if not specified.",directory.join("guide.md").display());
+    let prompt=format!("Read the guide at {} and the tools.json beside it before replying. Use bundled MarkIts tools for actual app screenshots, annotations and AI-authored operation scripts (operations-schema, operations-validate, operations-run). Register every requested or manual-bound screenshot in Studio Capture Resources with register-capture before editing, including background captures. If the matching UIMap is a separate file, run attach-uimap first and register its output. Verify the returned resource ID and report missing UIMap or operation metadata. The current working directory may differ from the manual project; generate manuals in the project specified by tools.json. Ask which application and workflow to document if not specified.",directory.join("guide.md").display());
     Ok(json!({"prompt":prompt,"guide":directory.join("guide.md"),"working_directory":working_directory}))
 }
 
@@ -44,6 +44,15 @@ fn output_path(root:&Path,request:&Value)->Result<std::path::PathBuf,String>{
     if output.exists(){return Err("Output already exists; choose a new filename".into());}
     if let Some(parent)=output.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
     Ok(output)
+}
+
+fn write_new_png(output: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let mut file = tempfile::NamedTempFile::new_in(output.parent().ok_or("Invalid PNG output path")?)
+        .map_err(|error| error.to_string())?;
+    file.write_all(bytes).map_err(|error| error.to_string())?;
+    file.persist_noclobber(output).map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub fn execute(request:&Value)->Result<Value,String>{
@@ -62,6 +71,23 @@ pub fn execute(request:&Value)->Result<Value,String>{
             let captured=markits::window_capture::capture_window(window,0,&output,detect_ui,detect_ui.then_some(window))?;
             Ok(json!({"output":request["output"],"window":captured}))
         },
+        "attach-uimap" => {
+            let image = path(root, request, "image")?;
+            let (bytes, _) = markits::raster::read_image(&image).map_err(|error| error.to_string())?;
+            let map_path = path(root, request, "uimap")?;
+            let elements = markits::raster::load_uimap_from_path(&map_path).map_err(|error| error.to_string())?;
+            let tagged = markits::raster::embed_png_uimap(&bytes, &elements).map_err(|error| error.to_string())?;
+            write_new_png(&output_path(root, request)?, &tagged)?;
+            Ok(json!({"output":request["output"],"uimap_elements":elements.len()}))
+        },
+        "register-capture" => {
+            let original = path(root, request, "image")?;
+            let bytes = fs::read(original).map_err(|error| error.to_string())?;
+            let name = request["name"].as_str().map(str::trim).filter(|name| !name.is_empty()).unwrap_or("AI撮影画像");
+            let resource = crate::capture_resources::register(root, &bytes, name)?;
+            let uimap_elements = markits::raster::extract_png_uimap(&bytes).map_or(0, |elements| elements.len());
+            Ok(json!({"resource_id": resource.id, "name": resource.name, "uimap_elements": uimap_elements, "recorded": resource.recorded, "window_recapture": resource.window_recapture}))
+        },
         "inspect"=>{
             let info=markits::raster::inspect_image(&path(root,request,"image")?).map_err(|e|e.to_string())?;
             Ok(json!({"width":info.width,"height":info.height,"uimap":info.uimap}))
@@ -74,7 +100,7 @@ pub fn execute(request:&Value)->Result<Value,String>{
             let margin=match request.get("crop_margin") {Some(value)=>Some(value.as_u64().filter(|v|*v<=4096).ok_or("Invalid crop_margin")? as u32),None=>None};
             let mut rendered=markits::raster::render_composed_png_bytes_with_crop(&scene.to_string(),&bytes,margin).map_err(|e|e.to_string())?;
             if request["strip_metadata"]==true{rendered=markits::image_metadata::strip_markits_metadata(&rendered).map_err(|e|e.to_string())?;}
-            fs::write(&output,rendered).map_err(|e|e.to_string())?;
+            write_new_png(&output, &rendered)?;
             Ok(json!({"output":request["output"]}))
         },
         action=>Err(format!("Unknown MarkIts tool action: {action}")),
@@ -116,8 +142,29 @@ mod tests{
         let root=tempfile::tempdir().unwrap();
         let image=root.path().join("source.png");
         image::DynamicImage::new_rgb8(200,120).save(&image).unwrap();
+        let plain = fs::read(&image).unwrap();
+        let plain_registration = execute(&json!({"root":root.path(),"action":"register-capture","image":"source.png"})).unwrap();
+        assert_eq!(plain_registration["uimap_elements"], 0);
+        let plain_id = plain_registration["resource_id"].as_str().unwrap();
+        let published = crate::capture_resources::generate(root.path(), plain_id, None, None).unwrap();
+        let edit_source = crate::capture_resources::editing_source(root.path(), &published.path).unwrap().unwrap();
+        assert_eq!(fs::read(edit_source).unwrap(), plain);
+        fs::write(root.path().join("uimap.json"), r#"[{"role":"button","name":"Save","x":30,"y":30,"width":80,"height":30}]"#).unwrap();
+        let attach = json!({"root":root.path(),"action":"attach-uimap","image":"source.png","uimap":"uimap.json","output":"editable.png"});
+        assert_eq!(execute(&attach).unwrap()["uimap_elements"], 1);
+        assert_eq!(fs::read(&image).unwrap(), plain);
+        let attached = fs::read(root.path().join("editable.png")).unwrap();
+        assert_eq!(markits::raster::extract_png_uimap(&attached).unwrap()[0].name, "Save");
         let original=markits::raster::embed_png_uimap(&fs::read(&image).unwrap(),&[markits::UiElement::new("button","保存",30.,30.,80.,30.)]).unwrap();
         fs::write(&image,&original).unwrap();
+        let registration = json!({"root":root.path(),"action":"register-capture","image":"source.png","name":"Save dialog"});
+        let registered = execute(&registration).unwrap();
+        let resource_id = registered["resource_id"].as_str().unwrap();
+        assert_eq!(registered["uimap_elements"], 1);
+        assert_eq!(registered["recorded"], false);
+        let source = crate::capture_resources::source(root.path(), resource_id).unwrap();
+        assert_eq!(fs::read(source).unwrap(), original);
+        assert_eq!(execute(&registration).unwrap()["resource_id"], resource_id);
         let inspected=execute(&json!({"root":root.path(),"action":"inspect","image":"source.png"})).unwrap();
         assert_eq!(inspected["width"],200);assert_eq!(inspected["uimap"][0]["name"],"保存");
         let request=json!({"root":root.path(),"action":"annotate","image":"source.png","output":"assets/step-1.png","scene":{"annotations":[{"type":"rect","target":"保存","style":"primary"},{"type":"badge","target":"保存","step":1,"style":"step"}]}});

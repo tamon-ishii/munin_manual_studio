@@ -22,6 +22,7 @@ export function setupCaptureResources(options:Options) {
   const importButton=panel.querySelector<HTMLButtonElement>('#capture-resource-import-button')!;
   importButton.innerHTML=uiIcon('image');importButton.setAttribute('aria-label','画像を登録');
   let items:CaptureResource[]=[];let generation=0;let running=false;
+  let pollPending=false;
   const rpc=(action:string,json:Record<string,unknown>={},root=options.root())=>options.rpc(action,{json},root);
   const observer=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){const img=e.target as HTMLImageElement;observer.unobserve(img);const root=options.root(),version=generation;void rpc('capture-resources-thumbnail',{id:img.dataset.id},root).then(src=>{if(root===options.root()&&version===generation)img.src=src;}).catch(()=>{img.alt='画像が見つかりません';});}},{root:list,rootMargin:'100px'});
   async function run(action:()=>Promise<void>){if(running)return;running=true;panel.setAttribute('aria-busy','true');try{await action();}catch(e){options.status(String(e),true);}finally{running=false;panel.removeAttribute('aria-busy');}}
@@ -85,9 +86,22 @@ export function setupCaptureResources(options:Options) {
       card.append(img,title,state,controls,usages);list.append(card);
     }
   }
-  async function refresh(){const root=options.root(),version=++generation;if(!root){items=[];render();return;}const result=JSON.parse(await rpc('capture-resources-list',{},root));if(root!==options.root()||version!==generation)return;items=result.items;render();}
+  async function refresh(onlyIfChanged=false){
+    const root=options.root(),version=++generation;
+    if(!root){items=[];render();return;}
+    const result=JSON.parse(await rpc('capture-resources-list',{},root)) as {items:CaptureResource[]};
+    if(root!==options.root()||version!==generation)return;
+    if(onlyIfChanged&&JSON.stringify(items)===JSON.stringify(result.items))return;
+    items=result.items;render();
+  }
+  async function refreshVisible(){
+    if(pollPending||running||!options.root()||document.hidden||!panel.getClientRects().length)return;
+    pollPending=true;
+    try{await refresh(true);}catch{/* Retry if registration is still in progress. */}
+    finally{pollPending=false;}
+  }
   filter.onchange=render;
   importButton.onclick=()=>panel.querySelector<HTMLInputElement>('#capture-resource-import')!.click();
   panel.querySelector<HTMLInputElement>('#capture-resource-import')!.onchange=event=>{const input=event.target as HTMLInputElement;const file=input.files?.[0];input.value='';if(!file)return;void run(async()=>{const root=options.root();const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);await rpc('capture-resources-register',{source:btoa(binary),name:file.name},root);if(root===options.root())await refresh();});};
-  return {refresh,recaptureImage(asset:string,page?:string){return run(()=>recapture({asset,page}));},upsert(resource:CaptureResource){generation++;const found=items.findIndex(r=>r.id===resource.id);const item={...resource,usages:resource.usages||[]};if(found>=0)items[found]=item;else items.unshift(item);render();}};
+  return {refresh,refreshVisible,recaptureImage(asset:string,page?:string){return run(()=>recapture({asset,page}));},upsert(resource:CaptureResource){generation++;const found=items.findIndex(r=>r.id===resource.id);const item={...resource,usages:resource.usages||[]};if(found>=0)items[found]=item;else items.unshift(item);render();}};
 }

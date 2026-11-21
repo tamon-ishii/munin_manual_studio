@@ -64,6 +64,13 @@ try{
  await page.locator('#view-menu-button').click();
  await page.locator('.flexlayout__tab_button').filter({hasText:'撮影リソース一覧'}).first().click();
  const card=page.locator(`[data-capture-resource="${resource.id}"]`);await card.waitFor({state:'visible'});
+ const backgroundPng='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGM4waUAAAKQAPPE/8eSAAAAAElFTkSuQmCC';
+ const background=await rpc('capture-resources-register',{source:backgroundPng,name:'Background screenshot'});
+ const backgroundCard=page.locator(`[data-capture-resource="${background.id}"]`);
+ await backgroundCard.waitFor({state:'visible',timeout:12_000});
+ assert.equal(await backgroundCard.getByRole('button',{name:'MarkItsで編集',exact:true}).isEnabled(),true);
+ await rpc('capture-resources-delete',{id:background.id});
+ await backgroundCard.waitFor({state:'detached',timeout:12_000});
  for(const name of ['MarkItsで編集','再撮影']){
   const button=card.getByRole('button',{name,exact:true});
   assert.equal(await button.textContent(),'');assert.equal(await button.getAttribute('title'),name);assert.equal(await button.locator('svg').count(),1);
@@ -77,7 +84,7 @@ try{
  assert.equal(await readFile(path.join(root,'docs/index.md'),'utf8'),'# Capture resources\n\nOriginal text.\n','generation must not change Markdown');
  assert.equal(await page.locator('#capture-resource-new,#capture-resource-search,#capture-resource-migrate,#capture-resource-refresh').count(),0);
  await page.waitForFunction(()=>document.querySelector('[data-capture-resource] img')?.naturalWidth>0);
- await page.screenshot({path:native?'reviews/capture-resources-webview2.png':'reviews/capture-resources-browser.png'});
+ await page.screenshot({path:process.env.MUNIN_CAPTURE_REVIEW_PATH||(native?'reviews/capture-resources-webview2.png':'reviews/capture-resources-browser.png')});
  const findDialog=async(selector='dialog[data-screenshot-destination]')=>{
   if(!native)return page;
   for(let i=0;i<100;i++){for(const p of browser.contexts().flatMap(c=>c.pages()).filter(p=>!p.isClosed()&&p.url().includes('/dialog.html'))){try{if(await p.locator(selector).count())return p;}catch{}}await new Promise(r=>setTimeout(r,100));}

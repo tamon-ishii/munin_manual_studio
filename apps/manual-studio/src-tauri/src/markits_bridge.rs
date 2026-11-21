@@ -307,6 +307,22 @@ pub async fn adopt_capture_resource(root:String,id:String)->Result<manual_core::
 mod tests {
     use super::*;
     #[test]
+    fn background_png_without_uimap_opens_from_capture_resources() {
+        let root = tempfile::tempdir().unwrap();
+        let png = root.path().join("background.png");
+        image::DynamicImage::new_rgba8(32, 24).save(&png).unwrap();
+        let bytes = fs::read(png).unwrap();
+        let resource = manual_core::capture_resources::register(root.path(), &bytes, "Background").unwrap();
+        let derived = manual_core::capture_resources::generate(root.path(), &resource.id, None, None).unwrap();
+        let edit = prepare_image_edit(root.path(), &derived.path, None).unwrap();
+        assert_eq!(edit.resource_id.as_deref(), Some(resource.id.as_str()));
+        let input = fs::read(&edit.input).unwrap();
+        assert_eq!(input, bytes);
+        let loaded = markits_desktop_lib::metadata::load_image_with_metadata(&input).unwrap();
+        assert_eq!((loaded.width, loaded.height), (32, 24));
+        assert!(loaded.ui_elements.is_none());
+    }
+    #[test]
     fn document_resource_id_restores_private_editing_state_and_survives_reopening() {
         use manual_core::capture_resources as resources;
         let root=tempfile::tempdir().unwrap();
