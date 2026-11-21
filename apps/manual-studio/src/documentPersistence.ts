@@ -1,10 +1,15 @@
 import type { Document } from './types';
 
+export function isRevisionConflict(message: unknown): boolean {
+  return /変更されています|原稿が更新され(?:ています|ました)|conflict|revision/i.test(String(message ?? ''));
+}
+
 export interface DocumentSaveContext {
   document: Document;
   root: string;
   content: string;
   version: number;
+  rebased?: boolean;
 }
 export interface DocumentSaveState {
   owner: Document;

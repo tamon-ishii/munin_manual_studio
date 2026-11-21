@@ -1119,6 +1119,7 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 #panel-terminal .terminal-toolbar{padding:4px 8px;gap:5px;flex-wrap:wrap;background:var(--surface-bg);}
 #panel-terminal .terminal-toolbar .actions{gap:5px;margin:0}
 #panel-terminal .terminal-toolbar button,#panel-terminal .terminal-toolbar select{padding:4px 8px;font-size:12px}
+#terminal-auto-review[aria-pressed=true]{border-color:currentColor;font-weight:700}
 .terminal-emblem{width:38px;height:38px;border-radius:10px;background:var(--surface-soft);color:var(--accent,#285d46)}
 .terminal-emblem>.ui-icon{width:23px;height:23px}
 .terminal-identity{display:flex;align-items:center;gap:9px;flex-wrap:wrap}

@@ -3,6 +3,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { extractDelimitedResult, DELIMITER_START } from "./terminalOutputParser";
 import { currentTheme, type ThemeId } from "./theme";
+import { confirmAction } from "./imageDialogs";
 
 export interface TerminalPaneOptions {
   rpc: (action: string, options?: Record<string, unknown>, root?: string) => Promise<string>;
@@ -198,6 +199,8 @@ export function setupTerminalPane(
   const badge = panelElement.querySelector<HTMLElement>("#terminal-badge");
   const agentLabel = panelElement.querySelector<HTMLElement>("#terminal-agent-name");
   const connectBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-connect-btn");
+  const autoReviewButton = panelElement.querySelector<HTMLButtonElement>("#terminal-auto-review");
+  const agentSelect = panelElement.querySelector<HTMLSelectElement>("#terminal-cli-agent");
   const stateNote = panelElement.querySelector<HTMLElement>("#terminal-state-note");
   const clearBtn = panelElement.querySelector<HTMLButtonElement>("#terminal-clear-btn");
 
@@ -215,6 +218,50 @@ export function setupTerminalPane(
   let promptResolver: ((value: string) => void) | null = null;
   let promptRejecter: ((reason: unknown) => void) | null = null;
   let promptTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  const autoReviewAgents = new Set<string>();
+  let restartingForApproval = false;
+
+  function updateAutoReview(): void {
+    if (!autoReviewButton) return;
+    const command = options.getCliCommand().command;
+    autoReviewButton.hidden = !['codex', 'claude', 'agy'].includes(command);
+    autoReviewButton.disabled = restartingForApproval || connectionState === 'starting' ||
+      connectionState === 'stopping' || (connectionState === 'error' && Boolean(ownerId));
+    autoReviewButton.setAttribute('aria-pressed', String(autoReviewAgents.has(command)));
+    autoReviewButton.title = connectionState === 'connected'
+      ? '承認モードを変更して再接続します。'
+      : 'AIが承認依頼を自動審査します。次の接続から有効です。';
+  }
+  async function toggleAutoReview(): Promise<void> {
+    if (!autoReviewButton) return;
+    if (autoReviewButton.hidden || autoReviewButton.disabled) return;
+    const {command, label} = options.getCliCommand();
+    const enable = !autoReviewAgents.has(command);
+    const restart = connectionState === 'connected';
+    const generation = sessionGeneration;
+    const root = options.getProjectRoot();
+    restartingForApproval = restart;
+    updateAutoReview();
+    try {
+      if (restart) {
+        const confirmed = await confirmAction(
+          `自動承認を${enable ? 'オン' : 'オフ'}にするため、${label}に再接続します。現在のターミナルセッションは終了します。`,
+          '変更して再接続',
+        );
+        if (!confirmed || disposed || generation !== sessionGeneration || root !== options.getProjectRoot()) return;
+        await killSession();
+        if (disposed || root !== options.getProjectRoot()) return;
+      }
+      if (enable) autoReviewAgents.add(command);
+      else autoReviewAgents.delete(command);
+      if (restart) await spawnSession();
+    } finally {
+      restartingForApproval = false;
+      updateAutoReview();
+    }
+  }
+  autoReviewButton?.addEventListener('click', () => { void toggleAutoReview().catch(() => {}); });
+  agentSelect?.addEventListener('change', updateAutoReview);
 
   const terminal = new Terminal({
     cursorBlink: true,
@@ -311,6 +358,7 @@ export function setupTerminalPane(
 
   function updateStatus(status: "connected" | "stopped" | "starting" | "stopping" | "error", message?: string): void {
     connectionState=status;
+    updateAutoReview();
     const labels = { connected: "接続中", stopped: "未接続", starting: "起動中", stopping: "終了中", error: "接続失敗" };
     if (badge) { badge.className = `badge ${status}`; badge.innerHTML = `${uiIcon(status === "connected" ? "connect" : status === "starting" || status === "stopping" ? "refresh" : "disconnect")}<span>${labels[status]}</span>`; }
     if(connectBtn){
@@ -435,6 +483,7 @@ export function setupTerminalPane(
         args:initialPrompt?[...args,...(command==='agy'?['--prompt-interactive']:[]),initialPrompt]:args,
         ownerId: spawningOwner,
         studio_mcp: true,
+        auto_review: autoReviewAgents.has(command),
         working_directory:workingDirectory,
         cols: terminal.cols || 80,
         rows: terminal.rows || 24,

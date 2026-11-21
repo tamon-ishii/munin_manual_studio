@@ -78,6 +78,7 @@ smoke: try {
   await idle();
   await page.waitForSelector("#milkdown-editor .ProseMirror");
   if (process.argv.includes('--save-conflict-only')) {
+    await page.locator('button[data-editor-view="split"]').click();
     const file = path.join(root, 'docs/index.md');
     await writeFile(file, '# Original text\n\nFirst part.\n\nLast part.\n');
     await page.reload();
@@ -86,7 +87,21 @@ smoke: try {
     await page.locator('#editor-mode-toggle').click();
     const source = page.locator('#markdown-editor');
     const draft = '# Original text\n\nFirst part.\n\nLocal draft.\n';
-    const external = '# Original text\n\nExternal edit.\n\nLast part.\n';
+    await source.fill(draft);
+    await writeFile(file, '# Original text\r\n\r\nExternal edit.\r\n\r\nLast part.\r\n');
+    await source.press('Control+s');
+    await idle();
+    const combined = '# Original text\n\nExternal edit.\n\nLocal draft.\n';
+    assert.equal(await source.inputValue(), combined);
+    assert.equal(await readFile(file, 'utf8'), combined);
+    await page.frameLocator('#markdown-preview').getByText('External edit.', {exact:true}).waitFor();
+    assert.equal(await page.locator('#save-conflict').isVisible(), false);
+    await writeFile(file, '# Original text\n\nFirst part.\n\nLast part.\n');
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('Last part.'));
+    await idle();
+    if (!await source.isVisible()) await page.locator('#editor-mode-toggle').click();
+    const external = '# Original text\n\nExternal edit.\n\nExternal last part.\n';
     await source.fill(draft);
     await writeFile(file, external);
     await source.press('Control+s');

@@ -238,6 +238,17 @@ pub fn pty_close_owner(owner: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn approval_args(command: &str, auto_review: bool) -> &'static [&'static str] {
+    match (command, auto_review) {
+        ("codex", true) => &["--approve-for-me"],
+        ("claude", true) => &["--permission-mode", "auto"],
+        ("claude", false) => &["--permission-mode", "default"],
+        ("agy", true) => &["--mode", "auto"],
+        ("agy", false) => &["--settings", r#"{"agentMode":""}"#],
+        _ => &[],
+    }
+}
+
 pub fn execute_pty_request(
     action: &str,
     root: &Path,
@@ -288,6 +299,9 @@ pub fn execute_pty_request(
                 .or_else(|| options.get("ownerId"))
                 .and_then(|v| v.as_str());
             let directory=working_directory(root,options["working_directory"].as_str())?;
+            if let Some(auto_review) = options["auto_review"].as_bool() {
+                args.splice(..0, approval_args(command, auto_review).iter().map(|arg| (*arg).to_owned()));
+            }
             let insertion = if options["studio_mcp"] == true && matches!(command, "codex" | "claude") {
                 let mailbox = tempfile::tempdir().map_err(|error| error.to_string())?;
                 let mut connection = crate::mcp::terminal_args(command, root, mailbox.path())?;
@@ -549,6 +563,17 @@ pub fn run_daemon() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_approval_mode_uses_each_clis_session_options() {
+        assert_eq!(approval_args("codex", true), ["--approve-for-me"]);
+        assert!(approval_args("codex", false).is_empty());
+        assert_eq!(approval_args("claude", true), ["--permission-mode", "auto"]);
+        assert_eq!(approval_args("claude", false), ["--permission-mode", "default"]);
+        assert_eq!(approval_args("agy", true), ["--mode", "auto"]);
+        assert_eq!(approval_args("agy", false), ["--settings", r#"{"agentMode":""}"#]);
+        assert!(approval_args("sh", true).is_empty());
+    }
     use std::path::Path;
 
     #[cfg(windows)]

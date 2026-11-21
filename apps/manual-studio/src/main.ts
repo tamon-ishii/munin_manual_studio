@@ -8,7 +8,8 @@ import {setupCliAiSettings} from './cliAiSettings';
 import { setupFileMove, type FileMoveResult } from './fileMove';
 import { PreviewScheduler } from './previewScheduler';
 import {rememberPreviewContent,rememberPreviewReplacement,updatePreviewContent} from './previewContent';
-import { DocumentPersistence } from './documentPersistence';
+import { DocumentPersistence, isRevisionConflict } from './documentPersistence';
+import { mergeDocumentChanges } from './selectableDiff';
 import {OperationTiming} from './operationTimings';
 import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
 import {applyReviewCorrections} from './reviewCorrections';
@@ -208,12 +209,39 @@ let documentState: Document | null = null;
 let dirty = false;
 const documentPersistence = new DocumentPersistence({
   context: () => documentState ? { document: documentState, root: projectRoot, content: editor.value, version: documentRequestVersion } : null,
-  write: async ({ document: current, root, content }) => JSON.parse(await rpc('editor-save', {
-    page: current.page, json: { content, revision: current.revision },
-  }, root)) as Document,
+  write: async context => {
+    const {document: current, root, content, version} = context;
+    const write = async (body: string, revision: string) => JSON.parse(await rpc('editor-save', {
+      page: current.page, json: {content: body, revision},
+    }, root)) as Document;
+    try {
+      return await write(content, current.revision);
+    } catch (error) {
+      if (!isRevisionConflict(error)) throw error;
+      const stored = JSON.parse(await rpc('editor-read', {page: current.page}, root)) as Document;
+      if (documentState !== current || projectRoot !== root || documentRequestVersion !== version || editor.value !== content) throw error;
+      const merged = mergeDocumentChanges(current.content, content, stored.content);
+      if (merged === null) throw error;
+      context.rebased = merged !== content;
+      return merged === stored.content.replace(/\r\n/g, '\n') ? {...stored, content: merged} : await write(merged, stored.revision);
+    }
+  },
   stateChanged: updateSaveState,
-  apply: (saved, { content }) => {
-    if (editor.value === content && saved.content !== content) editor.value = saved.content;
+  apply: (saved, { content, rebased }) => {
+    // A newer editor draft still needs the original base to incorporate the external changes.
+    if (rebased && editor.value !== content) { dirty = true; retainDocumentTab(); return; }
+    if (editor.value === content && saved.content !== content) {
+      const {selectionStart, selectionEnd, scrollTop} = editor;
+      const richScroll = milkdown.scrollElement.scrollTop;
+      editor.value = saved.content;
+      editor.setSelectionRange(selectionStart, selectionEnd);
+      editor.scrollTop = scrollTop;
+      milkdown.scrollElement.scrollTop = richScroll;
+      if (rebased) {
+        resetEditHistory();
+        void renderPreview();
+      }
+    }
     documentState = saved; dirty = editor.value !== saved.content; retainDocumentTab();
   },
   refresh: () => refreshWorkspace(false, false),
@@ -532,9 +560,7 @@ function getTerminalCliCommand(): { command: string; args: string[]; label: stri
     args.push("--model", model);
   }
   if (agent === "agy") {
-    args.push("--effort", "low", "--dangerously-skip-permissions");
-  } else if (agent === "claude") {
-    args.push("--dangerously-skip-permissions");
+    args.push("--effort", "low");
   }
   return {
     command: agent,
@@ -863,7 +889,7 @@ function updateSaveState(): void {
   badge.hidden = !documentState || ownerState?.state !== 'error';
   badge.parentElement!.hidden = badge.hidden;
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
-  const conflicted = ownerState?.state === 'error' && /変更されています|原稿が更新され(?:ています|ました)|conflict|revision/i.test(ownerState.message || '');
+  const conflicted = ownerState?.state === 'error' && isRevisionConflict(ownerState.message);
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
   badge.title = ownerState?.message || (dirty ? '保存ボタンまたはCtrl/Cmd+Sで保存してください。' : '原稿の保存状態');
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
@@ -1765,11 +1791,6 @@ for (const id of ['tree-create-menu']) {
   menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); } });
   document.addEventListener('click', event => { if (!menu.contains(event.target as Node)) menu.open = false; });
 }
-element('terminal-reload-files').addEventListener('click',()=>{void work(async()=>{
-  if(!projectRoot||!await confirmDiscard())return;
-  await refreshWorkspace(true);
-  status('AIターミナルで変更した原稿とファイル一覧を読み直しました。');
-});});
 element("undo-edit").addEventListener("click", () => stepEditHistory(-1));
 element("redo-edit").addEventListener("click", () => stepEditHistory(1));
 editor.addEventListener("editor-mode-change", updateHistoryButtons);
