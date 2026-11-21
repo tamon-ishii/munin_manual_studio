@@ -11,6 +11,25 @@ use super::task::{collect_markdown_files, utc_now};
 
 const SITE_MANIFEST: &str = ".moduleloom-site-files.json";
 
+pub(crate) fn is_published_site(path: &Path) -> bool {
+    path.join(SITE_MANIFEST).is_file()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SiteEngine {
+    MkDocs,
+    Zensical,
+}
+
+impl SiteEngine {
+    fn command(self) -> &'static str {
+        match self {
+            Self::MkDocs => "mkdocs",
+            Self::Zensical => "zensical",
+        }
+    }
+}
+
 fn copy_public_asset(source: &Path, destination: &Path) -> Result<(), String> {
     if source.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png")) {
         let bytes = fs::read(source).map_err(|e| e.to_string())?;
@@ -33,6 +52,30 @@ fn site_relative_path(path: &str) -> Result<&Path, String> {
         return Err(format!("Invalid generated site path: {path}"));
     }
     Ok(relative)
+}
+
+pub fn published_entry(root: &Path, output: &str) -> Result<std::path::PathBuf, String> {
+    let output = crate::config::project_path(root, output)?;
+    let resolve = |relative: &str| crate::config::project_path(root, &output.join(relative).to_string_lossy());
+    // A README outside the source directory is staged under _external.
+    for entry in ["index.html", "_external/index.html", "_external/README.html"] {
+        let page = resolve(entry)?;
+        if page.is_file() { return Ok(page); }
+    }
+    let manifest = resolve(SITE_MANIFEST)?;
+    if manifest.is_file() {
+        let bytes = fs::read(manifest).map_err(|error| error.to_string())?;
+        let mut files: Vec<String> = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        files.sort_by(|left, right| left.matches('/').count().cmp(&right.matches('/').count()).then(left.cmp(right)));
+        for entry in files {
+            let path = site_relative_path(&entry)?;
+            if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("html")) && entry != "404.html" {
+                let page = resolve(&entry)?;
+                if page.is_file() { return Ok(page); }
+            }
+        }
+    }
+    Err("出力先に開けるHTMLがありません。先に「HTMLを作成」を実行してください。".into())
 }
 
 fn publish_site(temp_site: &Path, output_root: &Path) -> Result<(), String> {
@@ -404,7 +447,22 @@ pub fn build(
     draft: bool,
     root: Option<&Path>,
 ) -> Result<String, String> {
-    build_inner(templates, generated, output_root, draft, root, false)
+    build_with_engine(templates, generated, output_root, draft, root, SiteEngine::MkDocs)
+}
+
+pub(crate) fn build_with_engine(
+    templates: &Path,
+    generated: &Path,
+    output_root: &Path,
+    draft: bool,
+    root: Option<&Path>,
+    engine: SiteEngine,
+) -> Result<String, String> {
+    let command = site_command(root, engine);
+    if engine == SiteEngine::Zensical && command.is_none() {
+        return Err("Zensicalが見つかりません。Studioから参照できるPATHに zensical を追加するか、プロジェクトの .venv にインストールしてください。PATHを変更した場合はStudioを再起動してください。".into());
+    }
+    build_inner(templates, generated, output_root, draft, root, engine, command)
 }
 
 #[cfg(test)]
@@ -413,7 +471,7 @@ pub(crate) fn build_without_mkdocs(
     generated: &Path,
     output_root: &Path,
 ) -> Result<String, String> {
-    build_inner(templates, generated, output_root, true, None, true)
+    build_inner(templates, generated, output_root, true, None, SiteEngine::MkDocs, None)
 }
 
 fn build_inner(
@@ -422,14 +480,26 @@ fn build_inner(
     output_root: &Path,
     draft: bool,
     root: Option<&Path>,
-    no_mkdocs: bool,
+    engine: SiteEngine,
+    command: Option<Vec<String>>,
 ) -> Result<String, String> {
     if !draft {
         if let Some(root) = root {
             crate::quality::require_ready(root)?;
         }
     }
-    let pages = build_pages(templates, root)?;
+    let published = output_root.canonicalize().unwrap_or_else(|_| output_root.to_path_buf());
+    let config = root.map(read_config);
+    let configured_output = root.zip(config.as_ref())
+        .and_then(|(root, config)| crate::config::project_path(root, &config.output).ok());
+    let root_is_source = config.as_ref().is_some_and(|config| config.docs == ".")
+        && root.is_some_and(|root| root.canonicalize().ok() == templates.canonicalize().ok());
+    let is_published = |path: &Path| {
+        path.starts_with(&published) || configured_output.as_ref().is_some_and(|output| path.starts_with(output))
+    };
+    let pages: Vec<_> = build_pages(templates, root)?.into_iter()
+        .filter(|page| !is_published(&page.original))
+        .collect();
     let mut paths = std::collections::HashSet::new();
     for page in &pages {
         if !paths.insert(page.destination.clone()) {
@@ -466,7 +536,16 @@ fn build_inner(
     // markdown 以外の静的ファイルをコピー
     for entry in WalkDir::new(templates)
         .into_iter()
-        .filter_entry(|entry| entry.file_name() != ".munin")
+        .filter_entry(|entry| {
+            if entry.file_name() == ".munin" || is_published(entry.path())
+                || (entry.depth() > 0 && entry.file_type().is_dir() && is_published_site(entry.path()))
+            {
+                return false;
+            }
+            if !root_is_source || entry.depth() == 0 { return true; }
+            let name = entry.file_name().to_string_lossy();
+            !name.starts_with('.') && !matches!(name.as_ref(), "node_modules" | "target" | "dist" | "__pycache__" | "manual_setting.json")
+        })
         .filter_map(|e| e.ok())
     {
         if entry.file_type().is_file() {
@@ -505,22 +584,12 @@ fn build_inner(
         }
     }
 
-    let (site_name, theme_name, theme_lang, use_dir_urls) = if let Some(r) = root {
-        let cfg = read_config(r);
-        (
-            cfg.mkdocs.site_name,
-            cfg.mkdocs.theme,
-            cfg.mkdocs.language,
-            cfg.mkdocs.use_directory_urls,
-        )
-    } else {
-        (
-            "ModuleLoom マニュアル".to_string(),
-            "material".to_string(),
-            "ja".to_string(),
-            false,
-        )
-    };
+    let crate::config::MkDocsConfig {
+        site_name,
+        theme: theme_name,
+        language: theme_lang,
+        use_directory_urls: use_dir_urls,
+    } = config.map(|config| config.mkdocs).unwrap_or_default();
 
     let mut nav_lines = String::new();
     for page in &pages {
@@ -537,35 +606,38 @@ fn build_inner(
         ));
     }
 
-    let alert_theme = if theme_name == "material" && root.is_some_and(crate::gfm::alert_icons_enabled) {
+    let theme = match engine {
+        SiteEngine::MkDocs => format!("  name: {theme_name}\n"),
+        SiteEngine::Zensical => "  variant: classic\n".into(),
+    };
+    let alert_theme = if (engine == SiteEngine::Zensical || theme_name == "material") && root.is_some_and(crate::gfm::alert_icons_enabled) {
         crate::gfm::mkdocs_alert_icons(&temp_root)?
     } else {
         String::new()
     };
     let config_yaml = format!(
-        "site_name: {}\n\
-        theme:\n  name: {}\n  language: {}\n\
-        {}use_directory_urls: {}\n\
-        site_dir: {}\n\
-        markdown_extensions:\n\
-          - tables\n\
-          - footnotes\n\
-          - admonition\n\
-          - pymdownx.tilde\n\
-          - pymdownx.tasklist\n\
-          - pymdownx.magiclink\n\
-          - pymdownx.superfences:\n\
-              custom_fences:\n\
-                - name: mermaid\n\
-                  class: mermaid\n\
-                  format: !!python/name:pymdownx.superfences.fence_code_format\n\
-        nav:\n{}",
+        concat!(
+            "site_name: {}\ntheme:\n{}  language: {}\n",
+            "{}use_directory_urls: {}\nsite_dir: site\n",
+            "markdown_extensions:\n",
+            "  - tables\n",
+            "  - footnotes\n",
+            "  - admonition\n",
+            "  - pymdownx.tilde\n",
+            "  - pymdownx.tasklist\n",
+            "  - pymdownx.magiclink\n",
+            "  - pymdownx.superfences:\n",
+            "      custom_fences:\n",
+            "        - name: mermaid\n",
+            "          class: mermaid\n",
+            "          format: !!python/name:pymdownx.superfences.fence_code_format\n",
+            "nav:\n{}",
+        ),
         serde_json::to_string(&site_name).unwrap(),
-        theme_name,
+        theme,
         theme_lang,
         alert_theme,
         if use_dir_urls { "true" } else { "false" },
-        serde_json::to_string(&temp_site.to_string_lossy()).unwrap(),
         nav_lines
     );
 
@@ -574,54 +646,23 @@ fn build_inner(
 
     fs::create_dir_all(output_root).map_err(|e| e.to_string())?;
 
-    // 外部 mkdocs CLI の探索
-    let mut mkdocs_cmd: Option<Vec<String>> = None;
-    if let Some(r) = root {
-        mkdocs_cmd = project_mkdocs(r, cfg!(windows));
-    }
-    if mkdocs_cmd.is_none() {
-        if let Some(bin) = which_binary("mkdocs") {
-            mkdocs_cmd = Some(vec![bin.to_string_lossy().into_owned()]);
-        }
-    }
-
-    if mkdocs_cmd.is_none() {
-        for py in &["python3", "python"] {
-            if let Some(py_bin) = which_binary(py) {
-                // python -m mkdocs が使えるかチェック
-                let test_out = Command::new(&py_bin)
-                    .args(["-m", "mkdocs", "--version"])
-                    .output();
-                if let Ok(out) = test_out {
-                    if out.status.success() {
-                        mkdocs_cmd = Some(vec![
-                            py_bin.to_string_lossy().into_owned(),
-                            "-m".to_string(),
-                            "mkdocs".to_string(),
-                        ]);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(cmd_parts) = if no_mkdocs { None } else { mkdocs_cmd } {
+    if let Some(cmd_parts) = command {
         let (prog, args) = cmd_parts.split_first().unwrap();
         let mut final_args: Vec<String> = args.to_vec();
         final_args.extend([
             "build".to_string(),
             "-f".to_string(),
             temp_config.to_string_lossy().into_owned(),
-            "-d".to_string(),
-            temp_site.to_string_lossy().into_owned(),
         ]);
+        if engine == SiteEngine::MkDocs {
+            final_args.extend(["-d".to_string(), temp_site.to_string_lossy().into_owned()]);
+        }
 
         let output = Command::new(prog)
             .args(&final_args)
             .current_dir(temp_root)
             .output()
-            .map_err(|e| format!("Failed to run mkdocs: {e}"))?;
+            .map_err(|e| format!("Failed to run {}: {e}", engine.command()))?;
 
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -631,7 +672,8 @@ fn build_inner(
             } else {
                 out.trim()
             };
-            return Err(format!("MkDocs site build failed: {msg}"));
+            let name = if engine == SiteEngine::MkDocs { "MkDocs" } else { "Zensical" };
+            return Err(format!("{name} site build failed: {msg}"));
         }
         publish_site(&temp_site, output_root)?;
         Ok(format!(
@@ -651,6 +693,18 @@ fn build_inner(
 #[cfg(test)]
 mod site_tests {
     use super::*;
+
+    #[test]
+    fn published_entry_uses_the_generated_manifest_without_a_homepage() {
+        let project = tempdir().unwrap();
+        let output = project.path().join("site");
+        fs::create_dir_all(output.join("guide")).unwrap();
+        for path in ["404.html", "guide/index.html", "unmanaged.html"] {
+            fs::write(output.join(path), "").unwrap();
+        }
+        fs::write(output.join(SITE_MANIFEST), r#"["404.html","guide/index.html"]"#).unwrap();
+        assert_eq!(published_entry(project.path(), "site").unwrap(), output.join("guide/index.html").canonicalize().unwrap());
+    }
 
     #[test]
     fn publication_strips_edit_metadata_without_changing_the_project_asset_or_pixels() {
@@ -839,11 +893,25 @@ mod site_tests {
     }
 }
 
-fn project_mkdocs(root: &Path, windows: bool) -> Option<Vec<String>> {
+fn site_command(root: Option<&Path>, engine: SiteEngine) -> Option<Vec<String>> {
+    let name = engine.command();
+    root.and_then(|root| project_site_command(root, cfg!(windows), name))
+        .or_else(|| which_binary(name).map(|binary| vec![binary.to_string_lossy().into_owned()]))
+        .or_else(|| {
+            ["python3", "python"].into_iter().find_map(|python| {
+                let binary = which_binary(python)?;
+                let probe = if engine == SiteEngine::MkDocs { "--version" } else { "--help" };
+                Command::new(&binary).args(["-m", name, probe]).output().ok()?
+                    .status.success().then(|| vec![binary.to_string_lossy().into_owned(), "-m".into(), name.into()])
+            })
+        })
+}
+
+fn project_site_command(root: &Path, windows: bool, name: &str) -> Option<Vec<String>> {
     let directory = root
         .join(".venv")
         .join(if windows { "Scripts" } else { "bin" });
-    let executable = directory.join(if windows { "mkdocs.exe" } else { "mkdocs" });
+    let executable = directory.join(if windows { format!("{name}.exe") } else { name.into() });
     executable
         .is_file()
         .then(|| vec![executable.to_string_lossy().into_owned()])
@@ -853,20 +921,18 @@ fn project_mkdocs(root: &Path, windows: bool) -> Option<Vec<String>> {
 mod portability_tests {
     use super::*;
     #[test]
-    fn mkdocs_is_found_in_each_platform_virtual_environment() {
-        for (windows, directory, filename) in
-            [(true, "Scripts", "mkdocs.exe"), (false, "bin", "mkdocs")]
-        {
-            let root = tempfile::tempdir().unwrap();
-            let bin = root.path().join(".venv").join(directory);
-            std::fs::create_dir_all(&bin).unwrap();
-            let executable = bin.join(filename);
-            std::fs::write(&executable, "test").unwrap();
-            assert_eq!(
-                project_mkdocs(root.path(), windows).unwrap()[0],
-                executable.to_string_lossy()
-            );
-            assert!(project_mkdocs(root.path(), !windows).is_none());
+    fn site_builders_are_found_in_each_platform_virtual_environment() {
+        for engine in [SiteEngine::MkDocs, SiteEngine::Zensical] {
+            let name = engine.command();
+            for (windows, directory) in [(true, "Scripts"), (false, "bin")] {
+                let root = tempfile::tempdir().unwrap();
+                let directory = root.path().join(".venv").join(directory);
+                let path = directory.join(if windows { format!("{name}.exe") } else { name.into() });
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(&path, []).unwrap();
+                assert_eq!(project_site_command(root.path(), windows, name).unwrap()[0], path.to_string_lossy());
+                assert!(project_site_command(root.path(), !windows, name).is_none());
+            }
         }
     }
 }

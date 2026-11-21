@@ -11,9 +11,8 @@ import {rememberPreviewContent,rememberPreviewReplacement,updatePreviewContent} 
 import { DocumentPersistence } from './documentPersistence';
 import {OperationTiming} from './operationTimings';
 import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
-import {setupEditorContextMenu} from './editorContextMenu';
 import {applyReviewCorrections} from './reviewCorrections';
-import {askReader,showReaderReport,type ReaderReport,type ReviewCapabilities} from './readerReview';
+import {showReaderReport,type ReaderReport} from './readerReview';
 import {reviewDraft,type DraftCandidate} from './draftReview';
 import {askTemplateDestination} from './templateCreation';
 import {configureTargetApplication,type TargetApplication} from './targetApplication';
@@ -22,8 +21,6 @@ import {setupFileTabMenu,type FileTab} from './fileTabMenu';
 import { AiProgressManager } from './aiProgressManager';
 import {imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
 import type {ResourceUsage} from './types';
-import { setupImageAiSettings } from './imageAiSettings';
-import { setupImageGeneration } from './imageGeneration';
 import { setupToolbarCustomization } from './toolbarCustomization';
 import { chooseDestination,featureDialog } from './imageDialogs';
 import { setupMarkitsImages, cursorCapturePreference } from "./markitsImages";
@@ -49,8 +46,8 @@ import { setupPreviewImageSizing, setupPreviewTheme } from "./themePreview";
 import { alertIconStyles } from "./alertIcons";
 import { setupMarkdownTableEditor } from "./markdownTable";
 import { jumpToSource } from "./editorNavigation";
-import {askSelectionAction,showSelectionAdvice,askSelectionInstruction,reviewSelection,type SelectionDraft,type SelectionAction} from "./selectionAi";
-import {reviewProofreading,type ProofreadingOptions} from './proofreading';
+import {reviewSelection} from "./selectionAi";
+import {reviewProofreading} from './proofreadingReview';
 import { showUnsavedChangesDialog } from "./unsavedChangesDialog";
 import { loadWorkspaceHistory, recordWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
 import { changeHeadingLevel, toggleStrikethrough, toggleTaskList, changeIndent, continueMarkdownList, type MarkdownEdit } from "./markdownAssists";
@@ -128,7 +125,6 @@ markitsCaptureKey.addEventListener('keydown',event=>{
 });
 element('markits-capture-key-reset').addEventListener('click',()=>{markitsKeyEdited=true;markitsKey='Control+Shift+E';displayMarkitsKey();persistMarkitsCaptureKey();});
 element('markits-capture-key-save').addEventListener('click',persistMarkitsCaptureKey);
-let refreshEditorContextMenu = () => {};
 const params = new URLSearchParams(location.search);
 
 const detached = params.get("editor") === "1";
@@ -511,7 +507,7 @@ element("progress-open").addEventListener("click", () => {
 });
 async function rpc(action: string, options: Record<string, unknown> = {}, root = projectRoot): Promise<string> {
   const mergedOptions = { ...options };
-  const aiActions = new Set(["selection-generate", "document-review", "draft", "draft-propose", "draft-plan", "operation-workbench", "fact-check", "scenario-save"]);
+  const aiActions = new Set(["proofread-text", "draft", "draft-propose", "draft-plan", "operation-workbench", "fact-check", "scenario-save"]);
   if (aiActions.has(action) && mergedOptions.api_key === undefined) {
     mergedOptions.api_key = root === projectRoot ? readAiCredential(root, workspace?.config.endpoint_url || "") : "";
   }
@@ -555,6 +551,65 @@ function openManualTerminal(): void {
     rpc,
     getProjectRoot: () => projectRoot,
     getCliCommand: getTerminalCliCommand,
+    editorRequest: async (action, args, root, signal) => {
+      if (action === 'proofread-text') {
+        if (root !== projectRoot || signal.aborted || busy) throw new Error('Studioの処理が完了してから推敲を実行してください。');
+        return JSON.parse(await rpc('proofread-text', {json:{source:args.source,skill:args.skill}}, root));
+      }
+      if (root !== projectRoot || !documentState || activeImageTab || busy || editor.disabled || editor.readOnly) {
+        throw new Error('編集する原稿を開いてから実行してください。');
+      }
+      const page = documentState.page;
+      const before = editor.value;
+      if (action === 'active-editor') {
+        if (args.include_content === true && new TextEncoder().encode(before).byteLength > 250_000) {
+          throw new Error('原稿が250 kBを超えています。本文を含めずに状態を確認してください。');
+        }
+        const start = editor.selectionStart, end = editor.selectionEnd;
+        const lines = before.slice(0, start).split('\n');
+        return { page, dirty, cursor: { line: lines.length, column: lines.at(-1)!.length + 1, start, end, units: 'utf16' },
+          ...(args.include_content === true ? { content: before } : {}) };
+      }
+      if (action === 'insert-image' && typeof args.path === 'string') {
+        const path = args.path;
+        const relative = relativeProjectAsset(path, page);
+        const alt = typeof args.alt === 'string' ? args.alt : '撮影画像';
+        const description = alt.replace(/[\r\n]+/g, ' ').replace(/[\[\]\\]/g, '\\$&');
+        insertDocumentMarkdown(`![${description}](<${relative}>)`);
+        return { page, output: path, inserted: true, saved: false };
+      }
+      if (action === 'preview-edit' || action === 'proofread') {
+        if (args.page !== page || args.before !== before) throw new Error('原稿が変更されています。active-editorで最新の原稿を確認してください。');
+        if (document.querySelector('#selection-diff-dialog[open],#proofreading-dialog[open]')) throw new Error('開いている差分を先に確認してください。');
+        const version = documentRequestVersion;
+        let content: string|null;
+        let accepted: number|undefined;
+        if (action === 'proofread') {
+          if (!args.drafts || typeof args.drafts !== 'object' || Array.isArray(args.drafts)) throw new Error('推敲案を指定してください。');
+          const variants = Object.entries(args.drafts).map(([id, draft]) => {
+            if (typeof draft !== 'string') throw new Error(`推敲案が必要です（${id}）。`);
+            return {id, content: draft};
+          });
+          content = variants.every(variant => variant.content === before) ? null :
+            await reviewProofreading(before, variants, {separate: true, signal});
+        } else {
+          if (typeof args.after !== 'string') throw new Error('差分案が必要です。');
+          const review = before === args.after ? null :
+            await reviewSelection(page, before, args.after, undefined, '', false, signal);
+          content = review?.action === 'adopt' ? review.content : null;
+          accepted = review?.accepted.length;
+        }
+        if (signal.aborted || content === null || content === before) return { page, applied: false, saved: false };
+        if (root !== projectRoot || page !== documentState?.page || version !== documentRequestVersion ||
+            activeImageTab || editor.value !== before || busy) {
+          throw new Error('原稿が変更されたため、差分を適用しませんでした。');
+        }
+        changeImageMarkdown(content, before);
+        status('承認した変更を原稿に反映しました。');
+        return { page, applied: true, saved: false, ...(accepted === undefined ? {} : {accepted}) };
+      }
+      throw new Error('不明なエディター操作です。');
+    },
     getWorkingDirectory:()=>terminalWorkingDirectory||projectRoot,
     prepareSession: async (root,workingDirectory) => {
       await saveAiSettings();
@@ -617,7 +672,6 @@ function setBusy(value: boolean, lockControls = true): void {
   editor.disabled = !documentState;
   updateHistoryButtons();
   if (!value && pendingEditorFocus) { pendingEditorFocus = false; milkdown.focus(); }
-  refreshEditorContextMenu();
 
 }
 function setButtonDisabled(button: HTMLButtonElement, disabled: boolean): void {
@@ -660,6 +714,15 @@ function openPanelDialog(panelId: string): void {
     return;
   }
   closeAllPanelDialogs();
+  if (panelId === 'panel-settings') {
+    input('settings-site-name').value = workspace?.config.mkdocs.site_name ?? '';
+    input('settings-site-output').value = workspace?.config.output ?? '';
+    element('settings-site-result').textContent = '';
+    element<HTMLButtonElement>('settings-site-browse').hidden = !native;
+    for (const id of ['settings-site-name','settings-site-output','settings-site-save','settings-site-browse']) {
+      element<HTMLInputElement | HTMLButtonElement>(id).disabled = !projectRoot;
+    }
+  }
   dlg.show();
 }
 
@@ -677,11 +740,10 @@ function chooseTab(name: string): void {
   if(name==='appearance'){
     selectSettingsCategory('appearance');
     const dialog=element<HTMLDialogElement>('panel-settings');
-    if(!dialog.open){closeAllPanelDialogs();dialog.show();}
+    if(!dialog.open)openPanelDialog('panel-settings');
     return;
   }
   if (name === "brief" || name === "appearance" || name === "settings") {
-    if(name==='settings')void imageAiSettings.refresh();
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => { button.classList.toggle("active", button.dataset.tab === name); });
     openPanelDialog(`panel-${name}`);
     return;
@@ -801,7 +863,7 @@ function updateSaveState(): void {
   badge.hidden = !documentState || ownerState?.state !== 'error';
   badge.parentElement!.hidden = badge.hidden;
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
-  const conflicted = ownerState?.state === 'error' && /変更されています|conflict|revision/i.test(ownerState.message || '');
+  const conflicted = ownerState?.state === 'error' && /変更されています|原稿が更新され(?:ています|ました)|conflict|revision/i.test(ownerState.message || '');
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
   badge.title = ownerState?.message || (dirty ? '保存ボタンまたはCtrl/Cmd+Sで保存してください。' : '原稿の保存状態');
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
@@ -911,15 +973,16 @@ function chooseImageDestination(): Promise<boolean> { return chooseDestination({
     select: (offset,heading) => { editor.setSelectionRange(offset,offset);milkdown.selectInsertionHeading(heading); },
   }); }
 function insertDocumentMarkdown(markdown:string): void {
+    const richInsertion = milkdown.captureSelectionEdit(true);
+    const position = editor.selectionStart;
     pendingEditorFocus = true;
     showDocumentView(); chooseTab("editor");
     if (documentState) element("editor-title").textContent = documentState.page;
     if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
-    const richInsertion = milkdown.captureSelectionEdit(true);
     if (richInsertion) richInsertion.apply(markdown, true);
     else {
       rememberCurrentSelection();
-      editor.setRangeText("\n\n" + markdown + "\n\n", editor.selectionStart, editor.selectionStart, "end");
+      editor.setRangeText("\n\n" + markdown + "\n\n", position, position, "end");
       editor.dispatchEvent(new Event("input", { bubbles: true }));
       editor.focus();
     }
@@ -970,8 +1033,6 @@ const captureDock=setupCaptureResources({root:()=>projectRoot,rpc,
   usage:usage=>openResourceUsage({...usage,snippet:usage.snippet||'',end:usage.start+(usage.snippet?.length||0)}),status,
 });
 setupToolbarCustomization();
-const imageAiSettings=setupImageAiSettings({root:()=>projectRoot,request:rpc,prepare:saveAiSettings});
-setupImageGeneration({prepare:async()=>{await saveAiSettings();await imageAiSettings.flush();},imageKey:(root,url)=>imageAiSettings.key(root,url),sharedKey:root=>root===projectRoot?readAiCredential(root,workspace?.config.endpoint_url||''):'',root:()=>projectRoot,page:()=>documentState?.page,request:rpc,work,refresh:()=>refreshWorkspace(),insert:async path=>{if(!await chooseImageDestination()||!documentState)return false;insertDocumentMarkdown(`![AI生成画像](<${relativeProjectAsset(path,documentState.page)}>)`);return true;}});
 
 let documentImageEditing = false;
 function changeImageMarkdown(next:string,expected:string){
@@ -1091,8 +1152,49 @@ async function refreshFileTree(): Promise<void> {
     treeRefreshPending = false;
   }
 }
+let documentRefreshPending = false;
+const reportedDocumentUpdates = new WeakMap<Document, string>();
+async function refreshOpenDocument(): Promise<void> {
+  const current = documentState;
+  const root = projectRoot;
+  const version = documentRequestVersion;
+  if (!current || activeImageTab || busy || document.hidden || documentRefreshPending) return;
+  documentRefreshPending = true;
+  try {
+    const opened = JSON.parse(await rpc('editor-read-if-changed', { page: current.page, revision: current.revision }, root)) as Document | null;
+    if (!opened?.revision || busy || activeImageTab || documentState !== current || root !== projectRoot || version !== documentRequestVersion) return;
+    if (dirty || editor.value !== current.content) {
+      if (reportedDocumentUpdates.get(current) !== opened.revision) {
+        reportedDocumentUpdates.set(current, opened.revision);
+        status('原稿が外部で更新されました。エディターの未保存の編集は保持しています。', true);
+      }
+      return;
+    }
+    const start = editor.selectionStart, end = editor.selectionEnd;
+    const scroll = editor.scrollTop, richScroll = milkdown.scrollElement.scrollTop;
+    documentState = opened;
+    documentPersistence.state = null;
+    if (opened.content !== current.content) {
+      editor.value = opened.content;
+      editor.setSelectionRange(start, end);
+      editor.scrollTop = scroll;
+      milkdown.scrollElement.scrollTop = richScroll;
+      resetEditHistory();
+    }
+    retainDocumentTab();
+    updateSaveState();
+    updateCursor();
+    status('外部で更新された原稿を読み直しました。');
+    await Promise.all([renderPreview(), milkdown.refreshImages()]);
+  } catch {
+    // Editors may temporarily replace a file when saving; the next poll retries.
+  } finally {
+    documentRefreshPending = false;
+  }
+}
 function refreshExternalChanges(): void {
   void refreshFileTree();
+  void refreshOpenDocument();
   void captureDock.refreshVisible();
 }
 window.setInterval(refreshExternalChanges, 4000);
@@ -1130,7 +1232,6 @@ function updateAiSettingsVisibility(): void {
 function renderSettings(): void {
   if (!workspace) return;
   applyAlertIconSetting();
-  void imageAiSettings.refresh();
   input("ai-model").value = workspace.config.model;
   cliAiSettings.load({...workspace.config.cli_models,...(workspace.config.connection_type==='cli'?{[workspace.config.agent]:workspace.config.model}:{})});
   if (!briefDirty && !briefSaving) {
@@ -1211,7 +1312,6 @@ function saveAiSettings(): Promise<void> {
   const root = projectRoot;
   const version = aiEditVersion;
   const options = {
-    mkdocs_settings: workspace.config.mkdocs,
     agent: element<HTMLSelectElement>("ai-agent").value,
     model: input("ai-model").value.trim(),
     connection_type: element<HTMLSelectElement>("ai-connection-type").value,
@@ -1228,7 +1328,6 @@ function saveAiSettings(): Promise<void> {
       if (projectRoot === root) {
         workspace!.config = saved.config;
         workspace!.has_config = saved.has_config;
-        void imageAiSettings.updateShared();
         if (aiEditVersion === version) setAiSaveState("保存済み");
       }
     } catch (error) {
@@ -1289,7 +1388,7 @@ async function ensureAiSettings(): Promise<void> {
   ) {
     await rpc("save", {
       agent: agentId, model, connection_type: connectionType,
-      endpoint_url: endpointUrl, mkdocs_settings: workspace.config.mkdocs,
+      endpoint_url: endpointUrl,
     });
     await refreshWorkspace();
     renderSettings();
@@ -1408,7 +1507,9 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
   if (isAiAction) logProgress("AIエージェントへ指示を送り、応答を待っています。");
   status(isAiAction ? "AIを実行中…" : "処理中…");
   let succeeded = false;
-  let completionMessage = `${action === "build-mkdocs" ? "MkDocsでHTMLを作成しました" : action === "recapture" || action === "capture-window" ? "画像を更新し、撮影元を保存しました" : "処理が完了しました"}。`;
+  let completionMessage = action === "build-zensical" ? "ZensicalでHTMLを作成しました。" :
+    action === "build-mkdocs" ? "MkDocsでHTMLを作成しました。" :
+    action === "recapture" || action === "capture-window" ? "画像を更新し、撮影元を保存しました。" : "処理が完了しました。";
   let completionHasError = false;
   try {
     const actionRoot=projectRoot;
@@ -1595,27 +1696,67 @@ function updateEditorEmptyState(): void {
   element('empty-create-page').hidden = !workspace;
   element('panel-editor').classList.toggle('editor-is-empty', empty);
   setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),!projectRoot||captureInsertionRunning);
-  for (const id of ['reader-review','generate-ai-image','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  for (const id of ['reader-review','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  setButtonDisabled(element<HTMLButtonElement>('site-export-open'), !projectRoot);
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
 element('empty-select-page').addEventListener('click', () => { layoutManager?.focusPanel('file-tree'); element('page-list').tabIndex = -1; element('page-list').focus(); });
 element('save-page').addEventListener('click', () => { void saveFromEditor(); });
 element('save-retry').addEventListener('click', () => { void saveFromEditor(false); });
+async function saveReviewedConflict(owner: Document, root: string, draft: string, stored: Document): Promise<void> {
+  const current = () => root === projectRoot && owner === documentState && editor.value === draft && !activeImageTab;
+  if (!current() || document.querySelector('#selection-diff-dialog[open]')) return;
+  const review = await reviewSelection(owner.page, stored.content, draft, {accepted:[],feedback:''}, '', false, undefined, true);
+  if (review.action !== 'adopt' || !review.accepted.length) return;
+  if (!current()) { status('編集中の原稿が変わりました。保存する変更を選び直してください。', true); return; }
+  await work(async () => {
+    documentPersistence.state = { owner, state: 'saving' };
+    updateSaveState();
+    try {
+      const saved = JSON.parse(await rpc('editor-save', {
+        page: owner.page, json: { content: review.content, revision: stored.revision },
+      }, root)) as Document;
+      if (root !== projectRoot || owner !== documentState || activeImageTab) return;
+      if (editor.value === draft) editor.value = saved.content;
+      documentState = saved;
+      documentPersistence.state = null;
+      dirty = editor.value !== saved.content;
+      retainDocumentTab();
+      updateSaveState();
+      await renderPreview();
+      status(`${owner.page}を保存しました。`);
+    } catch (error) {
+      if (root === projectRoot && owner === documentState) {
+        documentPersistence.state = { owner, state: 'error', message: String(error) };
+        updateSaveState();
+      }
+      throw error;
+    }
+  });
+}
 element('save-conflict').addEventListener('click', () => { void work(async () => {
   if (!documentState) return;
   const owner = documentState, root = projectRoot, draft = editor.value;
   const stored = JSON.parse(await rpc('editor-read', { page: owner.page }, root)) as Document;
   if (root !== projectRoot || owner !== documentState || draft !== editor.value) return;
   const {dialog,body} = featureDialog('外部変更を確認'); dialog.id = 'save-conflict-dialog';
-  const note = document.createElement('p'); note.textContent = '編集中の内容は保持しています。保存先の内容と比較してください。';
+  const note = document.createElement('p'); note.textContent = '編集中の内容は保持しています。保存先と比べて、保存する変更を選べます。';
   const columns = document.createElement('div'); columns.className = 'selection-diff-columns';
   for (const [label,content] of [['編集中の内容',draft],['保存先の内容',stored.content]]) {
     const column = document.createElement('section'), heading = document.createElement('h3'), pre = document.createElement('pre'); heading.textContent = label; pre.textContent = content; column.append(heading,pre); columns.append(column);
   }
   const keep = document.createElement('button'); keep.textContent = '編集中の内容を保持して閉じる'; keep.onclick = () => dialog.close();
+  const review = document.createElement('button'); review.textContent = '変更を選んで保存'; review.className = 'primary';
+  review.onclick = () => {
+    dialog.addEventListener('close', () => {
+      void saveReviewedConflict(owner, root, draft, stored).catch(error => status(String(error), true));
+    }, {once:true});
+    dialog.close();
+  };
   const reload = document.createElement('button'); reload.textContent = '保存先の内容を読み直す'; reload.onclick = () => { dialog.close(); if(documentState)void work(async()=>{if(!await confirmDiscard()||!documentState)return;await openPage(documentState.page,false);}); };
-  body.append(note,columns,keep,reload);
+  const actions = document.createElement('div'); actions.className = 'actions'; actions.append(keep, reload, review);
+  body.append(note,columns,actions);
 }); });
 element('workspace-name').addEventListener('keydown', event => { if (event.key === 'ArrowDown' && !document.getElementById('workspace-history-dialog')) { event.preventDefault(); element('workspace-name').click(); } });
 for (const id of ['tree-create-menu']) {
@@ -1785,7 +1926,6 @@ function runKeyboardCommand(command: ShortcutCommand, event: KeyboardEvent): voi
     document.querySelector<HTMLButtonElement>(`#panel-editor button[data-editor-view="${next}"]`)!.click();return;
   }
   if(command==='refresh'){void work(renderPreview);return;}
-  if(command==='selectionAi'){void createSelectionDocument();return;}
   if(milkdown.runShortcut(command))return;
   if(editor.readOnly||editor.disabled)return;
   if(command==='undo'||command==='redo'){stepEditHistory(command==='undo'?-1:1);return;}
@@ -2618,121 +2758,123 @@ async function showTargetApplication(){
 }
 element('target-application-open').addEventListener('click',()=>{void showTargetApplication().catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
+element('site-export-open').addEventListener('click', () => {
+  if (busy || !projectRoot || document.querySelector('#site-export-dialog[open]')) return;
+  const {dialog, body} = featureDialog('HTML出力');
+  dialog.id = 'site-export-dialog';
+  const controls = element('site-export-controls');
+  element<HTMLButtonElement>('browse-site-output').hidden = !native;
+  element<HTMLButtonElement>('open-site-html').hidden = !native;
+  input('site-output-path').value = workspace?.config.output ?? '';
+  element('site-build-result').textContent = '';
+  body.append(controls);
+  dialog.addEventListener('close', () => element('site-export-host').append(controls), {once: true});
+});
+function browseSiteOutput(dialogId: string, fieldId: string, resultId: string): void {
+  const root = projectRoot;
+  const dialog = document.querySelector<HTMLDialogElement>(`#${dialogId}[open]`);
+  if (!native || !root || !dialog || busy) return;
+  void work(async () => {
+    const field = input(fieldId);
+    try {
+      const selected = await invoke<string|null>('choose_path', {
+        initialPath: field.value.trim(), folder: true, projectRoot: root,
+      });
+      if (selected && dialog.open && root === projectRoot) {
+        field.value = selected;
+        element(resultId).textContent = '';
+      }
+    } catch (error) {
+      if (dialog.open && root === projectRoot) element(resultId).textContent = String(error);
+      throw error;
+    }
+  });
+}
+element('browse-site-output').addEventListener('click', () => browseSiteOutput('site-export-dialog', 'site-output-path', 'site-build-result'));
+element('settings-site-browse').addEventListener('click', () => browseSiteOutput('panel-settings', 'settings-site-output', 'settings-site-result'));
+async function saveSiteOutput(fieldId = 'site-output-path', resultId = 'site-build-result', siteName?: string): Promise<string> {
+  const root = projectRoot;
+  const path = input(fieldId);
+  const value = path.value.trim();
+  path.disabled = true;
+  try {
+    if (!value) throw new Error('出力先フォルダーを入力してください。');
+    if (siteName !== undefined && !siteName) throw new Error('サイト名を入力してください。');
+    if (value === workspace?.config.output && (siteName === undefined || siteName === workspace.config.mkdocs.site_name)) {
+      path.value = value;
+      return value;
+    }
+    const {output} = JSON.parse(await rpc('save-html-output', {output: value, ...(siteName === undefined ? {} : {json:{site_name:siteName}})}, root)) as {output: string};
+    if (projectRoot !== root || !workspace) throw new Error('プロジェクトが切り替わりました。');
+    workspace.config.output = output;
+    if (siteName !== undefined) workspace.config.mkdocs.site_name = siteName;
+    path.value = output;
+    return output;
+  } catch (error) {
+    element(resultId).textContent = String(error);
+    throw error;
+  } finally {
+    path.disabled = false;
+  }
+}
+element('settings-site-save').addEventListener('click', () => {
+  if (!projectRoot) return;
+  void work(async () => {
+    const name = input('settings-site-name');
+    const siteName = name.value.trim();
+    name.disabled = true;
+    try {
+      await saveSiteOutput('settings-site-output', 'settings-site-result', siteName);
+      name.value = siteName;
+      element('settings-site-result').textContent = '保存しました。';
+    } finally {
+      name.disabled = false;
+    }
+  });
+});
+element('save-site-output').addEventListener('click', () => {
+  void work(async () => {
+    const output = await saveSiteOutput();
+    element('site-build-result').textContent = `出力先を保存しました · ${output}`;
+  });
+});
+element('build-site').addEventListener('click', () => {
+  const root = projectRoot;
+  const action = element<HTMLSelectElement>('site-engine').value === 'build-zensical' ? 'build-zensical' : 'build-mkdocs';
+  void work(async () => {
+    const output = await saveSiteOutput();
+    await runAction(action, {output}, 'site-build-result');
+    if (!native || root !== projectRoot) return;
+    const result = element('site-build-result');
+    try {
+      await invoke('open_output_html', {root, output});
+      result.textContent += '\n出力済みのHTMLを開きました。';
+    } catch (error) {
+      const message = `HTMLを作成しましたが、自動で開けませんでした。\n${String(error)}`;
+      result.textContent += `\n${message}`;
+      status(message, true);
+    }
+  });
+});
+element('open-site-html').addEventListener('click', () => {
+  if (!native || !projectRoot) return;
+  const result = element('site-build-result');
+  void work(async () => {
+    try {
+      await invoke('open_output_html', {root: projectRoot, output: input('site-output-path').value.trim()});
+      result.textContent = '出力済みのHTMLを開きました。';
+    } catch (error) {
+      result.textContent = String(error);
+      throw error;
+    }
+  }, {lockControls: false});
+});
 setBusy(false);
 updateSaveState();
 {
   const initialRoot = params.get("root") || localStorage.getItem("manual-studio-project");
   if (initialRoot) void work(() => openProject(initialRoot));
 }
-
-function captureAiSelection():SelectionDraft|undefined {
-  if(milkdown.isRichEditing)return milkdown.captureSelectionEdit()||undefined;
-  const start=editor.selectionStart,end=editor.selectionEnd,expected=editor.value;
-  return {text:expected.slice(start,end),apply:content=>{
-    if(editor.value!==expected)throw new Error('原稿が変更されました。範囲を選び直してください。');
-    replaceMarkdown(start,end,content,0,content.length);
-  }};
-}
-async function createSelectionDocument(initial="",capturedSelection?:SelectionDraft,action?:SelectionAction):Promise<boolean|void>{
-  if(busy||!documentState||activeImageTab)return;
-  const owner=documentState,root=projectRoot,insertionAt=editor.selectionStart;
-  const selection=capturedSelection||captureAiSelection();
-  if(!selection){status('挿入する位置を選択してください。',true);return;}
-  const captured=editor.value;
-  let proofreading:ProofreadingOptions|undefined=action?.proofreading;
-  let instruction=action?.instruction || await askSelectionInstruction(selection.text,initial,'',options=>{proofreading=options;});
-  if(!instruction)return;
-  if(root!==projectRoot||documentState?.page!==owner.page||editor.value!==captured)throw new Error('原稿が変更されました。範囲を選び直してください。');
-  await savedBeforeOperation(true);
-  const expected=editor.value,page=owner.page,revision=documentState?.revision;
-  let previousCandidate:{content:string;accepted:number[];feedback:string}|undefined;
-  while(instruction){
-    const includeScreenshots=action?.includeScreenshots??/スクリーンショット|スクショ|撮影|screenshot|screen capture/i.test(instruction);
-    if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
-    let candidate:string|undefined,failure="",cancelled=false;
-    const variants:Array<{id:string;content?:string;error?:string}>=[];
-    await work(async()=>{
-      await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('selection-generate',root,action?.cliAgent);let succeeded=false;
-      try{
-        candidate=(JSON.parse(await rpc('selection-generate',{page,json:{body:expected,selected:selection.text,mode:action?.mode==='consult'?'consult':selection.text?"replace":"insert",cli_agent:action?.cliAgent,include_screenshots:includeScreenshots,insertion_at:insertionAt,instruction,revision}},root)) as {content:string}).content;
-        if(proofreading?.enabled&&action?.mode!=='consult'){
-          for(const profile of proofreading.profiles){
-            if(generationCancelRequest)break;
-            try{
-              if(!profile.rules)throw new Error('推敲ルールが空です。');
-              const result=JSON.parse(await rpc('selection-generate',{page,json:{body:expected,selected:selection.text,mode:selection.text?'replace':'insert',insertion_at:insertionAt,instruction:'指定したルールで原文を推敲してください。',revision,cli_agent:action?.cliAgent,proofreading:{source:candidate,rules:profile.rules}}},root)) as {content:string};
-              variants.push({id:profile.id,content:result.content});
-            }catch(error){variants.push({id:profile.id,error:String(error)});logAiFailure(error);}
-          }
-        }
-        succeeded=true;
-      }
-      catch(error){failure=String(error);logAiFailure(error);throw error;}
-      finally{cancelled=Boolean(generationCancelRequest);await stopAiProgress(succeeded);}
-    });
-    if(candidate!==undefined&&includeScreenshots&&action?.mode!=='consult'&&root===projectRoot)await refreshWorkspace(false,false);
-    if(candidate===undefined){
-      if(root!==projectRoot||documentState?.page!==page||editor.value!==expected)return;
-      if(previousCandidate){candidate=previousCandidate.content;failure=`再作成を完了できませんでした。前の候補と採用の選択を保持しています。${failure}`;}
-      else{if(cancelled||action?.mode==='consult')return;instruction=await askSelectionInstruction(selection.text,instruction,failure||'候補を作成できませんでした。');continue;}
-    }
-    if(root!==projectRoot||documentState?.page!==page||editor.value!==expected)return;
-    if(cancelled)return;
-    if(variants.length){
-      const final=await reviewProofreading(selection.text||candidate,selection.text?[{id:'AI書き直し',content:candidate},...variants]:variants);
-      if(final===null)return;
-      candidate=final;
-    }
-    if(action?.mode==='consult'){
-      const followup=await showSelectionAdvice(candidate);
-      if(followup===null)return;
-      if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
-      instruction=`次の相談内容と回答を踏まえて、選択範囲を書き直してください。\n\n相談内容:\n${instruction}\n\nAIからの回答:\n${candidate}\n\n追加指示:\n${followup||'回答の提案に沿って、分かりやすく書き直してください。'}`;
-      action={...action,mode:'rewrite',instruction};
-      previousCandidate=undefined;
-      continue;
-    }
-    const decision=variants.length?{action:'adopt' as const,content:candidate,accepted:[],feedback:''}:await reviewSelection(page,selection.text,candidate,failure?previousCandidate:undefined,failure);
-    if(decision.action==='restore')return;
-    if(decision.action==='retry'){previousCandidate={content:candidate,accepted:decision.accepted,feedback:decision.feedback};instruction=decision.feedback||instruction;continue;}
-    if(root!==projectRoot||documentState?.page!==page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
-    if(decision.content===selection.text){status("採用する変更はありません。本文を保持しました。");return;}
-    selection.apply(decision.content);updateHistoryButtons();status(selection.text?'指定範囲へAI文書を反映しました。':'カーソル位置にAI文書を挿入しました。');return true;
-  }
-}
-window.addEventListener('manual-studio-selection-ai',()=>{
-  if(busy||!documentState||activeImageTab)return;
-  const root=projectRoot,page=documentState.page,expected=editor.value,selection=captureAiSelection();
-  if(!selection)return;
-  if(!selection.text.trim()){
-    void createSelectionDocument('',selection).catch(error=>status(String(error),true));return;
-  }
-  void (async()=>{
-    const action=await askSelectionAction(selection.text,workspace?.agents,workspace?.config.connection_type==='cli'?workspace.config.agent:'');
-    if(!action)return;
-    if(root!==projectRoot||documentState?.page!==page||editor.value!==expected)throw new Error('原稿が変更されました。範囲を選び直してください。');
-    await createSelectionDocument('',selection,action);
-  })().catch(error=>status(String(error),true));
-});
-if(native)refreshEditorContextMenu=setupEditorContextMenu({
-  isEditorTarget:target=>target===editor||target instanceof Node&&milkdown.host.contains(target),
-  state:()=>{
-    const active=Boolean(documentState&&!activeImageTab&&(document.activeElement===editor||milkdown.host.contains(document.activeElement)));
-    return {active,enabled:active&&!busy&&Boolean(captureAiSelection()?.text)};
-  },
-  capture:()=>{
-    if(busy||!documentState||activeImageTab)return;
-    const root=projectRoot,page=documentState.page,expected=editor.value,selection=captureAiSelection();
-    if(!selection?.text)return;
-    return ()=>{
-      if(root!==projectRoot||page!==documentState?.page||editor.value!==expected){status('原稿が変更されました。範囲を選び直してください。',true);return;}
-      void createSelectionDocument('',selection).catch(error=>status(String(error),true));
-    };
-  },
-  sendState:(active,enabled)=>invoke('set_editor_context_menu_state',{active,enabled}),
-  report:error=>console.error('エディターの右クリックメニューを更新できません。',error),
-});
-
 
 function saveReaderReviewSession(root: string, page: string, expected: string, report: ReaderReport): void {
   try { localStorage.setItem(`manual-studio-reader-review:${root}:${page}`, JSON.stringify({ expected, report })); }
@@ -2793,32 +2935,32 @@ function installReaderReport(root:string,page:string,expected:string,result:Read
     return true;
   };
 }
-async function reviewCurrentDocument():Promise<void>{
+element('reader-review').addEventListener('click',()=>{
   if(busy||!documentState||activeImageTab)return;
-  const root=projectRoot,page=documentState.page,captured=editor.value;
-  const start=editor.selectionStart,end=editor.selectionEnd;
-  await savedBeforeOperation(true);await saveAiSettings();
-  const choices=await askReader(workspace?.brief||'',start!==end,async scope=>JSON.parse(await rpc('document-review-capabilities',{page,json:{body:captured,revision:documentState?.revision,range:scope==='selection'?{start,end}:undefined}},root)) as ReviewCapabilities,reopenReaderReview?()=>{if(!reopenReaderReview?.())status('原稿が変更されています。レビューを実行し直してください。',true);}:undefined,element('manuscript-check'));if(choices===null)return;
-  if(root!==projectRoot||documentState?.page!==page||editor.value!==captured)throw new Error('原稿が変更されました。レビューを実行し直してください。');
-  await savedBeforeOperation(true);let expected=editor.value;const revision=documentState?.revision;
-  const range=choices.scope==='selection'?{start,end}:undefined;
-  let report:ReaderReport|undefined;
-  await work(async()=>{
-    await saveAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('document-review',root);let success=false;
-    try{report=JSON.parse(await rpc('document-review',{page,json:{body:expected,reader:choices.reader,revision,range}},root)) as ReaderReport;success=true;}
-    catch(error){logAiFailure(error);throw error;}
-    finally{await stopAiProgress(success);}
-  });
-  const valid=()=>root===projectRoot&&documentState?.page===page&&editor.value===expected;
-  if(!valid()){status('原稿が変更されました。レビューを実行し直してください。',true);return;}
-  if(report){
-    document.querySelector<HTMLDialogElement>('#reader-review-results')?.close();
-    installReaderReport(root,page,expected,report);
-    saveReaderReviewSession(root,page,expected,report);
-    reopenReaderReview?.();status(`レビュー完了：指摘 ${report.issues.length}件。`);
+  const {dialog,body}=featureDialog('原稿チェック');
+  const checks=element('manuscript-check');
+  body.append(checks);
+  const terminal=document.createElement('button');
+  terminal.type='button';
+  terminal.textContent='AIターミナルを開く';
+  terminal.onclick=()=>{
+    dialog.close();
+    if(layoutManager&&!layoutManager.isPanelVisible('terminal'))layoutManager.togglePanel('terminal',true);
+    chooseTab('terminal');
+  };
+  body.append(terminal);
+  if(reopenReaderReview){
+    const previous=document.createElement('button');
+    previous.type='button';
+    previous.textContent='以前のレビュー結果を表示';
+    previous.onclick=()=>{
+      dialog.close();
+      if(!reopenReaderReview?.())status('現在の原稿と一致するレビュー結果がありません。',true);
+    };
+    body.append(previous);
   }
-}
-element('reader-review').addEventListener('click',()=>{void reviewCurrentDocument().catch(error=>status(String(error),true));});
+  dialog.addEventListener('close',()=>element('manuscript-check-host').append(checks),{once:true});
+});
 
 let captureInsertionRunning=false;
 async function insertScreenshotHere():Promise<void>{

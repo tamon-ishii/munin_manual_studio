@@ -26,15 +26,8 @@ pub fn save_paths(root: &Path, options: &Value) -> Result<Value, String> {
     let assets = field("assets")?;
     let output = field("output")?;
     let asset_path = config::project_path(root, &assets)?;
-    let output_path = config::project_path(root, &output)?;
     let docs_path = config::project_path(root, &docs)?;
-    if docs_path == output_path
-        || docs_path.starts_with(&output_path)
-        || (output_path.starts_with(&docs_path)
-            && !(docs == "." && output_path.starts_with(config::project_path(root, ".munin")?)))
-    {
-        return Err("原稿フォルダーとHTML出力先は分けてください。原稿が「.」の場合は出力先を「.munin/site」などに指定できます。".into());
-    }
+    let output_path = config::validate_output_path(root, &docs, &docs_path, &output)?;
     if asset_path.starts_with(&output_path) || output_path.starts_with(&asset_path) {
         return Err("画像保存先とHTML出力先は重ならない場所にしてください。".into());
     }

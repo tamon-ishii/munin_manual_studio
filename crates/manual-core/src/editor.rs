@@ -95,6 +95,15 @@ pub fn read(root: &Path, page: &str) -> Result<Document, String> {
     Ok(document)
 }
 
+pub(crate) fn read_if_changed(root: &Path, page: &str, expected: &str) -> Result<Option<Document>, String> {
+    let mut document = read_raw(root, page)?;
+    if document.revision == expected {
+        return Ok(None);
+    }
+    document.content = crate::legacy_ai::plain_markdown(&document.content, Some(&root.join("manual/ai")));
+    Ok(Some(document))
+}
+
 /// Original markup is needed only by explicit legacy migration and history readers.
 pub(crate) fn read_for_ai(root:&Path,page:&str,options:&serde_json::Value)->Result<Document,String>{
     let mut document=read(root,page)?;
@@ -140,7 +149,7 @@ pub(crate) fn save_exact(
         Err(error) => return Err(error.to_string()),
     };
     if existing.as_deref().map(revision).as_deref() != expected_revision {
-        return Err("別の画面やツールで原稿が更新されています。編集内容をコピーしてから原稿を読み直してください。".into());
+        return Err("別の画面やツールで原稿が更新されています。外部変更と編集中の内容を確認してください。".into());
     }
     let parent = path.parent().ok_or("Invalid Markdown path")?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -160,7 +169,7 @@ pub(crate) fn save_exact(
         .map_err(|error| error.to_string())?;
     if let Some(bytes) = existing {
         if fs::read(&path).map_err(|error| error.to_string())? != bytes {
-            return Err("保存中に原稿が更新されました。原稿を読み直してください。".into());
+            return Err("保存中に原稿が更新されました。最新の外部変更を確認してください。".into());
         }
         temporary
             .persist(&path)

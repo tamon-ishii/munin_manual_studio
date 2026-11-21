@@ -583,6 +583,7 @@ pub fn agent_json(
     agent_json_in(root, prompt, schema, agent, model, false, false)
 }
 
+#[cfg(test)]
 pub(crate) fn agent_json_cli(root:&Path,prompt:&str,schema:&Value,agent:&str,model:&str)->Result<Value,String>{
     agent_json_in(root,prompt,schema,agent,model,true,true)
 }

@@ -1,7 +1,9 @@
 //! Capture and rendering are executed by Studio; the AI only returns structured plans.
 use serde_json::{json,Value};
+#[cfg(test)]
 use std::{fs,io::Write,path::Path};
 
+#[cfg(test)]
 pub fn generate(root:&Path,page:&str,context:&Value,mut ai:impl FnMut(&str,&Value)->Result<Value,String>)->Result<Value,String>{
     let canonical=root.canonicalize().map_err(|e|e.to_string())?;
     let windows=crate::terminal_tools::invoke_isolated(root,&json!({"root":root,"action":"windows"}))?;
@@ -11,6 +13,7 @@ pub fn generate(root:&Path,page:&str,context:&Value,mut ai:impl FnMut(&str,&Valu
     },&mut ai)
 }
 
+#[cfg(test)]
 fn generate_with(root:&Path,page:&str,context:&Value,windows:&Value,mut capture:impl FnMut(&str,&Path)->Result<(),String>,ai:&mut impl FnMut(&str,&Value)->Result<Value,String>)->Result<Value,String>{
     let checkpoint=crate::agent::cancellation_checkpoint(root);
     let check=||crate::agent::check_cancelled(root,&checkpoint);

@@ -14,6 +14,7 @@ struct PtySession {
     output_buffer: Arc<Mutex<Vec<u8>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     owner: Option<String>,
+    insertion: Option<tempfile::TempDir>,
 }
 
 static SESSIONS: OnceLock<Mutex<HashMap<String, PtySession>>> = OnceLock::new();
@@ -45,7 +46,7 @@ fn pty_spawn_owned(
     rows: u16,
     owner: Option<&str>,
 ) -> Result<String, String> {
-    pty_spawn_owned_in(command,args,cols,rows,owner,root)
+    pty_spawn_owned_in(command,args,cols,rows,owner,root,None)
 }
 
 pub fn working_directory(root:&Path,value:Option<&str>)->Result<std::path::PathBuf,String>{
@@ -59,7 +60,7 @@ pub fn working_directory(root:&Path,value:Option<&str>)->Result<std::path::PathB
     Ok(directory)
 }
 
-fn pty_spawn_owned_in(command:&str,args:&[String],cols:u16,rows:u16,owner:Option<&str>,working_directory:&Path)->Result<String,String>{
+fn pty_spawn_owned_in(command:&str,args:&[String],cols:u16,rows:u16,owner:Option<&str>,working_directory:&Path,insertion:Option<tempfile::TempDir>)->Result<String,String>{
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -126,6 +127,7 @@ fn pty_spawn_owned_in(command:&str,args:&[String],cols:u16,rows:u16,owner:Option
         output_buffer,
         child,
         owner: owner.map(String::from),
+        insertion,
     };
 
     // Closing a window can race with the spawn response. Keep an owner marker
@@ -286,12 +288,14 @@ pub fn execute_pty_request(
                 .or_else(|| options.get("ownerId"))
                 .and_then(|v| v.as_str());
             let directory=working_directory(root,options["working_directory"].as_str())?;
-            if options["studio_mcp"] == true {
-                let mut connection = crate::mcp::terminal_args(command, root)?;
+            let insertion = if options["studio_mcp"] == true && matches!(command, "codex" | "claude") {
+                let mailbox = tempfile::tempdir().map_err(|error| error.to_string())?;
+                let mut connection = crate::mcp::terminal_args(command, root, mailbox.path())?;
                 connection.append(&mut args);
                 args = connection;
-            }
-            let session_id = pty_spawn_owned_in(command, &args, cols, rows, owner,&directory)?;
+                Some(mailbox)
+            } else { None };
+            let session_id = pty_spawn_owned_in(command, &args, cols, rows, owner,&directory,insertion)?;
             serde_json::to_string(&serde_json::json!({ "session_id": session_id }))
                 .map_err(|e| e.to_string())
         }
@@ -315,8 +319,22 @@ pub fn execute_pty_request(
                 .and_then(|v| v.as_str())
                 .ok_or("session_id is required")?;
             let (data, alive) = pty_read(session_id)?;
-            serde_json::to_string(&serde_json::json!({ "data": data, "alive": alive }))
+            let mut sessions = get_sessions().lock().map_err(|error| error.to_string())?;
+            let insertion = sessions.get_mut(session_id).and_then(|session| {
+                if alive { session.insertion.as_ref() } else { session.insertion = None; None }
+            });
+            let pending = insertion.and_then(|directory| crate::mcp_insert::pending(directory.path()).ok().flatten());
+            serde_json::to_string(&serde_json::json!({ "data": data, "alive": alive, "insert": pending }))
                 .map_err(|e| e.to_string())
+        }
+        "pty-insert-result" => {
+            let session_id = options["sessionId"].as_str().ok_or("sessionId is required")?;
+            let id = options["id"].as_str().ok_or("Insertion ID is required")?;
+            let sessions = get_sessions().lock().map_err(|error| error.to_string())?;
+            let mailbox = sessions.get(session_id).and_then(|session| session.insertion.as_ref())
+                .ok_or("Studio insertion session has ended")?;
+            crate::mcp_insert::acknowledge(mailbox.path(), id, &options["result"])?;
+            Ok("{\"ok\":true}".into())
         }
         "pty-resize" => {
             let session_id = options
@@ -549,7 +567,7 @@ process.stdin.setRawMode(true);
 process.stdin.on('data',data=>{require('node:fs').appendFileSync('terminal-input.txt',data);console.log('NODE:'+String(data).trim());});
 "#).unwrap();
         let work=root.path().join("application source");std::fs::create_dir(&work).unwrap();
-        let id=pty_spawn_owned_in(&shim.to_string_lossy(),&[],80,24,None,&work).unwrap();
+        let id=pty_spawn_owned_in(&shim.to_string_lossy(),&[],80,24,None,&work,None).unwrap();
         let mut output=String::new();let started=std::time::Instant::now();
         while !output.contains("NODE_READY") && started.elapsed().as_secs()<5 {
             output.push_str(&pty_read(&id).unwrap().0);thread::sleep(std::time::Duration::from_millis(20));

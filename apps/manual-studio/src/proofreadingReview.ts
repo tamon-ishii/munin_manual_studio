@@ -2,11 +2,11 @@ import {featureDialog} from './imageDialogs';
 import {comparisonBlocks} from './proofreadingDiff';
 import {openProofreadingWindow} from './proofreadingWindow';
 
-export function reviewProofreading(original:string,variants:Array<{id:string;content?:string;error?:string}>,options:{selections?:number[];standalone?:boolean}={}):Promise<string|null>{
+export function reviewProofreading(original:string,variants:Array<{id:string;content?:string;error?:string}>,options:{selections?:number[];standalone?:boolean;separate?:boolean;signal?:AbortSignal}={}):Promise<string|null>{
   // A DOM dialog is clipped to its owning webview, regardless of its CSS size.
   // Desktop comparisons must start in an independent native window.
-  if('__TAURI_INTERNALS__' in window&&!options.standalone){
-    return openProofreadingWindow({original,variants,selections:options.selections??[]},new AbortController().signal);
+  if(!options.standalone&&(options.separate||'__TAURI_INTERNALS__' in window)){
+    return openProofreadingWindow({original,variants,selections:options.selections??[]},options.signal??new AbortController().signal);
   }
   const {dialog,body}=featureDialog('推敲結果の差分比較');dialog.id='proofreading-dialog';
   const help=document.createElement('p');help.textContent='原文と各推敲結果を横に並べて比較します。差分ごとに採用する列を選ぶと、右端の最終結果に反映されます。';

@@ -12,7 +12,7 @@
   <nav class="workspace-tabs" aria-label="作業">
     <button type="button" id="create-ai-template" data-ui-icon="sparkle" aria-haspopup="dialog">AIで雛形作成</button>
     <button type="button" id="target-application-open" data-ui-icon="settings" aria-haspopup="dialog">対象アプリケーションの設定</button>
-    <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影して撮影リソース一覧へ登録">撮影</button><button type="button" id="reader-review" data-ui-icon="review">AIレビュー</button><button type="button" id="generate-ai-image" data-ui-icon="image" title="AIで画像を作成し、プレビューして原稿へ挿入" aria-haspopup="dialog">AI作画</button></div>
+    <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影して撮影リソース一覧へ登録">撮影</button><button type="button" id="reader-review" data-ui-icon="review" aria-haspopup="dialog">原稿チェック</button><button type="button" id="site-export-open" aria-haspopup="dialog">HTML出力</button></div>
   </nav>
   <div class="app-layout" id="app-layout"></div>
   <div id="layout-panel-pool" style="display:none">
@@ -111,9 +111,18 @@
   </dialog>
   <dialog id="panel-settings" class="panel-dialog"><div class="panel-header"><h1>設定</h1><button type="button" data-close-dialog="panel-settings">閉じる</button></div>
     <div class="card" id="keyboard-shortcut-settings"></div>
+    <div class="card" id="html-output-settings">
+      <label for="settings-site-name">サイト名</label>
+      <input id="settings-site-name" type="text">
+      <label for="settings-site-output">出力先フォルダー</label>
+      <div class="folder-picker">
+        <input id="settings-site-output" type="text">
+        <button id="settings-site-browse" type="button" data-ui-icon="folder" hidden>参照…</button>
+      </div>
+      <div class="actions"><button id="settings-site-save" type="button">保存</button><span id="settings-site-result" role="status" aria-live="polite"></span></div>
+    </div>
     <div class="card" id="markits-shortcut-settings"><h2>MarkItsの撮影設定</h2><label><input type="checkbox" id="capture-default-include-cursor" /> 新規撮影でカーソルを含める</label><p id="capture-default-include-cursor-status" role="status"></p><p>アプリ外でも使う撮影ショートカットです。キーを選ぶと自動保存します。初期値はCtrl+Shift+Eです。</p><label>キーの組み合わせ<input id="markits-capture-key" readonly placeholder="ここを選んでキーを押す" /></label><button type="button" id="markits-capture-key-save">撮影キーを保存</button><button type="button" id="markits-capture-key-reset">Ctrl+Shift+Eに戻す</button><p id="markits-capture-key-status" role="status" aria-live="polite"></p></div>
     <div class="card"><h2>文章・図の生成</h2><div class="settings-grid"><label for="ai-connection-type">接続方式<select id="ai-connection-type"><option value="none">後で設定する（AI未設定）</option><option value="cli">CLIツール</option><option value="local_llm">ローカルLLM (Ollama / LM Studio)</option><option value="api">クラウドAPI (OpenAI互換)</option></select></label><label id="ai-agent-label" for="ai-agent">AIエージェント<select id="ai-agent"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="grok">Grok Build</option><option value="agy">Agy</option></select></label><label id="ai-endpoint-url-label" for="ai-endpoint-url">エンドポイントURL<input id="ai-endpoint-url" placeholder="http://localhost:11434/v1" /></label><label id="ai-api-key-label" for="ai-api-key">APIキー<input id="ai-api-key" type="password" placeholder="sk-... (ローカル保存)" autocomplete="off" /></label><label id="ai-model-label" for="ai-model">AIモデル（省略可）<input id="ai-model" placeholder="（省略時は既定モデル）" /></label></div><p class="muted">AI設定は変更すると自動保存します。APIキーはこの端末でプロジェクト・接続先ごとに保存します。</p><button id="ai-key-migrate" type="button" hidden title="接続先URLを確認してから引き継いでください">以前のAPIキーをこの接続先へ引き継ぐ</button><div class="actions"><span id="ai-save-state" role="status" aria-live="polite"></span><button type="button" id="ai-save-retry" hidden>保存を再試行</button></div><p id="ai-cli-status" role="status"></p></div>
-    <div class="card" id="image-ai-settings"></div>
 
   </dialog>
   <dialog id="panel-brief" class="panel-dialog"><div class="panel-header"><h1>執筆方針</h1><button type="button" data-close-dialog="panel-brief">閉じる</button></div><p>想定読者、文書の目的、説明する操作をまとめます。AIレビューや文章作成の参考に使います。</p><label>AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label><p class="muted">執筆方針は変更すると自動保存します。</p><button type="button" id="brief-save-retry" hidden>保存を再試行</button><p id="brief-save-state" role="status" aria-live="polite"></p></dialog>
@@ -122,6 +131,21 @@
     <div class="card"><p>原稿のローカルリンク、見出し参照、画像の欠落を確認します。外部URLの疎通は確認しません。</p><button id="quality-check" data-ui-icon="review" class="primary">原稿をチェック</button></div>
     <pre id="publish-result" class="result" aria-live="polite"></pre>
   </section></section>
+  <section id="site-export-host" hidden>
+    <div id="site-export-controls">
+      <label>HTML出力ツール <select id="site-engine"><option value="build-mkdocs">MkDocs</option><option value="build-zensical">Zensical</option></select></label>
+      <label for="site-output-path">出力先フォルダー</label>
+      <div class="folder-picker">
+        <input id="site-output-path" type="text" aria-describedby="site-output-path-help">
+        <button id="browse-site-output" type="button" data-ui-icon="folder">参照…</button>
+      </div>
+      <p id="site-output-path-help" class="muted">プロジェクト内のフォルダーを指定します。絶対パスは保存時に相対パスに変換します。</p>
+      <button id="save-site-output" type="button">出力先を保存</button>
+      <button id="build-site" type="button">HTMLを作成</button>
+      <button id="open-site-html" type="button" hidden>HTMLを開く</button>
+      <pre id="site-build-result" class="result" aria-live="polite"></pre>
+    </div>
+  </section>
   <section id="operation-progress" class="operation-progress" role="dialog" aria-modal="false" aria-labelledby="progress-label" hidden>
     <div class="progress-heading"><div><small>AI 実行ログ</small><strong id="progress-label">AI実行ログ</strong></div><div class="progress-heading-actions"><span id="progress-elapsed">00:00</span><button type="button" id="progress-cancel" data-ui-icon="close" class="progress-control" hidden>生成を中断</button><button type="button" id="progress-dismiss" data-ui-icon="close" class="progress-control" aria-label="実行ログを閉じる">閉じる</button></div></div>
     <div id="progress-track" class="progress-track" role="progressbar" aria-label="AI生成中" aria-valuetext="実行中" hidden><span></span></div>

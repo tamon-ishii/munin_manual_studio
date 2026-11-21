@@ -38,6 +38,18 @@ pub fn build(
     draft: bool,
     audience: &str,
 ) -> Result<String, String> {
+    build_with_engine(root, docs, generated, output, draft, audience, builder::SiteEngine::MkDocs)
+}
+
+pub(crate) fn build_with_engine(
+    root: &Path,
+    docs: &Path,
+    generated: &Path,
+    output: &Path,
+    draft: bool,
+    audience: &str,
+    engine: builder::SiteEngine,
+) -> Result<String, String> {
     if !["user", "developer", "maintainer"].contains(&audience) {
         return Err("--audience must be user, developer, or maintainer".into());
     }
@@ -46,7 +58,13 @@ pub fn build(
     fs::create_dir_all(&selected).map_err(|error| error.to_string())?;
     let mut pages = 0;
     let mut has_index = false;
-    for entry in WalkDir::new(docs) {
+    let published = output.canonicalize().unwrap_or_else(|_| output.to_path_buf());
+    let configured = crate::config::project_path(root, &crate::config::read_config(root).output).ok();
+    for entry in WalkDir::new(docs).into_iter().filter_entry(|entry| {
+        !entry.path().starts_with(&published)
+            && !configured.as_ref().is_some_and(|output| entry.path().starts_with(output))
+            && !(entry.depth() > 0 && entry.file_type().is_dir() && builder::is_published_site(entry.path()))
+    }) {
         let entry = entry.map_err(|error| error.to_string())?;
         if !entry.file_type().is_file() {
             continue;
@@ -77,7 +95,7 @@ pub fn build(
     if pages == 0 || !has_index {
         return Err(format!("Audience {audience} needs an included index.md"));
     }
-    builder::build(&selected, generated, output, draft, Some(root))
+    builder::build_with_engine(&selected, generated, output, draft, Some(root), engine)
 }
 
 #[cfg(test)]

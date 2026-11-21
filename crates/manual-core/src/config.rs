@@ -41,7 +41,7 @@ pub struct MkDocsConfig {
 impl Default for MkDocsConfig {
     fn default() -> Self {
         Self {
-            site_name: "ModuleLoom マニュアル".to_string(),
+            site_name: "マニュアル".to_string(),
             theme: "material".to_string(),
             language: "ja".to_string(),
             use_directory_urls: false,
@@ -124,7 +124,7 @@ pub fn read_config(root: &Path) -> ManualConfig {
         }
         return ManualConfig {
             docs: ".".into(),
-            output: ".munin/site".into(),
+            output: "site".into(),
             targets: vec![".".into()],
             assets: "assets".into(),
             ..ManualConfig::default()
@@ -275,9 +275,7 @@ pub fn project_path(root: &Path, value: &str) -> Result<PathBuf, String> {
         if fs::symlink_metadata(candidate).is_ok_and(|meta| meta.file_type().is_symlink()) {
             return Err(format!("Manual path contains a symbolic link: {value}"));
         }
-        let parent = candidate
-            .parent()
-            .ok_or_else(|| format!("Invalid manual path: {value}"))?;
+        let Some(parent) = candidate.parent() else { break };
         if parent == candidate {
             break;
         }
@@ -338,15 +336,7 @@ pub fn save_settings_with_cli_models(
     }
     if connection_type.unwrap_or("cli")=="cli" { cli_models.insert(agent.to_string(), model.trim().to_string()); }
     let docs_path = project_path(root, docs)?;
-    let output_path = project_path(root, output)?;
-
-    if docs_path == output_path
-        || docs_path.starts_with(&output_path)
-        || (output_path.starts_with(&docs_path)
-            && !(docs.trim() == "." && output_path.starts_with(project_path(root, ".munin")?)))
-    {
-        return Err("Template and output directories must be separate".to_string());
-    }
+    let output_path = validate_output_path(root, docs, &docs_path, output)?;
     let final_brief = if brief.trim().is_empty() {
         let internal = root.join(".munin/brief.md");
         let existing = if docs.trim() == "." && internal.is_file() { internal } else { root.join("manual/brief.md") };
@@ -369,7 +359,7 @@ pub fn save_settings_with_cli_models(
         return Err("Invalid model ID".to_string());
     }
 
-    let mut mkdocs_cfg = MkDocsConfig::default();
+    let mut mkdocs_cfg = read_config(root).mkdocs;
     if !mkdocs_raw.trim().is_empty() {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(mkdocs_raw) {
             if let Some(obj) = parsed.as_object() {
@@ -458,9 +448,122 @@ pub fn save_settings_with_cli_models(
     Ok(config)
 }
 
+pub(crate) fn validate_output_path(root: &Path, docs: &str, docs_path: &Path, output: &str) -> Result<PathBuf, String> {
+    let output_path = project_path(root, output)?;
+    if docs_path.starts_with(&output_path)
+        || (output_path.starts_with(docs_path) && docs.trim() != ".")
+    {
+        return Err("Template and output directories must be separate".into());
+    }
+    Ok(output_path)
+}
+
+pub(crate) fn save_html_output(root: &Path, output: &str, site_name: Option<&str>) -> Result<String, String> {
+    let site_name = site_name.map(str::trim);
+    if site_name.is_some_and(|name| name.is_empty() || name.chars().any(char::is_control)) {
+        return Err("サイト名を入力してください。".into());
+    }
+    let config = read_config(root);
+    let docs_path = project_path(root, &config.docs)?;
+    let output_path = validate_output_path(root, &config.docs, &docs_path, output.trim())?;
+    let assets = project_path(root, &config.assets)?;
+    if assets.starts_with(&output_path) || output_path.starts_with(&assets) {
+        return Err("画像保存先とHTML出力先は重ならない場所にしてください。".into());
+    }
+    if output_path.exists() && !output_path.is_dir() {
+        return Err("HTML出力先にはフォルダーを指定してください。".into());
+    }
+    let abs_root = root.canonicalize().map_err(|error| error.to_string())?;
+    let relative = output_path.strip_prefix(abs_root).map_err(|error| error.to_string())?
+        .to_str().ok_or("HTML出力先の文字コードが不正です。")?.replace('\\', "/");
+    let destination = config_path(root);
+    let existing = if destination.is_file() { destination.clone() } else { root.join("manual/config.json") };
+    let mut settings: serde_json::Value = match fs::read(existing) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| error.to_string())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+            serde_json::to_value(&config).map_err(|error| error.to_string())?,
+        Err(error) => return Err(error.to_string()),
+    };
+    let fields = settings.as_object_mut().ok_or("プロジェクト設定の形式が不正です。")?;
+    fields.insert("output".into(), serde_json::json!(&relative));
+    if let Some(site_name) = site_name {
+        fields.entry("mkdocs").or_insert_with(|| serde_json::json!({}))
+            .as_object_mut().ok_or("公開設定の形式が不正です。")?
+            .insert("site_name".into(), serde_json::json!(site_name));
+    }
+    let temporary = tempfile::NamedTempFile::new_in(root).map_err(|error| error.to_string())?;
+    serde_json::to_writer_pretty(temporary.as_file(), &settings).map_err(|error| error.to_string())?;
+    temporary.persist(destination).map_err(|error| error.to_string())?;
+    Ok(relative)
+}
+
 #[cfg(test)]
 mod asset_tests {
     use super::*;
+
+    #[test]
+    fn saving_the_brief_keeps_the_configured_site_settings() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::write(config_path(root), r#"{"docs":"docs","output":"site","mkdocs":{"site_name":"Markits マニュアル","theme":"mkdocs","language":"en","use_directory_urls":true}}"#).unwrap();
+        crate::run(root, "save", &[("--brief", "Updated brief")]).unwrap();
+        let settings = read_config(root).mkdocs;
+        assert_eq!(settings.site_name, "Markits マニュアル");
+        assert_eq!(settings.theme, "mkdocs");
+        assert_eq!(settings.language, "en");
+        assert!(settings.use_directory_urls);
+    }
+
+    #[test]
+    fn html_settings_save_changes_site_name_without_replacing_other_mkdocs_settings() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let initial = serde_json::json!({"docs":"docs","output":"old","mkdocs":{"site_name":"Old","theme":"mkdocs","custom":true}});
+        fs::write(config_path(root), initial.to_string()).unwrap();
+        assert!(save_html_output(root, "new", Some("  ")).is_err());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(config_path(root)).unwrap()).unwrap();
+        assert_eq!(saved, initial);
+        crate::run(root, "save-html-output", &[("--output", "new"), ("--json", r#"{"site_name":" MarkIts マニュアル "}"#)]).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(config_path(root)).unwrap()).unwrap();
+        assert_eq!(saved, serde_json::json!({"docs":"docs","output":"new","mkdocs":{"site_name":"MarkIts マニュアル","theme":"mkdocs","custom":true}}));
+    }
+
+    #[test]
+    fn root_manuscripts_use_a_visible_output_excluded_from_collection() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        fs::write(root.join("index.md"), "# Source").unwrap();
+        fs::create_dir(root.join("site")).unwrap();
+        fs::write(root.join("site/previous.md"), "# Previous output").unwrap();
+        let config = read_config(root);
+        assert_eq!(config.docs, ".");
+        assert_eq!(config.output, "site");
+        let sources = crate::task::collect_target_markdown_files(root, &config);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].1.file_name().unwrap(), "index.md");
+        assert_eq!(save_html_output(root, "public", None).unwrap(), "public");
+        assert!(save_html_output(root, ".", None).is_err());
+        assert!(save_html_output(root, "assets", None).is_err());
+    }
+
+    #[test]
+    fn html_output_save_changes_only_the_output_and_rejects_unsafe_locations() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        let original = serde_json::json!({"docs":"docs","output":"manual","extra":{"preserved":true}});
+        fs::write(config_path(root), original.to_string()).unwrap();
+        fs::write(root.join("a-file"), "").unwrap();
+        assert!(save_html_output(root, "../outside", None).is_err());
+        assert!(save_html_output(root, "docs/site", None).is_err());
+        assert!(save_html_output(root, "a-file", None).is_err());
+        assert_eq!(read_config(root).output, "manual");
+        assert_eq!(save_html_output(root, "  publish/site  ", None).unwrap(), "publish/site");
+        let absolute = root.canonicalize().unwrap().join("publish/site");
+        assert_eq!(save_html_output(root, absolute.to_str().unwrap(), None).unwrap(), "publish/site");
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(config_path(root)).unwrap()).unwrap();
+        assert_eq!(saved, serde_json::json!({"docs":"docs","output":"publish/site","extra":{"preserved":true}}));
+        assert!(!root.join("publish").exists());
+    }
 
     #[cfg(unix)]
     #[test]

@@ -167,6 +167,7 @@ pub fn history(root: &Path) -> Result<Value, String> {
     items.sort_by(|a, b| b["created_at"].as_str().cmp(&a["created_at"].as_str()));
     Ok(json!({"items":items}))
 }
+#[cfg(test)]
 pub fn extract_image_path(text: &str) -> Option<String> {
     let re =
         regex::Regex::new(r#"(?:file://)?((?:[A-Za-z]:[\\/]|/)[^\s"'`\(\)\[\]<>]+\.(?:png|jpg|jpeg|webp))"#).ok()?;
@@ -184,6 +185,7 @@ fn cli_arguments(provider: &str, prompt: &str) -> Vec<String> {
 fn cli_image_arguments(provider: &str, prompt: &str, reference: bool) -> Vec<String> {
     cli_image_arguments_at(provider, prompt, reference, Path::new(""))
 }
+#[cfg(test)]
 fn cli_image_arguments_at(provider: &str, prompt: &str, reference: bool, output_dir: &Path) -> Vec<String> {
     let reference_path = output_dir.join("reference.png").to_string_lossy().into_owned();
     let output_path = output_dir.join("generated.png").to_string_lossy().into_owned();
@@ -248,7 +250,15 @@ fn save_generated(
     )?;
     Ok(metadata)
 }
-#[cfg(test)]
+
+pub(crate) fn import_generated(root: &Path, path: &str, description: &str) -> Result<Value, String> {
+    use std::io::Read;
+    let file = fs::File::open(project_path(root, path)?).map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    file.take(32_000_001).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    save_generated(root, description, "mcp", "", &bytes, &Value::Null)
+}
+#[cfg(all(test, unix))]
 fn generate_via_cli_with_binary(
     root: &Path,
     prompt: &str,
@@ -257,6 +267,7 @@ fn generate_via_cli_with_binary(
 ) -> Result<Value, String> {
     run_image_cli(root, prompt, provider, binary, &Value::Null)
 }
+#[cfg(test)]
 fn run_image_cli(
     root: &Path,
     prompt: &str,
@@ -375,6 +386,7 @@ fn api_key(options: &Value) -> Option<String> {
                 .filter(|s| !s.trim().is_empty())
         })
 }
+#[cfg(test)]
 fn run_api(
     root: &Path,
     prompt: &str,
@@ -450,6 +462,7 @@ fn run_api(
         .map_err(|_| "画像生成APIの画像データが不正です。")?;
     save_generated(root, prompt, "api", model, &bytes, options)
 }
+#[cfg(test)]
 pub fn generate(root: &Path, options: &Value) -> Result<Value, String> {
     let prompt = options["prompt"].as_str().unwrap_or_default().trim();
     if prompt.is_empty() {

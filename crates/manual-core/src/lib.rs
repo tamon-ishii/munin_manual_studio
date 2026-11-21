@@ -31,6 +31,7 @@ pub mod platform;
 pub mod preview;
 pub mod pty;
 pub mod mcp;
+mod mcp_insert;
 pub mod terminal_tools;
 mod operation_script;
 mod operation_checkpoint;
@@ -112,19 +113,17 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         return capture_resources::rpc(root,action,&serde_json::from_str(raw).map_err(|e|e.to_string())?);
     }
     let allowed = [
-        "document-review",
         "document-review-capabilities",
         "draft-propose",
         "draft-plan",
         "operation-workbench",
         "target-application",
         "draft-apply",
-        "selection-generate",
+        "proofread-text",
         "screenshots-migration-plan",
         "screenshots-migrate",
         "screenshots-list",
         "image-generation-settings",
-        "image-generate",
         "image-generation-history",
         "image-generation-cancel",
         "image-generation-capabilities",
@@ -160,6 +159,8 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "template-guide",
         "build",
         "build-mkdocs",
+        "build-zensical",
+        "save-html-output",
         "deps",
         "impact",
         "context",
@@ -192,6 +193,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "pty-spawn",
         "pty-write",
         "pty-read",
+        "pty-insert-result",
         "pty-resize",
         "pty-kill",
         "pty-close-owner",
@@ -325,7 +327,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
     };
     let output_path = if let Some(o) = output_opt {
         project_path(root, o)?
-    } else if matches!(action, "build" | "build-mkdocs") {
+    } else if matches!(action, "build" | "build-mkdocs" | "build-zensical") {
         if let Some(audience) = audience_opt {
             project_path(root, &format!("{}/{audience}", cfg.output))?
         } else {
@@ -364,7 +366,6 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "image-generation-cancel" => Ok(image_generation::cancel(root, id_opt.ok_or("作画の実行IDを指定してください。")?)?.to_string()),
         "image-generation-capabilities" => Ok(image_generation::capabilities(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}")).map_err(|e|e.to_string())?).to_string()),
         "image-generation-settings" => Ok(image_generation::settings(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
-        "image-generate" => Ok(image_generation::generate(root, &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}" )).map_err(|e|e.to_string())?)?.to_string()),
         "screenshots-templates" => Ok(screenshots::templates(root)?.to_string()),
         "screenshots-diagnose" => Ok(screenshots::diagnose(root)?.to_string()),
         "screenshots-list" => Ok(screenshots::list(root)?.to_string()),
@@ -524,6 +525,8 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             preview_asset(root, page, asset)
         }
         "save" => {
+            let _lock = workflow::resource_lock(root, "manual_setting.json")?;
+            let cfg = read_config(root);
             let brief = brief_opt.unwrap_or("");
             let docs = docs_opt.unwrap_or(&cfg.docs);
             let output = output_opt.unwrap_or(&cfg.output);
@@ -560,7 +563,13 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
-        "document-review" => document_review::review(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
+        "save-html-output" => {
+            let _lock = workflow::resource_lock(root, "manual_setting.json")?;
+            let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|error| error.to_string())?;
+            let site_name = options.get("site_name").map(|value| value.as_str().ok_or("サイト名を入力してください。")).transpose()?;
+            let output = config::save_html_output(root, output_opt.ok_or("HTML出力先を指定してください。")?, site_name)?;
+            Ok(serde_json::json!({"output":output}).to_string())
+        }
         "document-review-capabilities" => document_review::capabilities(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
         "draft-propose" => match json_opt { Some(options) => draft_review::propose_options(root, options), None => draft_review::propose(root) },
         "draft-plan" => {
@@ -576,7 +585,12 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             Ok(operation_workflow::handle(root,&options)?.to_string())
         },
         "draft-apply" => draft_review::apply(root, json_opt.unwrap_or("{}")),
-        "selection-generate" => selection_ai::generate(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
+        "proofread-text" => {
+            let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|error| error.to_string())?;
+            let source = options["source"].as_str().ok_or("Provide the original Markdown.")?;
+            let skill = options["skill"].as_str().ok_or("Choose a proofreading skill.")?;
+            Ok(selection_ai::proofread(root, source, skill)?.to_string())
+        }
         "draft" => {
             author::draft(root)?;
             let state_val = get_state(root)?;
@@ -591,23 +605,26 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
-        "build" | "build-mkdocs" => {
+        "build" | "build-mkdocs" | "build-zensical" => {
+            let engine = if action == "build-zensical" { builder::SiteEngine::Zensical } else { builder::SiteEngine::MkDocs };
             let result = if let Some(audience) = audience_opt {
-                audience::build(
+                audience::build_with_engine(
                     root,
                     &templates_path,
                     &generated_path,
                     &output_path,
                     draft_flag,
                     audience,
+                    engine,
                 )
             } else {
-                builder::build(
+                builder::build_with_engine(
                     &templates_path,
                     &generated_path,
                     &output_path,
                     draft_flag,
                     Some(root),
+                    engine,
                 )
             }?;
             if action == "build-mkdocs" && result.contains("MkDocs site build skipped:") {
@@ -844,6 +861,12 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
     let project = Path::new(root);
     if action == "terminal-prepare" {return terminal_tools::prepare_in(project,request["options"]["working_directory"].as_str()).map(|value|value.to_string());}
     let options = &request["options"];
+    if action == "editor-read-if-changed" {
+        let page = options["page"].as_str().ok_or("Page is required")?;
+        let revision = options["revision"].as_str().ok_or("Revision is required")?;
+        return serde_json::to_string(&editor::read_if_changed(project, page, revision)?)
+            .map_err(|error| error.to_string());
+    }
     let id = || options["id"].as_str().ok_or("実行IDを指定してください。");
     let page = || options["page"].as_str().ok_or("原稿を指定してください。");
     if matches!(action,"execution-begin"|"execution-checkpoint"|"execution-finish"|"execution-resume"){return Err(format!("AIタグ機能は廃止されました: {action}"));}

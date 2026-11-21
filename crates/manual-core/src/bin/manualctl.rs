@@ -2,7 +2,7 @@ fn main() {
     let mut mcp_args = std::env::args_os().skip(1);
     if mcp_args.next().as_deref() == Some(std::ffi::OsStr::new(manual_core::mcp::FLAG)) {
         let result = mcp_args.next().ok_or("Studio project path is required".to_string())
-            .and_then(|root| manual_core::mcp::run(std::path::Path::new(&root)));
+            .and_then(|root| manual_core::mcp::run(std::path::Path::new(&root), mcp_args.next().as_deref().map(std::path::Path::new)));
         if let Err(error) = result {
             eprintln!("{error}");
             std::process::exit(2);
@@ -52,7 +52,7 @@ fn main() {
         }
         match args.get(1).map(String::as_str) {
             None | Some("--help" | "-h") => {
-                println!("Usage: manualctl ACTION --root PROJECT [OPTIONS]\nActions: state, editor-read, editor-save, editor-preview, selection-generate, document-review, screenshots-list, screenshots-recapture, scenario-run, build, ...");
+                println!("Usage: manualctl ACTION --root PROJECT [OPTIONS]\nActions: state, editor-read, editor-save, editor-preview, screenshots-list, screenshots-recapture, scenario-run, build, ...");
                 return;
             }
             Some(action) => manual_core::run(std::path::Path::new(root), action, &options),

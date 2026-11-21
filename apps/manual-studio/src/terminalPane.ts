@@ -11,6 +11,7 @@ export interface TerminalPaneOptions {
   getWorkingDirectory?:()=>string;
   prepareSession?: (root:string,workingDirectory:string) => Promise<string>;
   onUnload?: (ownerId: string, root: string) => void;
+  editorRequest?: (action: string, args: Record<string, unknown>, root: string, signal: AbortSignal) => Promise<Record<string, unknown>>;
   onStatusChange?: (status: "connected" | "stopped" | "starting" | "stopping" | "error", message?: string) => void;
 }
 
@@ -345,6 +346,8 @@ export function setupTerminalPane(
     void options.rpc("pty-resize", { sessionId, cols, rows }, options.getProjectRoot()).catch(() => {});
   });
 
+  let lastInsertion: { sessionId: string; id: string; result: Record<string, unknown> } | undefined;
+  let editorRequestAbort: AbortController | undefined;
   async function pollOutput(): Promise<void> {
     if (!sessionId || isPolling || disposed) return;
     const readingSessionId = sessionId;
@@ -353,7 +356,7 @@ export function setupTerminalPane(
     try {
       const raw = await options.rpc("pty-read", { sessionId: readingSessionId }, sessionRoot);
       if (readingGeneration !== sessionGeneration || readingSessionId !== sessionId || disposed) return;
-      const res = JSON.parse(raw) as { data?: string; alive?: boolean };
+      const res = JSON.parse(raw) as { data?: string; alive?: boolean; insert?: { id: string; action: string; arguments: Record<string, unknown>; expiresAt: number } };
       if (res.data) {
         terminal.write(res.data);
         if (isPromptInjecting) {
@@ -370,6 +373,28 @@ export function setupTerminalPane(
             resolve?.(finalResult);
           }
         }
+      }
+      if (res.insert && res.alive !== false) {
+        const { id, action, arguments: args, expiresAt } = res.insert;
+        if (lastInsertion?.sessionId !== readingSessionId || lastInsertion.id !== id) {
+          let result: Record<string, unknown>;
+          const controller = new AbortController();
+          editorRequestAbort = controller;
+          const timeout = setTimeout(() => controller.abort(), Math.max(0, expiresAt - Date.now()));
+          try {
+            if (!options.editorRequest || Date.now() >= expiresAt) throw new Error('エディターへの要求が期限切れになりました。');
+            result = await options.editorRequest(action, args, sessionRoot, controller.signal);
+          } catch (error) {
+            result = { error: String(error) };
+          } finally {
+            clearTimeout(timeout);
+            if (editorRequestAbort === controller) editorRequestAbort = undefined;
+          }
+          if (readingGeneration !== sessionGeneration || readingSessionId !== sessionId || disposed) return;
+          lastInsertion = { sessionId: readingSessionId, id, result };
+        }
+        await options.rpc("pty-insert-result", { sessionId: readingSessionId, id, result: lastInsertion.result }, sessionRoot);
+        if (readingGeneration !== sessionGeneration || readingSessionId !== sessionId || disposed) return;
       }
       if (res.alive === false) {
         updateStatus("stopped");
@@ -438,6 +463,7 @@ export function setupTerminalPane(
   }
 
   async function killSession(): Promise<void> {
+    editorRequestAbort?.abort();
     const generation = ++sessionGeneration;
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined; }
     const id = sessionId, root = sessionRoot, owner = ownerId;
@@ -540,6 +566,7 @@ export function setupTerminalPane(
       return sessionId !== null;
     },
     disconnectOnUnload() {
+      editorRequestAbort?.abort();
       ++sessionGeneration;
       if (pollTimer) clearTimeout(pollTimer);
       const owner = ownerId;

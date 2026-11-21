@@ -9,7 +9,6 @@ use std::{
 use tauri::{Manager, State};
 
 mod clipboard_paths;
-mod editor_context_menu;
 mod native_worker;
 
 mod markits_bridge;
@@ -138,8 +137,7 @@ async fn manual_request(
     request: serde_json::Value,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let restore_after_capture = request["action"].as_str() == Some("screenshots-recapture")
-            || request["action"].as_str()==Some("selection-generate")&&request["options"]["json"]["include_screenshots"]==true;
+        let restore_after_capture = request["action"].as_str() == Some("screenshots-recapture");
         let capture_app = app.clone();
         let attempted_capture = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let attempted = attempted_capture.clone();
@@ -210,9 +208,14 @@ async fn choose_project(initial_directory: Option<String>) -> Result<Option<Stri
 }
 
 #[tauri::command]
-async fn choose_path(initial_path: String, folder: bool) -> Result<Option<String>, String> {
+async fn choose_path(initial_path: String, folder: bool, project_root: Option<String>) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(initial_path);
+        let root = project_root.as_deref().map(std::path::Path::new);
+        let path = if let Some(root) = root {
+            manual_core::config::project_path(root, &initial_path).unwrap_or_else(|_| root.to_path_buf())
+        } else {
+            PathBuf::from(initial_path)
+        };
         let mut directory = if folder { path.as_path() } else { path.parent().unwrap_or(path.as_path()) };
         while !directory.is_dir() {
             match directory.parent() { Some(parent) => directory = parent, None => break }
@@ -220,8 +223,19 @@ async fn choose_path(initial_path: String, folder: bool) -> Result<Option<String
         let mut dialog = rfd::FileDialog::new().set_title(if folder { "出力フォルダーを選択" } else { "出力ファイルを指定" }).set_directory(directory);
         if !folder { if let Some(name) = path.file_name() { dialog = dialog.set_file_name(name.to_string_lossy()); } }
         let selected = if folder { dialog.pick_folder() } else { dialog.save_file() };
-        selected.map(|path| path.to_string_lossy().into_owned())
-    }).await.map_err(|error| error.to_string())
+        selected.map(|path| {
+            if let Some(root) = root {
+                let root = root.canonicalize().map_err(|error| error.to_string())?;
+                let path = manual_core::config::project_path(&root, &path.to_string_lossy())?;
+                let relative = path.strip_prefix(&root).map_err(|error| error.to_string())?;
+                if relative.as_os_str().is_empty() {
+                    return Err("プロジェクト内のサブフォルダーを選んでください。".into());
+                }
+                return Ok(relative.to_string_lossy().replace('\\', "/"));
+            }
+            Ok(path.to_string_lossy().into_owned())
+        }).transpose()
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -446,6 +460,35 @@ fn open_output(root: String) -> Result<(), String> {
     open::that(output).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn open_output_html(root: String, output: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let page = manual_core::builder::published_entry(std::path::Path::new(&root), &output)?;
+        open::that(page).map_err(|error| error.to_string())
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod output_index_tests {
+    use manual_core::builder::published_entry;
+
+    #[test]
+    fn resolves_only_an_existing_project_index() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir(root.join("published site")).unwrap();
+        assert!(published_entry(root, "published site").unwrap_err().contains("開けるHTML"));
+        assert!(published_entry(root, "../outside").is_err());
+        let readme = root.join("published site/_external/index.html");
+        std::fs::create_dir(readme.parent().unwrap()).unwrap();
+        std::fs::write(&readme, "<h1>Published README</h1>").unwrap();
+        assert_eq!(published_entry(root, "published site").unwrap(), readme.canonicalize().unwrap());
+        let index = root.join("published site/index.html");
+        std::fs::write(&index, "<h1>Published</h1>").unwrap();
+        assert_eq!(published_entry(root, "published site").unwrap(), index.canonicalize().unwrap());
+    }
+}
+
 fn auxiliary_session(session: &str) -> Result<(), String> {
     if session.len() != 36 || !session.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         return Err("ウィンドウの識別子が不正です。".into());
@@ -533,7 +576,7 @@ fn main() {
     let mode = args.next();
     if mode.as_deref() == Some(std::ffi::OsStr::new(manual_core::mcp::FLAG)) {
         let result = args.next().ok_or("Studio project path is required".to_string())
-            .and_then(|root| manual_core::mcp::run(std::path::Path::new(&root)));
+            .and_then(|root| manual_core::mcp::run(std::path::Path::new(&root), args.next().as_deref().map(std::path::Path::new)));
         if let Err(error) = result {
             eprintln!("{error}");
             std::process::exit(2);
@@ -595,7 +638,6 @@ fn main() {
         context
     };
     tauri::Builder::default()
-        .manage(editor_context_menu::EditorContextMenus::default())
         .manage(HiddenStudioWindows::default())
         .invoke_handler(tauri::generate_handler![
             markits_bridge::open_markits,
@@ -609,7 +651,6 @@ fn main() {
             markits_bridge::import_markits_capture,
             markits_bridge::import_markits_image,
             manual_request,
-            editor_context_menu::set_editor_context_menu_state,
             load_workspace_history,
             record_workspace_history,
             hide_manual_studio,
@@ -623,6 +664,7 @@ fn main() {
             open_proofreading_window,
             open_dialog_window,
             open_output,
+            open_output_html,
         ])
         .run(context)
         .expect("Failed to start Munin Manual Studio");

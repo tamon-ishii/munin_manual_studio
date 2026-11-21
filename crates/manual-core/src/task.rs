@@ -324,6 +324,11 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
     let mut files = Vec::new();
     let mut visited_paths = HashSet::new();
     let templates = root.join(&config.docs);
+    let output = root.canonicalize().ok().and_then(|canonical| {
+        let output = crate::config::project_path(&canonical, &config.output).ok()?;
+        Some(root.join(output.strip_prefix(canonical).ok()?))
+    });
+    let is_output = |path: &Path| output.as_ref().is_some_and(|output| path.starts_with(output));
 
     for target in &config.targets {
         let trimmed = target.trim();
@@ -331,6 +336,9 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
             continue;
         }
         let target_path = root.join(trimmed);
+        if is_output(&target_path) {
+            continue;
+        }
         if target_path.is_file() {
             if target_path.extension().map_or(false, |ext| ext == "md") {
                 let canon = target_path
@@ -345,9 +353,11 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
             let is_docs_dir = trimmed == config.docs || target_path == templates;
             for entry in WalkDir::new(&target_path)
                 .into_iter()
-                .filter_entry(|entry| config.docs != "." || entry.depth() == 0 || !entry.file_type().is_dir()
+                .filter_entry(|entry| !is_output(entry.path())
+                    && !(entry.file_type().is_dir() && crate::builder::is_published_site(entry.path()))
+                    && (config.docs != "." || entry.depth() == 0 || !entry.file_type().is_dir()
                     || (!entry.file_name().to_string_lossy().starts_with('.')
-                        && !matches!(entry.file_name().to_str(), Some("node_modules" | "target" | "dist" | "__pycache__"))))
+                        && !matches!(entry.file_name().to_str(), Some("node_modules" | "target" | "dist" | "__pycache__")))))
                 .filter_map(|e| e.ok())
             {
                 if entry.file_type().is_file()
@@ -375,7 +385,9 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
     }
 
     if templates.is_dir() && !config.targets.iter().any(|t| t == &config.docs) {
-        for entry in WalkDir::new(&templates).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&templates).into_iter().filter_entry(|entry| {
+            !is_output(entry.path()) && !(entry.file_type().is_dir() && crate::builder::is_published_site(entry.path()))
+        }).filter_map(|e| e.ok()) {
             if entry.file_type().is_file()
                 && entry.path().extension().map_or(false, |ext| ext == "md")
             {

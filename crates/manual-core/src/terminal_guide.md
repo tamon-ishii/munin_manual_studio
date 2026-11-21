@@ -14,6 +14,20 @@ MCPに `munin-studio` が表示される場合は、一覧にあるツールを�
 6. 完成画像への相対リンクを含むMarkdownを書き、操作手順、前提条件、操作後の結果を説明する。既存原稿を変更するときはユーザーの依頼範囲に留める。
 7. 生成・変更した原稿と完成画像のパス、未確認の操作を報告する。Studioの「変更を読み直す」からファイルツリーと原稿を更新できる。
 
+## 原稿を3種類の推敲案で比較する
+
+原稿の添削を依頼されたら、`proofreading-skills` で利用可能なスキルを確認する。`proofread-text` に原文 `source` とスキルID `skill` を渡すと、Studioに設定されたAIが推敲し、結果を `content` で返す。標準は読みやすさ（`yomiyasu`）、自然な日本語（`natural-japanese`）、技術文書としての明確さ（`japanese-tech-writing`）。プロジェクト独自のスキルも選べる。
+
+`proofread-text` はStudioのAPIまたはローカルLLM接続で使える。AIターミナルに接続中のAIが直接推敲する場合は、`proofreading-skills` のルールで候補を作成して `proofread` に渡す。
+
+ユーザーはプロジェクトの `.munin/proofreading-skills.json` に `{"id":"house-style","rules":"用語を社内表記に統一する。"}` のようなオブジェクトをJSON配列で追加できる。`proofreading-skills` は毎回このファイルを読み込む。
+
+比較が必要なら、`active-editor` に `include_content: true` を指定して原稿を取得する。同じ本文から独立に作った最大3案を `drafts` にまとめ、`page` と取得した本文そのままの `before` とともに `proofread` に渡す。`drafts` はスキルIDからMarkdown全文への対応表。Studioのユーザーが差分ごとに採用する案を選び、確定した箇所が未保存の編集として反映される。
+
+## AIが生成した画像をStudioへ取り込む
+
+接続中のAIクライアントで画像を生成したら、プロジェクト内のファイルパスを `import-generated-image` の `image` に渡す。Studioの生成画像リソースに保存される。カーソル位置に入れる場合は、応答の `path` を `insert-image` の `image` に渡す。
+
 ## 撮影した画像をStudioの撮影リソース一覧に残す
 
 1. 対象画面はMarkItsの `capture` で撮影し、最初は `detect_ui: true` を使う。操作の記録も必要な場合は、対象アプリで実行する手順を `operations-validate` で検証し、`operations-run` で撮影する。

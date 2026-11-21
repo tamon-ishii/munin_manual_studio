@@ -1,10 +1,6 @@
 export {reviewProofreading} from './proofreadingReview';
-
-export const proofreadingProfiles = [
-  {id:'yomiyasu', rules:'読み手が一度で理解できる文章にする。一文を短くし、主語と述語の対応、情報の順序、段落のまとまりを整える。'},
-  {id:'natural-japanese', rules:'自然な日本語に整える。直訳調、冗長な表現、不自然な助詞や語順、同じ語尾の連続を改善する。'},
-  {id:'japanese-tech-writing', rules:'技術文書として明確にする。用語と表記を統一し、条件、操作、結果を明示する。曖昧な指示語を減らす。事実や仕様を追加しない。'},
-];
+import proofreadingProfiles from '../../../crates/manual-core/src/proofreading_profiles.json';
+export {proofreadingProfiles};
 export interface ProofreadingOptions {enabled:boolean; profiles:Array<{id:string;rules:string}>}
 export function proofreadingOptions():{element:HTMLElement;read:()=>ProofreadingOptions}{
   const element=document.createElement('fieldset');element.className='proofreading-options';

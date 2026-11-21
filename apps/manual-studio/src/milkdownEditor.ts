@@ -384,6 +384,8 @@ export function setupMilkdownEditor(
   function applyImageStyles(){if(!ready||!instance)return;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.state.doc.descendants((node,pos)=>{
     if(node.type.name!=='image-block')return;const dom=view.nodeDOM(pos);if(!(dom instanceof HTMLElement))return;
     const image=dom.querySelector('img');if(image)image.alt=String(node.attrs.alt||'');
+    const source = String(node.attrs.src || '');
+    dom.toggleAttribute('data-studio-image-actions', Boolean(onImageSettings && source && !source.startsWith('data:')));
     const configured=Boolean(node.attrs.presentation);
     const width = configured ? node.attrs.displayWidth as number | null : null;
     dom.dataset.imagePresentation = String(configured);
@@ -492,25 +494,15 @@ export function setupMilkdownEditor(
               }};
             });
           }
-          builder.addGroup('ai-actions','AI操作').addItem('ai-insert',{
-            icon:uiIcon('aiInsert'),active:()=>false,
-            onRun:()=>{window.dispatchEvent(new Event('manual-studio-selection-ai'));},
-          });
           const orderedGroups=builder.build();
           const otherIndex=orderedGroups.findIndex(group=>group.items.some(item=>item.key==='insert'));
           if(otherIndex>=0)orderedGroups.push(...orderedGroups.splice(otherIndex,1));
-          const selectorLabels:Record<string,string>={'heading-selector':'見出し','gfm-alert':'注釈',insert:'挿入・その他','ai-insert':'AI操作'};
+          const selectorLabels:Record<string,string>={'heading-selector':'見出し','gfm-alert':'注釈',insert:'挿入・その他'};
           topBarControls.splice(0,topBarControls.length,...builder.build().flatMap(group=>group.items.filter(item=>item.onRun||item.selector).map(item=>({key:item.key,label:selectorLabels[item.key]||labels[item.key]||item.key}))));
         },
       },
       [Crepe.Feature.Toolbar]: {
         boldLabel: '太字', italicLabel: '斜体', codeLabel: 'インラインコード', linkLabel: 'リンク', strikethroughLabel: '取り消し線', latexLabel: '数式',
-        buildToolbar: builder => {
-          builder.addGroup('selection-ai', 'AI操作').addItem('selection-ai', {
-            icon: uiIcon('aiInsert'), label: 'AI操作', active: () => false,
-            onRun: () => { window.dispatchEvent(new Event('manual-studio-selection-ai')); },
-          });
-        },
       },
       [Crepe.Feature.Placeholder]: { text: 'ここにマニュアルを書きます。' },
       [Crepe.Feature.ImageBlock]: { proxyDomURL: resolveImage, onUpload: uploadImage, inlineUploadButton: '画像を選ぶ', blockUploadButton: '画像を選ぶ', blockConfirmButton: '挿入', blockCaptionPlaceholderText: '画像の説明', inlineUploadPlaceholderText: '画像のURL', blockUploadPlaceholderText: '画像のURL' },

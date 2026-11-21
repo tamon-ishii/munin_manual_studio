@@ -8,7 +8,11 @@ pub const FLAG: &str = "--studio-mcp";
 const NAME: &str = "munin-studio";
 const PROTOCOL_VERSION: &str = "2025-11-25";
 
-pub(crate) fn terminal_args(agent: &str, root: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn terminal_args(
+    agent: &str,
+    root: &Path,
+    mailbox: &Path,
+) -> Result<Vec<String>, String> {
     if !matches!(agent, "codex" | "claude") {
         return Ok(Vec::new());
     }
@@ -18,7 +22,10 @@ pub(crate) fn terminal_args(agent: &str, root: &Path) -> Result<Vec<String>, Str
         .to_str()
         .ok_or("Studio executable path is not UTF-8")?;
     let root = root.to_str().ok_or("Studio project path is not UTF-8")?;
-    let args = [FLAG, root];
+    let mailbox = mailbox
+        .to_str()
+        .ok_or("Studio insertion path is not UTF-8")?;
+    let args = [FLAG, root, mailbox];
     if agent == "claude" {
         let config = json!({"mcpServers": { (NAME): {
             "type": "stdio", "command": command, "args": args
@@ -37,18 +44,20 @@ pub(crate) fn terminal_args(agent: &str, root: &Path) -> Result<Vec<String>, Str
             ),
         ),
         ("enabled", toml::Value::Boolean(true)),
+        ("tool_timeout_sec", toml::Value::Integer(190)),
     ] {
         config.extend(["-c".into(), format!("mcp_servers.{NAME}.{key}={value}")]);
     }
     Ok(config)
 }
 
-pub fn run(root: &Path) -> Result<(), String> {
+pub fn run(root: &Path, mailbox: Option<&Path>) -> Result<(), String> {
     let root = root.canonicalize().map_err(|error| error.to_string())?;
     if !root.is_dir() {
         return Err("Studio project must be a directory".into());
     }
-    serve(&root, io::stdin().lock(), io::stdout().lock()).map_err(|error| error.to_string())
+    serve(&root, mailbox, io::stdin().lock(), io::stdout().lock())
+        .map_err(|error| error.to_string())
 }
 
 fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
@@ -62,9 +71,9 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
     })
 }
 
-fn tools() -> Vec<Value> {
+fn tools(insertion: bool) -> Vec<Value> {
     let path = json!({"type": "string", "description": "Path relative to the Studio project"});
-    vec![
+    let mut tools = vec![
         tool(
             "windows",
             "List windows available for MarkIts capture.",
@@ -128,10 +137,59 @@ fn tools() -> Vec<Value> {
             }),
             &["image"],
         ),
-    ]
+        tool(
+            "find-images",
+            "Find project images by name, path or manuscript usage. Returns up to 50 matches.",
+            json!({"query":{"type":"string"}}),
+            &[],
+        ),
+    ];
+    if insertion {
+        tools.push(tool(
+            "annotate-and-insert",
+            "Annotate an existing screenshot and insert the new PNG at the current manuscript cursor. Leaves the manuscript unsaved.",
+            json!({
+                "image": path, "output": path, "scene": {"type": "object"},
+                "crop_margin": {"type": "integer", "minimum": 0, "maximum": 4096},
+                "strip_metadata": {"type": "boolean"},
+                "alt": {"type": "string", "description": "Image description for the manuscript"}
+            }),
+            &["image", "output", "scene"],
+        ));
+        tools.extend([
+            tool("active-editor", "Read the active manuscript, cursor and unsaved state, optionally including the current draft.", json!({"include_content":{"type":"boolean"}}), &[]),
+            tool("insert-image", "Insert a project PNG/JPEG or a registered capture resource at the manuscript cursor. Supply exactly one of image or resource_id.",
+                json!({"image":path,"resource_id":{"type":"string"},"alt":{"type":"string"}}), &[]),
+            tool("preview-edit", "Review proposed Markdown edits in Studio and apply only the changes approved by the user, without saving.",
+                json!({"page":{"type":"string"},"before":{"type":"string","description":"Exact draft from active-editor"},"after":{"type":"string"}}),
+                &["page","before","after"]),
+            tool("proofread", "Open Studio's proofreading diff. Supply up to three independent full Markdown drafts, keyed by skill ID. The user can mix changes from the drafts or keep the original per diff block. Applies only selected changes and leaves the document unsaved.",
+                json!({
+                    "page":{"type":"string","description":"Page from active-editor"},
+                    "before":{"type":"string","description":"Exact draft from active-editor with include_content enabled"},
+                    "drafts":{"type":"object","description":"Map of proofreading skill IDs to full Markdown drafts. Use proofreading-skills to list IDs and proofread-text to generate drafts.","minProperties":1,"maxProperties":3,"additionalProperties":{"type":"string"}}
+                }),
+                &["page","before","drafts"]),
+        ]);
+    }
+    tools.extend([
+        tool("import-generated-image", "Import an image already generated by the connected MCP client into the Studio generated image library. Returns its project-relative path for insert-image.",
+            json!({"image":{"type":"string","description":"Project-relative image path"},"description":{"type":"string"}}),
+            &["image"]),
+        tool("proofreading-skills", "List built-in and project-defined proofreading skills and their editorial rules.", json!({}), &[]),
+        tool("proofread-text", "Use Studio's configured AI to proofread Markdown using a skill from proofreading-skills. Returns revised Markdown without opening a review window or editing the manuscript.",
+            json!({"source":{"type":"string","description":"Original Markdown"},"skill":{"type":"string","description":"Proofreading skill ID"}}),
+            &["source","skill"]),
+    ]);
+    tools
 }
 
-fn call_tool(root: &Path, catalog: &[Value], params: &Value) -> Result<Value, (i32, &'static str)> {
+fn call_tool(
+    root: &Path,
+    mailbox: Option<&Path>,
+    catalog: &[Value],
+    params: &Value,
+) -> Result<Value, (i32, &'static str)> {
     let name = params["name"]
         .as_str()
         .ok_or((-32602, "Tool name is required"))?;
@@ -172,6 +230,31 @@ fn call_tool(root: &Path, catalog: &[Value], params: &Value) -> Result<Value, (i
     let request = Value::Object(request);
     let outcome = match name {
         "windows" | "capture" => crate::terminal_tools::invoke_isolated(root, &request),
+        "annotate-and-insert" => annotate_and_insert(root, mailbox, request),
+        "active-editor" => editor_request(mailbox, name, &request, 10),
+        "insert-image" => insert_image(root, mailbox, &request),
+        "preview-edit"
+            if request["before"].as_str().unwrap().len() > 250_000
+                || request["after"].as_str().unwrap().len() > 250_000 =>
+        {
+            Err("Diff exceeds the 250 kB review limit".into())
+        }
+        "preview-edit" => editor_request(mailbox, name, &request, 180),
+        "proofread" => {
+            let drafts = request["drafts"].as_object().unwrap();
+            if drafts.is_empty() || drafts.len() > 3 || drafts.iter().any(|(id, value)| {
+                id.trim().is_empty() || id.len() > 64 || !value.as_str().is_some_and(|draft| draft.len() <= 250_000)
+            }) || request["before"].as_str().unwrap().len() > 250_000 {
+                Err("Supply one to three proofreading drafts, each at most 250 kB.".into())
+            } else {
+                editor_request(mailbox, name, &request, 600)
+            }
+        }
+        "proofreading-skills" => crate::selection_ai::proofreading_profiles(root).map(|skills| json!({"skills":skills})),
+        "import-generated-image" => crate::image_generation::import_generated(root, request["image"].as_str().unwrap(), request["description"].as_str().unwrap_or("")),
+        "proofread-text" if mailbox.is_some() => editor_request(mailbox, name, &request, 600),
+        "proofread-text" => crate::selection_ai::proofread(root, request["source"].as_str().unwrap(), request["skill"].as_str().unwrap()),
+        "find-images" => find_images(root, request["query"].as_str().unwrap_or_default()),
         _ => crate::terminal_tools::execute(&request),
     };
     Ok(match outcome {
@@ -180,8 +263,115 @@ fn call_tool(root: &Path, catalog: &[Value], params: &Value) -> Result<Value, (i
     })
 }
 
-fn serve(root: &Path, input: impl BufRead, mut output: impl Write) -> io::Result<()> {
-    let catalog = tools();
+fn annotate_and_insert(
+    root: &Path,
+    mailbox: Option<&Path>,
+    mut request: Value,
+) -> Result<Value, String> {
+    let mailbox = mailbox
+        .filter(|path| path.is_dir())
+        .ok_or("Studio insertion session has ended")?;
+    let (_, path) = image_path(root, request["output"].as_str().unwrap())?;
+    request["action"] = json!("annotate");
+    crate::terminal_tools::execute(&request)?;
+    editor_request(
+        Some(mailbox),
+        "insert-image",
+        &json!({"path": path, "alt": request["alt"]}),
+        10,
+    )
+    .map_err(|error| format!("{error} Annotated PNG saved at {path}."))
+}
+
+fn image_path(root: &Path, input: &str) -> Result<(std::path::PathBuf, String), String> {
+    let output = crate::config::project_path(root, input)?;
+    let relative = output
+        .strip_prefix(root)
+        .map_err(|error| error.to_string())?;
+    let path = relative
+        .to_str()
+        .ok_or("Output path is not UTF-8")?
+        .replace('\\', "/");
+    if path.contains(['\r', '\n', '<', '>']) {
+        return Err("Output path cannot be used in a Markdown image".into());
+    }
+    Ok((output, path))
+}
+
+fn insert_image(root: &Path, mailbox: Option<&Path>, request: &Value) -> Result<Value, String> {
+    let path = match (request["image"].as_str(), request["resource_id"].as_str()) {
+        (Some(path), None) => path.to_string(),
+        (None, Some(id)) => crate::capture_resources::generate(root, id, None, None)?.path,
+        _ => return Err("Supply exactly one of image or resource_id".into()),
+    };
+    let (file, path) = image_path(root, &path)?;
+    image::image_dimensions(file).map_err(|error| format!("Cannot read project image: {error}"))?;
+    editor_request(
+        mailbox,
+        "insert-image",
+        &json!({"path":path,"alt":request["alt"]}),
+        10,
+    )
+}
+
+fn editor_request(
+    mailbox: Option<&Path>,
+    action: &str,
+    args: &Value,
+    seconds: u64,
+) -> Result<Value, String> {
+    crate::mcp_insert::request(
+        mailbox.ok_or("Studio editor session is unavailable")?,
+        action,
+        args,
+        seconds,
+    )
+}
+
+fn find_images(root: &Path, query: &str) -> Result<Value, String> {
+    let resources = crate::resources::list(root)?;
+    let captures = crate::capture_resources::list(root)?;
+    let query = query.trim().to_lowercase();
+    let mut matches = captures["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(resources["items"].as_array().unwrap())
+        .filter(|item| {
+            ["name", "path", "id"].iter().any(|key| {
+                item[*key]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .contains(&query)
+            }) || item["usages"].as_array().is_some_and(|usages| {
+                usages.iter().any(|usage| {
+                    usage["page"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .contains(&query)
+                })
+            })
+        });
+    let items: Vec<_> = matches.by_ref().take(50).map(|item| {
+        let usages: Vec<_> = item["usages"].as_array().into_iter().flatten().take(20)
+            .map(|usage| json!({"page": usage["page"], "line": usage["line"]})).collect();
+        json!({
+            "name":item["name"],"path":item["path"],"resource_id":item["id"],
+            "kind":item["kind"].as_str().unwrap_or("capture-resource"),"missing":item["missing"],"usages":usages
+        })
+    }).collect();
+    Ok(json!({"items":items,"truncated":matches.next().is_some()}))
+}
+
+fn serve(
+    root: &Path,
+    mailbox: Option<&Path>,
+    input: impl BufRead,
+    mut output: impl Write,
+) -> io::Result<()> {
+    let catalog = tools(mailbox.is_some());
     let mut negotiated = false;
     let mut initialized = false;
     for line in input.split(b'\n') {
@@ -220,7 +410,9 @@ fn serve(root: &Path, input: impl BufRead, mut output: impl Write) -> io::Result
                     },
                     "ping" => Ok(json!({})),
                     "tools/list" if initialized => Ok(json!({"tools": catalog})),
-                    "tools/call" if initialized => call_tool(root, &catalog, &request["params"]),
+                    "tools/call" if initialized => {
+                        call_tool(root, mailbox, &catalog, &request["params"])
+                    }
                     "tools/list" | "tools/call" => Err((-32002, "Server is not initialized")),
                     _ => Err((-32601, "Method not found")),
                 };

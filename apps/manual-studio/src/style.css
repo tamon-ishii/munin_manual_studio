@@ -1100,6 +1100,8 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 
 #milkdown-editor .milkdown-image-block[data-image-presentation="true"]{max-width:calc(var(--munin-image-width,100%) * var(--munin-image-scale,1))}
 #milkdown-editor .milkdown-image-block > .image-wrapper{min-width:0;max-width:min(100%,var(--munin-image-width,100%))}
+#milkdown-editor .milkdown-image-block.selected > .image-wrapper::before{pointer-events:none}
+#milkdown-editor .milkdown-image-block[data-studio-image-actions] > .image-wrapper > .operation{display:none}
 #milkdown-editor .milkdown-image-block img{height:auto!important;min-height:0;max-width:100%!important}
 #milkdown-editor .milkdown-image-block[data-image-width] > .image-wrapper,
 #milkdown-editor .milkdown-image-block[data-image-width] img{width:100%}

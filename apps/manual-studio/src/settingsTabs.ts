@@ -1,4 +1,4 @@
-﻿type SettingsCategory = 'keyboard' | 'capture' | 'text-ai' | 'image-ai' | 'appearance';
+﻿type SettingsCategory = 'keyboard' | 'capture' | 'text-ai' | 'html-output' | 'appearance';
 export function setupSettingsTabs(): (category: SettingsCategory) => void {
   const dialog = document.getElementById('panel-settings')!;
   const tabs = document.createElement('div');
@@ -9,7 +9,7 @@ export function setupSettingsTabs(): (category: SettingsCategory) => void {
     {id:'keyboard',label:'キーボード',nodes:[document.getElementById('keyboard-shortcut-settings')!]},
     {id:'capture',label:'撮影',nodes:[document.getElementById('markits-shortcut-settings')!]},
     {id:'text-ai',label:'文章・図のAI',nodes:[document.getElementById('ai-connection-type')!.closest('.card')!]},
-    {id:'image-ai',label:'画像生成AI',nodes:[document.getElementById('image-ai-settings')!]},
+    {id:'html-output',label:'HTML出力',nodes:[document.getElementById('html-output-settings')!]},
     {id:'appearance',label:'外観',nodes:Array.from(document.querySelectorAll('#panel-appearance > .card'))},
   ];
   const buttons = new Map<SettingsCategory, HTMLButtonElement>();

@@ -12,7 +12,6 @@
   { id: 'link', label: 'リンク', keys: [], scope: 'editor' },
   { id: 'preview', label: '編集・分割・プレビューの切替', keys: ['Mod+Shift+V'], scope: 'global' },
   { id: 'refresh', label: 'プレビューを再読込', keys: [], scope: 'global' },
-  { id: 'selectionAi', label: '選択範囲のAI変更・挿入', keys: [], scope: 'editor' },
   { id: 'treeSearch', label: 'ファイル名・パスを検索', keys: ['Mod+P'], scope: 'global' },
   { id: 'search', label: '全文検索・置換', keys: ['Mod+Shift+F'], scope: 'global' },
   { id: 'settings', label: '設定を開く', keys: ['Mod+,', 'Mod+K Mod+S'], scope: 'global' },

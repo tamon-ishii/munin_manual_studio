@@ -58,9 +58,11 @@ export function askSelectionInstruction(selected:string,initial="",failure="",on
   return new Promise(resolve=>{let answer:string|null=null;run.onclick=()=>{if(!instruction.value.trim())return;answer=instruction.value.trim();onProofreading?.(proofreading.read());dialog.close();};dialog.addEventListener('close',()=>{resolve(answer);dialog.remove();},{once:true});});
 }
 export interface SelectionReviewState {accepted:number[];feedback:string;}
-export function reviewSelection(page:string,before:string,after:string,previous?:SelectionReviewState,failure='',allowRetry=true):Promise<{action:'restore'|'retry'|'adopt';feedback:string;content:string;accepted:number[]}>{
-  const {dialog,body}=featureDialog('AI文章の変更を確認');dialog.id='selection-diff-dialog';
-  const help=document.createElement('p');help.textContent=`${page}：採用する変更を選択してください。チェックを外した箇所は元の文章を残します。`;
+export function reviewSelection(page:string,before:string,after:string,previous?:SelectionReviewState,failure='',allowRetry=true,signal?:AbortSignal,saveConflict=false):Promise<{action:'restore'|'retry'|'adopt';feedback:string;content:string;accepted:number[]}>{
+  const {dialog,body}=featureDialog(saveConflict?'保存する変更を選択':'AI文章の変更を確認');dialog.id='selection-diff-dialog';
+  const help=document.createElement('p');help.textContent=saveConflict
+    ? `${page}：左はディスク上の最新内容、右は編集中の内容です。保存する変更を選んでください。選ばなかった差分にはディスク上の内容を使います。`
+    : `${page}：採用する変更を選択してください。チェックを外した箇所は元の文章を残します。`;
   const parts=diffParts(before,after),accepted=new Set<number>();
   const controls=document.createElement('div');controls.className='actions diff-controls';
   const count=document.createElement('span');count.className='muted';count.role='status';
@@ -86,9 +88,12 @@ export function reviewSelection(page:string,before:string,after:string,previous?
     const finish=(action:'restore'|'retry'|'adopt')=>{void(async()=>{
       const content=acceptDiff(parts,accepted);
       if(action==='adopt'){try{for(const code of content.matchAll(/```mermaid\s*\n([\s\S]*?)\n```/g))await(await import('mermaid')).default.parse(code[1]);}catch(e){error.textContent=`図の構文を確認してください: ${String(e)}`;return;}}
+      if(!dialog.open||signal?.aborted)return;
       result={action,feedback:feedback.value.trim(),content,accepted:[...accepted]};dialog.close();
     })();};
-    for(const [text,action] of [['破棄','restore'],['再作成','retry'],['選んだ変更を反映','adopt']] as const){if(action==='retry'&&!allowRetry)continue;const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.diffAction=action;button.dataset.uiIcon=action==='adopt'?'check':action==='retry'?'refresh':'close';if(action==='adopt')button.className='primary';button.onclick=()=>finish(action);actions.append(button);}
-    dialog.addEventListener('close',()=>{resolve(result);dialog.remove();},{once:true});
+    for(const [text,action] of [[saveConflict?'キャンセル':'破棄','restore'],['再作成','retry'],[saveConflict?'選んだ変更を保存':'選んだ変更を反映','adopt']] as const){if(action==='retry'&&!allowRetry)continue;const button=document.createElement('button');button.type='button';button.textContent=text;button.dataset.diffAction=action;button.dataset.uiIcon=action==='adopt'?'check':action==='retry'?'refresh':'close';if(action==='adopt')button.className='primary';button.onclick=()=>finish(action);actions.append(button);}
+    const cancel=()=>dialog.close();
+    dialog.addEventListener('close',()=>{signal?.removeEventListener('abort',cancel);resolve(result);dialog.remove();},{once:true});
+    if(signal?.aborted)cancel();else signal?.addEventListener('abort',cancel,{once:true});
   });
 }
