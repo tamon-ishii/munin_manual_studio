@@ -32,6 +32,11 @@ try {
       case 'image-generation-settings': output={connection_type:'none',endpoint_url:'',model:''};break;
       case 'preview-page': output='<html><body>Preview</body></html>';break;
       case 'proofread-text':output={skill:request.options.json.skill,content:'推敲済みの文章です。'};break;
+      case 'proofreading-skill-install': {
+        const folder=request.options.agent==='claude'?'.claude':'.agents';
+        output={path:`${folder}/skills/${request.options.skill}`,already_installed:requests.filter(r=>r.action===request.action&&r.options.agent===request.options.agent).length>1};
+        break;
+      }
       case 'agent-progress':output={logs:[],total:0};break;
       case 'build-mkdocs':
       case 'build-zensical':output='Site: test-output';break;
@@ -64,6 +69,20 @@ try {
   assert.equal(requests.some(r=>r.action==='resources-list'),false);
   await page.locator('#application-settings').click();
   await page.locator('#settings-tab-text-ai').click();
+  const skillSettings=page.locator('section').filter({has:page.getByRole('heading',{name:'推敲スキルのインストール',exact:true})});
+  const installSkill=skillSettings.getByRole('button',{name:'インストール',exact:true});
+  for(const [agent,skill,folder] of [['codex','yomiyasu','.agents'],['agy','natural-japanese','.agents'],['claude','japanese-tech-writing','.claude']]){
+    await skillSettings.getByRole('combobox',{name:'AI クライアント'}).selectOption(agent);
+    await skillSettings.getByRole('combobox',{name:'推敲スキル'}).selectOption(skill);
+    const path=`${folder}/skills/${skill}`;
+    await skillSettings.getByText(`現在のプロジェクトに配置します（${path}）。`,{exact:true}).waitFor();
+    const requested=page.waitForRequest(req=>req.url().endsWith('/__manual/rpc')&&req.postDataJSON().action==='proofreading-skill-install');
+    await installSkill.click();
+    assert.deepEqual((await requested).postDataJSON(),{root:'test-project',action:'proofreading-skill-install',options:{agent,skill}});
+    await skillSettings.getByRole('status').filter({hasText:`インストールしました（${path}）。`}).waitFor();
+  }
+  await installSkill.click();
+  await skillSettings.getByRole('status').filter({hasText:'配置済みです'}).waitFor();
   await page.getByRole('textbox',{name:'Codexのモデル',exact:true}).fill('codex-custom');
   await page.getByRole('textbox',{name:'Claudeのモデル',exact:true}).fill('claude-custom');
   await page.getByRole('textbox',{name:'Agyのモデル',exact:true}).fill('agy-custom');

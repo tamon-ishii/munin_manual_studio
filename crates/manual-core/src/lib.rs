@@ -33,6 +33,7 @@ pub mod pty;
 pub mod mcp;
 mod mcp_insert;
 pub mod terminal_tools;
+mod proofreading_install;
 mod operation_script;
 mod operation_checkpoint;
 mod operation_workflow;
@@ -860,6 +861,9 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
         .ok_or("Action is required")?;
     let project = Path::new(root);
     if action == "terminal-prepare" {return terminal_tools::prepare_in(project,request["options"]["working_directory"].as_str()).map(|value|value.to_string());}
+    if action == "proofreading-skill-install" {
+        return proofreading_install::install(project, &request["options"]).map(|value| value.to_string());
+    }
     let options = &request["options"];
     if action == "editor-read-if-changed" {
         let page = options["page"].as_str().ok_or("Page is required")?;

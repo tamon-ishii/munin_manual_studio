@@ -5,6 +5,7 @@ import {setupSettingsTabs} from './settingsTabs';
 import {setupDialogDragging} from './dialogDragging';
 import {currentLine} from './editorLineCommands';
 import {setupCliAiSettings} from './cliAiSettings';
+import {setupProofreadingSkillSettings} from './proofreadingSkillSettings';
 import { setupFileMove, type FileMoveResult } from './fileMove';
 import { PreviewScheduler } from './previewScheduler';
 import {rememberPreviewContent,rememberPreviewReplacement,updatePreviewContent} from './previewContent';
@@ -543,6 +544,11 @@ async function rpc(action: string, options: Record<string, unknown> = {}, root =
     ? (request) => invoke<string>("manual_request", { request })
     : undefined);
 }
+
+setupProofreadingSkillSettings(element('ai-cli-status'), async (agent, skill) => {
+  if (!projectRoot) throw new Error('プロジェクトを開いてください。');
+  return JSON.parse(await rpc('proofreading-skill-install', {agent, skill}));
+});
 
 let terminalController: TerminalController | null = null;
 

@@ -19,6 +19,15 @@ pub fn prepare(root:&Path)->Result<Value,String>{
     prepare_in(root,None)
 }
 
+fn write_terminal_markdown(path: &Path, content: &str) -> std::io::Result<()> {
+    // Windows PowerShell defaults to the system code page for files without a BOM.
+    if cfg!(windows) {
+        fs::write(path, format!("\u{feff}{content}"))
+    } else {
+        fs::write(path, content)
+    }
+}
+
 pub fn prepare_in(root:&Path,working_directory:Option<&str>)->Result<Value,String>{
     let root=root.canonicalize().map_err(|e|e.to_string())?;
     let working_directory=crate::pty::working_directory(&root,working_directory)?;
@@ -28,11 +37,11 @@ pub fn prepare_in(root:&Path,working_directory:Option<&str>)->Result<Value,Strin
     let executable=std::env::current_exe().map_err(|e|e.to_string())?;
     let manifest=json!({"project":root,"working_directory":working_directory,"executable":executable,"docs":config.docs,"assets":config.assets,"target_application":crate::target_application::context(&root),"actions":["windows","capture","attach-uimap","register-capture","inspect","annotate","target-launch","operations-schema","operations-validate","operations-inspect","operations-attach","operations-run","operations-resume"]});
     fs::write(directory.join("tools.json"),serde_json::to_vec_pretty(&manifest).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-    fs::write(directory.join("guide.md"),include_str!("terminal_guide.md")).map_err(|e|e.to_string())?;
+    write_terminal_markdown(&directory.join("guide.md"),include_str!("terminal_guide.md")).map_err(|e|e.to_string())?;
     fs::write(directory.join("operation-script.schema.json"),include_str!("operation_script.schema.json")).map_err(|e|e.to_string())?;
-    fs::write(directory.join("markits-manual.md"),include_str!("../../markits/docs/AI_MANUAL.md")).map_err(|e|e.to_string())?;
+    write_terminal_markdown(&directory.join("markits-manual.md"),include_str!("../../markits/docs/AI_MANUAL.md")).map_err(|e|e.to_string())?;
     let prompt=format!("Read the guide at {} and the tools.json beside it before replying. Use bundled MarkIts tools for actual app screenshots, annotations and AI-authored operation scripts (operations-schema, operations-validate, operations-run). Register every requested or manual-bound screenshot in Studio Capture Resources with register-capture before editing, including background captures. If the matching UIMap is a separate file, run attach-uimap first and register its output. Verify the returned resource ID and report missing UIMap or operation metadata. The current working directory may differ from the manual project; generate manuals in the project specified by tools.json. Ask which application and workflow to document if not specified.",directory.join("guide.md").display());
-    Ok(json!({"prompt":prompt,"guide":directory.join("guide.md"),"working_directory":working_directory}))
+    Ok(json!({"prompt":format!("{prompt} Read text files as UTF-8. In PowerShell, use Get-Content -Raw -Encoding UTF8 -LiteralPath."),"guide":directory.join("guide.md"),"working_directory":working_directory}))
 }
 
 fn path(root:&Path,request:&Value,key:&str)->Result<std::path::PathBuf,String>{
@@ -125,8 +134,13 @@ mod tests{
         assert!(prepared["prompt"].as_str().unwrap().contains(prepared["guide"].as_str().unwrap()));
         let directory=root.path().join(".munin/ai-terminal");
         let guide=fs::read_to_string(directory.join("guide.md")).unwrap();
+        let markits_manual=fs::read_to_string(directory.join("markits-manual.md")).unwrap();
+        assert_eq!(guide.starts_with('\u{feff}'), cfg!(windows));
+        assert_eq!(markits_manual.starts_with('\u{feff}'), cfg!(windows));
+        assert_eq!(guide.trim_start_matches('\u{feff}'), include_str!("terminal_guide.md"));
+        assert!(prepared["prompt"].as_str().unwrap().contains("Get-Content -Raw -Encoding UTF8 -LiteralPath"));
         assert!(guide.contains("--studio-tools"));assert!(guide.contains("WINDOW_ID_FROM_WINDOWS"));
-        assert!(fs::read_to_string(directory.join("markits-manual.md")).unwrap().contains("MarkIts AI Manual"));
+        assert!(markits_manual.contains("MarkIts AI Manual"));
         let manifest:Value=serde_json::from_slice(&fs::read(directory.join("tools.json")).unwrap()).unwrap();
         assert!(manifest["actions"].as_array().unwrap().contains(&json!("operations-run")));
         let schema:Value=serde_json::from_slice(&fs::read(directory.join("operation-script.schema.json")).unwrap()).unwrap();
