@@ -440,6 +440,22 @@ fn stage_page_links(
     Ok(result)
 }
 
+fn strip_ai_notes_outside_code(content: &str) -> String {
+    let fences = crate::task::get_code_block_ranges(content);
+    let re = regex::Regex::new(r"(?s)[ \t]*<!--\s*ai-note\s*:.*?-->[ \t]*\r?\n?").unwrap();
+    let mut out = String::with_capacity(content.len());
+    let mut last = 0usize;
+    for m in re.find_iter(content) {
+        if crate::task::is_inside_ranges(&(m.start()..m.end()), &fences) {
+            continue;
+        }
+        out.push_str(&content[last..m.start()]);
+        last = m.end();
+    }
+    out.push_str(&content[last..]);
+    out
+}
+
 pub fn build(
     templates: &Path,
     generated: &Path,
@@ -519,8 +535,10 @@ fn build_inner(
 
     for page in &pages {
         let content = fs::read_to_string(&page.source).map_err(|e| e.to_string())?;
-        let final_page = crate::legacy_ai::plain_markdown(&content, Some(generated))
-            .replace("{{BUILD_TIMESTAMP}}", &built_at);
+        let final_page = strip_ai_notes_outside_code(
+            &crate::legacy_ai::plain_markdown(&content, Some(generated))
+                .replace("{{BUILD_TIMESTAMP}}", &built_at),
+        );
         let final_page = if let Some(root) = root {
             stage_page_links(root, page, &pages, &final_page, &temp_docs)?
         } else {
@@ -704,6 +722,15 @@ mod site_tests {
         }
         fs::write(output.join(SITE_MANIFEST), r#"["404.html","guide/index.html"]"#).unwrap();
         assert_eq!(published_entry(project.path(), "site").unwrap(), output.join("guide/index.html").canonicalize().unwrap());
+    }
+
+    #[test]
+    fn strip_ai_notes_removes_inline_notes_but_preserves_code_examples() {
+        let input = "# Title\n<!-- ai-note: 開発メモ -->\n本文です。\n```md\n<!-- ai-note: 例示は残す -->\n```\n";
+        let output = strip_ai_notes_outside_code(input);
+        assert!(!output.contains("開発メモ"));
+        assert!(output.contains("本文です。"));
+        assert!(output.contains("<!-- ai-note: 例示は残す -->"));
     }
 
     #[test]

@@ -24,6 +24,13 @@ MCPに `munin-studio` が表示される場合は、一覧にあるツールを�
 
 比較が必要なら、`active-editor` に `include_content: true` を指定して原稿を取得する。同じ本文から独立に作った最大3案を `drafts` にまとめ、`page` と取得した本文そのままの `before` とともに `proofread` に渡す。`drafts` はスキルIDからMarkdown全文への対応表。Studioのユーザーが差分ごとに採用する案を選び、確定した箇所が未保存の編集として反映される。
 
+## 用語集と原稿チェックを活用する
+
+- 執筆・推敲を始める前に `project-glossary` を呼び、プロジェクトで統一されているUI名称・用語・NG表記を確認する。
+- 原稿に `<!-- ai-note: ... -->` が含まれている場合、その箇所の指示を解決して本文へ反映し、解決したメモコメントは取り除く（`preview-edit` で人間が確認して採用する）。
+- 原稿を書き終えたら `check-manuscript`（必要に応じて `page` を指定）を呼び、リンク切れ・画像欠落・MarkIts注釈（番号バッジ/UI要素名）と本文のズレ・用語違反・未解決の `ai-note` がないか自己点検してから完了報告する。
+- 追加の調査・初稿作成には次の MCP ツールも活用できる：`draft-from-recording`（操作記録PNGから手順ドラフト生成）、`fact-check-manuscript`（コマンド・UI表記のソース/UIMap裏取り）、`analyze-app-impact`（アプリ側Git差分から影響ページと画像を特定）、`project-overview`（全ページの構成・孤立ページ・読者設定の俯瞰）、`translation-diff-plan`（基準言語の差分に基づく多言語翻訳同期）。
+
 ## AIが生成した画像をStudioへ取り込む
 
 接続中のAIクライアントで画像を生成したら、プロジェクト内のファイルパスを `import-generated-image` の `image` に渡す。Studioの生成画像リソースに保存される。カーソル位置に入れる場合は、応答の `path` を `insert-image` の `image` に渡す。

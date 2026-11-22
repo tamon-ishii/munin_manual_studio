@@ -5,6 +5,7 @@ export function isCompactDialog(dialog:HTMLDialogElement):boolean{
     '[data-image-presentation]','#unsaved-changes-dialog','#file-delete-dialog',
     '#workspace-dialog','#new-page-dialog','#new-folder-dialog',
     '#terminal-directory-dialog','#execution-failure-dialog',
+    '#ai-note-insert-dialog',
   ].join(','));
 }
 
@@ -19,6 +20,7 @@ export function canExpandDialog(dialog:HTMLDialogElement):boolean{
     '#reader-review-options','.image-comparison-dialog','#markdown-table-dialog',
     '#generation-pages-dialog','#reader-review-results','[data-manuscript-search]',
     '[data-manuscript-git]','[data-ai-image]','#template-creation-dialog',
+    '#terminal-handoff-dialog','#ai-notes-dialog','#external-change-tray-dialog','#ai-collab-hub-dialog',
   ].join(','));
 }
 

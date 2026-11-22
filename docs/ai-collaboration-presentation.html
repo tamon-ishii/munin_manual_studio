@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Munin Manual Studio — AI協業アップデート プレゼンテーション</title>
+  <style>
+    :root {
+      --bg: #0f1714;
+      --bg-grad: radial-gradient(circle at 18% 15%, rgba(92, 184, 135, 0.16), transparent 45%),
+                 radial-gradient(circle at 85% 82%, rgba(97, 203, 187, 0.12), transparent 45%),
+                 #0f1714;
+      --surface: #17221d;
+      --surface-soft: #1d2b25;
+      --surface-elevated: #22332c;
+      --border: rgba(164, 214, 185, 0.18);
+      --border-strong: rgba(130, 198, 154, 0.45);
+      --text: #eef4f0;
+      --text-muted: #9eb3a7;
+      --accent: #6ecf9a;
+      --accent-2: #62c5e6;
+      --accent-soft: rgba(110, 207, 154, 0.14);
+      --warn: #e8c468;
+      --warn-soft: rgba(232, 196, 104, 0.15);
+      --danger: #eb7a72;
+      --danger-soft: rgba(235, 122, 114, 0.15);
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+      --code-bg: #0b110e;
+      --font-sans: "BIZ UDPGothic", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
+    }
+
+    html[data-theme="light"] {
+      --bg: #f3f7f4;
+      --bg-grad: radial-gradient(circle at 18% 15%, rgba(47, 133, 90, 0.10), transparent 45%),
+                 radial-gradient(circle at 85% 82%, rgba(49, 130, 206, 0.08), transparent 45%),
+                 #f3f7f4;
+      --surface: #ffffff;
+      --surface-soft: #edf4ef;
+      --surface-elevated: #e3eee7;
+      --border: rgba(31, 69, 49, 0.14);
+      --border-strong: rgba(40, 110, 74, 0.45);
+      --text: #16261e;
+      --text-muted: #4c6357;
+      --accent: #227a4d;
+      --accent-2: #1f749c;
+      --accent-soft: rgba(34, 122, 77, 0.11);
+      --warn: #9c6b08;
+      --warn-soft: rgba(217, 155, 22, 0.14);
+      --danger: #b8322a;
+      --danger-soft: rgba(184, 50, 42, 0.11);
+      --shadow: 0 20px 50px rgba(17, 42, 29, 0.12);
+      --code-bg: #eef4f0;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg-grad);
+      color: var(--text);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .deck {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 28px 66px;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 20px 28px 66px;
+      margin: auto;
+      max-width: 1260px;
+      max-height: 760px;
+      width: calc(100vw - 56px);
+      height: calc(100vh - 86px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 36px 46px 32px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 18px;
+      opacity: 0;
+      transform: translateX(28px) scale(0.985);
+      pointer-events: none;
+      transition: opacity 0.28s ease, transform 0.28s ease;
+      overflow-y: auto;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      pointer-events: auto;
+      z-index: 2;
+    }
+
+    .slide.prev {
+      transform: translateX(-28px) scale(0.985);
+    }
+
+    .slide-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex: none;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      padding: 4px 12px;
+    }
+
+    .slide-num {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 3.8vw, 48px);
+      line-height: 1.22;
+      letter-spacing: -0.02em;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(22px, 2.5vw, 31px);
+      line-height: 1.28;
+      letter-spacing: -0.015em;
+    }
+
+    h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      line-height: 1.35;
+    }
+
+    p {
+      margin: 0;
+      line-height: 1.62;
+      font-size: 14.5px;
+      color: var(--text-muted);
+    }
+
+    .lead {
+      font-size: clamp(15px, 1.55vw, 19px);
+      color: var(--text-muted);
+      max-width: 820px;
+    }
+
+    .hero {
+      justify-content: center;
+      gap: 22px;
+      background:
+        radial-gradient(circle at 86% 20%, rgba(110, 207, 154, 0.2), transparent 40%),
+        radial-gradient(circle at 12% 88%, rgba(98, 197, 230, 0.14), transparent 36%),
+        var(--surface);
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-logo {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 24px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #0b1611;
+      box-shadow: 0 10px 24px rgba(110, 207, 154, 0.25);
+    }
+
+    .hero-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 13px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      font-weight: 600;
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .pill.accent { background: var(--accent-soft); border-color: var(--border-strong); color: var(--accent); }
+    .pill.warn { background: var(--warn-soft); border-color: rgba(232,196,104,0.4); color: var(--warn); }
+    .pill.danger { background: var(--danger-soft); border-color: rgba(235,122,114,0.4); color: var(--danger); }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; min-height: 0; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; flex: 1; min-height: 0; }
+    .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; flex: 1; min-height: 0; }
+
+    .card {
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .card.accent-border { border-left: 4px solid var(--accent); }
+    .card.warn-border { border-left: 4px solid var(--warn); }
+    .card.danger-border { border-left: 4px solid var(--danger); }
+    .card.info-border { border-left: 4px solid var(--accent-2); }
+
+    ul.clean {
+      margin: 0;
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: var(--text);
+    }
+
+    ul.clean li span { color: var(--text-muted); }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: var(--code-bg);
+      color: var(--accent);
+      padding: 2px 6px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+    }
+
+    pre.mock {
+      margin: 0;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text);
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    .mock-ui {
+      background: var(--surface-soft);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .mock-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12.5px;
+      font-weight: 700;
+    }
+
+    .mock-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-size: 12.5px;
+    }
+
+    .mock-btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .mock-btn {
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .mock-btn.primary {
+      background: var(--accent);
+      color: #0b1611;
+      border-color: var(--accent);
+    }
+
+    .diagram-box {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px;
+    }
+
+    .diagram-box svg {
+      width: 100%;
+      height: auto;
+      max-height: 100%;
+    }
+
+    table.spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    table.spec-table th,
+    table.spec-table td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    table.spec-table th {
+      color: var(--accent);
+      font-weight: 700;
+      background: var(--surface-soft);
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .stat-card {
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--accent);
+      font-family: var(--font-mono);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .cycle-steps {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+    }
+
+    .cycle-step {
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--accent);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .step-index {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    /* Controls footer */
+    .controls {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid var(--border);
+      z-index: 20;
+    }
+
+    .progress-bar {
+      position: fixed;
+      left: 0;
+      bottom: 54px;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 0.25s ease;
+      z-index: 21;
+    }
+
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ctrl-btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .ctrl-btn:hover:not(:disabled) {
+      background: var(--surface-elevated);
+      border-color: var(--border-strong);
+    }
+
+    .ctrl-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .ctrl-status {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      color: var(--text-muted);
+      min-width: 68px;
+      text-align: center;
+    }
+
+    .hint {
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+    /* Overview modal */
+    .overview-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 10, 8, 0.78);
+      backdrop-filter: blur(6px);
+      z-index: 40;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+    }
+
+    .overview-backdrop.open { display: flex; }
+
+    .overview-dialog {
+      width: min(980px, 95vw);
+      max-height: 84vh;
+      overflow: auto;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 18px;
+      padding: 22px 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .overview-item {
+      text-align: left;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+      color: var(--text);
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .overview-item.current {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .overview-item small {
+      display: block;
+      font-family: var(--font-mono);
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 900px) {
+      .slide { padding: 22px 22px 20px; }
+      .grid-2, .grid-3, .grid-4, .stats-row, .cycle-steps { grid-template-columns: 1fr; }
+      .hint { display: none; }
+    }
+
+    @media print {
+      html, body { overflow: visible; height: auto; background: #fff; }
+      .deck { display: block; height: auto; padding: 0; }
+      .slide {
+        position: static;
+        opacity: 1 !important;
+        transform: none !important;
+        pointer-events: auto;
+        width: 100%;
+        height: auto;
+        max-width: none;
+        max-height: none;
+        margin: 0 0 18px;
+        page-break-after: always;
+        break-after: page;
+        box-shadow: none;
+      }
+      .controls, .progress-bar, .overview-backdrop { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" id="deck" aria-live="polite">
+
+    <!-- Slide 1: Hero -->
+    <section class="slide hero active" data-title="Munin Manual Studio — AI協業アップデート">
+      <div class="slide-top">
+        <div class="brand-row">
+          <div class="brand-logo" aria-hidden="true">M</div>
+          <div>
+            <div style="font-weight:800;font-size:15px;">Munin Manual Studio</div>
+            <div style="font-size:12px;color:var(--text-muted);">AI Collaboration Architecture Update</div>
+          </div>
+        </div>
+        <span class="slide-num">01 / 11</span>
+      </div>
+
+      <h1>AIと協業して書く、<br />壊さないマニュアル制作へ</h1>
+      <p class="lead">
+        MarkIts の実画面データ・プロジェクト用語集・ソースコード照合・AIターミナル双方向連携を統合。<br />
+        「初稿作成」から「日々の並行執筆」「アプリ更新への追従」「多言語同期」まで一気通貫で支える 8 つの改善案と実装サマリーです。
+      </p>
+
+      <div class="hero-badges">
+        <span class="pill accent">通常 Markdown 正本を維持</span>
+        <span class="pill accent">明示的 Diff 採用 &amp; Undo 保証</span>
+        <span class="pill">AI 未設定でも動く決定論的チェック</span>
+        <span class="pill">ローカル MCP 7 ツール新設</span>
+        <span class="pill">AI 協業ツール 5 タブ統合 UI</span>
+      </div>
+    </section>
+
+    <!-- Slide 2: Problem -->
+    <section class="slide" data-title="課題背景：AIとの並行執筆で起きる4つの壁">
+      <div class="slide-top">
+        <span class="kicker">01 · Background</span>
+        <span class="slide-num">02 / 11</span>
+      </div>
+      <h2>AI と人間が「兼業・協業」するときに起きる 4 つの壁</h2>
+      <p>既存の Munin は部分編集・推敲・MarkIts 撮影が強力でしたが、継続的な協業運用では次の摩擦が残っていました。</p>
+
+      <div class="grid-4">
+        <div class="card danger-border">
+          <h3>1. 画像（注釈）と本文のズレ</h3>
+          <p>手順の追加・並べ替えで、スクショ上の番号バッジ（①②③）や UI ボタン名と本文が乖離。CLI 接続時は画像レビューが「未確認」になる制約もありました。</p>
+        </div>
+        <div class="card warn-border">
+          <h3>2. エディタ ⇄ AIターミナルの摩擦</h3>
+          <p>人間がエディタで見つけた修正点を AI ターミナルへ伝えるには手動入力が必要。逆に AI が複数ファイルを直接更新すると差分確認が煩雑でした。</p>
+        </div>
+        <div class="card info-border">
+          <h3>3. 複数ページ横断の表記ゆれ</h3>
+          <p>人間と AI が複数ページを分担すると、「フォルダー / フォルダ」や UI ボタン名の揺れ、孤立ページ、読者向けリンク不整合が紛れ込みます。</p>
+        </div>
+        <div class="card accent-border">
+          <h3>4. 更新メンテ・裏取り・派生作成の負荷</h3>
+          <p>アプリ改修のたびに「どの原稿とスクショを直すべきか」の特定、仕様のソース裏取り、FAQ・英語版への差分追従が手作業になりがちでした。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slide 3: Architecture Map -->
+    <section class="slide" data-title="全体アーキテクチャと設計原則">
+      <div class="slide-top">
+        <span class="kicker">02 · Architecture</span>
+        <span class="slide-num">03 / 11</span>
+      </div>
+      <h2>一次情報を中心に、人間と AI が安全に並走する全体構成</h2>
+      <div class="diagram-box">
+        <svg viewBox="0 0 1080 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI協業アーキテクチャ図">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#6ecf9a" />
+            </marker>
+            <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#62c5e6" />
+            </marker>
+          </defs>
+
+          <!-- Left: Human Editor -->
+          <rect x="20" y="34" width="275" height="235" rx="16" fill="rgba(110,207,154,0.08)" stroke="#6ecf9a" stroke-width="1.5" />
+          <text x="40" y="64" fill="#6ecf9a" font-size="14" font-weight="700">人間の執筆（Studio UI）</text>
+          <rect x="38" y="80" width="239" height="44" rx="9" fill="rgba(255,255,255,0.04)" stroke="rgba(164,214,185,0.28)" />
+          <text x="50" y="100" fill="currentColor" font-size="13" font-weight="700">リッチ / ソース編集 &amp; 画像ホバー</text>
+          <text x="50" y="116" fill="#9eb3a7" font-size="11">選択範囲送信 / ai-note 付箋バー</text>
+
+          <rect x="38" y="136" width="239" height="48" rx="9" fill="rgba(255,255,255,0.04)" stroke="rgba(164,214,185,0.28)" />
+          <text x="50" y="156" fill="currentColor" font-size="13" font-weight="700">強化された原稿チェック</text>
+          <text x="50" y="173" fill="#9eb3a7" font-size="11">注釈整合 / 用語置換 / MarkIts直行</text>
+
+          <rect x="38" y="196" width="239" height="56" rx="9" fill="rgba(255,255,255,0.04)" stroke="rgba(164,214,185,0.28)" />
+          <text x="50" y="216" fill="currentColor" font-size="13" font-weight="700">設定 → 用語集（Glossary）</text>
+          <text x="50" y="234" fill="#9eb3a7" font-size="11">CRUD・検索・UIMap候補の一括取込</text>
+
+          <!-- Center: Source of Truth -->
+          <rect x="365" y="24" width="350" height="255" rx="16" fill="rgba(98,197,230,0.08)" stroke="#62c5e6" stroke-width="1.6" />
+          <text x="388" y="54" fill="#62c5e6" font-size="14" font-weight="700">プロジェクト一次情報（正本データ）</text>
+
+          <rect x="385" y="72" width="310" height="50" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(98,197,230,0.35)" />
+          <text x="400" y="94" fill="currentColor" font-size="13" font-weight="700">通常 Markdown（docs/*.md）</text>
+          <text x="400" y="112" fill="#9eb3a7" font-size="11">本文・ai-note（公開時除去）・ai:audience</text>
+
+          <rect x="385" y="134" width="310" height="56" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(98,197,230,0.35)" />
+          <text x="400" y="156" fill="currentColor" font-size="13" font-weight="700">MarkIts PNG メタデータ</text>
+          <text x="400" y="174" fill="#9eb3a7" font-size="11">annotations / uimap / operations / script</text>
+
+          <rect x="385" y="202" width="310" height="60" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(98,197,230,0.35)" />
+          <text x="400" y="224" fill="currentColor" font-size="13" font-weight="700">.munin/glossary.json &amp; 対象アプリ Git</text>
+          <text x="400" y="242" fill="#9eb3a7" font-size="11">用語辞書・外部変更スナップショット・ソースコード</text>
+
+          <!-- Right: AI Agents & MCP -->
+          <rect x="785" y="34" width="275" height="235" rx="16" fill="rgba(232,196,104,0.08)" stroke="#e8c468" stroke-width="1.5" />
+          <text x="805" y="64" fill="#e8c468" font-size="14" font-weight="700">AI エージェント &amp; MCP</text>
+
+          <rect x="803" y="80" width="239" height="52" rx="9" fill="rgba(255,255,255,0.04)" stroke="rgba(232,196,104,0.32)" />
+          <text x="815" y="101" fill="currentColor" font-size="13" font-weight="700">AI ターミナル (Codex/Claude/Agy)</text>
+          <text x="815" y="118" fill="#9eb3a7" font-size="11">文脈貼り付け/送信 + 自動スナップショット</text>
+
+          <rect x="803" y="144" width="239" height="52" rx="9" fill="rgba(255,255,255,0.04)" stroke="rgba(232,196,104,0.32)" />
+          <text x="815" y="165" fill="currentColor" font-size="13" font-weight="700">ローカル MCP 7 ツール新設</text>
+          <text x="815" y="182" fill="#9eb3a7" font-size="11">glossary / check / fact / impact / draft…</text>
+
+          <rect x="803" y="208" width="239" height="46" rx="9" fill="rgba(255,255,255,0.04)" stroke="rgba(232,196,104,0.32)" />
+          <text x="815" y="228" fill="currentColor" font-size="13" font-weight="700">エディタ内 AI 自動連携</text>
+          <text x="815" y="244" fill="#9eb3a7" font-size="11">部分編集・推敲・全体下書きへ用語注入</text>
+
+          <!-- Bottom: AI Collab Hub + External Tray -->
+          <rect x="20" y="314" width="1040" height="96" rx="16" fill="rgba(110,207,154,0.07)" stroke="rgba(110,207,154,0.4)" stroke-width="1.5" />
+          <text x="40" y="342" fill="#6ecf9a" font-size="14" font-weight="700">統合ワークフロー UI：「AI協業ツール（5タブ）」 &amp; 「外部変更の確認トレー」</text>
+          <g font-size="12" font-weight="600" fill="currentColor">
+            <rect x="40" y="356" width="160" height="36" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(164,214,185,0.3)" />
+            <text x="56" y="379">1. 構成・読者ダッシュボード</text>
+            <rect x="212" y="356" width="150" height="36" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(164,214,185,0.3)" />
+            <text x="228" y="379">2. ソース事実裏取り</text>
+            <rect x="374" y="356" width="155" height="36" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(164,214,185,0.3)" />
+            <text x="390" y="379">3. アプリ変更影響抽出</text>
+            <rect x="541" y="356" width="155" height="36" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(164,214,185,0.3)" />
+            <text x="557" y="379">4. 操作記録→手順書</text>
+            <rect x="708" y="356" width="160" height="36" rx="8" fill="rgba(255,255,255,0.06)" stroke="rgba(164,214,185,0.3)" />
+            <text x="722" y="379">5. 派生・多言語差分同期</text>
+            <rect x="880" y="356" width="160" height="36" rx="8" fill="rgba(232,196,104,0.16)" stroke="#e8c468" />
+            <text x="896" y="379" fill="#e8c468">外部変更 Diff トレー</text>
+          </g>
+
+          <!-- Connectors -->
+          <line x1="295" y1="150" x2="362" y2="150" stroke="#6ecf9a" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)" />
+          <line x1="715" y1="150" x2="782" y2="150" stroke="#62c5e6" stroke-width="2" marker-end="url(#arrow2)" marker-start="url(#arrow2)" />
+          <line x1="540" y1="279" x2="540" y2="312" stroke="#6ecf9a" stroke-width="2" marker-end="url(#arrow)" />
+        </svg>
+      </div>
+    </section>
+
+    <!-- Slide 4: MarkIts Consistency -->
+    <section class="slide" data-title="機能① MarkIts注釈・UIMap × 本文の自動整合チェック">
+      <div class="slide-top">
+        <span class="kicker">03 · Feature A</span>
+        <span class="slide-num">04 / 11</span>
+      </div>
+      <h2>MarkIts 注釈・UIMap × 本文の自動整合チェック</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>AI コストゼロ・高速・決定論的にズレを検出</h3>
+          <ul class="clean">
+            <li><strong>PNG メタデータ自動読取</strong>: <span>文書内 PNG または管理画像の編集用 PNG から <code>markits:annotations</code> / <code>markits:uimap</code> を取得。</span></li>
+            <li><strong>番号バッジ照合</strong>: <span>画像の ①②③ と直後の説明文（次の見出し/画像まで）を比較し、説明漏れ・余剰番号・順序逆転を検出。</span></li>
+            <li><strong>UIMap 表記ズレ照合</strong>: <span>注釈ターゲットの UI 要素名と本文内「」/太字/コード表記を比較し、近接ズレを警告。</span></li>
+            <li><strong>安全設計</strong>: <span>コードブロック・HTML コメント内は除外。<code>severity: "warning"</code> のため完成版ビルド（<code>error</code> のみ停止）を阻害しません。</span></li>
+          </ul>
+          <div class="hero-badges">
+            <span class="pill accent">quality.rs 拡張</span>
+            <span class="pill accent">MCP: check-manuscript</span>
+          </div>
+        </div>
+
+        <div class="mock-ui">
+          <div class="mock-bar">
+            <span>原稿チェック結果（公開前チェック合格 · 警告 3件）</span>
+            <span class="pill accent" style="padding:2px 8px;font-size:11px;">絞り込み: すべて ▾</span>
+          </div>
+          <div class="mock-row" style="border-left:4px solid var(--accent);">
+            <div><span class="pill warn" style="padding:1px 7px;font-size:10.5px;">警告 · 注釈整合</span></div>
+            <div>画像の注釈番号 <strong>②（対象:「保存する」）</strong> が直後の本文に言及されていません。</div>
+            <div class="mock-btns">
+              <span class="mock-btn">docs/index.md:3 — 該当箇所を開く</span>
+              <span class="mock-btn">MarkItsで編集</span>
+              <span class="mock-btn primary">AIターミナルで補正</span>
+            </div>
+          </div>
+          <div class="mock-row" style="border-left:4px solid var(--accent);">
+            <div><span class="pill warn" style="padding:1px 7px;font-size:10.5px;">警告 · 用語集</span></div>
+            <div>用語集の表記ルール: 「フォルダ」は「<strong>フォルダー</strong>」に統一してください。</div>
+            <div class="mock-btns">
+              <span class="mock-btn">docs/index.md:5 — 該当箇所を開く</span>
+              <span class="mock-btn primary">「フォルダー」に置換</span>
+            </div>
+          </div>
+          <div class="mock-row" style="border-left:4px solid var(--accent);">
+            <div><span class="pill warn" style="padding:1px 7px;font-size:10.5px;">警告 · AIメモ</span></div>
+            <div>未解決のAIメモが残っています: ②の手順を追記する</div>
+            <div class="mock-btns">
+              <span class="mock-btn">該当箇所を開く</span>
+              <span class="mock-btn primary">AIターミナルで解決</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slide 5: Editor <-> Terminal & Inline AI Notes -->
+    <section class="slide" data-title="機能② エディタ⇄AIターミナル送信 & インラインAIメモ">
+      <div class="slide-top">
+        <span class="kicker">04 · Feature B-1 &amp; B-2</span>
+        <span class="slide-num">05 / 11</span>
+      </div>
+      <h2>エディタ ⇄ AIターミナル双方向送信 &amp; インライン AI メモ</h2>
+      <div class="grid-2">
+        <div class="card accent-border">
+          <h3>エディタからの文脈付き送信（<code>Ctrl/Cmd+Shift+T</code>）</h3>
+          <p>選択範囲・画像ホバー「AIへ相談」・原稿チェック警告・AIターミナルツールバーから 1 クリックで構造化プロンプトを送れます。</p>
+          <pre class="mock">対象原稿: docs/editing-and-ai.md（行 34-41）
+注意: 未保存の変更あり → active-editor で最新本文を取得
+原稿修正時は MCP の preview-edit を使ってください。
+指示: ショートカットの補足をソースから確認して追記</pre>
+          <ul class="clean">
+            <li><strong>既定は「入力欄に貼り付け」</strong>: <span>Enter 自動送信はチェック時のみ。誤爆を防止。</span></li>
+            <li><strong>未接続時も安心</strong>: <span>クリップボードへコピーしてターミナルパネルを案内。</span></li>
+          </ul>
+        </div>
+
+        <div class="card info-border">
+          <h3>執筆を止めないインライン AI メモ（<code>Ctrl/Cmd+Shift+M</code>）</h3>
+          <p>通常 Markdown の HTML コメント <code>&lt;!-- ai-note: ... --&gt;</code> を使い、思いついた依頼を付箋のように残せます。</p>
+          <div class="mock-ui" style="padding:10px 12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;padding:6px 10px;font-size:12px;">
+              <strong>AIメモ 2件（行 18: Windows/macOS のキー差を表で追記…）</strong>
+              <span class="mock-btn primary">一覧・AIへ依頼</span>
+            </div>
+            <p style="font-size:12px;">リッチエディタ上部に自動表示（0件時は非表示）。チェックしたメモをまとめて AI ターミナルへ一括依頼できます。</p>
+          </div>
+          <ul class="clean">
+            <li><strong>公開ビルド時は自動除去</strong>: <span><code>builder.rs</code> がコードブロック外の <code>ai-note</code> を除去し、公開 HTML に開発メモを残しません。</span></li>
+            <li><strong>原稿チェックでも警告</strong>: <span>書き残したままの公開ミスを防止。</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slide 6: External Change Review Tray -->
+    <section class="slide" data-title="機能③ 外部変更の確認トレー（複数ファイルDiff承認）">
+      <div class="slide-top">
+        <span class="kicker">05 · Feature B-3</span>
+        <span class="slide-num">06 / 11</span>
+      </div>
+      <h2>AI 外部変更の「確認トレー」— 複数ファイルをハンク単位で統制</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>AI が直接書き換えた複数ファイルも「壊さない」</h3>
+          <ul class="clean">
+            <li><strong>自動スナップショット</strong>: <span>AI ターミナル接続時にプロジェクト内 Markdown のベースラインを <code>.munin/terminal-snapshots/</code> へ記録。</span></li>
+            <li><strong>差分自動検知</strong>: <span>新規（<code>added</code>）・更新（<code>modified</code>）・削除（<code>deleted</code>）を検出し、ツールバーに <code>外部変更を確認 (N)</code> バッジを表示。</span></li>
+            <li><strong>ハンク単位で採用 / 元に戻す</strong>: <span>変更ブロックごとにチェックを外せばその箇所だけ変更前へ復元。</span></li>
+            <li><strong>厳格な競合・未保存保護</strong>: <span>書き戻し時に現在のディスク SHA-256 を照合。さらにエディタで未保存編集中のファイルは警告表示＆確定ボタンを無効化。</span></li>
+          </ul>
+        </div>
+
+        <div class="mock-ui">
+          <div class="mock-bar">
+            <span>外部変更の確認トレー</span>
+            <div class="mock-btns">
+              <span class="mock-btn">最新を再取得</span>
+              <span class="mock-btn">すべて承認して閉じる</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:155px 1fr;gap:10px;">
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div class="mock-row" style="border-color:var(--accent);background:var(--accent-soft);padding:7px 9px;">
+                <span class="pill" style="padding:1px 6px;font-size:10px;width:fit-content;">更新</span>
+                <strong>docs/guide.md</strong>
+                <span style="font-size:11px;color:var(--text-muted);">+8 / -3</span>
+              </div>
+              <div class="mock-row" style="padding:7px 9px;">
+                <span class="pill accent" style="padding:1px 6px;font-size:10px;width:fit-content;">新規</span>
+                <strong>docs/faq.md</strong>
+                <span style="font-size:11px;color:var(--text-muted);">+24 / -0</span>
+              </div>
+              <div class="mock-row" style="padding:7px 9px;">
+                <span class="pill danger" style="padding:1px 6px;font-size:10px;width:fit-content;">未保存編集あり</span>
+                <strong>docs/index.md</strong>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div class="mock-row">
+                <div style="font-weight:700;">☑ ハンク 1 を採用（変更後を維持）</div>
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);">+ Ctrl+S または自動保存で保存します。</div>
+              </div>
+              <div class="mock-row">
+                <div style="font-weight:700;">☐ ハンク 2 を元に戻す（変更前へ復元）</div>
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--danger);">- AIが勝手に書き換えた注意事項</div>
+              </div>
+              <div class="mock-btns" style="justify-content:flex-end;">
+                <span class="mock-btn primary">選んだ変更を確定（SHA-256照合）</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slide 7: Project Glossary -->
+    <section class="slide" data-title="機能④ プロジェクト用語集（Glossary）と全AI自動連携">
+      <div class="slide-top">
+        <span class="kicker">06 · Feature C</span>
+        <span class="slide-num">07 / 11</span>
+      </div>
+      <h2>プロジェクト用語集（<code>.munin/glossary.json</code>）と 4 箇所自動連携</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>UIMap から実ボタン名をワンクリック取り込み</h3>
+          <p>「設定 → 用語集」タブで正式表記・NG表記・カテゴリ（<code>ui</code> / <code>term</code> / <code>style</code>）・大文字小文字区別・メモを管理できます。</p>
+          <pre class="mock">{
+  "version": 1,
+  "terms": [{
+    "preferred": "撮影するアプリを登録",
+    "avoid": ["アプリ登録", "対象アプリ登録"],
+    "category": "ui",
+    "source": "uimap",
+    "note": "本文では「」で囲む"
+  }]
+}</pre>
+          <p style="font-size:12.5px;">管理画像・プロジェクト内 PNG の <code>markits:uimap</code> を走査し、未登録 UI 要素名を一括チェック登録できます。</p>
+        </div>
+
+        <div class="grid-4" style="gap:10px;">
+          <div class="card accent-border">
+            <h3>1. 原稿チェック＋置換</h3>
+            <p>コード・URL・正式表記の部分一致を除外して NG 表記を検出。1 クリック置換＋Undo 対応。</p>
+          </div>
+          <div class="card info-border">
+            <h3>2. エディタ内 AI</h3>
+            <p>部分編集・推敲（<code>selection_ai.rs</code>）と全体下書き（<code>author.rs</code>）へ関連語を自動注入。</p>
+          </div>
+          <div class="card warn-border">
+            <h3>3. MCP 公開</h3>
+            <p><code>project-glossary</code> ツールで AI ターミナルから検索・カテゴリ指定取得が可能。</p>
+          </div>
+          <div class="card">
+            <h3>4. Git チーム共有</h3>
+            <p>プロジェクト内 JSON として保存（最大 500 件・アトミック保存）し、チームで同一ルールを運用。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slide 8: Recording Draft & Fact Check -->
+    <section class="slide" data-title="機能⑤⑥ 操作記録からの手順書生成 & ソース根拠ファクトチェック">
+      <div class="slide-top">
+        <span class="kicker">07 · AI Collab Hub (Part 1)</span>
+        <span class="slide-num">08 / 11</span>
+      </div>
+      <h2>「撮るだけで初稿」と「ソースで裏取り」を統合</h2>
+      <div class="grid-2">
+        <div class="card accent-border">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3>機能 ⑤ 操作記録 → 手順書ドラフト生成</h3>
+            <span class="pill accent">draft-from-recording</span>
+          </div>
+          <p>MarkIts の録画・スクリプト（<code>markits:operation_script</code> / <code>operations</code> / <code>annotations</code> / <code>uimap</code>）から操作手順の初稿を自動生成します。</p>
+          <pre class="mock">## 設定の保存手順
+
+![設定の保存手順](&lt;assets/rec.png&gt;)
+
+1. 「**設定**」ボタンをクリックします。
+2. `サンプル` と入力します。
+3. 「**保存**」ボタンをクリックします。
+
+**操作後の結果**: 変更が画面に反映されます。</pre>
+          <ul class="clean">
+            <li><span>AI なしでも即座に構造化生成、接続済み AI での文章整形も選択可能。</span></li>
+            <li><span>既存 <code>reviewSelection</code> Diff 画面で確認してからカーソル位置へ挿入。</span></li>
+          </ul>
+        </div>
+
+        <div class="card info-border">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3>機能 ⑥ ソースコード・UIMap 根拠ファクトチェック</h3>
+            <span class="pill">fact-check-manuscript</span>
+          </div>
+          <p>通常 Markdown 内の <code>--flag</code>・ファイルパス・コマンド・「」UI 表記を、対象アプリのソースコードと撮影画像の UIMap に決定論的に照合します。</p>
+          <div class="mock-ui" style="padding:10px 12px;">
+            <div class="mock-row" style="border-left:4px solid var(--accent);">
+              <div><span class="pill accent" style="padding:1px 6px;font-size:10px;">根拠あり</span> <code>--studio-tools</code></div>
+              <div style="font-size:11.5px;color:var(--text-muted);">source: crates/manual-core/src/terminal_tools.rs:11</div>
+            </div>
+            <div class="mock-row" style="border-left:4px solid var(--danger);">
+              <div><span class="pill danger" style="padding:1px 6px;font-size:10px;">根拠未確認</span> 「存在しない設定」</div>
+              <div class="mock-btns">
+                <span class="mock-btn">該当行を開く</span>
+                <span class="mock-btn primary">AIターミナルで調査</span>
+              </div>
+            </div>
+          </div>
+          <p style="font-size:12.5px;">AI のハルシネーションや古い UI 名を瞬時にあぶり出し、人間の裏取り時間を大幅に短縮します。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slide 9: Impact, Dashboard, Derivative & Translation -->
+    <section class="slide" data-title="機能⑦⑧ 変更影響抽出・構成ダッシュボード・派生＆多言語同期">
+      <div class="slide-top">
+        <span class="kicker">08 · AI Collab Hub (Part 2)</span>
+        <span class="slide-num">09 / 11</span>
+      </div>
+      <h2>運用・保守まで支える 3 つの横断ワークフロー</h2>
+      <div class="grid-3">
+        <div class="card warn-border">
+          <span class="pill warn" style="width:fit-content;">analyze-app-impact</span>
+          <h3>アプリ変更からの影響抽出</h3>
+          <p>対象アプリリポジトリの <code>git diff</code> と作業ツリー変更から、変更された UI 文言・識別子・ファイル名を抽出。</p>
+          <ul class="clean">
+            <li><span>影響を受けるマニュアルページをスコア順に表示。</span></li>
+            <li><span>一致する UIMap を持つ関連撮影画像をピックアップ。</span></li>
+            <li><span>そのまま AI ターミナルへ更新案の作成を依頼。</span></li>
+          </ul>
+        </div>
+
+        <div class="card accent-border">
+          <span class="pill accent" style="width:fit-content;">project-overview</span>
+          <h3>構成・読者ダッシュボード</h3>
+          <p>プロジェクト全ページを俯瞰し、ページ横断の品質と読者別出し分けを管理します。</p>
+          <ul class="clean">
+            <li><span>孤立ページ・重複見出し・読者リンク不整合を自動診断。</span></li>
+            <li><span><code>ai:audience</code>（user / developer / maintainer）を UI から保存。</span></li>
+            <li><span>読者別 HTML 出力（MkDocs / Zensical）を直結。</span></li>
+          </ul>
+        </div>
+
+        <div class="card info-border">
+          <span class="pill" style="width:fit-content;">translation-diff-plan</span>
+          <h3>派生生成 &amp; 多言語差分同期</h3>
+          <p>完成したマニュアル資産を別フォーマット・多言語へ壊さず展開します。</p>
+          <ul class="clean">
+            <li><span>選択ページから <strong>FAQ / リリースノート / クイックガイド</strong> を生成。</span></li>
+            <li><span>基準言語の <code>git diff</code> と変更見出しだけを抽出し、翻訳先ページの該当箇所のみ同期。</span></li>
+            <li><span>全文再翻訳による既存訳の破壊を防止。</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slide 10: MCP & Verification -->
+    <section class="slide" data-title="新設 MCP ツール一覧と検証結果">
+      <div class="slide-top">
+        <span class="kicker">09 · MCP &amp; Verification</span>
+        <span class="slide-num">10 / 11</span>
+      </div>
+      <h2>新設 MCP 7 ツールと自動テスト検証サマリー</h2>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value">16 / 16</div>
+          <div class="stat-label">Rust 単体・RPC 結合テスト</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">2 / 2</div>
+          <div class="stat-label">MCP stdio 実バイナリ検証</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">2 / 2</div>
+          <div class="stat-label">Playwright 実ブラウザ E2E</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">7 / 7</div>
+          <div class="stat-label">OpenSpec 仕様バリデーション</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:10px 14px;overflow:auto;">
+        <table class="spec-table">
+          <thead>
+            <tr>
+              <th>新設 MCP ツール</th>
+              <th>役割（AI ターミナルの Codex / Claude Code 等から直接呼び出し）</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>project-glossary</code></td><td><code>.munin/glossary.json</code> の用語・UI表記・NG表記を検索・参照</td></tr>
+            <tr><td><code>check-manuscript</code></td><td>リンク切れ・画像欠落・MarkIts 注釈整合・用語違反・未解決 <code>ai-note</code> を自己点検</td></tr>
+            <tr><td><code>draft-from-recording</code></td><td>操作記録 / スクリプト / 注釈 PNG から手順書ドラフトを生成</td></tr>
+            <tr><td><code>fact-check-manuscript</code></td><td>原稿内のコマンド・パス・「」UI表記をソースコード＆UIMap へ裏取り</td></tr>
+            <tr><td><code>analyze-app-impact</code></td><td>対象アプリリポジトリの Git 差分から影響ページと撮影画像を抽出</td></tr>
+            <tr><td><code>project-overview</code></td><td>全ページ構成・見出し・孤立ページ・読者設定・警告件数を俯瞰</td></tr>
+            <tr><td><code>translation-diff-plan</code></td><td>基準言語の Git 差分を抽出し、多言語ページの最小差分同期プランを作成</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Slide 11: Summary Cycle -->
+    <section class="slide" data-title="まとめ：AIとつくる、壊さない協業サイクル">
+      <div class="slide-top">
+        <span class="kicker">10 · Summary</span>
+        <span class="slide-num">11 / 11</span>
+      </div>
+      <h2>「AI とつくる、壊さない」マニュアル協業サイクルが完成</h2>
+      <p>人間の意図と実画面の一次情報を起点に、初稿作成・並行執筆・品質検査・更新保守までが途切れず循環します。</p>
+
+      <div class="cycle-steps">
+        <div class="cycle-step">
+          <span class="step-index">STEP 01</span>
+          <h3>撮る・記録</h3>
+          <p style="font-size:12.5px;">MarkIts で実画面・UIMap・操作手順を記録し、用語集へ UI 名を自動取込。</p>
+        </div>
+        <div class="cycle-step">
+          <span class="step-index">STEP 02</span>
+          <h3>初稿生成</h3>
+          <p style="font-size:12.5px;">操作記録から手順書ドラフトを生成し、Diff 確認のうえ安全に挿入。</p>
+        </div>
+        <div class="cycle-step">
+          <span class="step-index">STEP 03</span>
+          <h3>並行執筆</h3>
+          <p style="font-size:12.5px;"><code>ai-note</code> 付箋と文脈送信で AI ターミナルと並走。外部変更はトレーで承認。</p>
+        </div>
+        <div class="cycle-step">
+          <span class="step-index">STEP 04</span>
+          <h3>自動検査</h3>
+          <p style="font-size:12.5px;">注釈整合・用語集・ソース裏取り・構成ダッシュボードで品質を担保。</p>
+        </div>
+        <div class="cycle-step">
+          <span class="step-index">STEP 05</span>
+          <h3>公開＆追従</h3>
+          <p style="font-size:12.5px;">読者別 HTML 出力・FAQ 派生生成・アプリ Git 差分追従・多言語差分同期。</p>
+        </div>
+      </div>
+
+      <div class="grid-2" style="flex:none;">
+        <div class="card">
+          <h3>すぐ使えるショートカット &amp; 入口</h3>
+          <ul class="clean">
+            <li><code>Ctrl/Cmd+Shift+T</code> : <span>選択範囲・現在位置を AI ターミナルへ文脈付き送信</span></li>
+            <li><code>Ctrl/Cmd+Shift+M</code> : <span>カーソル位置へ <code>&lt;!-- ai-note: ... --&gt;</code> を挿入</span></li>
+            <li><strong>設定 → 用語集</strong> / <strong>AIターミナル → AI協業ツール</strong> / <strong>原稿チェック</strong></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>次のアクション（実デスクトップ反映）</h3>
+          <ul class="clean">
+            <li><span>ローカル環境で <code>npm run manual:build</code> / <code>npm run manual:app</code> を実行し、デスクトップバイナリへ反映。</span></li>
+            <li><span>実案件プロジェクトで UIMap 用語取込・原稿チェック・AI協業ハブを試用。</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="progress-bar" id="progress-bar" style="width: 9.09%;"></div>
+
+  <footer class="controls" aria-label="プレゼンテーション操作">
+    <div class="ctrl-group">
+      <button type="button" class="ctrl-btn" id="prev-btn" aria-label="前のスライド">← 前へ</button>
+      <span class="ctrl-status" id="slide-counter">1 / 11</span>
+      <button type="button" class="ctrl-btn" id="next-btn" aria-label="次のスライド">次へ →</button>
+    </div>
+    <span class="hint">← / → / Space で移動 · G で目次 · T でテーマ切替 · F で全画面</span>
+    <div class="ctrl-group">
+      <button type="button" class="ctrl-btn" id="overview-btn">目次 (G)</button>
+      <button type="button" class="ctrl-btn" id="theme-btn">ライト切替</button>
+      <button type="button" class="ctrl-btn" id="fullscreen-btn">全画面</button>
+    </div>
+  </footer>
+
+  <div class="overview-backdrop" id="overview-backdrop" role="dialog" aria-modal="true" aria-label="スライド一覧">
+    <div class="overview-dialog">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <h3 style="margin:0;font-size:18px;">スライド一覧（クリックで移動）</h3>
+        <button type="button" class="ctrl-btn" id="overview-close">閉じる (Esc)</button>
+      </div>
+      <div class="overview-grid" id="overview-grid"></div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const total = slides.length;
+      let index = 0;
+
+      const prevBtn = document.getElementById('prev-btn');
+      const nextBtn = document.getElementById('next-btn');
+      const counter = document.getElementById('slide-counter');
+      const progress = document.getElementById('progress-bar');
+      const overviewBackdrop = document.getElementById('overview-backdrop');
+      const overviewGrid = document.getElementById('overview-grid');
+      const themeBtn = document.getElementById('theme-btn');
+      const fullscreenBtn = document.getElementById('fullscreen-btn');
+
+      function goTo(next) {
+        const clamped = Math.max(0, Math.min(total - 1, next));
+        index = clamped;
+        slides.forEach((slide, i) => {
+          slide.classList.toggle('active', i === index);
+          slide.classList.toggle('prev', i < index);
+        });
+        counter.textContent = `${index + 1} / ${total}`;
+        progress.style.width = `${((index + 1) / total) * 100}%`;
+        prevBtn.disabled = index === 0;
+        nextBtn.disabled = index === total - 1;
+        history.replaceState(null, '', `#slide-${index + 1}`);
+        renderOverviewSelection();
+      }
+
+      function toggleTheme() {
+        const html = document.documentElement;
+        const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        themeBtn.textContent = next === 'dark' ? 'ライト切替' : 'ダーク切替';
+      }
+
+      function toggleOverview(force) {
+        const open = typeof force === 'boolean' ? force : !overviewBackdrop.classList.contains('open');
+        overviewBackdrop.classList.toggle('open', open);
+        if (open) renderOverviewSelection();
+      }
+
+      function renderOverviewSelection() {
+        overviewGrid.querySelectorAll('.overview-item').forEach((item, i) => {
+          item.classList.toggle('current', i === index);
+        });
+      }
+
+      slides.forEach((slide, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'overview-item';
+        const num = document.createElement('small');
+        num.textContent = `Slide ${String(i + 1).padStart(2, '0')}`;
+        const title = document.createElement('div');
+        title.textContent = slide.dataset.title || `Slide ${i + 1}`;
+        btn.append(num, title);
+        btn.onclick = () => {
+          goTo(i);
+          toggleOverview(false);
+        };
+        overviewGrid.append(btn);
+      });
+
+      prevBtn.onclick = () => goTo(index - 1);
+      nextBtn.onclick = () => goTo(index + 1);
+      document.getElementById('overview-btn').onclick = () => toggleOverview();
+      document.getElementById('overview-close').onclick = () => toggleOverview(false);
+      overviewBackdrop.addEventListener('click', (e) => {
+        if (e.target === overviewBackdrop) toggleOverview(false);
+      });
+      themeBtn.onclick = toggleTheme;
+      fullscreenBtn.onclick = () => {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+        else document.exitFullscreen?.().catch(() => {});
+      };
+
+      document.addEventListener('keydown', (e) => {
+        if (overviewBackdrop.classList.contains('open')) {
+          if (e.key === 'Escape' || e.key.toLowerCase() === 'g') {
+            e.preventDefault();
+            toggleOverview(false);
+          }
+          return;
+        }
+        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+          e.preventDefault();
+          goTo(index + 1);
+        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+          e.preventDefault();
+          goTo(index - 1);
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          goTo(0);
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          goTo(total - 1);
+        } else if (e.key.toLowerCase() === 'g') {
+          e.preventDefault();
+          toggleOverview(true);
+        } else if (e.key.toLowerCase() === 't') {
+          e.preventDefault();
+          toggleTheme();
+        } else if (e.key.toLowerCase() === 'f') {
+          e.preventDefault();
+          fullscreenBtn.click();
+        }
+      });
+
+      let touchStartX = null;
+      document.addEventListener('touchstart', (e) => { touchStartX = e.changedTouches[0]?.clientX ?? null; }, { passive: true });
+      document.addEventListener('touchend', (e) => {
+        if (touchStartX === null) return;
+        const dx = (e.changedTouches[0]?.clientX ?? touchStartX) - touchStartX;
+        touchStartX = null;
+        if (Math.abs(dx) > 50) goTo(index + (dx < 0 ? 1 : -1));
+      }, { passive: true });
+
+      const hashMatch = /^#slide-(\d+)$/.exec(location.hash);
+      goTo(hashMatch ? Number(hashMatch[1]) - 1 : 0);
+    })();
+  </script>
+</body>
+</html>

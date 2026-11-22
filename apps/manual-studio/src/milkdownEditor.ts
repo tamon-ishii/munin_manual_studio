@@ -4,6 +4,7 @@ import {currentLine} from './editorLineCommands';
 import {sinkListItem,liftListItem} from '@milkdown/kit/prose/schema-list';
 import {lift} from '@milkdown/kit/prose/commands';
 import {documentImages,parseFigure,renderFigure,type DocumentImage,type ImagePresentation} from './imagePresentation';
+import {copyTextToClipboard} from './clipboardText';
 import { Slice } from '@milkdown/kit/prose/model';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { dropPoint } from '@milkdown/kit/prose/transform';
@@ -59,7 +60,8 @@ export function setupMilkdownEditor(
   _requestAiTask?: undefined,
   onEditImage?: (source: string, img: HTMLImageElement) => void,
   onImageSettings?: (img: HTMLImageElement) => void,
-  onRecaptureImage?: (source: string, img: HTMLImageElement) => void
+  onRecaptureImage?: (source: string, img: HTMLImageElement) => void,
+  onAskTerminalImage?: (source: string, img: HTMLImageElement) => void
 ) {
   const host = document.createElement('div');
   host.id = 'milkdown-editor';
@@ -126,6 +128,10 @@ export function setupMilkdownEditor(
     recaptureBtn.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(activeImg&&activeSource)onRecaptureImage(activeSource,activeImg);});overlay.append(recaptureBtn);
   }
   const settingsBtn=document.createElement('button');settingsBtn.type='button';settingsBtn.textContent='画像の表示設定';settingsBtn.onclick=()=>{if(activeImg)onImageSettings?.(activeImg);};if(onImageSettings)overlay.append(settingsBtn);
+  if(onAskTerminalImage){
+    const askBtn=document.createElement('button');askBtn.type='button';askBtn.className='milkdown-image-ask-ai-btn';askBtn.textContent='AIへ相談';askBtn.title='この画像の文脈をAIターミナルへ送ります';
+    askBtn.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(activeImg&&activeSource)onAskTerminalImage(activeSource,activeImg);});overlay.append(askBtn);
+  }
   host.appendChild(overlay);
 
   let activeImg: HTMLImageElement | null = null;
@@ -696,14 +702,14 @@ export function setupMilkdownEditor(
         tr.insertText('\n'+line.text.slice(0,-1),blockStart+line.end);
       } else if (command === 'cut' && !empty) {
         const text=state.doc.textBetween(state.selection.from,state.selection.to,'\n');
-        void navigator.clipboard.writeText(text).then(()=>{if(view.state===state)view.dispatch(state.tr.deleteSelection().scrollIntoView());}).catch(error=>report(`切り取りできませんでした: ${String(error)}`));
+        void copyTextToClipboard(text).then(()=>{if(view.state===state)view.dispatch(state.tr.deleteSelection().scrollIntoView());}).catch(error=>report(`切り取りできませんでした: ${String(error)}`));
         return true;
       } else {
         const from=blockStart+line.deleteStart,to=blockStart+line.deleteEnd;
         if (line.start===0 && line.end===$from.parent.content.size && $from.depth>0) tr.delete($from.before(),$from.after());
         else tr.delete(from,to);
         if(command==='cut') {
-          void navigator.clipboard.writeText(line.text).then(()=>{if(view.state===state)view.dispatch(tr.scrollIntoView());}).catch(error=>report(`切り取りできませんでした: ${String(error)}`));
+          void copyTextToClipboard(line.text).then(()=>{if(view.state===state)view.dispatch(tr.scrollIntoView());}).catch(error=>report(`切り取りできませんでした: ${String(error)}`));
           return true;
         }
       }

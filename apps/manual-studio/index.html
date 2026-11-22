@@ -58,9 +58,13 @@
           <button type="button" data-format="indent" title="選択行をインデント" aria-label="インデント">→ インデント</button>
           <button type="button" data-format="unindent" title="選択行のインデントを解除" aria-label="インデント解除">← 解除</button>
           <button type="button" data-format="rule" title="区切り線" aria-label="区切り線">―</button>
+          <button type="button" id="insert-ai-note" title="カーソル位置に一時的なAI依頼メモを挿入">AIメモを挿入</button>
+          <button type="button" id="manage-ai-notes" title="原稿内のAIメモ一覧を表示してAIへ依頼">AIメモ一覧・依頼</button>
+          <button type="button" id="send-to-terminal" title="選択範囲または現在位置をAIターミナルへ送る">AIターミナルへ送る</button>
 </div></details>
         </div>
       </div>
+      <div id="rich-ai-notes-banner" class="rich-ai-notes-banner" hidden></div>
       <div id="editor-workspace" class="editor-workspace">
         <div class="editor-split">
           <div class="editor-column"><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div>
@@ -80,6 +84,9 @@
           <select id="terminal-cli-agent" aria-label="ターミナルのAI"><option value="codex">Codex</option><option value="claude">Claude</option><option value="agy">Agy</option></select>
           <button type="button" id="terminal-connect-btn" data-ui-icon="connect">接続</button>
           <button type="button" id="terminal-auto-review" aria-pressed="false" title="AIが承認依頼を自動審査します。次の接続から有効です。">自動承認</button>
+          <button type="button" id="terminal-send-editor-btn" title="編集中の原稿や選択範囲を文脈付きでAIターミナルへ送る">編集箇所を送る</button>
+          <button type="button" id="open-ai-collab-hub" title="構成ダッシュボード・事実裏取り・アプリ影響抽出・操作記録ドラフト・派生生成">AI協業ツール</button>
+          <button type="button" id="terminal-external-changes-btn" hidden title="AIターミナル稼働中の外部変更をDiffで確認・復元">外部変更を確認</button>
           <button type="button" id="terminal-directory-settings" data-ui-icon="open" aria-haspopup="dialog">作業フォルダ設定</button>
           <button type="button" id="terminal-clear-btn" data-ui-icon="clear">クリア</button>
 
@@ -128,7 +135,7 @@
   <dialog id="panel-brief" class="panel-dialog"><div class="panel-header"><h1>執筆方針</h1><button type="button" data-close-dialog="panel-brief">閉じる</button></div><p>想定読者、文書の目的、説明する操作をまとめます。AIレビューや文章作成の参考に使います。</p><label>AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label><p class="muted">執筆方針は変更すると自動保存します。</p><button type="button" id="brief-save-retry" hidden>保存を再試行</button><p id="brief-save-state" role="status" aria-live="polite"></p></dialog>
   <section id="manuscript-check-host" hidden><section id="manuscript-check" aria-label="原稿チェック">
     <h2>原稿チェック</h2>
-    <div class="card"><p>原稿のローカルリンク、見出し参照、画像の欠落を確認します。外部URLの疎通は確認しません。</p><button id="quality-check" data-ui-icon="review" class="primary">原稿をチェック</button></div>
+    <div class="card"><p>ローカルリンク、見出し参照、画像の欠落に加え、MarkIts注釈（番号・UI名）と本文の整合、用語集違反、未解決のAIメモを確認します。</p><button id="quality-check" data-ui-icon="review" class="primary">原稿をチェック</button></div>
     <pre id="publish-result" class="result" aria-live="polite"></pre>
   </section></section>
   <section id="site-export-host" hidden>

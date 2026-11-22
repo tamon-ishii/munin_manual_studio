@@ -68,6 +68,7 @@ steps.push(
   { group: 'ui', name: 'workspace path settings and timing history', command: process.execPath, args: ['scripts/test_manual_studio_priority_improvements.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'Milkdown and Mermaid browser checks', command: process.execPath, args: ['scripts/test_manual_studio_milkdown.mjs'], timeoutMs: 120_000 },
   { group: 'ui', name: 'tree search and selection AI actions', command: process.execPath, args: ['scripts/test_manual_studio_selection_actions.mjs'], timeoutMs: 120_000 },
+  { group: 'ui', name: 'AI collaboration workflows, glossary, checks, handoff, and hub', command: process.execPath, args: ['scripts/test_manual_studio_ai_collaboration.mjs'], timeoutMs: 120_000 },
   { group: 'capture', name: 'MarkIts direct capture, cancellation and insertion ownership', command: process.execPath, args: ['scripts/test_manual_studio_markits_bridge.mjs'], timeoutMs: 60_000 },
   { group: 'ui', name: 'dialog layout at desktop and small viewport sizes', command: process.execPath, args: ['scripts/test_manual_studio_dialog_layout.mjs'], timeoutMs: 90_000 },
   { group: 'ui', name: 'resource and image generation workflows', command: process.execPath, args: ['scripts/test_manual_studio_resources.mjs'], timeoutMs: 180_000 },

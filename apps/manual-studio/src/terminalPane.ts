@@ -18,6 +18,7 @@ export interface TerminalPaneOptions {
 
 export interface TerminalController {
   write(data: string): void;
+  sendInput(text: string, submit: boolean): Promise<void>;
   fit(): void;
   focus():void;
   kill(): Promise<void>;
@@ -544,6 +545,17 @@ export function setupTerminalPane(
     focus(){terminal.focus();},
     write(data: string) {
       terminal.write(data);
+    },
+    async sendInput(text: string, submit: boolean) {
+      if (!sessionId) {
+        throw new Error("AIターミナルが接続されていません。");
+      }
+      const normalized = text.replace(/\r\n/g, "\n");
+      const useBracketed = Boolean((terminal as any).modes?.bracketedPasteMode);
+      const body = useBracketed ? `\x1b[200~${normalized}\x1b[201~` : normalized;
+      const payload = submit ? `${body}\r` : body;
+      await options.rpc("pty-write", { sessionId, data: payload }, options.getProjectRoot());
+      terminal.focus();
     },
     fit() {
       try {

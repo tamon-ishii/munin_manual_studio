@@ -1,14 +1,16 @@
-﻿type SettingsCategory = 'keyboard' | 'capture' | 'text-ai' | 'html-output' | 'appearance';
-export function setupSettingsTabs(): (category: SettingsCategory) => void {
+﻿type SettingsCategory = 'keyboard' | 'capture' | 'text-ai' | 'glossary' | 'html-output' | 'appearance';
+export function setupSettingsTabs(extraNodes?: { glossary?: Element[] }): (category: SettingsCategory) => void {
   const dialog = document.getElementById('panel-settings')!;
   const tabs = document.createElement('div');
   tabs.className = 'settings-category-tabs';
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', '設定の種類');
+  const glossaryNodes = extraNodes?.glossary ?? (document.getElementById('glossary-settings') ? [document.getElementById('glossary-settings')!] : []);
   const categories: {id: SettingsCategory;label: string;nodes: Element[]}[] = [
     {id:'keyboard',label:'キーボード',nodes:[document.getElementById('keyboard-shortcut-settings')!]},
     {id:'capture',label:'撮影',nodes:[document.getElementById('markits-shortcut-settings')!]},
     {id:'text-ai',label:'文章・図のAI',nodes:[document.getElementById('ai-connection-type')!.closest('.card')!]},
+    {id:'glossary',label:'用語集',nodes:glossaryNodes},
     {id:'html-output',label:'HTML出力',nodes:[document.getElementById('html-output-settings')!]},
     {id:'appearance',label:'外観',nodes:Array.from(document.querySelectorAll('#panel-appearance > .card'))},
   ];

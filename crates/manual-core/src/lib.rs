@@ -16,6 +16,13 @@ mod desktop_scenario;
 pub mod semantic_target;
 pub mod visual_target;
 pub mod editor;
+pub mod derivative;
+pub mod external_changes;
+pub mod fact_check;
+pub mod glossary;
+pub mod impact_analyzer;
+pub mod operation_draft;
+pub mod project_dashboard;
 mod gfm;
 mod manuscript_tools;
 mod file_move;
@@ -898,7 +905,95 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
                 .and_then(|v| capture_validation::save(project, id()?, v))
                 .map(|_| serde_json::json!({})),
         ),
-        "quality-check" => Some(quality::check(project)),
+        "quality-check" => Some(quality::check_page(project, options["page"].as_str())),
+        "glossary-read" => Some(
+            glossary::load(project)
+                .and_then(|value| serde_json::to_value(value).map_err(|e| e.to_string())),
+        ),
+        "glossary-save" => Some(
+            serde_json::from_value::<glossary::GlossaryFile>(options["json"].clone())
+                .map_err(|e| format!("用語集の形式が不正です: {e}"))
+                .and_then(|file| glossary::save(project, &file))
+                .and_then(|value| serde_json::to_value(value).map_err(|e| e.to_string())),
+        ),
+        "glossary-uimap-candidates" => Some(glossary::extract_uimap_candidates(project)),
+        "external-snapshot-create" => Some(external_changes::create(project)),
+        "external-snapshot-diff" => Some(external_changes::diff(project, id()?)),
+        "external-snapshot-apply" => Some(external_changes::apply(
+            project,
+            id()?,
+            page()?,
+            options["expected_sha256"]
+                .as_str()
+                .ok_or("expected_sha256を指定してください。")?,
+            options["content"].as_str(),
+        )),
+        "external-snapshot-clear" => Some(external_changes::clear(project, id()?)),
+        "operation-draft-sources" => Some(operation_draft::list_sources(project)),
+        "operation-draft-generate" => Some(operation_draft::generate(
+            project,
+            options["image"].as_str(),
+            options["resource_id"].as_str(),
+            options["page"].as_str(),
+            options["title"].as_str(),
+            options["use_ai"].as_bool().unwrap_or(false),
+        )),
+        "app-impact-analyze" => Some(impact_analyzer::analyze(
+            project,
+            options["repo_path"].as_str(),
+            options["base_ref"].as_str(),
+        )),
+        "manuscript-fact-check" => Some(fact_check::audit_manuscript(
+            project,
+            page()?,
+            options["source_dir"].as_str(),
+        )),
+        "project-dashboard" => Some(project_dashboard::overview(project)),
+        "page-audience-save" => Some({
+            let audiences: Vec<String> = options["audiences"]
+                .as_array()
+                .ok_or("audiences配列を指定してください。")?
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect();
+            project_dashboard::set_page_audience(project, page()?, &audiences)
+        }),
+        "build-audience" => Some(project_dashboard::build_for_audience(
+            project,
+            options["audience"]
+                .as_str()
+                .ok_or("対象読者を指定してください。")?,
+            options["engine"].as_str().unwrap_or("mkdocs"),
+            options["output"].as_str(),
+            options["draft"].as_bool().unwrap_or(false),
+        )),
+        "derivative-generate" => Some({
+            let kind = options["kind"].as_str().ok_or("派生種別を指定してください。")?;
+            let pages: Vec<String> = options["pages"]
+                .as_array()
+                .ok_or("対象原稿の配列を指定してください。")?
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect();
+            derivative::generate_derivative(
+                project,
+                kind,
+                &pages,
+                options["use_ai"].as_bool().unwrap_or(false),
+            )
+        }),
+        "translation-diff-plan" => Some(derivative::translation_diff_plan(
+            project,
+            options["source_page"]
+                .as_str()
+                .ok_or("基準言語の原稿を指定してください。")?,
+            options["target_page"]
+                .as_str()
+                .ok_or("翻訳先の原稿を指定してください。")?,
+            options["base_ref"].as_str(),
+            options["target_language"].as_str(),
+            options["use_ai"].as_bool().unwrap_or(false),
+        )),
         _ => None,
     };
     if let Some(result) = workflow_result {
@@ -2444,5 +2539,109 @@ mod tests {
         // The unified task has one opening and one closing tag
         assert_eq!(updated.matches("<!-- ai:task").count(), 1);
         assert_eq!(updated.matches("<!-- /ai:task -->").count(), 1);
+    }
+
+    #[test]
+    fn test_ai_collaboration_rpc_round_trip() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap();
+        fs::create_dir_all(tmp.path().join("docs/assets")).unwrap();
+        fs::write(
+            tmp.path().join("docs/index.md"),
+            "# テスト\n\nフォルダを開く。\n<!-- ai-note: 手順を追加 -->\n",
+        )
+        .unwrap();
+
+        let saved_raw = request(serde_json::json!({
+            "root": root,
+            "action": "glossary-save",
+            "options": {
+                "json": {
+                    "version": 1,
+                    "terms": [{
+                        "id": "",
+                        "preferred": "フォルダー",
+                        "avoid": ["フォルダ"],
+                        "category": "style",
+                        "case_sensitive": false,
+                        "note": "長音あり",
+                        "source": "manual"
+                    }]
+                }
+            }
+        }))
+        .unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
+        assert_eq!(saved["terms"][0]["preferred"], "フォルダー");
+
+        let read_raw = request(serde_json::json!({
+            "root": root,
+            "action": "glossary-read",
+            "options": {}
+        }))
+        .unwrap();
+        let read: serde_json::Value = serde_json::from_str(&read_raw).unwrap();
+        assert_eq!(read["terms"].as_array().unwrap().len(), 1);
+
+        let check_raw = request(serde_json::json!({
+            "root": root,
+            "action": "quality-check",
+            "options": { "page": "index.md" }
+        }))
+        .unwrap();
+        let checked: serde_json::Value = serde_json::from_str(&check_raw).unwrap();
+        assert_eq!(checked["passed"], true);
+        assert_eq!(checked["has_warnings"], true);
+        let issues = checked["issues"].as_array().unwrap();
+        assert!(issues.iter().any(|i| i["kind"] == "glossary_violation"));
+        assert!(issues.iter().any(|i| i["kind"] == "unresolved_ai_note"));
+
+        let snap_raw = request(serde_json::json!({
+            "root": root,
+            "action": "external-snapshot-create",
+            "options": {}
+        }))
+        .unwrap();
+        let snap: serde_json::Value = serde_json::from_str(&snap_raw).unwrap();
+        let snap_id = snap["session_id"].as_str().unwrap();
+
+        fs::write(
+            tmp.path().join("docs/index.md"),
+            "# テスト\n\nAIが更新した本文。\n",
+        )
+        .unwrap();
+        let diff_raw = request(serde_json::json!({
+            "root": root,
+            "action": "external-snapshot-diff",
+            "options": { "id": snap_id }
+        }))
+        .unwrap();
+        let diff: serde_json::Value = serde_json::from_str(&diff_raw).unwrap();
+        let change = &diff["changes"][0];
+        assert_eq!(change["page"], "docs/index.md");
+        assert_eq!(change["status"], "modified");
+
+        request(serde_json::json!({
+            "root": root,
+            "action": "external-snapshot-apply",
+            "options": {
+                "id": snap_id,
+                "page": "docs/index.md",
+                "expected_sha256": change["current_sha256"],
+                "content": "# テスト\n\nフォルダーを開く。\n"
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("docs/index.md")).unwrap(),
+            "# テスト\n\nフォルダーを開く。\n"
+        );
+
+        request(serde_json::json!({
+            "root": root,
+            "action": "external-snapshot-clear",
+            "options": { "id": snap_id }
+        }))
+        .unwrap();
     }
 }

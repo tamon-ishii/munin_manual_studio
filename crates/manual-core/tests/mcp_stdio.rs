@@ -13,6 +13,10 @@ fn lists_and_executes_project_tools_over_stdio() {
     fs::create_dir(root.path().join(".munin")).unwrap();
     fs::write(root.path().join(".munin/proofreading-skills.json"),
         r#"[{"id":"house-style","rules":"Use the house style."}]"#).unwrap();
+    fs::write(root.path().join(".munin/glossary.json"),
+        r#"{"version":1,"terms":[{"id":"folder","preferred":"フォルダー","avoid":["フォルダ"],"category":"style","case_sensitive":false,"note":"長音あり","source":"manual"}]}"#).unwrap();
+    fs::create_dir(root.path().join("docs")).unwrap();
+    fs::write(root.path().join("docs/index.md"), "# Guide\n\nフォルダを開く。\n<!-- ai-note: 手順を補足 -->\n").unwrap();
     image::DynamicImage::new_rgb8(16, 12)
         .save(root.path().join("image.png"))
         .unwrap();
@@ -37,6 +41,11 @@ fn lists_and_executes_project_tools_over_stdio() {
         json!({"id": 9, "method": "tools/call", "params": {"name": "import-generated-image", "arguments":{"image":"image.png","description":"Imported diagram"}}}),
         json!({"id": 10, "method": "tools/call", "params": {"name": "import-generated-image", "arguments":{"image":"../outside.png"}}}),
         json!({"id": 11, "method": "tools/call", "params": {"name": "proofread-text", "arguments":{"source":"Draft","skill":"house-style"}}}),
+        json!({"id": 12, "method": "tools/call", "params": {"name": "project-glossary", "arguments":{"query":"フォルダ"}}}),
+        json!({"id": 13, "method": "tools/call", "params": {"name": "check-manuscript", "arguments":{"page":"index.md"}}}),
+        json!({"id": 14, "method": "tools/call", "params": {"name": "project-overview"}}),
+        json!({"id": 15, "method": "tools/call", "params": {"name": "fact-check-manuscript", "arguments":{"page":"docs/index.md"}}}),
+        json!({"id": 16, "method": "tools/call", "params": {"name": "draft-from-recording", "arguments":{"image":"image.png","page":"docs/index.md"}}}),
     ] {
         let mut request = request;
         request["jsonrpc"] = json!("2.0");
@@ -50,7 +59,7 @@ fn lists_and_executes_project_tools_over_stdio() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(responses.len(), 11);
+    assert_eq!(responses.len(), 16);
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-06-18");
     assert!(responses[1]["result"]["tools"]
         .as_array()
@@ -86,6 +95,20 @@ fn lists_and_executes_project_tools_over_stdio() {
     assert_eq!(responses[9]["result"]["isError"], true);
     assert_eq!(responses[10]["result"]["isError"], true);
     assert!(responses[10]["result"]["content"][0]["text"].as_str().unwrap().contains("API or local LLM"));
+    let glossary_res: Value = serde_json::from_str(responses[11]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(glossary_res["terms"][0]["preferred"], "フォルダー");
+    let check_res: Value = serde_json::from_str(responses[12]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(check_res["passed"], true);
+    assert_eq!(check_res["has_warnings"], true);
+    let check_issues = check_res["issues"].as_array().unwrap();
+    assert!(check_issues.iter().any(|item| item["kind"] == "glossary_violation"));
+    assert!(check_issues.iter().any(|item| item["kind"] == "unresolved_ai_note"));
+    let overview: Value = serde_json::from_str(responses[13]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(overview["total_pages"], 1);
+    let fact: Value = serde_json::from_str(responses[14]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(fact["page"], "docs/index.md");
+    let rec_draft: Value = serde_json::from_str(responses[15]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(rec_draft["markdown"].as_str().unwrap().contains("image.png"));
 }
 
 #[test]

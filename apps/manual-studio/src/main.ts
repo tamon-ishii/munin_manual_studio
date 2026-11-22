@@ -61,6 +61,17 @@ import "./style.css";
 import { captureInsertionContext, isInsertionCurrent, STALE_INSERTION_MESSAGE } from "./insertionContext";
 import {setupManuscriptSearch} from './manuscriptSearch';
 import {sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions} from './manuscriptTools';
+import {setupGlossarySettings} from './glossarySettings';
+import {
+  extractAiNotes,
+  openAiNotesManagerDialog,
+  openExternalChangeTrayDialog,
+  openInsertAiNoteDialog,
+  openSendToTerminalDialog,
+  type ExternalChangeEntry,
+} from './aiCollaboration';
+import { openAiCollabHubDialog, type HubTabId } from './aiCollabHub';
+import { copyTextToClipboard } from './clipboardText';
 
 import type { State, Document } from "./types";
 
@@ -86,14 +97,22 @@ const milkdown = setupMilkdownEditor(editor, message => status(message, true), s
     status(`画像を挿入できませんでした。${String(error)} 画像を選び直して再試行できます。`, true);
     throw error;
   }
-}, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img),source=>{void recaptureDocumentImage(source);});
+}, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img),source=>{void recaptureDocumentImage(source);},(source)=>{void openImageSendToTerminal(source);});
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 setupPreviewImageSizing(element<HTMLIFrameElement>("markdown-preview"), milkdown.host);
 const native = "__TAURI_INTERNALS__" in window;
 setupDialogDragging();
-const selectSettingsCategory=setupSettingsTabs();
+const glossarySettings = setupGlossarySettings({
+  rpc,
+  getProjectRoot: () => projectRoot,
+  reportStatus: (message, isError) => status(message, isError),
+});
+const selectSettingsCategory=setupSettingsTabs({ glossary: [glossarySettings.element] });
 setupShortcutSettings(element('keyboard-shortcut-settings'));
-element('application-settings').addEventListener('click',()=>chooseTab('settings'));
+element('application-settings').addEventListener('click',()=>{
+  chooseTab('settings');
+  void glossarySettings.reload();
+});
 const markitsCaptureKey=input('markits-capture-key');
 markitsCaptureKey.dataset.keyRecorder='all';
 const defaultIncludeCursor=input('capture-default-include-cursor');
@@ -575,6 +594,322 @@ function getTerminalCliCommand(): { command: string; args: string[]; label: stri
   };
 }
 
+let terminalSnapshotId = '';
+let terminalSnapshotRoot = '';
+let externalChangesCache: ExternalChangeEntry[] = [];
+let externalChangesPollPending = false;
+
+function updateExternalChangesButton(): void {
+  const btn = element<HTMLButtonElement>('terminal-external-changes-btn');
+  if (!btn) return;
+  const count = externalChangesCache.length;
+  btn.hidden = count === 0;
+  btn.textContent = count > 0 ? `外部変更を確認 (${count})` : '外部変更を確認';
+}
+
+async function ensureTerminalSnapshot(root = projectRoot): Promise<void> {
+  if (!root) return;
+  if (terminalSnapshotId && terminalSnapshotRoot === root) return;
+  try {
+    const raw = await rpc('external-snapshot-create', {}, root);
+    const created = JSON.parse(raw) as { session_id?: string };
+    if (created?.session_id && root === projectRoot) {
+      terminalSnapshotId = created.session_id;
+      terminalSnapshotRoot = root;
+      externalChangesCache = [];
+      updateExternalChangesButton();
+    }
+  } catch {
+    // Optional snapshot support; do not interrupt terminal connection.
+  }
+}
+
+async function refreshExternalSnapshotDiff(): Promise<ExternalChangeEntry[]> {
+  const root = projectRoot;
+  const snapId = terminalSnapshotId;
+  if (!root || !snapId || terminalSnapshotRoot !== root || document.hidden || externalChangesPollPending) {
+    return externalChangesCache;
+  }
+  externalChangesPollPending = true;
+  try {
+    const raw = await rpc('external-snapshot-diff', { id: snapId }, root);
+    if (root !== projectRoot || snapId !== terminalSnapshotId) return externalChangesCache;
+    const parsed = JSON.parse(raw) as { changes?: ExternalChangeEntry[] };
+    externalChangesCache = Array.isArray(parsed?.changes) ? parsed.changes : [];
+    updateExternalChangesButton();
+    return externalChangesCache;
+  } catch {
+    return externalChangesCache;
+  } finally {
+    externalChangesPollPending = false;
+  }
+}
+
+function showTerminalPanel(): void {
+  if (layoutManager && !layoutManager.isPanelVisible('terminal')) {
+    layoutManager.togglePanel('terminal', true);
+  }
+  chooseTab('terminal');
+  openManualTerminal();
+}
+
+function lineRangeFromOffsets(text: string, start: number, end: number): { lineStart: number; lineEnd: number } {
+  const lineStart = text.slice(0, start).split('\n').length;
+  const lineEnd = text.slice(0, Math.max(start, end)).split('\n').length;
+  return { lineStart, lineEnd };
+}
+
+async function openEditorSendToTerminal(overrides?: {
+  title?: string;
+  page?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  excerpt?: string;
+  imagePath?: string;
+  defaultInstruction?: string;
+}): Promise<void> {
+  if (!documentState && !overrides?.page) {
+    status('先に原稿を開いてください。', true);
+    return;
+  }
+  const page = overrides?.page || (documentState ? manuscriptPagePath(documentState.page) : '');
+  const content = editor.value;
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  const hasSelection = end > start;
+  const computedLines = lineRangeFromOffsets(content, start, end);
+  let excerpt = overrides?.excerpt;
+  if (excerpt === undefined && documentState && !activeImageTab) {
+    if (hasSelection) {
+      excerpt = content.slice(start, end);
+    } else {
+      const lines = content.split('\n');
+      const idx = Math.max(0, computedLines.lineStart - 1);
+      excerpt = lines.slice(Math.max(0, idx - 2), Math.min(lines.length, idx + 4)).join('\n');
+    }
+  }
+  await openSendToTerminalDialog({
+    title: overrides?.title,
+    page,
+    lineStart: overrides?.lineStart ?? (documentState ? computedLines.lineStart : undefined),
+    lineEnd: overrides?.lineEnd ?? (documentState ? computedLines.lineEnd : undefined),
+    excerpt,
+    imagePath: overrides?.imagePath,
+    defaultInstruction: overrides?.defaultInstruction,
+    dirty: Boolean(dirty && documentState && manuscriptPagePath(documentState.page) === page),
+    isConnected: () => Boolean(terminalController?.isConnected()),
+    openTerminal: showTerminalPanel,
+    sendToTerminal: async (prompt, submit) => {
+      if (!terminalController?.isConnected()) throw new Error('AIターミナルが接続されていません。');
+      await terminalController.sendInput(prompt, submit);
+    },
+    reportStatus: (message, isError) => status(message, isError),
+  });
+}
+
+async function openImageSendToTerminal(source: string): Promise<void> {
+  if (!documentState || activeImageTab) return;
+  const page = manuscriptPagePath(documentState.page);
+  const content = editor.value;
+  const idx = content.indexOf(source);
+  let lineStart: number | undefined;
+  let excerpt = '';
+  if (idx >= 0) {
+    const lines = content.slice(0, idx).split('\n');
+    lineStart = lines.length;
+    const all = content.split('\n');
+    excerpt = all.slice(Math.max(0, lineStart - 1), Math.min(all.length, lineStart + 8)).join('\n');
+  }
+  await openEditorSendToTerminal({
+    title: '画像についてAIターミナルへ相談',
+    page,
+    lineStart,
+    excerpt,
+    imagePath: source,
+    defaultInstruction: 'この画像の内容・MarkIts注釈と直後の説明文を確認し、不足やズレがあれば修正案を提示してください。',
+  });
+}
+
+async function insertAiNoteAtCursor(): Promise<void> {
+  if (!documentState || activeImageTab || busy) {
+    status('編集する原稿を開いてください。', true);
+    return;
+  }
+  const comment = await openInsertAiNoteDialog();
+  if (!comment || !documentState || activeImageTab || busy) return;
+  insertDocumentMarkdown(comment);
+  status('AIメモを挿入しました。あとで「AIメモ一覧・依頼」からまとめてAIへ依頼できます。');
+}
+
+function openCurrentAiNotes(): void {
+  if (!documentState || activeImageTab || busy) {
+    status('編集する原稿を開いてください。', true);
+    return;
+  }
+  const page = manuscriptPagePath(documentState.page);
+  const currentContent = editor.value;
+  const notes = extractAiNotes(currentContent);
+  openAiNotesManagerDialog({
+    page,
+    notes,
+    onJump: (note) => {
+      showDocumentView();
+      chooseTab('editor');
+      if (preferredEditorView === 'preview') {
+        preferredEditorView = 'edit';
+        applyEditorView();
+      }
+      milkdown.showSource();
+      jumpToSource(editor, note.start, note.end);
+      updateCursor();
+    },
+    onRemove: (note) => {
+      if (!documentState || editor.value !== currentContent) {
+        status('原稿が変更されています。AIメモ一覧を開き直してください。', true);
+        return;
+      }
+      const next = currentContent.slice(0, note.start) + currentContent.slice(note.end);
+      changeImageMarkdown(next, currentContent);
+      status('AIメモを削除しました。');
+    },
+    onSendSelected: (selected) => {
+      const listText = selected.map((n, i) => `${i + 1}. 行 ${n.line}: ${n.note}`).join('\n');
+      void openEditorSendToTerminal({
+        title: `AIメモ ${selected.length}件をAIターミナルへ依頼`,
+        page,
+        lineStart: selected[0]?.line,
+        lineEnd: selected.at(-1)?.line,
+        excerpt: selected.map((n) => `行 ${n.line}: ${n.raw}`).join('\n'),
+        defaultInstruction: `以下の <!-- ai-note: ... --> メモを順番に解決し、本文へ反映して解決済みの ai-note コメントは削除してください。\n${listText}`,
+      });
+    },
+  });
+}
+
+async function openExternalChangeTray(): Promise<void> {
+  if (!projectRoot || !terminalSnapshotId) return;
+  const root = projectRoot;
+  const snapId = terminalSnapshotId;
+  const latest = await refreshExternalSnapshotDiff();
+  const dirtyPages = new Set<string>();
+  if (documentState && (dirty || editor.value !== documentState.content)) {
+    dirtyPages.add(manuscriptPagePath(documentState.page));
+  }
+  for (const [tabPage, tab] of documentTabs) {
+    if (tab.content !== tab.document.content) {
+      dirtyPages.add(manuscriptPagePath(tabPage));
+    }
+  }
+  await openExternalChangeTrayDialog({
+    sessionId: snapId,
+    changes: latest,
+    dirtyPages,
+    onApply: async (page, expectedSha256, content) => {
+      await rpc('external-snapshot-apply', { id: snapId, page, expected_sha256: expectedSha256, content }, root);
+      await refreshWorkspace(true, false);
+      await refreshFileTree();
+    },
+    onAcceptAll: async () => {
+      await rpc('external-snapshot-clear', { id: snapId }, root);
+      terminalSnapshotId = '';
+      externalChangesCache = [];
+      updateExternalChangesButton();
+      if (terminalController?.isConnected()) {
+        await ensureTerminalSnapshot(root);
+      }
+      await refreshWorkspace(true, false);
+      await refreshFileTree();
+      status('外部変更をすべて承認しました。');
+    },
+    onRefresh: async () => refreshExternalSnapshotDiff(),
+    reportStatus: (message, isError) => status(message, isError),
+  });
+}
+
+function updateRichAiNotesBanner(): void {
+  const banner = element('rich-ai-notes-banner');
+  if (!banner) return;
+  if (!documentState || activeImageTab) {
+    banner.hidden = true;
+    banner.replaceChildren();
+    return;
+  }
+  const notes = extractAiNotes(editor.value);
+  if (!notes.length) {
+    banner.hidden = true;
+    banner.replaceChildren();
+    return;
+  }
+  banner.hidden = false;
+  banner.replaceChildren();
+  const label = document.createElement('span');
+  label.className = 'rich-ai-notes-summary';
+  const preview = notes[0].note.length > 56 ? `${notes[0].note.slice(0, 56)}…` : notes[0].note;
+  label.textContent = `AIメモ ${notes.length}件（行 ${notes[0].line}: ${preview || '内容なし'}）`;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '一覧・AIへ依頼';
+  btn.onclick = () => openCurrentAiNotes();
+  banner.append(label, btn);
+}
+
+function openAiCollabHub(initialTab: HubTabId = 'dashboard'): void {
+  const docsPrefix = (workspace?.config.docs || 'docs').replace(/\/$/, '');
+  const listPages = (): string[] =>
+    (workspace?.pages || []).map((p) => (docsPrefix === '.' ? p : `${docsPrefix}/${p}`));
+  openAiCollabHubDialog(
+    {
+      rpc,
+      getProjectRoot: () => projectRoot,
+      getWorkingDirectory: () => terminalWorkingDirectory || projectRoot,
+      getCurrentPage: () => (documentState && !activeImageTab ? manuscriptPagePath(documentState.page) : null),
+      getCurrentContent: () => editor.value,
+      getPages: listPages,
+      openPage: async (page, line = 1) => {
+        await openResourceUsage({ page, line, start: -1, end: -1, snippet: '' });
+      },
+      insertMarkdownWithDiff: async (markdown, title) => {
+        if (!documentState || activeImageTab || busy) {
+          status('挿入先の原稿を開いてから実行してください。', true);
+          return;
+        }
+        const page = documentState.page;
+        const before = editor.value;
+        const pos = editor.selectionEnd;
+        const gapBefore = pos > 0 && !before.slice(0, pos).endsWith('\n\n') ? '\n\n' : '';
+        const gapAfter = pos < before.length && !before.slice(pos).startsWith('\n\n') ? '\n\n' : '';
+        const after = before.slice(0, pos) + gapBefore + markdown.trim() + gapAfter + before.slice(pos);
+        const decision = await reviewSelection(`${page} — ${title}`, before, after, undefined, '', false);
+        if (decision.action !== 'adopt' || decision.content === before) return;
+        if (!documentState || documentState.page !== page || editor.value !== before) {
+          status('原稿が変更されたため挿入を中止しました。', true);
+          return;
+        }
+        changeImageMarkdown(decision.content, before);
+        status(`${title}を原稿に反映しました。`);
+      },
+      createPageWithContent: async (relativePage, markdown) => {
+        const root = projectRoot;
+        const target = relativePage.replace(/^\/+/, '');
+        const cleanPage = docsPrefix !== '.' && target.startsWith(`${docsPrefix}/`)
+          ? target.slice(docsPrefix.length + 1)
+          : target;
+        await rpc('editor-save', { page: cleanPage, json: { content: markdown } }, root);
+        await refreshWorkspace(false, false);
+        await openPage(cleanPage, false);
+        showDocumentView();
+        chooseTab('editor');
+        status(`${cleanPage} を作成して開きました。`);
+      },
+      sendToTerminal: async (opts) => {
+        await openEditorSendToTerminal(opts);
+      },
+      reportStatus: (message, isError) => status(message, isError),
+    },
+    initialTab,
+  );
+}
+
 const terminalPanel = element<HTMLElement>("panel-terminal");
 let terminalWorkingDirectory='';
 function openManualTerminal(): void {
@@ -652,6 +987,9 @@ function openManualTerminal(): void {
     onStatusChange: (state, message) => {
       element<HTMLSelectElement>('terminal-cli-agent').disabled=['connected','starting','stopping'].includes(state);
       for(const id of ['terminal-directory-settings','terminal-working-directory','terminal-choose-directory','terminal-project-directory'])element<HTMLInputElement|HTMLButtonElement>(id).disabled=['connected','starting','stopping'].includes(state);
+      if (state === 'connected') {
+        void ensureTerminalSnapshot(projectRoot);
+      }
       if (state === "error" && message) status(message, true);
     },
     onUnload: (ownerId, root) => {
@@ -926,6 +1264,7 @@ function updateCursor(): void {
 
   const lines = editor.value.slice(0, editor.selectionStart).split("\n");
   element("cursor-position").textContent = `${lines.length}:${lines.at(-1)!.length + 1}`;
+  updateRichAiNotesBanner();
 }
 function previewScrollElement(): Element | null {
   try { return element<HTMLIFrameElement>("markdown-preview").contentDocument?.scrollingElement || null; }
@@ -1020,16 +1359,176 @@ function insertDocumentMarkdown(markdown:string): void {
     }
     status("画像を原稿に挿入しました。保存ボタンまたはCtrl/Cmd+Sで保存してください。");
   }
-interface QualityIssue extends Partial<ResourceUsage> {page:string;tag?:string;kind?:string;message:string}
-function renderQualityReport(target:HTMLElement,report:{passed:boolean;issues:QualityIssue[]},root:string){
+interface QualityIssue extends Partial<ResourceUsage> {
+  page: string;
+  tag?: string;
+  kind?: string;
+  severity?: 'error' | 'warning';
+  message: string;
+  details?: Record<string, unknown>;
+}
+interface QualityReport {
+  passed: boolean;
+  has_warnings?: boolean;
+  error_count?: number;
+  warning_count?: number;
+  issues: QualityIssue[];
+}
+function qualityCategory(kind?: string): 'error' | 'annotation' | 'glossary' | 'ai-note' {
+  if (kind === 'annotation_step_mismatch' || kind === 'annotation_target_mismatch' || kind === 'annotation_step_order') return 'annotation';
+  if (kind === 'glossary_violation') return 'glossary';
+  if (kind === 'unresolved_ai_note') return 'ai-note';
+  return 'error';
+}
+function renderQualityReport(target: HTMLElement, report: QualityReport, root: string) {
   target.replaceChildren();
-  const summary=document.createElement('p');summary.textContent=report.passed?'公開前チェックに合格しました。':`公開前チェックで${report.issues.length}件の問題が見つかりました。`;target.append(summary);
-  for(const issue of report.issues){
-    const row=document.createElement('div');row.className='quality-issue';
-    const jump=document.createElement('button');jump.type='button';jump.textContent=`${issue.page}${issue.line?`:${issue.line}`:''} — 該当箇所を開く`;
-    jump.onclick=()=>{void work(async()=>{if(root!==projectRoot)return;await openResourceUsage({page:issue.page,line:issue.line||1,start:issue.start??-1,end:issue.end??-1,snippet:issue.snippet||''});});};
-    const message=document.createElement('span');message.textContent=issue.message;row.append(jump,message);target.append(row);
+  const errorCount = report.error_count ?? report.issues.filter((i) => (i.severity || 'error') === 'error').length;
+  const warningCount = report.warning_count ?? report.issues.length - errorCount;
+
+  const summary = document.createElement('p');
+  summary.className = 'quality-summary';
+  summary.textContent = report.passed
+    ? warningCount > 0
+      ? `公開前チェックに合格しました（警告 ${warningCount}件）。`
+      : '公開前チェックに合格しました。'
+    : `公開前チェックでエラー ${errorCount}件${warningCount > 0 ? `・警告 ${warningCount}件` : ''}が見つかりました。`;
+  target.append(summary);
+
+  if (!report.issues.length) return;
+
+  const filterBar = document.createElement('div');
+  filterBar.className = 'actions quality-filter-bar';
+  const filterSelect = document.createElement('select');
+  filterSelect.setAttribute('aria-label', '原稿チェックの絞り込み');
+  for (const [value, label] of [
+    ['all', `すべて (${report.issues.length})`],
+    ['error', `エラー (${errorCount})`],
+    ['annotation', `注釈・UIMap整合 (${report.issues.filter((i) => qualityCategory(i.kind) === 'annotation').length})`],
+    ['glossary', `用語集 (${report.issues.filter((i) => qualityCategory(i.kind) === 'glossary').length})`],
+    ['ai-note', `AIメモ (${report.issues.filter((i) => qualityCategory(i.kind) === 'ai-note').length})`],
+  ] as const) {
+    filterSelect.add(new Option(label, value));
   }
+  filterBar.append(filterSelect);
+  target.append(filterBar);
+
+  const list = document.createElement('div');
+  list.className = 'quality-issue-list';
+  target.append(list);
+
+  const renderRows = () => {
+    list.replaceChildren();
+    const selected = filterSelect.value;
+    const visible = report.issues.filter((issue) => selected === 'all' || qualityCategory(issue.kind) === selected);
+    for (const issue of visible) {
+      const row = document.createElement('div');
+      const severity = issue.severity || (qualityCategory(issue.kind) === 'error' ? 'error' : 'warning');
+      row.className = `quality-issue quality-severity-${severity}`;
+      const badge = document.createElement('span');
+      badge.className = `quality-badge quality-badge-${severity}`;
+      badge.textContent = severity === 'error' ? 'エラー' : '警告';
+
+      const jump = document.createElement('button');
+      jump.type = 'button';
+      jump.textContent = `${issue.page}${issue.line ? `:${issue.line}` : ''} — 該当箇所を開く`;
+      jump.onclick = () => {
+        void work(async () => {
+          if (root !== projectRoot) return;
+          await openResourceUsage({
+            page: issue.page,
+            line: issue.line || 1,
+            start: issue.start ?? -1,
+            end: issue.end ?? -1,
+            snippet: issue.snippet || '',
+          });
+        });
+      };
+
+      const message = document.createElement('span');
+      message.className = 'quality-issue-message';
+      message.textContent = issue.message;
+
+      const rowActions = document.createElement('div');
+      rowActions.className = 'actions quality-issue-actions';
+      rowActions.append(jump);
+
+      if (issue.kind === 'glossary_violation' && typeof issue.details?.preferred === 'string' && issue.snippet) {
+        const preferred = issue.details.preferred;
+        const replaceBtn = document.createElement('button');
+        replaceBtn.type = 'button';
+        replaceBtn.textContent = `「${preferred}」に置換`;
+        replaceBtn.onclick = () => {
+          void work(async () => {
+            if (root !== projectRoot) return;
+            await openResourceUsage({
+              page: issue.page,
+              line: issue.line || 1,
+              start: issue.start ?? -1,
+              end: issue.end ?? -1,
+              snippet: issue.snippet || '',
+            });
+            const s = editor.selectionStart;
+            const e = editor.selectionEnd;
+            if (editor.value.slice(s, e) !== issue.snippet) {
+              status('対象文字列の位置が変わっています。原稿チェックを再実行してください。', true);
+              return;
+            }
+            const before = editor.value;
+            const next = before.slice(0, s) + preferred + before.slice(e);
+            changeImageMarkdown(next, before);
+            status(`「${issue.snippet}」を「${preferred}」に置換しました。`);
+          });
+        };
+        rowActions.append(replaceBtn);
+      } else if (qualityCategory(issue.kind) === 'annotation') {
+        const image = typeof issue.details?.image === 'string' ? issue.details.image : undefined;
+        if (image) {
+          const editImgBtn = document.createElement('button');
+          editImgBtn.type = 'button';
+          editImgBtn.textContent = 'MarkItsで編集';
+          editImgBtn.onclick = () => {
+            void handleEditDocumentImage(image, element<HTMLImageElement>('image-tab-preview'));
+          };
+          rowActions.append(editImgBtn);
+        }
+        const fixBtn = document.createElement('button');
+        fixBtn.type = 'button';
+        fixBtn.textContent = 'AIターミナルで補正';
+        fixBtn.onclick = () => {
+          const detailsSummary = issue.details ? JSON.stringify(issue.details) : '';
+          void openEditorSendToTerminal({
+            title: '注釈と本文のズレをAIターミナルで補正',
+            page: issue.page,
+            lineStart: issue.line || 1,
+            imagePath: image,
+            excerpt: issue.snippet || '',
+            defaultInstruction: `原稿チェックで以下の注釈整合の警告が出ました。画像と直後の本文を確認し、番号とUI表記が一致するよう修正案を preview-edit で提示してください。\n警告: ${issue.message}\n詳細: ${detailsSummary}`,
+          });
+        };
+        rowActions.append(fixBtn);
+      } else if (issue.kind === 'unresolved_ai_note') {
+        const resolveBtn = document.createElement('button');
+        resolveBtn.type = 'button';
+        resolveBtn.textContent = 'AIターミナルで解決';
+        resolveBtn.onclick = () => {
+          const note = typeof issue.details?.note === 'string' ? issue.details.note : issue.message;
+          void openEditorSendToTerminal({
+            title: 'AIメモを解決',
+            page: issue.page,
+            lineStart: issue.line || 1,
+            excerpt: issue.snippet || '',
+            defaultInstruction: `以下の <!-- ai-note: ... --> メモを解決して本文に反映し、解決済みの ai-note コメントを削除してください。\n内容: ${note}`,
+          });
+        };
+        rowActions.append(resolveBtn);
+      }
+
+      row.append(badge, message, rowActions);
+      list.append(row);
+    }
+  };
+  filterSelect.onchange = renderRows;
+  renderRows();
 }
 async function openResourceUsage(usage:ResourceUsage):Promise<void>{
   const root=projectRoot;const docsPrefix=(workspace?.config.docs||'docs').replace(/\/$/,'')+'/';
@@ -1228,6 +1727,7 @@ function refreshExternalChanges(): void {
   void refreshFileTree();
   void refreshOpenDocument();
   void captureDock.refreshVisible();
+  void refreshExternalSnapshotDiff();
 }
 window.setInterval(refreshExternalChanges, 4000);
 document.addEventListener("visibilitychange", refreshExternalChanges);
@@ -1447,6 +1947,11 @@ async function openProject(root: string, check = true): Promise<void> {
   documentTabs.clear(); imageTabs.clear(); showDocumentView();
   if(version!==projectRequestVersion)return;
   projectRoot = root; workspace = loaded; documentState = null; dirty = false;
+  terminalSnapshotId = '';
+  terminalSnapshotRoot = '';
+  externalChangesCache = [];
+  updateExternalChangesButton();
+  void glossarySettings.reload(root);
   terminalWorkingDirectory=root;
   element('terminal-directory-settings').title=root;
   if (version !== projectRequestVersion) return;
@@ -1553,9 +2058,13 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
       try {
         const parsed = JSON.parse(output);
         if (action === "quality-check") {
-          const issues=parsed.issues as Array<{page:string;tag?:string;message:string}>;
+          const issues=parsed.issues as Array<{page:string;tag?:string;severity?:string;message:string}>;
+          const errorCount=typeof parsed.error_count==='number'?parsed.error_count:issues.filter(i=>(i.severity||'error')==='error').length;
+          const warningCount=typeof parsed.warning_count==='number'?parsed.warning_count:issues.length-errorCount;
           completionHasError=!parsed.passed;
-          completionMessage=parsed.passed?"公開前チェックに合格しました。":`公開前チェックで${issues.length}件の問題が見つかりました。`;
+          completionMessage=parsed.passed
+            ? (warningCount>0?`公開前チェックに合格しました（警告 ${warningCount}件）。`:'公開前チェックに合格しました。')
+            : `公開前チェックでエラー ${errorCount}件${warningCount>0?`・警告 ${warningCount}件`:''}が見つかりました。`;
           text=completionMessage+"\n"+issues.map(issue=>`${issue.page}${issue.tag?` · ${issue.tag}`:""}: ${issue.message}`).join("\n");
         } else if (action === "capture-source-auto") {
           const assigned = parsed.assigned as Array<{ id: string; title: string; kind: string }>;
@@ -1945,7 +2454,9 @@ function runKeyboardCommand(command: ShortcutCommand, event: KeyboardEvent): voi
     requestAnimationFrame(()=>{input('tree-search').focus();input('tree-search').select();});return;
   }
   if(command==='search'){element('manuscript-search-open').click();return;}
+  if(command==='sendToTerminal'){void openEditorSendToTerminal();return;}
   if(busy||!documentState||activeImageTab)return;
+  if(command==='insertAiNote'){void insertAiNoteAtCursor();return;}
   if(command==='save'){void saveFromEditor();return;}
   if(command==='preview'){
     const views:EditorView[]=['edit','split','preview'];
@@ -1967,7 +2478,7 @@ function runKeyboardCommand(command: ShortcutCommand, event: KeyboardEvent): voi
   if(command==='deleteLine'){replaceMarkdown(line.deleteStart,line.deleteEnd,'',0);return;}
   if(command==='cut'){
     const selected=start!==end,text=selected?expected.slice(start,end):line.text;
-    void navigator.clipboard.writeText(text).then(()=>{
+    void copyTextToClipboard(text).then(()=>{
       if(editor.value!==expected||editor.selectionStart!==start||editor.selectionEnd!==end)return;
       replaceMarkdown(selected?start:line.deleteStart,selected?end:line.deleteEnd,'',0);
     }).catch(error=>status(`切り取りできませんでした: ${String(error)}`,true));
@@ -2967,15 +3478,42 @@ element('reader-review').addEventListener('click',()=>{
   const {dialog,body}=featureDialog('原稿チェック');
   const checks=element('manuscript-check');
   body.append(checks);
+  const actionsRow=document.createElement('div');
+  actionsRow.className='actions';
   const terminal=document.createElement('button');
   terminal.type='button';
   terminal.textContent='AIターミナルを開く';
   terminal.onclick=()=>{
     dialog.close();
-    if(layoutManager&&!layoutManager.isPanelVisible('terminal'))layoutManager.togglePanel('terminal',true);
-    chooseTab('terminal');
+    showTerminalPanel();
   };
-  body.append(terminal);
+  const notesBtn=document.createElement('button');
+  notesBtn.type='button';
+  const noteCount=extractAiNotes(editor.value).length;
+  notesBtn.textContent=noteCount>0?`AIメモ一覧・依頼 (${noteCount})`:'AIメモを挿入';
+  notesBtn.onclick=()=>{
+    dialog.close();
+    if(noteCount>0)openCurrentAiNotes();
+    else void insertAiNoteAtCursor();
+  };
+  const glossaryBtn=document.createElement('button');
+  glossaryBtn.type='button';
+  glossaryBtn.textContent='用語集を設定';
+  glossaryBtn.onclick=()=>{
+    dialog.close();
+    selectSettingsCategory('glossary');
+    chooseTab('settings');
+    void glossarySettings.reload();
+  };
+  const hubBtn=document.createElement('button');
+  hubBtn.type='button';
+  hubBtn.textContent='AI協業ツール';
+  hubBtn.onclick=()=>{
+    dialog.close();
+    openAiCollabHub('dashboard');
+  };
+  actionsRow.append(terminal,notesBtn,glossaryBtn,hubBtn);
+  body.append(actionsRow);
   if(reopenReaderReview){
     const previous=document.createElement('button');
     previous.type='button';
@@ -2988,6 +3526,13 @@ element('reader-review').addEventListener('click',()=>{
   }
   dialog.addEventListener('close',()=>element('manuscript-check-host').append(checks),{once:true});
 });
+
+element('insert-ai-note')?.addEventListener('click',()=>{void insertAiNoteAtCursor();});
+element('manage-ai-notes')?.addEventListener('click',()=>{openCurrentAiNotes();});
+element('send-to-terminal')?.addEventListener('click',()=>{void openEditorSendToTerminal();});
+element('terminal-send-editor-btn')?.addEventListener('click',()=>{void openEditorSendToTerminal();});
+element('open-ai-collab-hub')?.addEventListener('click',()=>{openAiCollabHub('dashboard');});
+element('terminal-external-changes-btn')?.addEventListener('click',()=>{void openExternalChangeTray();});
 
 let captureInsertionRunning=false;
 async function insertScreenshotHere():Promise<void>{

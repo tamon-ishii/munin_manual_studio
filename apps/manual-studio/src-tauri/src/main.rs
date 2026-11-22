@@ -450,6 +450,19 @@ async fn read_clipboard_image() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+async fn write_clipboard_text(text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("クリップボードを開けませんでした: {e}"))?;
+        clipboard
+            .set_text(text)
+            .map_err(|e| format!("クリップボードへコピーできませんでした: {e}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn open_output(root: String) -> Result<(), String> {
     let root = PathBuf::from(root);
     let output =
@@ -660,6 +673,7 @@ fn main() {
             choose_image,
             read_clipboard_image,
             paste_clipboard_image,
+            write_clipboard_text,
             open_editor,
             open_proofreading_window,
             open_dialog_window,
