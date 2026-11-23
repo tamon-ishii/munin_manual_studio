@@ -99,6 +99,7 @@ pub fn build_for_audience(
     let output = project_path(root, &output_rel)?;
     let site_engine = match engine {
         "zensical" | "build-zensical" => builder::SiteEngine::Zensical,
+        "single-html" | "build-single-html" => builder::SiteEngine::SingleHtml,
         _ => builder::SiteEngine::MkDocs,
     };
     let summary = audience::build_with_engine(root, &docs, &generated, &output, draft, target_audience, site_engine)?;
@@ -296,6 +297,8 @@ pub fn overview(root: &Path) -> Result<Value, String> {
         "total_pages": page_entries.len(),
         "total_errors": quality_report["error_count"],
         "total_warnings": quality_report["warning_count"],
+        "nav": config.mkdocs.nav,
+        "exclude_unused_assets": config.mkdocs.exclude_unused_assets,
         "pages": page_entries,
         "diagnostics": diagnostics
     }))

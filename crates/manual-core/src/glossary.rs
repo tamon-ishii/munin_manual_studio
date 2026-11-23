@@ -227,6 +227,185 @@ pub fn query(root: &Path, search: &str, category: Option<&str>) -> Result<Value,
     }))
 }
 
+/// Safely add a term or merge avoid variants/note into an existing term without deleting anything.
+pub fn upsert_term(
+    root: &Path,
+    preferred: &str,
+    avoid: &[String],
+    category: Option<&str>,
+    note: Option<&str>,
+    case_sensitive: Option<bool>,
+) -> Result<Value, String> {
+    let preferred_clean = preferred.trim();
+    if preferred_clean.is_empty() {
+        return Err("正式表記（preferred）を指定してください。".into());
+    }
+    let mut file = load(root)?;
+    let mut updated = false;
+    if let Some(existing) = file
+        .terms
+        .iter_mut()
+        .find(|t| t.preferred.eq_ignore_ascii_case(preferred_clean) || t.preferred == preferred_clean)
+    {
+        for item in avoid {
+            let clean = item.trim();
+            if !clean.is_empty() && !existing.avoid.iter().any(|a| a == clean) {
+                existing.avoid.push(clean.to_string());
+            }
+        }
+        if let Some(cat) = category.map(str::trim).filter(|c| !c.is_empty()) {
+            existing.category = cat.to_string();
+        }
+        if let Some(n) = note.map(str::trim).filter(|s| !s.is_empty()) {
+            existing.note = n.to_string();
+        }
+        if let Some(cs) = case_sensitive {
+            existing.case_sensitive = cs;
+        }
+        updated = true;
+    } else {
+        file.terms.push(GlossaryTerm {
+            id: String::new(),
+            preferred: preferred_clean.to_string(),
+            avoid: avoid.to_vec(),
+            category: category
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+                .unwrap_or("term")
+                .to_string(),
+            case_sensitive: case_sensitive.unwrap_or(false),
+            note: note.map(str::trim).unwrap_or_default().to_string(),
+            source: "manual".to_string(),
+        });
+    }
+    let saved = save(root, &file)?;
+    let term = saved
+        .terms
+        .iter()
+        .find(|t| t.preferred == preferred_clean || t.preferred.eq_ignore_ascii_case(preferred_clean))
+        .cloned();
+    Ok(json!({
+        "updated": updated,
+        "total": saved.terms.len(),
+        "term": term
+    }))
+}
+
+/// Build a revision-verified batch replacement plan for all glossary violations across manuscripts.
+pub fn replace_plan(root: &Path, only_page: Option<&str>) -> Result<Value, String> {
+    let glossary_file = load(root)?;
+    if glossary_file.terms.is_empty() {
+        return Ok(json!({ "total_replacements": 0, "documents": [] }));
+    }
+    let config = read_config(root);
+    let pages = crate::task::collect_target_markdown_files(root, &config);
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let filter_page = only_page.map(|p| p.trim().replace('\\', "/"));
+
+    let mut documents = Vec::new();
+    let mut total_replacements = 0usize;
+
+    for (page, path) in pages {
+        let rel = path
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.strip_prefix(&canonical_root).ok().map(Path::to_path_buf))
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| page.clone());
+        if let Some(target) = &filter_page {
+            if target != &page && target != &rel && !rel.ends_with(&format!("/{target}")) {
+                continue;
+            }
+        }
+        let Ok(doc) = crate::editor::read_raw(root, &rel) else {
+            continue;
+        };
+        let content = &doc.content;
+        let excluded = excluded_ranges(content);
+
+        // Collect exact byte ranges + preferred replacements, preventing overlaps.
+        struct Hit {
+            start: usize,
+            end: usize,
+            line: usize,
+            matched: String,
+            preferred: String,
+            term_id: String,
+        }
+        let mut hits: Vec<Hit> = Vec::new();
+        for term in &glossary_file.terms {
+            for avoid in &term.avoid {
+                for range in find_matches(content, avoid, term.case_sensitive) {
+                    if overlaps(&range, &excluded)
+                        || !boundary_ok(content, &range, avoid)
+                        || is_part_of_preferred(content, &range, &term.preferred, term.case_sensitive)
+                    {
+                        continue;
+                    }
+                    let line = content[..range.start]
+                        .bytes()
+                        .filter(|b| *b == b'\n')
+                        .count()
+                        + 1;
+                    hits.push(Hit {
+                        start: range.start,
+                        end: range.end,
+                        line,
+                        matched: content[range.clone()].to_string(),
+                        preferred: term.preferred.clone(),
+                        term_id: term.id.clone(),
+                    });
+                }
+            }
+        }
+        // Sort by start asc, longer match first on ties, then filter non-overlapping.
+        hits.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| (b.end - b.start).cmp(&(a.end - a.start))));
+        let mut selected: Vec<Hit> = Vec::new();
+        let mut last_end = 0usize;
+        for hit in hits {
+            if hit.start >= last_end {
+                last_end = hit.end;
+                selected.push(hit);
+            }
+        }
+        if selected.is_empty() {
+            continue;
+        }
+        let mut after = content.clone();
+        for hit in selected.iter().rev() {
+            after.replace_range(hit.start..hit.end, &hit.preferred);
+        }
+        if after == *content {
+            continue;
+        }
+        total_replacements += selected.len();
+        let replacements: Vec<Value> = selected
+            .iter()
+            .map(|h| {
+                json!({
+                    "line": h.line,
+                    "matched": h.matched,
+                    "preferred": h.preferred,
+                    "term_id": h.term_id
+                })
+            })
+            .collect();
+        documents.push(json!({
+            "page": doc.page,
+            "revision": doc.revision,
+            "before": doc.content,
+            "after": after,
+            "count": replacements.len(),
+            "replacements": replacements
+        }));
+    }
+
+    Ok(json!({
+        "total_replacements": total_replacements,
+        "documents": documents
+    }))
+}
+
 pub fn extract_uimap_candidates(root: &Path) -> Result<Value, String> {
     let existing = load(root)?;
     let registered_names: BTreeSet<String> = existing
@@ -698,5 +877,49 @@ mod tests {
         assert_eq!(candidates[0]["registered"], false);
         assert_eq!(candidates[1]["name"], "保存");
         assert_eq!(candidates[1]["registered"], true);
+    }
+
+    #[test]
+    fn upsert_term_merges_without_deleting_and_replace_plan_builds_safe_diffs() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs")).unwrap();
+        fs::write(
+            root.path().join("docs/index.md"),
+            "# テスト\n\nフォルダとディレクトリを確認。\n\n```sh\nフォルダ\n```\n",
+        )
+        .unwrap();
+
+        let first = upsert_term(
+            root.path(),
+            "フォルダー",
+            &["フォルダ".into()],
+            Some("style"),
+            Some("長音あり"),
+            Some(false),
+        )
+        .unwrap();
+        assert_eq!(first["updated"], false);
+        assert_eq!(first["total"], 1);
+
+        let second = upsert_term(
+            root.path(),
+            "フォルダー",
+            &["ディレクトリ".into()],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(second["updated"], true);
+        assert_eq!(second["total"], 1);
+        assert_eq!(second["term"]["avoid"], json!(["フォルダ", "ディレクトリ"]));
+
+        let plan = replace_plan(root.path(), None).unwrap();
+        assert_eq!(plan["total_replacements"], 2);
+        let docs = plan["documents"].as_array().unwrap();
+        assert_eq!(docs.len(), 1);
+        let after = docs[0]["after"].as_str().unwrap();
+        assert!(after.contains("フォルダーとフォルダーを確認。"));
+        assert!(after.contains("```sh\nフォルダ\n```"));
     }
 }

@@ -183,6 +183,15 @@ fn tools(insertion: bool) -> Vec<Value> {
         tool("project-glossary", "List project terminology and preferred UI/style wording from .munin/glossary.json.",
             json!({"query":{"type":"string","description":"Optional substring filter"},"category":{"type":"string","description":"Optional category: ui, term, or style"}}),
             &[]),
+        tool("upsert-glossary-term", "Add a new term or merge avoid variants/note into an existing term in .munin/glossary.json without deleting existing terms.",
+            json!({
+                "preferred":{"type":"string","description":"Canonical preferred wording"},
+                "avoid":{"type":"array","items":{"type":"string"},"description":"Optional variants to avoid"},
+                "category":{"type":"string","description":"Optional category: ui, term, or style"},
+                "note":{"type":"string","description":"Optional editorial note"},
+                "case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive"}
+            }),
+            &["preferred"]),
         tool("check-manuscript", "Run manuscript quality checks including broken links, missing images, MarkIts annotation/UIMap consistency, glossary violations, and unresolved ai-note comments.",
             json!({"page":{"type":"string","description":"Optional single manuscript path to check"}}),
             &[]),
@@ -239,6 +248,9 @@ fn call_tool(
             Some("string") => value.is_string(),
             Some("boolean") => value.is_boolean(),
             Some("object") => value.is_object(),
+            Some("array") => value
+                .as_array()
+                .is_some_and(|items| items.iter().all(|v| v.is_string())),
             Some("integer") => value.as_u64().is_some_and(|number| number <= 4096),
             _ => false,
         };
@@ -276,6 +288,24 @@ fn call_tool(
         "proofread-text" if mailbox.is_some() => editor_request(mailbox, name, &request, 600),
         "proofread-text" => crate::selection_ai::proofread(root, request["source"].as_str().unwrap(), request["skill"].as_str().unwrap()),
         "project-glossary" => crate::glossary::query(root, request["query"].as_str().unwrap_or_default(), request["category"].as_str()),
+        "upsert-glossary-term" => {
+            let avoid: Vec<String> = request["avoid"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            crate::glossary::upsert_term(
+                root,
+                request["preferred"].as_str().unwrap(),
+                &avoid,
+                request["category"].as_str(),
+                request["note"].as_str(),
+                request["case_sensitive"].as_bool(),
+            )
+        }
         "check-manuscript" => crate::quality::check_page(root, request["page"].as_str()),
         "draft-from-recording" => crate::operation_draft::generate(root, request["image"].as_str(), request["resource_id"].as_str(), request["page"].as_str(), request["title"].as_str(), false),
         "analyze-app-impact" => crate::impact_analyzer::analyze(root, request["repo_path"].as_str(), request["base_ref"].as_str()),

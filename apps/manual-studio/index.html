@@ -18,7 +18,7 @@
   <div id="layout-panel-pool" style="display:none">
     <section id="panel-capture-resources" class="panel capture-resource-panel" aria-label="撮影リソース一覧">
       <div class="capture-resource-toolbar"><button type="button" id="capture-resource-import-button" title="画像を登録" aria-label="画像を登録"></button><input type="file" id="capture-resource-import" accept="image/png" hidden /></div>
-      <div class="capture-resource-toolbar"><select id="capture-resource-usage" aria-label="撮影リソースの使用状況"><option value="all">すべて</option><option value="used">使用中</option><option value="unused">未使用</option></select><span id="capture-resource-count">0件</span></div>
+      <div class="capture-resource-toolbar"><select id="capture-resource-usage" aria-label="撮影リソースの使用状況"><option value="all">すべて</option><option value="used">使用中</option><option value="unused">未使用</option></select><span id="capture-resource-count">0件</span><button type="button" id="capture-resource-cleanup-btn" title="未使用の撮影リソースを .munin/trash へ退避して整理" disabled>未使用を整理</button><button type="button" id="capture-resource-restore-trash-btn" title="直前に退避した未使用の撮影リソースを元に戻す" hidden>整理を戻す</button></div>
       <div id="capture-resource-list" class="capture-resource-list"></div>
     </section>
     <aside id="panel-tree" class="sidebar">
@@ -126,6 +126,7 @@
         <input id="settings-site-output" type="text">
         <button id="settings-site-browse" type="button" data-ui-icon="folder" hidden>参照…</button>
       </div>
+      <label class="setting-checkbox"><input type="checkbox" id="settings-site-exclude-unused" /> <span>未使用の画像をHTML出力に含めない</span></label>
       <div class="actions"><button id="settings-site-save" type="button">保存</button><span id="settings-site-result" role="status" aria-live="polite"></span></div>
     </div>
     <div class="card" id="markits-shortcut-settings"><h2>MarkItsの撮影設定</h2><label><input type="checkbox" id="capture-default-include-cursor" /> 新規撮影でカーソルを含める</label><p id="capture-default-include-cursor-status" role="status"></p><p>アプリ外でも使う撮影ショートカットです。キーを選ぶと自動保存します。初期値はCtrl+Shift+Eです。</p><label>キーの組み合わせ<input id="markits-capture-key" readonly placeholder="ここを選んでキーを押す" /></label><button type="button" id="markits-capture-key-save">撮影キーを保存</button><button type="button" id="markits-capture-key-reset">Ctrl+Shift+Eに戻す</button><p id="markits-capture-key-status" role="status" aria-live="polite"></p></div>
@@ -140,12 +141,13 @@
   </section></section>
   <section id="site-export-host" hidden>
     <div id="site-export-controls">
-      <label>HTML出力ツール <select id="site-engine"><option value="build-mkdocs">MkDocs</option><option value="build-zensical">Zensical</option></select></label>
+      <label>HTML出力ツール <select id="site-engine"><option value="build-mkdocs">MkDocs</option><option value="build-zensical">Zensical</option><option value="build-single-html">単一HTML（Python不要・PDF印刷対応）</option></select></label>
       <label for="site-output-path">出力先フォルダー</label>
       <div class="folder-picker">
         <input id="site-output-path" type="text" aria-describedby="site-output-path-help">
         <button id="browse-site-output" type="button" data-ui-icon="folder">参照…</button>
       </div>
+      <label class="setting-checkbox"><input type="checkbox" id="site-exclude-unused-assets" /> <span>未使用の画像をHTML出力に含めない</span></label>
       <p id="site-output-path-help" class="muted">プロジェクト内のフォルダーを指定します。絶対パスは保存時に相対パスに変換します。</p>
       <button id="save-site-output" type="button">出力先を保存</button>
       <button id="build-site" type="button">HTMLを作成</button>

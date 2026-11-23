@@ -1,6 +1,8 @@
 import { copyTextToClipboard } from "./clipboardText";
 import { featureDialog } from "./imageDialogs";
+import { appendContentDiff } from "./manuscriptTools";
 import { acceptDiff, diffParts } from "./selectableDiff";
+import type { Document } from "./types";
 
 export interface AiNoteItem {
   index: number;
@@ -671,5 +673,171 @@ export function openExternalChangeTrayDialog(options: ExternalChangeTrayOptions)
   render();
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => resolve(), { once: true });
+  });
+}
+
+export interface GlossaryReplacePlanDoc {
+  page: string;
+  revision: string;
+  before: string;
+  after: string;
+  count: number;
+  replacements: Array<{ line: number; matched: string; preferred: string; term_id: string }>;
+}
+
+export function openGlossaryBatchReplaceDialog(options: {
+  documents: GlossaryReplacePlanDoc[];
+  dirtyPages: Set<string>;
+  onApply: (docs: Document[]) => Promise<{ before: Document[]; documents: Document[] }>;
+  onUndo: (batch: { before: Document[]; documents: Document[] }) => Promise<void>;
+  reportStatus: (message: string, isError?: boolean) => void;
+}): Promise<boolean> {
+  const { dialog, body } = featureDialog("用語集違反の一括置換（Diff確認）");
+  dialog.id = "glossary-batch-replace-dialog";
+
+  if (!options.documents.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "一括置換の対象となる用語集違反は見つかりませんでした。";
+    body.append(empty);
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => resolve(false), { once: true });
+    });
+  }
+
+  const totalCount = options.documents.reduce((sum, d) => sum + d.count, 0);
+  const statusEl = document.createElement("p");
+  statusEl.className = "muted";
+  statusEl.role = "status";
+  statusEl.textContent = `${options.documents.length}原稿・合計 ${totalCount}箇所の置換候補。変更前後を確認して適用する原稿を選んでください。`;
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "actions";
+  const selectAllBtn = document.createElement("button");
+  selectAllBtn.type = "button";
+  selectAllBtn.textContent = "すべて選択";
+  const selectNoneBtn = document.createElement("button");
+  selectNoneBtn.type = "button";
+  selectNoneBtn.textContent = "選択解除";
+  const applyBtn = document.createElement("button");
+  applyBtn.type = "button";
+  applyBtn.className = "primary";
+  applyBtn.textContent = "選んだ原稿を一括置換";
+  const undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.textContent = "直前の一括置換を元に戻す";
+  undoBtn.hidden = true;
+  toolbar.append(selectAllBtn, selectNoneBtn, applyBtn, undoBtn);
+
+  const list = document.createElement("div");
+  list.className = "glossary-batch-list";
+
+  const selected = new Set<string>();
+  const checkboxes: Array<{ page: string; input: HTMLInputElement; dirty: boolean }> = [];
+
+  for (const item of options.documents) {
+    const dirty = options.dirtyPages.has(item.page);
+    if (!dirty) selected.add(item.page);
+
+    const card = document.createElement("div");
+    card.className = "glossary-batch-item";
+    const head = document.createElement("div");
+    head.className = "glossary-batch-item-head";
+
+    const lbl = document.createElement("label");
+    lbl.className = "glossary-batch-check";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !dirty;
+    cb.disabled = dirty;
+    cb.dataset.glossaryBatchPage = item.page;
+    cb.onchange = () => {
+      if (cb.checked) selected.add(item.page);
+      else selected.delete(item.page);
+      applyBtn.disabled = selected.size === 0;
+    };
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = `${item.page}（${item.count}箇所）`;
+    lbl.append(cb, titleSpan);
+    head.append(lbl);
+
+    if (dirty) {
+      const warn = document.createElement("span");
+      warn.className = "quality-badge quality-badge-error";
+      warn.textContent = "未保存の編集があるため対象外（先に保存してください）";
+      head.append(warn);
+    }
+
+    const diffHost = document.createElement("div");
+    appendContentDiff(diffHost, item.before, item.after, item.page);
+    card.append(head, diffHost);
+    list.append(card);
+    checkboxes.push({ page: item.page, input: cb, dirty });
+  }
+
+  selectAllBtn.onclick = () => {
+    for (const c of checkboxes) {
+      if (c.dirty) continue;
+      c.input.checked = true;
+      selected.add(c.page);
+    }
+    applyBtn.disabled = selected.size === 0;
+  };
+  selectNoneBtn.onclick = () => {
+    for (const c of checkboxes) {
+      c.input.checked = false;
+      selected.delete(c.page);
+    }
+    applyBtn.disabled = true;
+  };
+
+  let lastBatch: { before: Document[]; documents: Document[] } | null = null;
+  let appliedAny = false;
+
+  applyBtn.disabled = selected.size === 0;
+  applyBtn.onclick = async () => {
+    const targets: Document[] = options.documents
+      .filter((d) => selected.has(d.page))
+      .map((d) => ({ page: d.page, content: d.after, revision: d.revision }));
+    if (!targets.length) return;
+    applyBtn.disabled = true;
+    statusEl.textContent = `${targets.length}原稿を一括置換しています…`;
+    try {
+      lastBatch = await options.onApply(targets);
+      appliedAny = true;
+      undoBtn.hidden = false;
+      undoBtn.disabled = false;
+      selectAllBtn.disabled = true;
+      selectNoneBtn.disabled = true;
+      for (const c of checkboxes) c.input.disabled = true;
+      statusEl.textContent = `${lastBatch.documents.length}原稿の用語集違反を一括置換しました。必要なら「直前の一括置換を元に戻す」で戻せます。`;
+      options.reportStatus(`${lastBatch.documents.length}原稿の用語集違反を一括置換しました。`);
+    } catch (error) {
+      applyBtn.disabled = false;
+      statusEl.textContent = `一括置換できませんでした: ${String(error)}`;
+      options.reportStatus(String(error), true);
+    }
+  };
+
+  undoBtn.onclick = async () => {
+    if (!lastBatch) return;
+    undoBtn.disabled = true;
+    statusEl.textContent = "一括置換を元に戻しています…";
+    try {
+      await options.onUndo(lastBatch);
+      lastBatch = null;
+      undoBtn.hidden = true;
+      statusEl.textContent = "用語集の一括置換を元に戻しました。";
+      options.reportStatus("用語集の一括置換を元に戻しました。");
+    } catch (error) {
+      undoBtn.disabled = false;
+      statusEl.textContent = `元に戻せませんでした: ${String(error)}`;
+      options.reportStatus(String(error), true);
+    }
+  };
+
+  body.append(statusEl, toolbar, list);
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(appliedAny), { once: true });
   });
 }

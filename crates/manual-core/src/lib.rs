@@ -168,6 +168,8 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "build",
         "build-mkdocs",
         "build-zensical",
+        "build-single-html",
+        "build-audience",
         "save-html-output",
         "deps",
         "impact",
@@ -257,6 +259,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
     let mut template_opt: Option<&str> = None;
     let mut clear_flag = false;
     let mut audience_opt: Option<&str> = None;
+    let mut engine_opt: Option<&str> = None;
     let mut path_opt: Option<&str> = None;
     let mut data_opt: Option<&str> = None;
     let mut detect_ui_flag = false;
@@ -318,6 +321,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             "--input" => input_opt = Some(*value),
             "--window" => window_opt = Some(*value),
             "--audience" => audience_opt = Some(*value),
+            "--engine" => engine_opt = Some(*value),
             "--path" => path_opt = Some(*value),
             "--data" => data_opt = Some(*value),
             "--assets" => assets_opt = Some(*value),
@@ -335,7 +339,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
     };
     let output_path = if let Some(o) = output_opt {
         project_path(root, o)?
-    } else if matches!(action, "build" | "build-mkdocs" | "build-zensical") {
+    } else if matches!(action, "build" | "build-mkdocs" | "build-zensical" | "build-single-html") {
         if let Some(audience) = audience_opt {
             project_path(root, &format!("{}/{audience}", cfg.output))?
         } else {
@@ -575,7 +579,13 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let _lock = workflow::resource_lock(root, "manual_setting.json")?;
             let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|error| error.to_string())?;
             let site_name = options.get("site_name").map(|value| value.as_str().ok_or("サイト名を入力してください。")).transpose()?;
-            let output = config::save_html_output(root, output_opt.ok_or("HTML出力先を指定してください。")?, site_name)?;
+            let exclude_unused = options.get("exclude_unused_assets").and_then(|v| v.as_bool());
+            let output = config::save_html_output_with_options(
+                root,
+                output_opt.ok_or("HTML出力先を指定してください。")?,
+                site_name,
+                exclude_unused,
+            )?;
             Ok(serde_json::json!({"output":output}).to_string())
         }
         "document-review-capabilities" => document_review::capabilities(root, page_opt.ok_or("原稿を指定してください。")?, json_opt.unwrap_or("{}")),
@@ -613,8 +623,12 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let state_val = get_state(root)?;
             serde_json::to_string(&state_val).map_err(|e| e.to_string())
         }
-        "build" | "build-mkdocs" | "build-zensical" => {
-            let engine = if action == "build-zensical" { builder::SiteEngine::Zensical } else { builder::SiteEngine::MkDocs };
+        "build" | "build-mkdocs" | "build-zensical" | "build-single-html" => {
+            let engine = match action {
+                "build-zensical" => builder::SiteEngine::Zensical,
+                "build-single-html" => builder::SiteEngine::SingleHtml,
+                _ => builder::SiteEngine::MkDocs,
+            };
             let result = if let Some(audience) = audience_opt {
                 audience::build_with_engine(
                     root,
@@ -639,6 +653,19 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                 return Err("MkDocsが見つかりません。プロジェクトのPython環境へ mkdocs-material をインストールしてください。HTMLは作成されていません。".into());
             }
             Ok(result)
+        }
+        "build-audience" => {
+            let audience = audience_opt
+                .ok_or("対象読者（--audience user|developer|maintainer）を指定してください。")?;
+            let engine = engine_opt.unwrap_or("mkdocs");
+            let res = project_dashboard::build_for_audience(
+                root,
+                audience,
+                engine,
+                output_opt,
+                draft_flag,
+            )?;
+            Ok(res.to_string())
         }
         "deps" => {
             let graph = deps::build_manual_dependency_graph(root, &templates_path)?;
@@ -917,6 +944,15 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
                 .and_then(|value| serde_json::to_value(value).map_err(|e| e.to_string())),
         ),
         "glossary-uimap-candidates" => Some(glossary::extract_uimap_candidates(project)),
+        "glossary-replace-plan" => Some(glossary::replace_plan(project, options["page"].as_str())),
+        "publication-nav-save" => Some({
+            let _lock = workflow::resource_lock(project, "manual_setting.json")?;
+            let nav: Vec<config::NavEntry> = serde_json::from_value(options["nav"].clone())
+                .map_err(|e| format!("目次設定の形式が不正です: {e}"))?;
+            let exclude_unused = options["exclude_unused_assets"].as_bool();
+            config::save_publication_nav(project, &nav, exclude_unused)
+                .map(|saved| serde_json::json!({ "nav": saved }))
+        }),
         "external-snapshot-create" => Some(external_changes::create(project)),
         "external-snapshot-diff" => Some(external_changes::diff(project, id()?)),
         "external-snapshot-apply" => Some(external_changes::apply(

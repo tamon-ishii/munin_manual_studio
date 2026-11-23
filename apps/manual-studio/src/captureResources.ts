@@ -14,14 +14,19 @@ interface Options {
   changed():Promise<void>;
   usage(usage:CaptureResource['usages'][number]):Promise<void>;
   status(message:string,error?:boolean):void;
+  setButtonDisabled?:(button:HTMLButtonElement,disabled:boolean)=>void;
 }
 export function setupCaptureResources(options:Options) {
   const panel=document.getElementById('panel-capture-resources')!;
   const list=panel.querySelector<HTMLElement>('#capture-resource-list')!;
   const filter=panel.querySelector<HTMLSelectElement>('#capture-resource-usage')!;
+  const cleanupButton=panel.querySelector<HTMLButtonElement>('#capture-resource-cleanup-btn');
+  const restoreTrashButton=panel.querySelector<HTMLButtonElement>('#capture-resource-restore-trash-btn');
   const importButton=panel.querySelector<HTMLButtonElement>('#capture-resource-import-button')!;
   importButton.innerHTML=uiIcon('image');importButton.setAttribute('aria-label','画像を登録');
-  let items:CaptureResource[]=[];let generation=0;let running=false;
+  let items:CaptureResource[]=[];
+  let latestTrash:{trash_dir:string;archived_at:string;count:number}|null=null;
+  let generation=0;let running=false;
   let pollPending=false;
   const rpc=(action:string,json:Record<string,unknown>={},root=options.root())=>options.rpc(action,{json},root);
   const observer=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){const img=e.target as HTMLImageElement;observer.unobserve(img);const root=options.root(),version=generation;void rpc('capture-resources-thumbnail',{id:img.dataset.id},root).then(src=>{if(root===options.root()&&version===generation)img.src=src;}).catch(()=>{img.alt='画像が見つかりません';});}},{root:list,rootMargin:'100px'});
@@ -50,7 +55,21 @@ export function setupCaptureResources(options:Options) {
   function render(){
     observer.disconnect();list.replaceChildren();
     const shown=items.filter(r=>(filter.value==='all'||(filter.value==='used')===(r.usages.length>0)));
+    const unusedCount=items.filter(r=>r.usages.length===0).length;
     panel.querySelector('#capture-resource-count')!.textContent=`${shown.length} / ${items.length}件`;
+    if(cleanupButton){
+      const disabled=!options.root()||unusedCount===0;
+      if(options.setButtonDisabled)options.setButtonDisabled(cleanupButton,disabled);
+      else cleanupButton.disabled=disabled;
+      cleanupButton.textContent=unusedCount>0?`未使用を整理 (${unusedCount})`:'未使用を整理';
+    }
+    if(restoreTrashButton){
+      const hasTrash=Boolean(options.root()&&latestTrash&&latestTrash.count>0);
+      restoreTrashButton.hidden=!hasTrash;
+      if(options.setButtonDisabled)options.setButtonDisabled(restoreTrashButton,!hasTrash);
+      else restoreTrashButton.disabled=!hasTrash;
+      restoreTrashButton.textContent=hasTrash&&latestTrash?`整理を戻す (${latestTrash.count})`:'整理を戻す';
+    }
     if(!shown.length){const p=document.createElement('p');p.textContent=options.root()?'撮影リソースがありません。撮影または画像を登録してください。':'プロジェクトを開いてください。';list.append(p);}
     for(const r of shown){
       const card=document.createElement('article');card.className='capture-resource-card';card.dataset.captureResource=r.id;
@@ -88,11 +107,12 @@ export function setupCaptureResources(options:Options) {
   }
   async function refresh(onlyIfChanged=false){
     const root=options.root(),version=++generation;
-    if(!root){items=[];render();return;}
-    const result=JSON.parse(await rpc('capture-resources-list',{},root)) as {items:CaptureResource[]};
+    if(!root){items=[];latestTrash=null;render();return;}
+    const result=JSON.parse(await rpc('capture-resources-list',{},root)) as {items:CaptureResource[];latest_trash?:{trash_dir:string;archived_at:string;count:number}|null};
     if(root!==options.root()||version!==generation)return;
-    if(onlyIfChanged&&JSON.stringify(items)===JSON.stringify(result.items))return;
-    items=result.items;render();
+    const nextTrash=result.latest_trash??null;
+    if(onlyIfChanged&&JSON.stringify(items)===JSON.stringify(result.items)&&JSON.stringify(latestTrash)===JSON.stringify(nextTrash))return;
+    items=result.items;latestTrash=nextTrash;render();
   }
   async function refreshVisible(){
     if(pollPending||running||!options.root()||document.hidden||!panel.getClientRects().length)return;
@@ -101,6 +121,49 @@ export function setupCaptureResources(options:Options) {
     finally{pollPending=false;}
   }
   filter.onchange=render;
+  if(cleanupButton){
+    cleanupButton.onclick=()=>void run(async()=>{
+      const root=options.root();
+      const unused=items.filter(r=>r.usages.length===0);
+      if(!root||!unused.length)return;
+      const confirmed=await confirmAction(
+        `未使用の撮影リソース ${unused.length}件（保護されていないもの）と未参照の生成PNGを .munin/trash へ退避して整理しますか？\n使用中または保護済みの画像は対象外です。`,
+        '未使用を整理する',
+      );
+      if(!confirmed||root!==options.root())return;
+      const report=JSON.parse(await rpc('capture-resources-cleanup-unused',{},root)) as {
+        archived_count:number;trash_dir:string|null;skipped?:Array<{id:string;reason:string}>;
+      };
+      if(root!==options.root())return;
+      await refresh();
+      await options.changed();
+      const skippedCount=report.skipped?.length||0;
+      if(report.archived_count>0){
+        options.status(`未使用の撮影リソース ${report.archived_count}件を ${report.trash_dir} へ退避しました${skippedCount?`（対象外 ${skippedCount}件）`:''}。`);
+      }else{
+        options.status('整理できる未使用の撮影リソースはありませんでした（使用中または保護済み）。');
+      }
+    });
+  }
+  if(restoreTrashButton){
+    restoreTrashButton.onclick=()=>void run(async()=>{
+      const root=options.root();
+      const target=latestTrash;
+      if(!root||!target)return;
+      const confirmed=await confirmAction(
+        `直前に退避した撮影リソース ${target.count}件（${target.trash_dir}）と派生画像を元の場所へ復元しますか？`,
+        '元に戻す',
+      );
+      if(!confirmed||root!==options.root())return;
+      const report=JSON.parse(await rpc('capture-resources-restore-trash',{trash_dir:target.trash_dir},root)) as {
+        restored_count:number;trash_dir:string;
+      };
+      if(root!==options.root())return;
+      await refresh();
+      await options.changed();
+      options.status(`退避していた撮影リソース ${report.restored_count}件を元に戻しました。`);
+    });
+  }
   importButton.onclick=()=>panel.querySelector<HTMLInputElement>('#capture-resource-import')!.click();
   panel.querySelector<HTMLInputElement>('#capture-resource-import')!.onchange=event=>{const input=event.target as HTMLInputElement;const file=input.files?.[0];input.value='';if(!file)return;void run(async()=>{const root=options.root();const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);await rpc('capture-resources-register',{source:btoa(binary),name:file.name},root);if(root===options.root())await refresh();});};
   return {refresh,refreshVisible,recaptureImage(asset:string,page?:string){return run(()=>recapture({asset,page}));},upsert(resource:CaptureResource){generation++;const found=items.findIndex(r=>r.id===resource.id);const item={...resource,usages:resource.usages||[]};if(found>=0)items[found]=item;else items.unshift(item);render();}};

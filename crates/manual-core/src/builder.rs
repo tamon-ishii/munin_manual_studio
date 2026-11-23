@@ -1,12 +1,14 @@
-use std::collections::{BTreeSet};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use tempfile::{tempdir, tempdir_in};
 use walkdir::WalkDir;
 
 use super::agent::which_binary;
-use super::config::read_config;
+use super::config::{read_config, NavEntry};
 use super::task::{collect_markdown_files, utc_now};
 
 const SITE_MANIFEST: &str = ".moduleloom-site-files.json";
@@ -19,6 +21,7 @@ pub(crate) fn is_published_site(path: &Path) -> bool {
 pub(crate) enum SiteEngine {
     MkDocs,
     Zensical,
+    SingleHtml,
 }
 
 impl SiteEngine {
@@ -26,6 +29,7 @@ impl SiteEngine {
         match self {
             Self::MkDocs => "mkdocs",
             Self::Zensical => "zensical",
+            Self::SingleHtml => "",
         }
     }
 }
@@ -302,10 +306,10 @@ fn stage_page_links(
     pages: &[BuildPage],
     body: &str,
     docs: &Path,
+    referenced_assets: &mut HashSet<PathBuf>,
 ) -> Result<String, String> {
-    use pulldown_cmark::{Event, Options, Parser, Tag};
     let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
-    let resolve = |url: &str| -> Result<Option<String>, String> {
+    let mut resolve = |url: &str| -> Result<Option<String>, String> {
         if url.is_empty()
             || url.starts_with(['#', '/'])
             || regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
@@ -348,6 +352,11 @@ fn stage_page_links(
             } else if source.extension().is_some_and(|ext| ext == "md") {
                 return Ok(None);
             } else {
+                if let Ok(canon) = source.canonicalize() {
+                    referenced_assets.insert(canon);
+                } else {
+                    referenced_assets.insert(source.clone());
+                }
                 let destination = Path::new("_assets").join(&relative);
                 let output = docs.join(&destination);
                 fs::create_dir_all(output.parent().ok_or("Invalid asset path")?)
@@ -474,11 +483,608 @@ pub(crate) fn build_with_engine(
     root: Option<&Path>,
     engine: SiteEngine,
 ) -> Result<String, String> {
+    if engine == SiteEngine::SingleHtml {
+        return build_inner(templates, generated, output_root, draft, root, engine, None);
+    }
     let command = site_command(root, engine);
     if engine == SiteEngine::Zensical && command.is_none() {
         return Err("Zensicalが見つかりません。Studioから参照できるPATHに zensical を追加するか、プロジェクトの .venv にインストールしてください。PATHを変更した場合はStudioを再起動してください。".into());
     }
     build_inner(templates, generated, output_root, draft, root, engine, command)
+}
+
+fn extract_h1_title(content: &str) -> Option<String> {
+    let mut in_h1 = false;
+    let mut text = String::new();
+    for event in Parser::new_ext(content, Options::all()) {
+        match event {
+            Event::Start(Tag::Heading {
+                level: HeadingLevel::H1,
+                ..
+            }) => {
+                in_h1 = true;
+                text.clear();
+            }
+            Event::Text(value) | Event::Code(value) if in_h1 => {
+                text.push_str(&value);
+            }
+            Event::End(TagEnd::Heading(HeadingLevel::H1)) if in_h1 => {
+                let cleaned = text.trim().to_string();
+                if !cleaned.is_empty() {
+                    return Some(cleaned);
+                }
+                in_h1 = false;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn is_image_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg"
+            )
+        })
+}
+
+struct ResolvedNavItem {
+    page_index: usize,
+    rel_posix: String,
+    title: String,
+    section: String,
+    anchor_id: String,
+}
+
+fn nav_matches_page(entry_page: &str, dest_posix: &str, root_rel: Option<&str>) -> bool {
+    let norm = entry_page.trim().replace('\\', "/");
+    if norm == dest_posix {
+        return true;
+    }
+    if let Some(rel) = root_rel {
+        if norm == rel {
+            return true;
+        }
+    }
+    if let Some(stripped) = norm.strip_prefix("./") {
+        if stripped == dest_posix || root_rel.is_some_and(|rel| rel == stripped) {
+            return true;
+        }
+    }
+    false
+}
+
+fn resolve_nav_items(
+    pages: &[BuildPage],
+    contents: &[String],
+    nav_config: &[NavEntry],
+    root: Option<&Path>,
+) -> Vec<ResolvedNavItem> {
+    let canonical_root = root.and_then(|r| r.canonicalize().ok());
+    let page_meta: Vec<(String, Option<String>, String)> = pages
+        .iter()
+        .enumerate()
+        .map(|(idx, page)| {
+            let dest_posix = page.destination.to_string_lossy().replace('\\', "/");
+            let root_rel = canonical_root.as_ref().and_then(|cr| {
+                page.original
+                    .strip_prefix(cr)
+                    .ok()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+            });
+            let default_title = extract_h1_title(&contents[idx]).unwrap_or_else(|| {
+                page.source
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            });
+            (dest_posix, root_rel, default_title)
+        })
+        .collect();
+
+    let mut ordered: Vec<ResolvedNavItem> = Vec::new();
+    let mut handled: HashSet<usize> = HashSet::new();
+
+    for entry in nav_config {
+        if let Some((idx, (dest_posix, _, default_title))) =
+            page_meta.iter().enumerate().find(|(idx, (dest, rel, _))| {
+                !handled.contains(idx) && nav_matches_page(&entry.page, dest, rel.as_deref())
+            })
+        {
+            handled.insert(idx);
+            if entry.hidden {
+                continue;
+            }
+            let title = if entry.title.trim().is_empty() {
+                default_title.clone()
+            } else {
+                entry.title.trim().to_string()
+            };
+            ordered.push(ResolvedNavItem {
+                page_index: idx,
+                rel_posix: dest_posix.clone(),
+                title,
+                section: entry.section.trim().to_string(),
+                anchor_id: format!("page-{}", ordered.len() + 1),
+            });
+        }
+    }
+
+    // Append remaining unlisted pages with index.md / README.md first, then alphabetical.
+    let mut remaining: Vec<usize> = (0..pages.len()).filter(|i| !handled.contains(i)).collect();
+    remaining.sort_by(|&a, &b| {
+        let priority = |dest: &str| -> u8 {
+            if dest == "index.md" {
+                0
+            } else if dest == "_external/README.md" || dest.eq_ignore_ascii_case("README.md") {
+                1
+            } else {
+                2
+            }
+        };
+        priority(&page_meta[a].0)
+            .cmp(&priority(&page_meta[b].0))
+            .then_with(|| page_meta[a].0.cmp(&page_meta[b].0))
+    });
+
+    for idx in remaining {
+        let (dest_posix, _, default_title) = &page_meta[idx];
+        ordered.push(ResolvedNavItem {
+            page_index: idx,
+            rel_posix: dest_posix.clone(),
+            title: default_title.clone(),
+            section: String::new(),
+            anchor_id: format!("page-{}", ordered.len() + 1),
+        });
+    }
+
+    ordered
+}
+
+fn build_nav_yaml(items: &[ResolvedNavItem]) -> String {
+    let mut out = String::new();
+    let mut current_section: Option<&str> = None;
+    for item in items {
+        if item.section.is_empty() {
+            current_section = None;
+            out.push_str(&format!(
+                "  - {}: {}\n",
+                serde_json::to_string(&item.title).unwrap(),
+                serde_json::to_string(&item.rel_posix).unwrap()
+            ));
+        } else {
+            if current_section != Some(item.section.as_str()) {
+                out.push_str(&format!(
+                    "  - {}:\n",
+                    serde_json::to_string(&item.section).unwrap()
+                ));
+                current_section = Some(item.section.as_str());
+            }
+            out.push_str(&format!(
+                "      - {}: {}\n",
+                serde_json::to_string(&item.title).unwrap(),
+                serde_json::to_string(&item.rel_posix).unwrap()
+            ));
+        }
+    }
+    out
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn inline_single_html_assets(html: &str, temp_docs: &Path, page_dir: &Path) -> String {
+    let img_re = regex::Regex::new(r#"(?i)<img\s+[^>]*\bsrc\s*=\s*["'](?P<src>[^"']+)["'][^>]*>"#).unwrap();
+    let mut out = String::with_capacity(html.len());
+    let mut last = 0usize;
+    for cap in img_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        out.push_str(&html[last..m.start()]);
+        let src = cap.name("src").unwrap().as_str();
+        let clean = src.split(['?', '#']).next().unwrap_or(src);
+        let decoded = percent_encoding::percent_decode_str(clean)
+            .decode_utf8()
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| clean.to_string());
+        let candidate = if !decoded.starts_with("data:")
+            && !decoded.starts_with("http://")
+            && !decoded.starts_with("https://")
+        {
+            let rel_path = page_dir.join(&decoded);
+            if rel_path.is_file() {
+                Some(rel_path)
+            } else {
+                let from_docs = temp_docs.join(decoded.trim_start_matches(['.', '/']));
+                from_docs.is_file().then_some(from_docs)
+            }
+        } else {
+            None
+        };
+        if let Some(img_path) = candidate {
+            let ext = img_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let mime = match ext.as_str() {
+                "png" => Some("image/png"),
+                "jpg" | "jpeg" => Some("image/jpeg"),
+                "gif" => Some("image/gif"),
+                "webp" => Some("image/webp"),
+                "svg" => Some("image/svg+xml"),
+                _ => None,
+            };
+            if let Some(mime_type) = mime {
+                if let Ok(bytes) = fs::read(&img_path) {
+                    if bytes.len() <= 20_000_000 {
+                        let public_bytes = if mime_type == "image/png"
+                            && bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+                        {
+                            let id = crate::capture_resources::resource_id(&bytes);
+                            crate::capture_resources::document_png(&bytes, id.as_deref())
+                                .unwrap_or(bytes)
+                        } else {
+                            bytes
+                        };
+                        let data_uri = format!("data:{mime_type};base64,{}", BASE64.encode(&public_bytes));
+                        out.push_str(&m.as_str().replace(src, &data_uri));
+                        last = m.end();
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push_str(m.as_str());
+        last = m.end();
+    }
+    out.push_str(&html[last..]);
+    out
+}
+
+fn rewrite_single_html_links(
+    html: &str,
+    current_rel: &str,
+    page_anchors: &BTreeMap<String, String>,
+) -> String {
+    let link_re = regex::Regex::new(r#"(?i)\bhref\s*=\s*"(?P<href>[^"]+)""#).unwrap();
+    let current_parent = Path::new(current_rel).parent().unwrap_or(Path::new(""));
+    let mut out = String::with_capacity(html.len());
+    let mut last = 0usize;
+    for cap in link_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        out.push_str(&html[last..m.start()]);
+        let href = cap.name("href").unwrap().as_str();
+        let lower = href.to_ascii_lowercase();
+        if !href.starts_with('#')
+            && !lower.starts_with("http://")
+            && !lower.starts_with("https://")
+            && !lower.starts_with("mailto:")
+        {
+            let clean = href.split(['?', '#']).next().unwrap_or(href);
+            let decoded = percent_encoding::percent_decode_str(clean)
+                .decode_utf8()
+                .map(|c| c.into_owned())
+                .unwrap_or_else(|_| clean.to_string());
+            let mut parts: Vec<std::ffi::OsString> = current_parent
+                .components()
+                .filter_map(|c| match c {
+                    Component::Normal(s) => Some(s.to_os_string()),
+                    _ => None,
+                })
+                .collect();
+            for part in Path::new(&decoded).components() {
+                match part {
+                    Component::Normal(s) => parts.push(s.to_os_string()),
+                    Component::ParentDir => {
+                        parts.pop();
+                    }
+                    Component::CurDir => {}
+                    _ => {}
+                }
+            }
+            let resolved = parts
+                .iter()
+                .map(|p| p.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            if let Some(anchor) = page_anchors.get(&resolved) {
+                out.push_str(&format!(r##"href="#{anchor}""##));
+                last = m.end();
+                continue;
+            }
+        }
+        out.push_str(m.as_str());
+        last = m.end();
+    }
+    out.push_str(&html[last..]);
+    out
+}
+
+fn transform_mermaid_blocks(html: &str) -> (String, bool) {
+    let re = regex::Regex::new(r#"(?s)<pre><code class="language-mermaid">(.*?)</code></pre>"#).unwrap();
+    let mut found = false;
+    let out = re
+        .replace_all(html, |caps: &regex::Captures<'_>| {
+            found = true;
+            format!(
+                "<div class=\"mermaid-diagram\"><pre class=\"mermaid\">{}</pre></div>",
+                &caps[1]
+            )
+        })
+        .into_owned();
+    (out, found)
+}
+
+fn render_single_html_document(
+    site_name: &str,
+    language: &str,
+    built_at: &str,
+    nav_items: &[ResolvedNavItem],
+    staged_markdown: &[String],
+    temp_docs: &Path,
+) -> String {
+    let mut page_anchors = BTreeMap::new();
+    for item in nav_items {
+        page_anchors.insert(item.rel_posix.clone(), item.anchor_id.clone());
+    }
+
+    let mut toc_html = String::new();
+    let mut current_section: Option<&str> = None;
+    for item in nav_items {
+        if !item.section.is_empty() && current_section != Some(item.section.as_str()) {
+            toc_html.push_str(&format!(
+                "<li class=\"toc-section\">{}</li>\n",
+                escape_html(&item.section)
+            ));
+            current_section = Some(item.section.as_str());
+        } else if item.section.is_empty() {
+            current_section = None;
+        }
+        let indent_class = if item.section.is_empty() { "" } else { " toc-nested" };
+        toc_html.push_str(&format!(
+            "<li class=\"toc-item{indent_class}\"><a href=\"#{}\">{}</a></li>\n",
+            escape_html(&item.anchor_id),
+            escape_html(&item.title)
+        ));
+    }
+
+    let mut sections_html = String::new();
+    let mut has_mermaid = false;
+    for item in nav_items {
+        let md = &staged_markdown[item.page_index];
+        let mut rendered = String::new();
+        pulldown_cmark::html::push_html(&mut rendered, crate::gfm::events(md).into_iter());
+        let (with_mermaid, page_has_mermaid) = transform_mermaid_blocks(&rendered);
+        if page_has_mermaid {
+            has_mermaid = true;
+        }
+        let page_dir = temp_docs
+            .join(&item.rel_posix)
+            .parent()
+            .unwrap_or(temp_docs)
+            .to_path_buf();
+        let with_images = inline_single_html_assets(&with_mermaid, temp_docs, &page_dir);
+        let with_links = rewrite_single_html_links(&with_images, &item.rel_posix, &page_anchors);
+        sections_html.push_str(&format!(
+            "<article class=\"manual-page\" id=\"{}\">\n{}\n</article>\n",
+            escape_html(&item.anchor_id),
+            with_links
+        ));
+    }
+
+    let mermaid_script = if has_mermaid {
+        r#"  <script type="module">
+    (async () => {
+      try {
+        const mod = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
+        const mermaid = mod.default || mod;
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+        await mermaid.run({ querySelector: '.mermaid' });
+      } catch (_offlineFallback) {
+        // Offline or blocked: keep readable <pre class="mermaid"> source block as-is.
+      }
+    })();
+  </script>
+"#
+    } else {
+        ""
+    };
+
+    format!(
+        r#"<!doctype html>
+<html lang="{lang}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="generator" content="munin-manual-studio-single-html" />
+  <title>{title}</title>
+  <style>
+    :root {{
+      --bg: #ffffff;
+      --surface: #f7f8fa;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --code-bg: #f3f4f6;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.75;
+    }}
+    .layout {{
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }}
+    .sidebar {{
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 18px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+    }}
+    .site-title {{
+      margin: 0 0 6px;
+      font-size: 1.1rem;
+      line-height: 1.35;
+    }}
+    .site-meta {{
+      margin: 0 0 14px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }}
+    .print-btn {{
+      width: 100%;
+      margin-bottom: 16px;
+      padding: 8px 12px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.88rem;
+      cursor: pointer;
+    }}
+    .print-btn:hover {{ opacity: 0.92; }}
+    .toc {{
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }}
+    .toc-section {{
+      margin: 14px 0 4px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }}
+    .toc-item a {{
+      display: block;
+      padding: 5px 8px;
+      border-radius: 5px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }}
+    .toc-item.toc-nested a {{ padding-left: 18px; }}
+    .toc-item a:hover {{ background: #e8eefc; color: var(--accent); }}
+    .content {{
+      max-width: 920px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 36px 44px 72px;
+    }}
+    .manual-page + .manual-page {{
+      margin-top: 52px;
+      padding-top: 36px;
+      border-top: 2px solid var(--border);
+    }}
+    h1, h2, h3, h4 {{ line-height: 1.35; margin-top: 1.5em; }}
+    .manual-page > h1:first-child {{ margin-top: 0; }}
+    a {{ color: var(--accent); }}
+    img {{ max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); }}
+    figure[data-munin-image] {{ margin: 1.2em 0; }}
+    figure[data-munin-image] figcaption {{ font-size: 0.86rem; color: var(--muted); margin-top: 6px; }}
+    pre {{
+      background: var(--code-bg);
+      padding: 14px 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.88rem;
+      line-height: 1.55;
+    }}
+    code {{
+      font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+      background: var(--code-bg);
+      padding: 0.12em 0.35em;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }}
+    pre code {{ background: transparent; padding: 0; }}
+    table {{ border-collapse: collapse; width: 100%; margin: 1.2em 0; font-size: 0.92rem; }}
+    th, td {{ border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }}
+    th {{ background: var(--surface); }}
+    blockquote {{
+      margin: 1em 0;
+      padding: 10px 14px;
+      border-left: 4px solid var(--border);
+      background: var(--surface);
+      border-radius: 0 6px 6px 0;
+    }}
+    .markdown-alert {{ border-left-width: 4px; }}
+    .markdown-alert-note {{ border-left-color: #2563eb; background: #eff6ff; }}
+    .markdown-alert-tip {{ border-left-color: #16a34a; background: #f0fdf4; }}
+    .markdown-alert-important {{ border-left-color: #7c3aed; background: #f5f3ff; }}
+    .markdown-alert-warning {{ border-left-color: #d97706; background: #fffbeb; }}
+    .markdown-alert-caution {{ border-left-color: #dc2626; background: #fef2f2; }}
+    .markdown-alert-title {{ font-weight: 700; margin: 0 0 4px; }}
+    .mermaid-diagram {{ margin: 1.2em 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow-x: auto; }}
+    .mermaid-diagram pre.mermaid {{ margin: 0; background: transparent; padding: 0; }}
+    .mermaid-diagram svg {{ display: block; margin: 0 auto; max-width: 100%; height: auto; }}
+    @media (max-width: 860px) {{
+      .layout {{ grid-template-columns: 1fr; }}
+      .sidebar {{ position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }}
+      .content {{ padding: 24px 18px 48px; }}
+    }}
+    @media print {{
+      .sidebar, .print-btn {{ display: none !important; }}
+      .layout {{ display: block; }}
+      .content {{ max-width: none; padding: 0; }}
+      .manual-page + .manual-page {{
+        page-break-before: always;
+        break-before: page;
+        border-top: none;
+        margin-top: 0;
+        padding-top: 0;
+      }}
+      figure, table, pre, blockquote, .mermaid-diagram {{ page-break-inside: avoid; break-inside: avoid; }}
+      a {{ color: inherit; text-decoration: underline; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1 class="site-title">{title}</h1>
+      <p class="site-meta">出力日時: {built_at}</p>
+      <button type="button" class="print-btn" onclick="window.print()">印刷 / PDFとして保存</button>
+      <nav aria-label="目次">
+        <ul class="toc">
+          {toc}
+        </ul>
+      </nav>
+    </aside>
+    <main class="content">
+      {sections}
+    </main>
+  </div>
+{mermaid_script}</body>
+</html>
+"#,
+        lang = escape_html(language),
+        title = escape_html(site_name),
+        built_at = escape_html(built_at),
+        toc = toc_html,
+        sections = sections_html,
+        mermaid_script = mermaid_script,
+    )
 }
 
 #[cfg(test)]
@@ -532,6 +1138,8 @@ fn build_inner(
     fs::create_dir_all(&temp_docs).map_err(|e| e.to_string())?;
 
     let built_at = utc_now();
+    let mut referenced_assets: HashSet<PathBuf> = HashSet::new();
+    let mut staged_markdown: Vec<String> = Vec::with_capacity(pages.len());
 
     for page in &pages {
         let content = fs::read_to_string(&page.source).map_err(|e| e.to_string())?;
@@ -540,7 +1148,14 @@ fn build_inner(
                 .replace("{{BUILD_TIMESTAMP}}", &built_at),
         );
         let final_page = if let Some(root) = root {
-            stage_page_links(root, page, &pages, &final_page, &temp_docs)?
+            stage_page_links(
+                root,
+                page,
+                &pages,
+                &final_page,
+                &temp_docs,
+                &mut referenced_assets,
+            )?
         } else {
             final_page
         };
@@ -549,7 +1164,17 @@ fn build_inner(
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         fs::write(&dest, crate::gfm::for_publication(&final_page)).map_err(|e| e.to_string())?;
+        staged_markdown.push(final_page);
     }
+
+    let crate::config::MkDocsConfig {
+        site_name,
+        theme: theme_name,
+        language: theme_lang,
+        use_directory_urls: use_dir_urls,
+        nav: nav_config,
+        exclude_unused_assets,
+    } = config.map(|config| config.mkdocs).unwrap_or_default();
 
     // markdown 以外の静的ファイルをコピー
     for entry in WalkDir::new(templates)
@@ -568,6 +1193,15 @@ fn build_inner(
     {
         if entry.file_type().is_file() {
             if entry.path().extension().map_or(true, |ext| ext != "md") {
+                if exclude_unused_assets && root.is_some() && is_image_file(entry.path()) {
+                    let canon = entry
+                        .path()
+                        .canonicalize()
+                        .unwrap_or_else(|_| entry.path().to_path_buf());
+                    if !referenced_assets.contains(&canon) {
+                        continue;
+                    }
+                }
                 let rel = entry.path().strip_prefix(templates).unwrap_or(entry.path());
                 let dest = temp_docs.join(rel);
                 if let Some(parent) = dest.parent() {
@@ -587,6 +1221,15 @@ fn build_inner(
             .filter_map(|e| e.ok())
         {
             if entry.file_type().is_file() {
+                if exclude_unused_assets && root.is_some() && is_image_file(entry.path()) {
+                    let canon = entry
+                        .path()
+                        .canonicalize()
+                        .unwrap_or_else(|_| entry.path().to_path_buf());
+                    if !referenced_assets.contains(&canon) {
+                        continue;
+                    }
+                }
                 let rel = entry
                     .path()
                     .strip_prefix(&legacy_assets)
@@ -602,31 +1245,34 @@ fn build_inner(
         }
     }
 
-    let crate::config::MkDocsConfig {
-        site_name,
-        theme: theme_name,
-        language: theme_lang,
-        use_directory_urls: use_dir_urls,
-    } = config.map(|config| config.mkdocs).unwrap_or_default();
+    let nav_items = resolve_nav_items(&pages, &staged_markdown, &nav_config, root);
 
-    let mut nav_lines = String::new();
-    for page in &pages {
-        let rel_posix = page.destination.to_string_lossy().replace('\\', "/");
-        let stem = page
-            .source
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy();
-        nav_lines.push_str(&format!(
-            "  - {}: {}\n",
-            serde_json::to_string(&stem).unwrap(),
-            serde_json::to_string(&rel_posix).unwrap()
+    if engine == SiteEngine::SingleHtml {
+        fs::create_dir_all(&temp_site).map_err(|e| e.to_string())?;
+        let single_html = render_single_html_document(
+            &site_name,
+            &theme_lang,
+            &built_at,
+            &nav_items,
+            &staged_markdown,
+            &temp_docs,
+        );
+        fs::write(temp_site.join("index.html"), single_html).map_err(|e| e.to_string())?;
+        fs::create_dir_all(output_root).map_err(|e| e.to_string())?;
+        publish_site(&temp_site, output_root)?;
+        return Ok(format!(
+            "{}\nSingle HTML: {}",
+            output_root.display(),
+            output_root.join("index.html").display()
         ));
     }
+
+    let nav_lines = build_nav_yaml(&nav_items);
 
     let theme = match engine {
         SiteEngine::MkDocs => format!("  name: {theme_name}\n"),
         SiteEngine::Zensical => "  variant: classic\n".into(),
+        SiteEngine::SingleHtml => unreachable!(),
     };
     let alert_theme = if (engine == SiteEngine::Zensical || theme_name == "material") && root.is_some_and(crate::gfm::alert_icons_enabled) {
         crate::gfm::mkdocs_alert_icons(&temp_root)?
@@ -784,13 +1430,156 @@ mod site_tests {
         let staged = tmp.path().join("staged");
         fs::create_dir(&staged).unwrap();
         let body = fs::read_to_string(&page.source).unwrap();
-        let rendered = stage_page_links(&root, page, &pages, &body, &staged).unwrap();
+        let mut referenced = HashSet::new();
+        let rendered = stage_page_links(&root, page, &pages, &body, &staged, &mut referenced).unwrap();
         assert!(rendered.contains("_assets/docs/image.png"));
         assert!(rendered.contains("_external/README.md"));
+        assert!(!referenced.is_empty());
         assert_eq!(
             fs::read(staged.join("_assets/docs/image.png")).unwrap(),
             b"fixture"
         );
+    }
+
+    #[test]
+    fn nav_uses_h1_titles_index_first_and_supports_custom_order_sections_and_hidden() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/index.md"), "# はじめに\n\nトップページ\n").unwrap();
+        fs::write(root.join("docs/beta.md"), "# ベータ手順\n\n内容\n").unwrap();
+        fs::write(root.join("docs/alpha.md"), "# アルファ概要\n\n内容\n").unwrap();
+        fs::write(root.join("docs/secret.md"), "# 下書きメモ\n\n非公開\n").unwrap();
+
+        let pages = build_pages(&root.join("docs"), Some(root)).unwrap();
+        let contents: Vec<String> = pages
+            .iter()
+            .map(|p| fs::read_to_string(&p.source).unwrap())
+            .collect();
+
+        // Default nav: index.md first, H1 titles automatically adopted
+        let default_items = resolve_nav_items(&pages, &contents, &[], Some(root));
+        assert_eq!(default_items[0].rel_posix, "index.md");
+        assert_eq!(default_items[0].title, "はじめに");
+        let default_yaml = build_nav_yaml(&default_items);
+        assert!(default_yaml.contains("\"はじめに\": \"index.md\""));
+        assert!(default_yaml.contains("\"アルファ概要\": \"alpha.md\""));
+
+        // Custom nav: custom order, section grouping, title override, hidden exclusion
+        let custom = vec![
+            NavEntry {
+                page: "beta.md".into(),
+                title: "最初に読む手順".into(),
+                section: "基本操作".into(),
+                hidden: false,
+            },
+            NavEntry {
+                page: "alpha.md".into(),
+                title: String::new(),
+                section: "基本操作".into(),
+                hidden: false,
+            },
+            NavEntry {
+                page: "secret.md".into(),
+                title: String::new(),
+                section: String::new(),
+                hidden: true,
+            },
+        ];
+        let custom_items = resolve_nav_items(&pages, &contents, &custom, Some(root));
+        assert_eq!(custom_items.len(), 3);
+        assert_eq!(custom_items[0].title, "最初に読む手順");
+        assert_eq!(custom_items[1].title, "アルファ概要");
+        assert_eq!(custom_items[2].rel_posix, "index.md");
+        assert!(!custom_items.iter().any(|i| i.rel_posix == "secret.md"));
+        let yaml = build_nav_yaml(&custom_items);
+        assert!(yaml.contains("  - \"基本操作\":\n      - \"最初に読む手順\": \"beta.md\"\n      - \"アルファ概要\": \"alpha.md\""));
+    }
+
+    #[test]
+    fn single_html_builds_offline_with_inlined_stripped_images_links_and_print_css() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("docs/assets")).unwrap();
+
+        let original = image::DynamicImage::new_rgba8(12, 10);
+        let mut buf = std::io::Cursor::new(Vec::new());
+        original.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+        let private_png = markits::raster::embed_png_text_chunk(
+            buf.get_ref(),
+            "markits:base_image",
+            "secret-original",
+        )
+        .unwrap();
+        fs::write(root.join("docs/assets/used.png"), &private_png).unwrap();
+        fs::write(root.join("docs/assets/unused.png"), &private_png).unwrap();
+
+        fs::write(
+            root.join("manual_setting.json"),
+            r#"{"docs":"docs","output":"site","assets":"docs/assets","mkdocs":{"site_name":"テストマニュアル","theme":"material","language":"ja","use_directory_urls":false,"exclude_unused_assets":true}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("docs/index.md"),
+            "# テストトップ\n\n<!-- ai-note: 公開に出ないメモ -->\n\n![画面](assets/used.png)\n\n[詳細へ](guide.md)\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("docs/guide.md"),
+            "# 詳細ガイド\n\n> [!TIP]\n> 便利なヒントです。\n\n```mermaid\nflowchart LR\n  A[開始] --> B[完了]\n```\n",
+        )
+        .unwrap();
+
+        let res = crate::run(root, "build-single-html", &[]).unwrap();
+        assert!(res.contains("Single HTML:"));
+
+        let html = fs::read_to_string(root.join("site/index.html")).unwrap();
+        assert!(html.contains("<title>テストマニュアル</title>"));
+        assert!(html.contains("テストトップ"));
+        assert!(html.contains("詳細ガイド"));
+        assert!(!html.contains("公開に出ないメモ"));
+        assert!(html.contains("data:image/png;base64,"));
+        assert!(html.contains("href=\"#page-2\""));
+        assert!(html.contains("@media print"));
+        assert!(html.contains("window.print()"));
+        assert!(html.contains("markdown-alert-tip"));
+        assert!(html.contains(r#"<pre class="mermaid">"#));
+        assert!(html.contains("mermaid.run"));
+
+        // Verify the embedded base64 PNG has private MarkIts metadata stripped
+        let marker = "data:image/png;base64,";
+        let start = html.find(marker).unwrap() + marker.len();
+        let end = html[start..].find('"').unwrap() + start;
+        let decoded = BASE64.decode(&html[start..end]).unwrap();
+        assert!(markits::raster::extract_png_text_chunk(&decoded, "markits:base_image").is_none());
+
+        // published_entry finds the generated index.html
+        assert_eq!(
+            published_entry(root, "site").unwrap(),
+            root.join("site/index.html").canonicalize().unwrap()
+        );
+
+        // CLI build-audience works directly with --audience and --engine single-html
+        fs::write(
+            root.join("docs/dev.md"),
+            "<!-- ai:audience developer -->\n# 開発者専用\n\n内部API説明\n",
+        )
+        .unwrap();
+        let aud_res = crate::run(
+            root,
+            "build-audience",
+            &[
+                ("--audience", "user"),
+                ("--engine", "single-html"),
+                ("--draft", ""),
+            ],
+        )
+        .unwrap();
+        let aud_json: serde_json::Value = serde_json::from_str(&aud_res).unwrap();
+        assert_eq!(aud_json["audience"], "user");
+        let user_html = fs::read_to_string(root.join("site-user/index.html")).unwrap();
+        assert!(user_html.contains("テストトップ"));
+        assert!(!user_html.contains("開発者専用"));
     }
 
     #[test]

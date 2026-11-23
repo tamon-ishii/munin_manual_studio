@@ -30,12 +30,31 @@ mod cli_model_tests {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NavEntry {
+    pub page: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub section: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MkDocsConfig {
     pub site_name: String,
     pub theme: String,
     pub language: String,
     pub use_directory_urls: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nav: Vec<NavEntry>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub exclude_unused_assets: bool,
 }
 
 impl Default for MkDocsConfig {
@@ -45,6 +64,8 @@ impl Default for MkDocsConfig {
             theme: "material".to_string(),
             language: "ja".to_string(),
             use_directory_urls: false,
+            nav: Vec::new(),
+            exclude_unused_assets: false,
         }
     }
 }
@@ -185,6 +206,14 @@ pub fn read_config(root: &Path) -> ManualConfig {
         }
         if let Some(du) = mk.get("use_directory_urls").and_then(|v| v.as_bool()) {
             config.mkdocs.use_directory_urls = du;
+        }
+        if let Some(nav_val) = mk.get("nav") {
+            if let Ok(parsed_nav) = serde_json::from_value::<Vec<NavEntry>>(nav_val.clone()) {
+                config.mkdocs.nav = parsed_nav;
+            }
+        }
+        if let Some(exclude) = mk.get("exclude_unused_assets").and_then(|v| v.as_bool()) {
+            config.mkdocs.exclude_unused_assets = exclude;
         }
     }
 
@@ -375,6 +404,14 @@ pub fn save_settings_with_cli_models(
                 if let Some(du) = obj.get("use_directory_urls").and_then(|v| v.as_bool()) {
                     mkdocs_cfg.use_directory_urls = du;
                 }
+                if let Some(nav_val) = obj.get("nav") {
+                    if let Ok(parsed_nav) = serde_json::from_value::<Vec<NavEntry>>(nav_val.clone()) {
+                        mkdocs_cfg.nav = parsed_nav;
+                    }
+                }
+                if let Some(exclude) = obj.get("exclude_unused_assets").and_then(|v| v.as_bool()) {
+                    mkdocs_cfg.exclude_unused_assets = exclude;
+                }
             }
         }
     }
@@ -458,7 +495,17 @@ pub(crate) fn validate_output_path(root: &Path, docs: &str, docs_path: &Path, ou
     Ok(output_path)
 }
 
+#[cfg(test)]
 pub(crate) fn save_html_output(root: &Path, output: &str, site_name: Option<&str>) -> Result<String, String> {
+    save_html_output_with_options(root, output, site_name, None)
+}
+
+pub(crate) fn save_html_output_with_options(
+    root: &Path,
+    output: &str,
+    site_name: Option<&str>,
+    exclude_unused_assets: Option<bool>,
+) -> Result<String, String> {
     let site_name = site_name.map(str::trim);
     if site_name.is_some_and(|name| name.is_empty() || name.chars().any(char::is_control)) {
         return Err("サイト名を入力してください。".into());
@@ -486,15 +533,78 @@ pub(crate) fn save_html_output(root: &Path, output: &str, site_name: Option<&str
     };
     let fields = settings.as_object_mut().ok_or("プロジェクト設定の形式が不正です。")?;
     fields.insert("output".into(), serde_json::json!(&relative));
-    if let Some(site_name) = site_name {
-        fields.entry("mkdocs").or_insert_with(|| serde_json::json!({}))
-            .as_object_mut().ok_or("公開設定の形式が不正です。")?
-            .insert("site_name".into(), serde_json::json!(site_name));
+    if site_name.is_some() || exclude_unused_assets.is_some() {
+        let mkdocs = fields
+            .entry("mkdocs")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or("公開設定の形式が不正です。")?;
+        if let Some(site_name) = site_name {
+            mkdocs.insert("site_name".into(), serde_json::json!(site_name));
+        }
+        if let Some(exclude) = exclude_unused_assets {
+            mkdocs.insert("exclude_unused_assets".into(), serde_json::json!(exclude));
+        }
     }
     let temporary = tempfile::NamedTempFile::new_in(root).map_err(|error| error.to_string())?;
     serde_json::to_writer_pretty(temporary.as_file(), &settings).map_err(|error| error.to_string())?;
     temporary.persist(destination).map_err(|error| error.to_string())?;
     Ok(relative)
+}
+
+pub(crate) fn save_publication_nav(
+    root: &Path,
+    nav: &[NavEntry],
+    exclude_unused_assets: Option<bool>,
+) -> Result<Vec<NavEntry>, String> {
+    let mut normalized = Vec::with_capacity(nav.len());
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in nav {
+        let page = entry.page.trim().replace('\\', "/");
+        if page.is_empty() || page.contains("..") || page.contains('\0') {
+            return Err(format!("目次設定のページパスが不正です: {}", entry.page));
+        }
+        let title = entry.title.trim().to_string();
+        let section = entry.section.trim().to_string();
+        if title.chars().any(char::is_control) || section.chars().any(char::is_control) {
+            return Err("目次タイトルまたはセクション名に制御文字は使えません。".into());
+        }
+        if seen.insert(page.clone()) {
+            normalized.push(NavEntry {
+                page,
+                title,
+                section,
+                hidden: entry.hidden,
+            });
+        }
+    }
+    let config = read_config(root);
+    let destination = config_path(root);
+    let existing = if destination.is_file() { destination.clone() } else { root.join("manual/config.json") };
+    let mut settings: serde_json::Value = match fs::read(existing) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| error.to_string())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+            serde_json::to_value(&config).map_err(|error| error.to_string())?,
+        Err(error) => return Err(error.to_string()),
+    };
+    let fields = settings.as_object_mut().ok_or("プロジェクト設定の形式が不正です。")?;
+    let mkdocs = fields
+        .entry("mkdocs")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or("公開設定の形式が不正です。")?;
+    if normalized.is_empty() {
+        mkdocs.remove("nav");
+    } else {
+        mkdocs.insert("nav".into(), serde_json::to_value(&normalized).map_err(|e| e.to_string())?);
+    }
+    if let Some(exclude) = exclude_unused_assets {
+        mkdocs.insert("exclude_unused_assets".into(), serde_json::json!(exclude));
+    }
+    let temporary = tempfile::NamedTempFile::new_in(root).map_err(|error| error.to_string())?;
+    serde_json::to_writer_pretty(temporary.as_file(), &settings).map_err(|error| error.to_string())?;
+    temporary.persist(destination).map_err(|error| error.to_string())?;
+    Ok(normalized)
 }
 
 #[cfg(test)]

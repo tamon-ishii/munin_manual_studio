@@ -232,6 +232,8 @@ fn init_template_inner(
             theme: "material".to_string(),
             language: "ja".to_string(),
             use_directory_urls: false,
+            nav: Vec::new(),
+            exclude_unused_assets: false,
         },
     };
     let setting_dest = config_path(root);

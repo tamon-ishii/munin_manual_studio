@@ -150,6 +150,272 @@ fn delete(root: &Path, id: &str) -> Result<(), String> {
     fs::rename(source, staging.path().join("resource")).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// Safely move unused, unprotected capture resources (and their unreferenced derived PNGs)
+/// into `.munin/trash/capture-cleanup-<timestamp>/` instead of permanently deleting them.
+pub fn archive_unused(root: &Path, ids: Option<&[String]>) -> Result<Value, String> {
+    let _lock = workflow::resource_lock(root, HOME)?;
+    let listed = list(root)?;
+    let items = listed["items"].as_array().cloned().unwrap_or_default();
+    let requested: Option<std::collections::BTreeSet<&str>> =
+        ids.map(|slice| slice.iter().map(String::as_str).collect());
+
+    let mut targets = Vec::new();
+    let mut skipped = Vec::new();
+    for item in items {
+        let Some(id) = item["id"].as_str() else {
+            continue;
+        };
+        if let Some(filter) = &requested {
+            if !filter.contains(id) {
+                continue;
+            }
+        }
+        let usages = item["usages"].as_array().map_or(0, Vec::len);
+        let resource = load(root, id)?;
+        let is_protected = resource.derived.iter().any(|d| d.protected);
+        if usages > 0 {
+            skipped.push(json!({"id": id, "name": resource.name, "reason": "原稿で使用中です"}));
+            continue;
+        }
+        if is_protected {
+            skipped.push(json!({"id": id, "name": resource.name, "reason": "保護されている派生画像があります"}));
+            continue;
+        }
+        targets.push(resource);
+    }
+
+    if targets.is_empty() {
+        return Ok(json!({
+            "archived_count": 0,
+            "archived_ids": [],
+            "trash_dir": Value::Null,
+            "skipped": skipped
+        }));
+    }
+
+    let stamp = crate::task::utc_now()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>();
+    let trash_rel = format!(".munin/trash/capture-cleanup-{stamp}");
+    let trash_root = project_path(root, &trash_rel)?;
+    fs::create_dir_all(&trash_root).map_err(|e| e.to_string())?;
+
+    let mut archived_ids = Vec::new();
+    let mut manifest_entries = Vec::new();
+
+    for resource in targets {
+        let src_dir = home(root, &resource.id)?;
+        if !src_dir.exists() {
+            continue;
+        }
+        let dest_dir = trash_root.join(&resource.id);
+        fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
+        let mut moved_derived = Vec::new();
+        for derived in &resource.derived {
+            if let Ok(derived_path) = project_path(root, &derived.path) {
+                if derived_path.is_file() {
+                    let file_name = derived_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let archived_file = format!("derived-{}-{file_name}", derived.id);
+                    let dest_img = dest_dir.join(&archived_file);
+                    if fs::rename(&derived_path, &dest_img).is_err() {
+                        fs::copy(&derived_path, &dest_img).map_err(|e| e.to_string())?;
+                        fs::remove_file(&derived_path).map_err(|e| e.to_string())?;
+                    }
+                    moved_derived.push(json!({
+                        "id": derived.id,
+                        "original_path": derived.path,
+                        "archived_file": archived_file
+                    }));
+                }
+            }
+        }
+        fs::rename(&src_dir, dest_dir.join("resource")).map_err(|e| e.to_string())?;
+        archived_ids.push(resource.id.clone());
+        manifest_entries.push(json!({
+            "id": resource.id,
+            "name": resource.name,
+            "moved_derived": moved_derived
+        }));
+    }
+
+    let summary = json!({
+        "archived_at": crate::task::utc_now(),
+        "items": manifest_entries
+    });
+    let _ = fs::write(
+        trash_root.join("trash-manifest.json"),
+        serde_json::to_vec_pretty(&summary).unwrap_or_default(),
+    );
+
+    Ok(json!({
+        "archived_count": archived_ids.len(),
+        "archived_ids": archived_ids,
+        "trash_dir": trash_rel,
+        "skipped": skipped
+    }))
+}
+
+pub fn trash_list(root: &Path) -> Result<Value, String> {
+    let trash_base = project_path(root, ".munin/trash")?;
+    let mut batches = Vec::new();
+    if trash_base.is_dir() {
+        for entry in fs::read_dir(&trash_base).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with("capture-cleanup-") || !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let manifest_path = entry.path().join("trash-manifest.json");
+            let Ok(bytes) = fs::read(&manifest_path) else {
+                continue;
+            };
+            let Ok(manifest) = serde_json::from_slice::<Value>(&bytes) else {
+                continue;
+            };
+            let count = manifest["items"].as_array().map_or(0, Vec::len);
+            if count == 0 {
+                continue;
+            }
+            batches.push(json!({
+                "trash_dir": format!(".munin/trash/{name}"),
+                "archived_at": manifest["archived_at"].as_str().unwrap_or(""),
+                "count": count,
+                "items": manifest["items"]
+            }));
+        }
+    }
+    batches.sort_by(|a, b| {
+        b["archived_at"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(a["archived_at"].as_str().unwrap_or(""))
+            .then_with(|| {
+                b["trash_dir"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(a["trash_dir"].as_str().unwrap_or(""))
+            })
+    });
+    Ok(json!({ "batches": batches }))
+}
+
+fn latest_trash(root: &Path) -> Option<Value> {
+    let list = trash_list(root).ok()?;
+    let first = list["batches"].as_array()?.first()?.clone();
+    Some(json!({
+        "trash_dir": first["trash_dir"],
+        "archived_at": first["archived_at"],
+        "count": first["count"]
+    }))
+}
+
+/// Restore a previously archived unused-capture cleanup batch from `.munin/trash/` back to its
+/// original locations without overwriting any existing resource or file.
+pub fn restore_trash(root: &Path, trash_dir: Option<&str>) -> Result<Value, String> {
+    let _lock = workflow::resource_lock(root, HOME)?;
+    let target_rel = match trash_dir.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(custom) => custom.replace('\\', "/"),
+        None => {
+            let latest = latest_trash(root)
+                .ok_or("復元できる退避済みの撮影リソースがありません。")?;
+            latest["trash_dir"]
+                .as_str()
+                .ok_or("復元できる退避フォルダーが見つかりません。")?
+                .to_string()
+        }
+    };
+    if !target_rel.starts_with(".munin/trash/capture-cleanup-") || target_rel.contains("..") {
+        return Err("退避フォルダーのパスが不正です。".into());
+    }
+    let batch_root = project_path(root, &target_rel)?;
+    let manifest_path = batch_root.join("trash-manifest.json");
+    if !manifest_path.is_file() {
+        return Err("指定された退避フォルダーは既に復元済みか存在しません。".into());
+    }
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(&manifest_path).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("退避マニフェストの形式が不正です: {e}"))?;
+    let entries = manifest["items"]
+        .as_array()
+        .ok_or("退避マニフェストに項目がありません。")?;
+
+    // Pre-validate all destinations so restore never partially overwrites existing files.
+    for entry in entries {
+        let id = entry["id"].as_str().ok_or("退避項目のIDが不正です。")?;
+        let res_dest = home(root, id)?;
+        let res_src = batch_root.join(id).join("resource");
+        if !res_src.is_dir() {
+            return Err(format!("退避済みのリソース本体が見つかりません: {id}"));
+        }
+        if res_dest.exists() {
+            return Err(format!("同じIDの撮影リソースが既に存在するため復元できません: {id}"));
+        }
+        if let Some(derived_list) = entry["moved_derived"].as_array() {
+            for d in derived_list {
+                let (orig, archived) = match (
+                    d["original_path"].as_str(),
+                    d["archived_file"].as_str(),
+                ) {
+                    (Some(o), Some(a)) => (o, a),
+                    _ => continue,
+                };
+                let dest_img = project_path(root, orig)?;
+                let src_img = batch_root.join(id).join(archived);
+                if !src_img.is_file() {
+                    return Err(format!("退避済みの派生画像が見つかりません: {orig}"));
+                }
+                if dest_img.exists() {
+                    return Err(format!("復元先に既に画像が存在するため復元できません: {orig}"));
+                }
+            }
+        }
+    }
+
+    let mut restored_ids = Vec::new();
+    for entry in entries {
+        let id = entry["id"].as_str().unwrap();
+        let res_dest = home(root, id)?;
+        if let Some(parent) = res_dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let res_src = batch_root.join(id).join("resource");
+        fs::rename(&res_src, &res_dest).map_err(|e| e.to_string())?;
+        if let Some(derived_list) = entry["moved_derived"].as_array() {
+            for d in derived_list {
+                let (Some(orig), Some(archived)) = (
+                    d["original_path"].as_str(),
+                    d["archived_file"].as_str(),
+                ) else {
+                    continue;
+                };
+                let dest_img = project_path(root, orig)?;
+                if let Some(parent) = dest_img.parent() {
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let src_img = batch_root.join(id).join(archived);
+                if fs::rename(&src_img, &dest_img).is_err() {
+                    fs::copy(&src_img, &dest_img).map_err(|e| e.to_string())?;
+                    fs::remove_file(&src_img).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        restored_ids.push(id.to_string());
+    }
+
+    let _ = fs::remove_dir_all(&batch_root);
+
+    Ok(json!({
+        "restored_count": restored_ids.len(),
+        "restored_ids": restored_ids,
+        "trash_dir": target_rel
+    }))
+}
 /// Keep encoded pixel/color chunks intact. Drop all text and non-display payloads.
 pub fn document_png(bytes: &[u8], id: Option<&str>) -> Result<Vec<u8>, String> {
     image::load_from_memory(bytes).map_err(|e| e.to_string())?;
@@ -406,7 +672,7 @@ pub fn list(root: &Path) -> Result<Value, String> {
         v["usages"] = json!(identities.get(&r.id).cloned().unwrap_or_default());
         items.push(v);
     }
-    Ok(json!({"items":items}))
+    Ok(json!({"items":items,"latest_trash":latest_trash(root)}))
 }
 pub fn thumbnail(root: &Path, id: &str, pending: bool) -> Result<String, String> {
     let path = if pending {
@@ -686,6 +952,18 @@ pub fn rpc(root: &Path, action: &str, options: &Value) -> Result<String, String>
         "capture-resources-delete" => {
             delete(root, id)?;
             json!({"deleted": true})
+        }
+        "capture-resources-cleanup-unused" => {
+            let ids = options["ids"].as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            });
+            archive_unused(root, ids.as_deref())?
+        }
+        "capture-resources-trash-list" => trash_list(root)?,
+        "capture-resources-restore-trash" => {
+            restore_trash(root, options["trash_dir"].as_str())?
         }
         "capture-resources-thumbnail" => return thumbnail(root, id, options["pending"] == true),
         "capture-resources-generate" => {
@@ -993,5 +1271,54 @@ mod tests {
         )
         .unwrap();
         assert_ne!(fs::read(root.join("renamed.png")).unwrap(), original);
+    }
+
+    #[test]
+    fn archive_unused_moves_only_unreferenced_unprotected_resources_to_trash() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+
+        let used_res = register(root, &private(1), "使用中").unwrap();
+        let used_d = generate(root, &used_res.id, None, None).unwrap();
+        let unused_res = register(root, &private(2), "未使用").unwrap();
+        let unused_d = generate(root, &unused_res.id, None, None).unwrap();
+        let protected_res = register(root, &private(3), "保護済み").unwrap();
+        let _prot_d = generate(root, &protected_res.id, None, None).unwrap();
+        let mut prot_loaded = load(root, &protected_res.id).unwrap();
+        prot_loaded.derived[0].protected = true;
+        save(root, &prot_loaded).unwrap();
+
+        fs::write(
+            root.join("docs/index.md"),
+            format!("# Index\n\n![shot](../{})\n", used_d.path),
+        )
+        .unwrap();
+
+        let report = archive_unused(root, None).unwrap();
+        assert_eq!(report["archived_count"], 1);
+        assert_eq!(report["archived_ids"], json!([unused_res.id]));
+        let trash_dir = report["trash_dir"].as_str().unwrap();
+        assert!(root.join(trash_dir).join(&unused_res.id).join("resource/manifest.json").is_file());
+        assert!(!project_path(root, &unused_d.path).unwrap().exists());
+        assert!(project_path(root, &used_d.path).unwrap().exists());
+
+        let remaining = catalog(root).unwrap();
+        assert_eq!(remaining.len(), 2);
+        assert!(remaining.iter().any(|r| r.id == used_res.id));
+        assert!(remaining.iter().any(|r| r.id == protected_res.id));
+
+        // Verify list reports latest_trash, restore_trash puts everything back, and double-restore fails
+        let listed = list(root).unwrap();
+        assert_eq!(listed["latest_trash"]["trash_dir"], trash_dir);
+        assert_eq!(listed["latest_trash"]["count"], 1);
+
+        let restored = restore_trash(root, Some(trash_dir)).unwrap();
+        assert_eq!(restored["restored_count"], 1);
+        assert_eq!(restored["restored_ids"], json!([unused_res.id]));
+        assert!(project_path(root, &unused_d.path).unwrap().is_file());
+        assert_eq!(catalog(root).unwrap().len(), 3);
+        assert!(list(root).unwrap()["latest_trash"].is_null());
+        assert!(restore_trash(root, Some(trash_dir)).is_err());
     }
 }

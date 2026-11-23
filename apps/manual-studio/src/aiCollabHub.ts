@@ -100,39 +100,161 @@ export function openAiCollabHubDialog(
       <select id="hub-audience-build-engine" aria-label="読者別HTML出力ツール">
         <option value="mkdocs">MkDocs</option>
         <option value="zensical">Zensical</option>
+        <option value="single-html">単一HTML（Python不要）</option>
       </select>
       <button type="button" id="hub-audience-build-btn">読者別HTMLを作成</button>
+      <button type="button" id="hub-nav-save-btn">目次順・公開設定を保存</button>
     </div>
     <p id="hub-dashboard-status" class="muted" role="status"></p>
     <div id="hub-dashboard-diagnostics" class="ai-hub-list"></div>
     <div id="hub-dashboard-pages" class="ai-hub-list"></div>
   `;
   let dashboardLoaded = false;
+  type DashboardPage = {
+    page: string;
+    title: string;
+    audiences: string[];
+    char_count: number;
+    heading_count: number;
+    image_count: number;
+    incoming_count: number;
+    error_count: number;
+    warning_count: number;
+    ai_note_count: number;
+  };
+  type NavDraft = { page: string; title: string; section: string; hidden: boolean };
+  let orderedPages: DashboardPage[] = [];
+  let navDraftMap = new Map<string, NavDraft>();
+
+  const renderDashboardPages = () => {
+    const statusEl = dashPanel.querySelector<HTMLElement>("#hub-dashboard-status")!;
+    const pagesEl = dashPanel.querySelector<HTMLElement>("#hub-dashboard-pages")!;
+    pagesEl.replaceChildren();
+    orderedPages.forEach((item, idx) => {
+      const draft = navDraftMap.get(item.page) || { page: item.page, title: "", section: "", hidden: false };
+      navDraftMap.set(item.page, draft);
+
+      const row = document.createElement("div");
+      row.className = "ai-hub-card ai-hub-page-row";
+      row.dataset.page = item.page;
+
+      const info = document.createElement("div");
+      info.className = "ai-hub-page-info";
+      const title = document.createElement("strong");
+      title.textContent = `${item.title} (${item.page})`;
+      const meta = document.createElement("div");
+      meta.className = "muted";
+      meta.textContent = `文字数: ${item.char_count} / 見出し: ${item.heading_count} / 画像: ${item.image_count} / 被リンク: ${item.incoming_count} / エラー: ${item.error_count} / 警告: ${item.warning_count} / AIメモ: ${item.ai_note_count}`;
+
+      const navRow = document.createElement("div");
+      navRow.className = "ai-hub-nav-controls";
+      const upBtn = document.createElement("button");
+      upBtn.type = "button";
+      upBtn.textContent = "↑";
+      upBtn.title = "目次順を上へ移動";
+      upBtn.setAttribute("aria-label", `${item.page} を上へ移動`);
+      upBtn.disabled = idx === 0;
+      upBtn.onclick = () => {
+        if (idx === 0) return;
+        [orderedPages[idx - 1], orderedPages[idx]] = [orderedPages[idx], orderedPages[idx - 1]];
+        renderDashboardPages();
+      };
+      const downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.textContent = "↓";
+      downBtn.title = "目次順を下へ移動";
+      downBtn.setAttribute("aria-label", `${item.page} を下へ移動`);
+      downBtn.disabled = idx === orderedPages.length - 1;
+      downBtn.onclick = () => {
+        if (idx >= orderedPages.length - 1) return;
+        [orderedPages[idx], orderedPages[idx + 1]] = [orderedPages[idx + 1], orderedPages[idx]];
+        renderDashboardPages();
+      };
+
+      const sectionInput = document.createElement("input");
+      sectionInput.type = "text";
+      sectionInput.className = "ai-hub-nav-input";
+      sectionInput.placeholder = "セクション名（任意）";
+      sectionInput.setAttribute("aria-label", `${item.page} のセクション名`);
+      sectionInput.value = draft.section;
+      sectionInput.oninput = () => { draft.section = sectionInput.value; };
+
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.className = "ai-hub-nav-input";
+      titleInput.placeholder = `表示名（既定: ${item.title}）`;
+      titleInput.setAttribute("aria-label", `${item.page} の目次表示名`);
+      titleInput.value = draft.title;
+      titleInput.oninput = () => { draft.title = titleInput.value; };
+
+      const hideLbl = document.createElement("label");
+      hideLbl.className = "ai-hub-aud-check";
+      const hideCb = document.createElement("input");
+      hideCb.type = "checkbox";
+      hideCb.checked = draft.hidden;
+      hideCb.onchange = () => { draft.hidden = hideCb.checked; };
+      hideLbl.append(hideCb, document.createTextNode("目次から隠す"));
+
+      navRow.append(upBtn, downBtn, sectionInput, titleInput, hideLbl);
+      info.append(title, meta, navRow);
+
+      const controls = document.createElement("div");
+      controls.className = "actions ai-hub-audience-controls";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.textContent = "開く";
+      openBtn.onclick = () => {
+        dialog.close();
+        void options.openPage(item.page);
+      };
+      controls.append(openBtn);
+
+      const checks: Array<{ aud: string; input: HTMLInputElement }> = [];
+      for (const aud of ["user", "developer", "maintainer"]) {
+        const lbl = document.createElement("label");
+        lbl.className = "ai-hub-aud-check";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = item.audiences.includes(aud);
+        lbl.append(cb, document.createTextNode(aud));
+        controls.append(lbl);
+        checks.push({ aud, input: cb });
+      }
+      const saveAudBtn = document.createElement("button");
+      saveAudBtn.type = "button";
+      saveAudBtn.textContent = "読者保存";
+      saveAudBtn.onclick = async () => {
+        saveAudBtn.disabled = true;
+        try {
+          const selected = checks.filter((c) => c.input.checked).map((c) => c.aud);
+          await options.rpc("page-audience-save", { page: item.page, audiences: selected }, root);
+          options.reportStatus(`${item.page} の対象読者設定を保存しました。`);
+          await loadDashboard();
+        } catch (error) {
+          statusEl.textContent = `保存失敗: ${String(error)}`;
+        } finally {
+          saveAudBtn.disabled = false;
+        }
+      };
+      controls.append(saveAudBtn);
+      row.append(info, controls);
+      pagesEl.append(row);
+    });
+  };
 
   async function loadDashboard(): Promise<void> {
     dashboardLoaded = true;
     const statusEl = dashPanel.querySelector<HTMLElement>("#hub-dashboard-status")!;
     const diagEl = dashPanel.querySelector<HTMLElement>("#hub-dashboard-diagnostics")!;
-    const pagesEl = dashPanel.querySelector<HTMLElement>("#hub-dashboard-pages")!;
     statusEl.textContent = "プロジェクト全体の構成を集計しています…";
     try {
       const data = JSON.parse(await options.rpc("project-dashboard", {}, root)) as {
         total_pages: number;
         total_errors: number;
         total_warnings: number;
+        nav?: Array<{ page: string; title?: string; section?: string; hidden?: boolean }>;
         diagnostics: Array<{ kind: string; severity: string; pages: string[]; message: string }>;
-        pages: Array<{
-          page: string;
-          title: string;
-          audiences: string[];
-          char_count: number;
-          heading_count: number;
-          image_count: number;
-          incoming_count: number;
-          error_count: number;
-          warning_count: number;
-          ai_note_count: number;
-        }>;
+        pages: DashboardPage[];
       };
       statusEl.textContent = `全 ${data.total_pages} ページ / エラー ${data.total_errors}件・警告 ${data.total_warnings}件・横断診断 ${data.diagnostics.length}件`;
 
@@ -158,65 +280,54 @@ export function openAiCollabHubDialog(
         diagEl.append(card);
       }
 
-      pagesEl.replaceChildren();
-      for (const item of data.pages) {
-        const row = document.createElement("div");
-        row.className = "ai-hub-card ai-hub-page-row";
-        const info = document.createElement("div");
-        info.className = "ai-hub-page-info";
-        const title = document.createElement("strong");
-        title.textContent = `${item.title} (${item.page})`;
-        const meta = document.createElement("div");
-        meta.className = "muted";
-        meta.textContent = `文字数: ${item.char_count} / 見出し: ${item.heading_count} / 画像: ${item.image_count} / 被リンク: ${item.incoming_count} / エラー: ${item.error_count} / 警告: ${item.warning_count} / AIメモ: ${item.ai_note_count}`;
-        info.append(title, meta);
-
-        const controls = document.createElement("div");
-        controls.className = "actions ai-hub-audience-controls";
-        const openBtn = document.createElement("button");
-        openBtn.type = "button";
-        openBtn.textContent = "開く";
-        openBtn.onclick = () => {
-          dialog.close();
-          void options.openPage(item.page);
-        };
-        controls.append(openBtn);
-
-        const checks: Array<{ aud: string; input: HTMLInputElement }> = [];
-        for (const aud of ["user", "developer", "maintainer"]) {
-          const lbl = document.createElement("label");
-          lbl.className = "ai-hub-aud-check";
-          const cb = document.createElement("input");
-          cb.type = "checkbox";
-          cb.checked = item.audiences.includes(aud);
-          lbl.append(cb, document.createTextNode(aud));
-          controls.append(lbl);
-          checks.push({ aud, input: cb });
-        }
-        const saveAudBtn = document.createElement("button");
-        saveAudBtn.type = "button";
-        saveAudBtn.textContent = "読者保存";
-        saveAudBtn.onclick = async () => {
-          saveAudBtn.disabled = true;
-          try {
-            const selected = checks.filter((c) => c.input.checked).map((c) => c.aud);
-            await options.rpc("page-audience-save", { page: item.page, audiences: selected }, root);
-            options.reportStatus(`${item.page} の対象読者設定を保存しました。`);
-            await loadDashboard();
-          } catch (error) {
-            statusEl.textContent = `保存失敗: ${String(error)}`;
-          } finally {
-            saveAudBtn.disabled = false;
-          }
-        };
-        controls.append(saveAudBtn);
-        row.append(info, controls);
-        pagesEl.append(row);
+      const savedNav = data.nav || [];
+      navDraftMap = new Map();
+      for (const entry of savedNav) {
+        navDraftMap.set(entry.page, {
+          page: entry.page,
+          title: entry.title || "",
+          section: entry.section || "",
+          hidden: Boolean(entry.hidden),
+        });
       }
+      const rankOf = (page: string) => {
+        const i = savedNav.findIndex((e) => e.page === page || page.endsWith(`/${e.page}`));
+        if (i >= 0) return i;
+        if (page === "index.md" || page.endsWith("/index.md")) return savedNav.length;
+        return savedNav.length + 1;
+      };
+      orderedPages = [...data.pages].sort(
+        (a, b) => rankOf(a.page) - rankOf(b.page) || a.page.localeCompare(b.page),
+      );
+      renderDashboardPages();
     } catch (error) {
       statusEl.textContent = `集計できませんでした: ${String(error)}`;
     }
   }
+
+  dashPanel.querySelector<HTMLButtonElement>("#hub-nav-save-btn")!.onclick = async () => {
+    const statusEl = dashPanel.querySelector<HTMLElement>("#hub-dashboard-status")!;
+    const saveNavBtn = dashPanel.querySelector<HTMLButtonElement>("#hub-nav-save-btn")!;
+    saveNavBtn.disabled = true;
+    try {
+      const nav = orderedPages.map((item) => {
+        const d = navDraftMap.get(item.page) || { page: item.page, title: "", section: "", hidden: false };
+        return {
+          page: item.page,
+          title: d.title.trim(),
+          section: d.section.trim(),
+          hidden: d.hidden,
+        };
+      });
+      await options.rpc("publication-nav-save", { nav }, root);
+      statusEl.textContent = `目次順・公開設定（${nav.length}ページ）を保存しました。HTML出力時に反映されます。`;
+      options.reportStatus("HTML出力の目次順・公開設定を保存しました。");
+    } catch (error) {
+      statusEl.textContent = `目次設定の保存に失敗しました: ${String(error)}`;
+    } finally {
+      saveNavBtn.disabled = false;
+    }
+  };
 
   dashPanel.querySelector<HTMLButtonElement>("#hub-dashboard-refresh")!.onclick = () =>
     void loadDashboard();

@@ -1,4 +1,6 @@
-# 撮影リソース
+# 撮影リソース（現行正本）
+
+> 撮影画像の管理方式は本仕様（`.munin/capture-resources/` と撮影リソース一覧Dock）を現行の正本とする。[resource-library.md](resource-library.md) と [screenshot-library.md](screenshot-library.md) は旧形式およびMarkIts直接連携の互換契約を保持する。
 
 「撮影」はMarkItsの撮影・編集結果を撮影リソース一覧Dockへ登録する。原稿がなくても利用でき、撮影完了だけではMarkdownを変更しない。Dockは「表示」メニューから開閉・配置できる。
 
@@ -30,3 +32,7 @@ Dockの「既存画像を変換」で対象を選び、「登録して変換」�
 CLIでは`manualctl capture-resources-migrate --root PROJECT --json '{"path":"docs/assets/old.png"}'`を利用できる。復元は同じ引数で`capture-resources-restore-migration`を使う。現在画像と復元元が記録と一致する場合だけ元PNGへ戻し、バックアップは残す。画像名から復元元を推測しない。
 
 公開時は文書用PNGとリソースIDだけを出力し、私有領域とMarkItsの操作・編集情報を含めない。既存PNGを公開する場合も元ファイルを書き換えず、公開コピーから私有情報を取り除く。
+
+## 未使用リソースの安全な整理
+
+Dockの「未使用を整理」（RPC: `capture-resources-cleanup-unused`）は、原稿から参照されておらず、かつ保護済み派生画像を持たない撮影リソースだけを対象に、原本と未参照の生成PNGを `.munin/trash/capture-cleanup-<timestamp>/` へ安全に退避する。使用中または保護済みのリソースは対象外とし、完全削除は行わない。退避後はDockの「整理を戻す」（RPC: `capture-resources-restore-trash`）から、既存ファイルを上書きしない安全検証付きで元の場所へ復元できる。

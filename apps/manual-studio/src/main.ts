@@ -66,9 +66,11 @@ import {
   extractAiNotes,
   openAiNotesManagerDialog,
   openExternalChangeTrayDialog,
+  openGlossaryBatchReplaceDialog,
   openInsertAiNoteDialog,
   openSendToTerminalDialog,
   type ExternalChangeEntry,
+  type GlossaryReplacePlanDoc,
 } from './aiCollaboration';
 import { openAiCollabHubDialog, type HubTabId } from './aiCollabHub';
 import { copyTextToClipboard } from './clipboardText';
@@ -1087,9 +1089,10 @@ function openPanelDialog(panelId: string): void {
   if (panelId === 'panel-settings') {
     input('settings-site-name').value = workspace?.config.mkdocs.site_name ?? '';
     input('settings-site-output').value = workspace?.config.output ?? '';
+    input('settings-site-exclude-unused').checked = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
     element('settings-site-result').textContent = '';
     element<HTMLButtonElement>('settings-site-browse').hidden = !native;
-    for (const id of ['settings-site-name','settings-site-output','settings-site-save','settings-site-browse']) {
+    for (const id of ['settings-site-name','settings-site-output','settings-site-exclude-unused','settings-site-save','settings-site-browse']) {
       element<HTMLInputElement | HTMLButtonElement>(id).disabled = !projectRoot;
     }
   }
@@ -1410,6 +1413,55 @@ function renderQualityReport(target: HTMLElement, report: QualityReport, root: s
     filterSelect.add(new Option(label, value));
   }
   filterBar.append(filterSelect);
+  const glossaryCount = report.issues.filter((i) => qualityCategory(i.kind) === 'glossary').length;
+  if (glossaryCount > 0) {
+    const batchReplaceBtn = document.createElement('button');
+    batchReplaceBtn.type = 'button';
+    batchReplaceBtn.id = 'quality-glossary-batch-replace';
+    batchReplaceBtn.textContent = `用語集違反を一括置換 (${glossaryCount})`;
+    batchReplaceBtn.onclick = () => {
+      void work(async () => {
+        if (root !== projectRoot) return;
+        const plan = JSON.parse(await rpc('glossary-replace-plan', {}, root)) as {
+          total_replacements: number;
+          documents: GlossaryReplacePlanDoc[];
+        };
+        if (root !== projectRoot) return;
+        const dirtyPages = new Set<string>();
+        if (documentState && dirty) dirtyPages.add(manuscriptPagePath(documentState.page));
+        for (const [page, tab] of documentTabs) {
+          if (tab.content !== tab.document.content) dirtyPages.add(manuscriptPagePath(page));
+        }
+        const applied = await openGlossaryBatchReplaceDialog({
+          documents: plan.documents,
+          dirtyPages,
+          onApply: async (docs) => {
+            const saved = JSON.parse(
+              await rpc('editor-batch-save', { json: { documents: docs } }, root),
+            ) as { before: Document[]; documents: Document[] };
+            if (root === projectRoot) await manuscriptToolOptions.changed(saved.documents);
+            return saved;
+          },
+          onUndo: async (batch) => {
+            const docs = batch.before.map((before, i) => ({
+              ...before,
+              revision: batch.documents[i].revision,
+            }));
+            const restored = JSON.parse(
+              await rpc('editor-batch-save', { json: { documents: docs } }, root),
+            ) as { before: Document[]; documents: Document[] };
+            if (root === projectRoot) await manuscriptToolOptions.changed(restored.documents);
+          },
+          reportStatus: status,
+        });
+        if (applied && root === projectRoot) {
+          const fresh = JSON.parse(await rpc('quality-check', {}, root)) as QualityReport;
+          if (root === projectRoot) renderQualityReport(target, fresh, root);
+        }
+      });
+    };
+    filterBar.append(batchReplaceBtn);
+  }
   target.append(filterBar);
 
   const list = document.createElement('div');
@@ -1561,7 +1613,7 @@ const markitsImages = setupMarkitsImages({
 const captureDock=setupCaptureResources({root:()=>projectRoot,rpc,
   edited:async path=>{await handleEditDocumentImage(path,element<HTMLImageElement>('image-tab-preview'));},
   changed:async()=>{previewScheduler.invalidate();if(documentState)await Promise.all([renderPreview(),milkdown.refreshImages()]);},
-  usage:usage=>openResourceUsage({...usage,snippet:usage.snippet||'',end:usage.start+(usage.snippet?.length||0)}),status,
+  usage:usage=>openResourceUsage({...usage,snippet:usage.snippet||'',end:usage.start+(usage.snippet?.length||0)}),status,setButtonDisabled,
 });
 setupToolbarCustomization();
 
@@ -3304,6 +3356,7 @@ element('site-export-open').addEventListener('click', () => {
   element<HTMLButtonElement>('browse-site-output').hidden = !native;
   element<HTMLButtonElement>('open-site-html').hidden = !native;
   input('site-output-path').value = workspace?.config.output ?? '';
+  input('site-exclude-unused-assets').checked = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
   element('site-build-result').textContent = '';
   body.append(controls);
   dialog.addEventListener('close', () => element('site-export-host').append(controls), {once: true});
@@ -3330,7 +3383,12 @@ function browseSiteOutput(dialogId: string, fieldId: string, resultId: string): 
 }
 element('browse-site-output').addEventListener('click', () => browseSiteOutput('site-export-dialog', 'site-output-path', 'site-build-result'));
 element('settings-site-browse').addEventListener('click', () => browseSiteOutput('panel-settings', 'settings-site-output', 'settings-site-result'));
-async function saveSiteOutput(fieldId = 'site-output-path', resultId = 'site-build-result', siteName?: string): Promise<string> {
+async function saveSiteOutput(
+  fieldId = 'site-output-path',
+  resultId = 'site-build-result',
+  siteName?: string,
+  excludeUnused?: boolean,
+): Promise<string> {
   const root = projectRoot;
   const path = input(fieldId);
   const value = path.value.trim();
@@ -3338,14 +3396,29 @@ async function saveSiteOutput(fieldId = 'site-output-path', resultId = 'site-bui
   try {
     if (!value) throw new Error('出力先フォルダーを入力してください。');
     if (siteName !== undefined && !siteName) throw new Error('サイト名を入力してください。');
-    if (value === workspace?.config.output && (siteName === undefined || siteName === workspace.config.mkdocs.site_name)) {
+    const currentExclude = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
+    if (
+      value === workspace?.config.output &&
+      (siteName === undefined || siteName === workspace.config.mkdocs.site_name) &&
+      (excludeUnused === undefined || excludeUnused === currentExclude)
+    ) {
       path.value = value;
       return value;
     }
-    const {output} = JSON.parse(await rpc('save-html-output', {output: value, ...(siteName === undefined ? {} : {json:{site_name:siteName}})}, root)) as {output: string};
+    const jsonPayload: Record<string, unknown> = {};
+    if (siteName !== undefined) jsonPayload.site_name = siteName;
+    if (excludeUnused !== undefined) jsonPayload.exclude_unused_assets = excludeUnused;
+    const {output} = JSON.parse(
+      await rpc(
+        'save-html-output',
+        { output: value, ...(Object.keys(jsonPayload).length ? { json: jsonPayload } : {}) },
+        root,
+      ),
+    ) as {output: string};
     if (projectRoot !== root || !workspace) throw new Error('プロジェクトが切り替わりました。');
     workspace.config.output = output;
     if (siteName !== undefined) workspace.config.mkdocs.site_name = siteName;
+    if (excludeUnused !== undefined) workspace.config.mkdocs.exclude_unused_assets = excludeUnused;
     path.value = output;
     return output;
   } catch (error) {
@@ -3360,9 +3433,10 @@ element('settings-site-save').addEventListener('click', () => {
   void work(async () => {
     const name = input('settings-site-name');
     const siteName = name.value.trim();
+    const excludeUnused = input('settings-site-exclude-unused').checked;
     name.disabled = true;
     try {
-      await saveSiteOutput('settings-site-output', 'settings-site-result', siteName);
+      await saveSiteOutput('settings-site-output', 'settings-site-result', siteName, excludeUnused);
       name.value = siteName;
       element('settings-site-result').textContent = '保存しました。';
     } finally {
@@ -3372,15 +3446,21 @@ element('settings-site-save').addEventListener('click', () => {
 });
 element('save-site-output').addEventListener('click', () => {
   void work(async () => {
-    const output = await saveSiteOutput();
+    const output = await saveSiteOutput('site-output-path', 'site-build-result', undefined, input('site-exclude-unused-assets').checked);
     element('site-build-result').textContent = `出力先を保存しました · ${output}`;
   });
 });
 element('build-site').addEventListener('click', () => {
   const root = projectRoot;
-  const action = element<HTMLSelectElement>('site-engine').value === 'build-zensical' ? 'build-zensical' : 'build-mkdocs';
+  const selectedEngine = element<HTMLSelectElement>('site-engine').value;
+  const action =
+    selectedEngine === 'build-zensical'
+      ? 'build-zensical'
+      : selectedEngine === 'build-single-html'
+        ? 'build-single-html'
+        : 'build-mkdocs';
   void work(async () => {
-    const output = await saveSiteOutput();
+    const output = await saveSiteOutput('site-output-path', 'site-build-result', undefined, input('site-exclude-unused-assets').checked);
     await runAction(action, {output}, 'site-build-result');
     if (!native || root !== projectRoot) return;
     const result = element('site-build-result');
