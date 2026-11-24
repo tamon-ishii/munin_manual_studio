@@ -61,7 +61,8 @@ export function setupMilkdownEditor(
   onEditImage?: (source: string, img: HTMLImageElement) => void,
   onImageSettings?: (img: HTMLImageElement) => void,
   onRecaptureImage?: (source: string, img: HTMLImageElement) => void,
-  onAskTerminalImage?: (source: string, img: HTMLImageElement) => void
+  onAskTerminalImage?: (source: string, img: HTMLImageElement) => void,
+  onSaveBase64Image?: (source: string, img: HTMLImageElement) => void
 ) {
   const host = document.createElement('div');
   host.id = 'milkdown-editor';
@@ -123,13 +124,30 @@ export function setupMilkdownEditor(
   editBtn.textContent = '🎨 画像の編集';
   editBtn.title = 'MarkItsで画像に注釈やトリミングを加えて編集します';
   overlay.appendChild(editBtn);
+  let saveImageBtn: HTMLButtonElement | null = null;
+  if (onSaveBase64Image) {
+    saveImageBtn = document.createElement('button');
+    saveImageBtn.type = 'button';
+    saveImageBtn.className = 'milkdown-image-save-btn';
+    saveImageBtn.textContent = '画像に保存する';
+    saveImageBtn.title = 'Base64画像をファイルに保存して原稿の参照を差し替えます';
+    saveImageBtn.hidden = true;
+    saveImageBtn.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (activeImg && activeSource) onSaveBase64Image(activeSource, activeImg);
+    });
+    overlay.append(saveImageBtn);
+  }
+  let recaptureBtn: HTMLButtonElement | null = null;
   if(onRecaptureImage){
-    const recaptureBtn=document.createElement('button');recaptureBtn.type='button';recaptureBtn.className='milkdown-image-recapture-btn';recaptureBtn.textContent='再撮影';recaptureBtn.title='保存済みの撮影手順でこの画像を再撮影します';
+    recaptureBtn=document.createElement('button');recaptureBtn.type='button';recaptureBtn.className='milkdown-image-recapture-btn';recaptureBtn.textContent='再撮影';recaptureBtn.title='保存済みの撮影手順でこの画像を再撮影します';
     recaptureBtn.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(activeImg&&activeSource)onRecaptureImage(activeSource,activeImg);});overlay.append(recaptureBtn);
   }
   const settingsBtn=document.createElement('button');settingsBtn.type='button';settingsBtn.textContent='画像の表示設定';settingsBtn.onclick=()=>{if(activeImg)onImageSettings?.(activeImg);};if(onImageSettings)overlay.append(settingsBtn);
+  let askBtn: HTMLButtonElement | null = null;
   if(onAskTerminalImage){
-    const askBtn=document.createElement('button');askBtn.type='button';askBtn.className='milkdown-image-ask-ai-btn';askBtn.textContent='AIへ相談';askBtn.title='この画像の文脈をAIターミナルへ送ります';
+    askBtn=document.createElement('button');askBtn.type='button';askBtn.className='milkdown-image-ask-ai-btn';askBtn.textContent='AIへ相談';askBtn.title='この画像の文脈をAIターミナルへ送ります';
     askBtn.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(activeImg&&activeSource)onAskTerminalImage(activeSource,activeImg);});overlay.append(askBtn);
   }
   host.appendChild(overlay);
@@ -179,7 +197,7 @@ export function setupMilkdownEditor(
     }
     if(img.dataset.originalSrc)return img.dataset.originalSrc;
     const rawSrc = img.getAttribute('src');
-    if (rawSrc && !rawSrc.startsWith('data:')) {
+    if (rawSrc && (!rawSrc.startsWith('data:') || /^data:image\//i.test(rawSrc))) {
       img.dataset.originalSrc = rawSrc;
       return rawSrc;
     }
@@ -207,11 +225,15 @@ export function setupMilkdownEditor(
   }
 
   function handleImageHover(img: HTMLImageElement) {
-    if ((!onEditImage&&!onImageSettings&&!onRecaptureImage) || readonly) return;
+    if ((!onEditImage&&!onImageSettings&&!onRecaptureImage&&!onSaveBase64Image) || readonly) return;
     cancelHide();
     activeImg = img;
     activeSource = getOriginalSrc(img) || '';
-    if (!activeSource || activeSource.startsWith('data:')) return;
+    const isDataImage = /^data:image\//i.test(activeSource);
+    if (!activeSource || (activeSource.startsWith('data:') && !isDataImage)) return;
+    if (saveImageBtn) saveImageBtn.hidden = !isDataImage;
+    if (recaptureBtn) recaptureBtn.hidden = isDataImage;
+    if (askBtn) askBtn.hidden = isDataImage;
     updateOverlayPosition();
   }
 
@@ -304,9 +326,20 @@ export function setupMilkdownEditor(
     toggle.setAttribute('aria-pressed', 'true');
     source.dispatchEvent(new Event('editor-mode-change'));
   }
+  function showRich() {
+    if (!sourceMode) return;
+    refresh(true);
+    sourceMode = false;
+    delete host.dataset.sourceMode;
+    host.hidden = false;
+    source.hidden = true;
+    toggle.setAttribute('aria-pressed', 'false');
+    instance?.action(ctx => ctx.get(editorViewCtx).focus());
+    source.dispatchEvent(new Event('editor-mode-change'));
+  }
   toggle.addEventListener('click', () => {
     if (!sourceMode) { showSource(); source.focus(); }
-    else { refresh(true); sourceMode = false; delete host.dataset.sourceMode; host.hidden = false; source.hidden = true; toggle.setAttribute('aria-pressed', 'false'); instance?.action(ctx => ctx.get(editorViewCtx).focus()); source.dispatchEvent(new Event('editor-mode-change')); }
+    else { showRich(); }
   });
   source.addEventListener('input', () => { if (!syncing) refresh(); });
   // Notify the existing top bar when source selection changes, without parsing
@@ -391,7 +424,7 @@ export function setupMilkdownEditor(
     if(node.type.name!=='image-block')return;const dom=view.nodeDOM(pos);if(!(dom instanceof HTMLElement))return;
     const image=dom.querySelector('img');if(image)image.alt=String(node.attrs.alt||'');
     const source = String(node.attrs.src || '');
-    dom.toggleAttribute('data-studio-image-actions', Boolean(onImageSettings && source && !source.startsWith('data:')));
+    dom.toggleAttribute('data-studio-image-actions', Boolean(onImageSettings && source && (!source.startsWith('data:') || /^data:image\//i.test(source))));
     const configured=Boolean(node.attrs.presentation);
     const width = configured ? node.attrs.displayWidth as number | null : null;
     dom.dataset.imagePresentation = String(configured);
@@ -537,9 +570,31 @@ export function setupMilkdownEditor(
     // The upload callback already reports the error; an empty result lets the
     // plugin remove the placeholder without inserting an image.
     ctx.update(uploadConfig.key, previous => ({ ...previous, uploader: async (...args) => {
+      const [files, schema] = args;
       const pending = { cancelled: false };
       pendingUploads.push(pending);
-      try { const result = await previous.uploader(...args); return pending.cancelled ? [] : result; }
+      try {
+        if (uploadImage) {
+          const images: File[] = [];
+          for (let i = 0; i < files.length; i++) {
+            const file = files.item(i);
+            if (file && file.type.startsWith('image/')) images.push(file);
+          }
+          if (images.length) {
+            const nodes = [];
+            for (const file of images) {
+              const src = await uploadImage(file);
+              if (pending.cancelled) return [];
+              const alt = (file.name || '').replace(/\.[^.]+$/, '');
+              const node = schema.nodes.image?.createAndFill({ src, alt });
+              if (node) nodes.push(node);
+            }
+            return pending.cancelled ? [] : nodes;
+          }
+        }
+        const result = await previous.uploader(...args);
+        return pending.cancelled ? [] : result;
+      }
       catch { return []; }
       finally { pendingUploads.splice(pendingUploads.indexOf(pending), 1); }
     } }));
@@ -716,7 +771,31 @@ export function setupMilkdownEditor(
       view.dispatch(tr.scrollIntoView());return true;
     });
   }
-  return { showSource, refresh, refreshImages, host, stepHistory,imageSourceRange,runShortcut,
+  return { showSource, showRich, refresh, refreshImages, host, stepHistory,imageSourceRange,runShortcut,
+    findInRich: (query: string, matchIndex: number): { total: number; current: number } => {
+      if (!ready || !instance || sourceMode || !query) return { total: 0, current: 0 };
+      const needle = query.toLocaleLowerCase();
+      return instance.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        const hits: Array<{ from: number; to: number }> = [];
+        view.state.doc.descendants((node, pos) => {
+          if (!node.isText || !node.text) return;
+          const lower = node.text.toLocaleLowerCase();
+          let offset = 0;
+          while (true) {
+            const found = lower.indexOf(needle, offset);
+            if (found < 0) break;
+            hits.push({ from: pos + found, to: pos + found + needle.length });
+            offset = found + Math.max(1, needle.length);
+          }
+        });
+        if (!hits.length) return { total: 0, current: 0 };
+        const clamped = ((matchIndex % hits.length) + hits.length) % hits.length;
+        const target = hits[clamped];
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, target.from, target.to)).scrollIntoView());
+        return { total: hits.length, current: clamped + 1 };
+      });
+    },
     get scrollElement(): HTMLElement { return host.querySelector<HTMLElement>('.ProseMirror') || host; },
     selectedImageSourceRange:()=>{if(!ready||!instance||sourceMode)return;let image:HTMLImageElement|undefined;instance.action(ctx=>{const view=ctx.get(editorViewCtx);const dom=view.nodeDOM(view.state.selection.from);image=dom instanceof HTMLImageElement?dom:dom instanceof HTMLElement?dom.querySelector<HTMLImageElement>('img')||undefined:undefined;});return image?imageSourceRange(image):undefined;},
     replaceMarkdownDocument:(markdown:string,expected:string)=>{if(sourceValue()!==expected)throw new Error('原稿が変更されました。画像を選び直してください。');if(!ready||!instance||sourceMode)return false;instance.action(ctx=>{const view=ctx.get(editorViewCtx);view.dispatch(closeHistory(view.state.tr));replaceAll(markdown,false)(ctx);view.dispatch(closeHistory(view.state.tr));});return true;},

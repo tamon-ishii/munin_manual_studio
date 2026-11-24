@@ -91,9 +91,11 @@ export async function hostNativeDialog(dialog:HTMLDialogElement):Promise<void>{
   const wide=dialog.querySelector('table,.selection-diff-columns,.generation-diff,.image-comparison-grid,.settings-grid');
   const compact=isCompactDialog(dialog);
   const imagePresentation=dialog.hasAttribute('data-image-presentation');
-  const width=imagePresentation?520:compact?480:columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*300+48:wide?1040:dialog.querySelector('textarea,pre,dl')||dialog.querySelectorAll('input,select').length>4?760:560;
+  const initialWidth=Number(dialog.dataset.dialogInitialWidth);
+  const initialHeight=Number(dialog.dataset.dialogInitialHeight);
+  const width=initialWidth>0?initialWidth:imagePresentation?520:compact?480:columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*300+48:wide?1040:dialog.querySelector('textarea,pre,dl')||dialog.querySelectorAll('input,select').length>4?760:560;
   // scrollHeight already includes the dialog's padding; do not add empty space.
-  const height=imagePresentation?Math.max(560,Math.min(640,dialog.scrollHeight+32)):compact?Math.max(120,Math.min(420,Math.ceil(dialog.scrollHeight))):Math.max(320,Math.min(900,dialog.scrollHeight+80));
+  const height=initialHeight>0?initialHeight:imagePresentation?Math.max(560,Math.min(640,dialog.scrollHeight+32)):compact?Math.max(120,Math.min(420,Math.ceil(dialog.scrollHeight))):Math.max(320,Math.min(900,dialog.scrollHeight+80));
   try{
     const {invoke}=await import('@tauri-apps/api/core');
     await invoke('open_dialog_window',{session,title,width,height});

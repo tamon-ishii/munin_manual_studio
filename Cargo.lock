@@ -3486,7 +3486,7 @@ dependencies = [
 
 [[package]]
 name = "manual-studio"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "arboard",
  "base64 0.22.1",

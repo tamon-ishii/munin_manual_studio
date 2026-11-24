@@ -93,7 +93,32 @@ pub fn usages(root: &Path) -> Result<BTreeMap<String, Vec<Value>>, String> {
     index.save();
     Ok(result)
 }
+fn is_in_output_dir(config: &crate::config::ManualConfig, rel_path: &str) -> bool {
+    let normalize = |value: &str| {
+        value
+            .trim()
+            .replace('\\', "/")
+            .trim_matches('/')
+            .to_string()
+    };
+    let output = normalize(&config.output);
+    if output.is_empty() || output == "." {
+        return false;
+    }
+    let docs = normalize(&config.docs);
+    let assets = normalize(&config.assets);
+    if output == docs
+        || output == assets
+        || docs.starts_with(&format!("{output}/"))
+        || assets.starts_with(&format!("{output}/"))
+    {
+        return false;
+    }
+    rel_path == output || rel_path.starts_with(&format!("{output}/"))
+}
+
 pub fn list(root: &Path) -> Result<Value, String> {
+    let config = crate::config::read_config(root);
     let usage = usages(root)?;
     let shots = screenshots::list(root)?;
     let generated = image_generation::history(root)?;
@@ -112,6 +137,9 @@ pub fn list(root: &Path) -> Result<Value, String> {
     for file in &index.files {
         if image_extension(file) {
             let path = file.strip_prefix(root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
+            if is_in_output_dir(&config, &path) {
+                continue;
+            }
             records.entry(path.clone()).or_insert_with(||json!({"path":path,"name":file.file_name().unwrap_or_default().to_string_lossy(),"kind":"imported"}));
         }
     }
@@ -138,6 +166,115 @@ pub fn list(root: &Path) -> Result<Value, String> {
         items.push(item);
     }
     Ok(json!({"items":items,"screenshots":shots}))
+}
+
+pub fn delete_unused(root: &Path, options: &Value) -> Result<Value, String> {
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let _move_lock = crate::workflow::resource_lock(&root, ".munin/file-move")?;
+    let _resource_lock = crate::workflow::resource_lock(&root, ".munin/resources")?;
+    let config = crate::config::read_config(&root);
+    let usage = usages(&root)?;
+    let listed = list(&root)?;
+    let existing_assets: BTreeSet<String> = listed["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["missing"].as_bool() != Some(true))
+        .filter_map(|item| item["path"].as_str().map(str::to_string))
+        .collect();
+
+    let targets: Vec<String> = if let Some(requested) = options.get("paths").and_then(Value::as_array) {
+        let mut set = BTreeSet::new();
+        for entry in requested {
+            let raw = entry
+                .as_str()
+                .ok_or("削除対象のパスは文字列で指定してください。")?
+                .replace('\\', "/");
+            if raw.is_empty()
+                || raw.split('/').any(|p| matches!(p, ".git" | ".munin" | "node_modules" | "target" | "dist"))
+                || is_in_output_dir(&config, &raw)
+            {
+                return Err(format!("プロジェクト内の画像アセットを指定してください: {raw}"));
+            }
+            let resolved = project_path(&root, &raw)?;
+            if !image_extension(&resolved) {
+                return Err(format!("画像ファイルのみ削除できます: {raw}"));
+            }
+            set.insert(raw);
+        }
+        set.into_iter().collect()
+    } else {
+        existing_assets
+            .iter()
+            .filter(|path| usage.get(*path).map_or(true, Vec::is_empty))
+            .cloned()
+            .collect()
+    };
+
+    let mut deleted: Vec<String> = Vec::new();
+    let mut skipped: Vec<Value> = Vec::new();
+    let mut freed_bytes: u64 = 0;
+    let mut backup_rel: Option<String> = None;
+    let mut manifest_entries: Vec<Value> = Vec::new();
+
+    for rel in targets {
+        if let Some(refs) = usage.get(&rel).filter(|refs| !refs.is_empty()) {
+            skipped.push(json!({
+                "path": rel,
+                "reason": format!("原稿（{}箇所）から参照されているためスキップしました。", refs.len())
+            }));
+            continue;
+        }
+        let abs = match project_path(&root, &rel) {
+            Ok(path) if path.is_file() && image_extension(&path) => path,
+            _ => {
+                skipped.push(json!({"path": rel, "reason": "ファイルが見つかりません。"}));
+                continue;
+            }
+        };
+        let bytes = fs::read(&abs).map_err(|e| e.to_string())?;
+        let batch_rel = match &backup_rel {
+            Some(existing) => existing.clone(),
+            None => {
+                let rel_dir = format!(".munin/file-deletions/{}", screenshots::new_id("assets"));
+                let abs_dir = project_path(&root, &rel_dir)?;
+                fs::create_dir_all(&abs_dir).map_err(|e| e.to_string())?;
+                backup_rel = Some(rel_dir.clone());
+                rel_dir
+            }
+        };
+        let backup_file = format!("{}.bin", manifest_entries.len());
+        let backup_dir = project_path(&root, &batch_rel)?;
+        fs::write(backup_dir.join(&backup_file), &bytes).map_err(|e| e.to_string())?;
+        fs::remove_file(&abs).map_err(|e| e.to_string())?;
+        freed_bytes += bytes.len() as u64;
+        manifest_entries.push(json!({
+            "path": rel,
+            "backup": backup_file,
+            "bytes": bytes.len(),
+        }));
+        deleted.push(rel);
+    }
+
+    if let Some(ref batch_rel) = backup_rel {
+        let backup_dir = project_path(&root, batch_rel)?;
+        fs::write(
+            backup_dir.join("manifest.json"),
+            serde_json::to_vec_pretty(&json!({
+                "created_at": task::utc_now(),
+                "deleted": manifest_entries,
+            }))
+            .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(json!({
+        "deleted": deleted,
+        "skipped": skipped,
+        "freed_bytes": freed_bytes,
+        "backup": backup_rel,
+    }))
 }
 pub(crate) fn thumbnail_from_bytes(root: &Path, path: &str, bytes: &[u8]) -> Result<String, String> {
     let hash = format!("{:x}", Sha256::digest(bytes));
@@ -474,5 +611,64 @@ mod tests {
         )
         .unwrap_err()
         .contains("編集版を採用"));
+    }
+
+    #[test]
+    fn delete_unused_removes_only_unreferenced_assets_with_backup_and_skips_output_dir() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs/assets")).unwrap();
+        fs::create_dir_all(root.path().join("manual/assets")).unwrap();
+        fs::write(
+            root.path().join("manual_setting.json"),
+            r#"{"docs":"docs","output":"manual","assets":"docs/assets","targets":["docs"]}"#,
+        )
+        .unwrap();
+        let used_bytes = png(1);
+        let unused_a = png(2);
+        let unused_b = png(3);
+        fs::write(root.path().join("docs/assets/used.png"), &used_bytes).unwrap();
+        fs::write(root.path().join("docs/assets/unused-a.png"), &unused_a).unwrap();
+        fs::write(root.path().join("docs/assets/unused-b.png"), &unused_b).unwrap();
+        fs::write(root.path().join("manual/assets/published.png"), png(4)).unwrap();
+        fs::write(root.path().join("docs/index.md"), "# Guide\n\n![Used](assets/used.png)\n").unwrap();
+
+        let listed = list(root.path()).unwrap();
+        let paths: Vec<_> = listed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["path"].as_str().unwrap())
+            .collect();
+        assert!(!paths.contains(&"manual/assets/published.png"));
+        assert!(paths.contains(&"docs/assets/used.png"));
+        assert!(paths.contains(&"docs/assets/unused-a.png"));
+        assert!(paths.contains(&"docs/assets/unused-b.png"));
+
+        // Explicit request for a referenced asset skips it safely without deleting.
+        let skipped = delete_unused(root.path(), &json!({"paths": ["docs/assets/used.png"]})).unwrap();
+        assert_eq!(skipped["deleted"], json!([]));
+        assert_eq!(skipped["skipped"].as_array().unwrap().len(), 1);
+        assert!(root.path().join("docs/assets/used.png").is_file());
+
+        // Rejects path traversal and non-image files.
+        assert!(delete_unused(root.path(), &json!({"paths": ["../escape.png"]})).is_err());
+        assert!(delete_unused(root.path(), &json!({"paths": ["docs/index.md"]})).is_err());
+
+        // Single unused asset delete backs up and removes only that file.
+        let single = delete_unused(root.path(), &json!({"paths": ["docs/assets/unused-a.png"]})).unwrap();
+        assert_eq!(single["deleted"], json!(["docs/assets/unused-a.png"]));
+        assert!(!root.path().join("docs/assets/unused-a.png").exists());
+        assert!(root.path().join("docs/assets/unused-b.png").is_file());
+        let backup_dir = root.path().join(single["backup"].as_str().unwrap());
+        assert_eq!(fs::read(backup_dir.join("0.bin")).unwrap(), unused_a);
+
+        // Bulk delete removes remaining unused assets while keeping used and output files.
+        let bulk = delete_unused(root.path(), &json!({})).unwrap();
+        assert_eq!(bulk["deleted"], json!(["docs/assets/unused-b.png"]));
+        assert!(!root.path().join("docs/assets/unused-b.png").exists());
+        assert!(root.path().join("docs/assets/used.png").is_file());
+        assert!(root.path().join("manual/assets/published.png").is_file());
+        let bulk_backup = root.path().join(bulk["backup"].as_str().unwrap());
+        assert_eq!(fs::read(bulk_backup.join("0.bin")).unwrap(), unused_b);
     }
 }

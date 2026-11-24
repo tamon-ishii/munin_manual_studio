@@ -28,7 +28,7 @@ const paths = {
   redo: '<path d="m16 4 5 5-5 5M21 9H10a6 6 0 0 0 0 12"/>',
   back: '<path d="m14 5-7 7 7 7"/>',
   forward: '<path d="m10 5 7 7-7 7"/>',
-  refresh: '<path d="M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 2M4 17l2 2a8 8 0 0 0 13-3"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
   save: '<path d="M5 3h12l4 4v14H3V3h2ZM7 3v6h10V3M7 21v-8h10v8"/>',
   settings: '<path d="M4 7h16M4 17h16M8 4v6M16 14v6"/>',
   check: '<path d="m5 12 4 4L19 6"/>',

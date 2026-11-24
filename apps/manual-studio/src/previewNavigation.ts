@@ -149,6 +149,10 @@ export function createPreviewNavigator(options: {
       const doc = iframe.contentDocument;
       if (!doc) return;
       // pulldown-cmark emits headings without IDs. Assign stable fragment targets.
+      doc.querySelectorAll<HTMLElement>('h1[data-auto-heading-id],h2[data-auto-heading-id],h3[data-auto-heading-id],h4[data-auto-heading-id],h5[data-auto-heading-id],h6[data-auto-heading-id]').forEach(heading => {
+        heading.removeAttribute('id');
+        heading.removeAttribute('data-auto-heading-id');
+      });
       const usedIds = new Set(Array.from(doc.querySelectorAll('[id]'), node => node.id));
       doc.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(heading => {
         if (heading.id) return;
@@ -156,7 +160,7 @@ export function createPreviewNavigator(options: {
           .replace(/[^\p{L}\p{N}_\s-]/gu, '').replace(/\s/g, '-') || 'section';
         let id = base, suffix = 1;
         while (usedIds.has(id)) id = `${base}-${suffix++}`;
-        usedIds.add(id); heading.id = id;
+        usedIds.add(id); heading.id = id; heading.dataset.autoHeadingId = 'true';
       });
 
       function scrollToFragment(href: string): void {
@@ -209,8 +213,8 @@ export function createPreviewNavigator(options: {
                 const element = nextDoc?.getElementById(id) || nextDoc?.getElementsByName(id)[0];
                 element?.scrollIntoView({behavior:'instant', block:'start'});
               };
-              if (iframe.contentDocument !== doc && iframe.contentDocument?.readyState === 'complete') scroll();
-              else iframe.addEventListener('load', () => requestAnimationFrame(scroll), {once:true});
+              if (iframe.dataset.previewPendingLoad === 'true') iframe.addEventListener('load', () => requestAnimationFrame(scroll), {once:true});
+              else scroll();
             });
             return;
           }

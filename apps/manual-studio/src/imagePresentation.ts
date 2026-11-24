@@ -16,7 +16,7 @@ export function documentImages(source:string):DocumentImage[] {
   const ignored:Array<[number,number]>=[];let fence:{start:number;char:string;length:number}|undefined;let offset=0;
   for(const line of source.split(/(?<=\n)/)){const match=/^ {0,3}(`{3,}|~{3,})/.exec(line);if(match){if(!fence)fence={start:offset,char:match[1][0],length:match[1].length};else if(match[1][0]===fence.char&&match[1].length>=fence.length){ignored.push([fence.start,offset+line.length]);fence=undefined;}}offset+=line.length;}
   if(fence)ignored.push([fence.start,source.length]);
-  const pattern=/<figure\b[^>]*data-munin-image[^>]*>[\s\S]*?<\/figure>|!\[((?:\\.|[^\]\\])*)\]\(\s*(?:<([^>]+)>|((?:\\.|[^\s()]|\([^()]*\))+))(?:\s+"((?:\\.|[^"\\])*)")?\s*\)|<img\b[^>]*>/gi;
+  const pattern=/<figure\b[^>]*data-munin-image[^>]*>[\s\S]*?<\/figure>|!\[((?:\\.|[^\]\\])*)\]\(\s*(?:<([^>]+)>|((?:[^\s()\\]+|\\.|(?:\([^()]*\)))+))(?:\s+"((?:\\.|[^"\\])*)")?\s*\)|<img\b[^>]*>/gi;
   const images:DocumentImage[]=[];
   for(const match of source.matchAll(pattern)){
     const start=match.index!;if(ignored.some(([a,b])=>start>=a&&start<b))continue;

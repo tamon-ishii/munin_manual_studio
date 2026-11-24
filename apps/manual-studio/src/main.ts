@@ -15,15 +15,14 @@ import {OperationTiming} from './operationTimings';
 import {showWorkspacePaths,showOperationTimings} from './workspaceSettings';
 import {applyReviewCorrections} from './reviewCorrections';
 import {showReaderReport,type ReaderReport} from './readerReview';
-import {reviewDraft,type DraftCandidate} from './draftReview';
-import {askTemplateDestination} from './templateCreation';
 import {configureTargetApplication,type TargetApplication} from './targetApplication';
 import {setupPathPickers,addPathBrowse} from './pathPicker';
 import {setupFileTabMenu,type FileTab} from './fileTabMenu';
 import { AiProgressManager } from './aiProgressManager';
-import {imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
+import {documentImages,imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
 import type {ResourceUsage} from './types';
 import { setupToolbarCustomization } from './toolbarCustomization';
+import { openAssetOrganizerDialog } from './assetOrganizer';
 import { chooseDestination,featureDialog } from './imageDialogs';
 import { setupMarkitsImages, cursorCapturePreference } from "./markitsImages";
 import {setupCaptureResources} from './captureResources';
@@ -44,7 +43,7 @@ import { setupWindowLayout, type WindowLayoutManager } from "./windowLayout";
 import { createPreviewNavigator } from "./previewNavigation";
 import { sendManualRequest } from "./manualTransport";
 import { renderFileTree } from "./fileTree";
-import { setupPreviewImageSizing, setupPreviewTheme } from "./themePreview";
+import { injectPreviewTheme, setupPreviewImageSizing, setupPreviewTheme } from "./themePreview";
 import { alertIconStyles } from "./alertIcons";
 import { setupMarkdownTableEditor } from "./markdownTable";
 import { jumpToSource } from "./editorNavigation";
@@ -99,7 +98,7 @@ const milkdown = setupMilkdownEditor(editor, message => status(message, true), s
     status(`画像を挿入できませんでした。${String(error)} 画像を選び直して再試行できます。`, true);
     throw error;
   }
-}, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img),source=>{void recaptureDocumentImage(source);},(source)=>{void openImageSendToTerminal(source);});
+}, undefined, (source, img) => { void handleEditDocumentImage(source, img); },img=>showImagePresentation(img),source=>{void recaptureDocumentImage(source);},(source)=>{void openImageSendToTerminal(source);},(source,img)=>{handleSaveBase64DocumentImage(source,img);});
 setupPreviewTheme(element<HTMLIFrameElement>("markdown-preview"));
 setupPreviewImageSizing(element<HTMLIFrameElement>("markdown-preview"), milkdown.host);
 const native = "__TAURI_INTERNALS__" in window;
@@ -349,9 +348,42 @@ function stepEditHistory(direction: -1 | 1): void {
 function escape(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
 }
+const statusHistory: Array<{ time: string; message: string; error: boolean }> = [];
+function showStudioToast(message: string, error = false): void {
+  const stack = document.getElementById('studio-toast-stack');
+  if (!stack) return;
+  const toast = document.createElement('div');
+  toast.className = `studio-toast${error ? ' is-error' : ''}`;
+  toast.role = error ? 'alert' : 'status';
+  const text = document.createElement('span');
+  text.className = 'studio-toast-message';
+  text.textContent = message;
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'studio-toast-close';
+  close.textContent = '×';
+  close.setAttribute('aria-label', '通知を閉じる');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const dismiss = () => {
+    if (timer) clearTimeout(timer);
+    toast.remove();
+  };
+  close.onclick = dismiss;
+  toast.append(text, close);
+  stack.append(toast);
+  while (stack.children.length > 4) stack.firstElementChild?.remove();
+  timer = setTimeout(dismiss, error ? 8000 : 4000);
+}
 function status(message: string, error = false): void {
-  element("status").textContent = message;
-  element("status").classList.toggle("error", error);
+  const statusEl = element("status");
+  statusEl.textContent = message;
+  statusEl.classList.toggle("error", error);
+  const time = new Date().toLocaleTimeString("ja-JP", { hour12: false });
+  statusHistory.unshift({ time, message, error });
+  if (statusHistory.length > 50) statusHistory.length = 50;
+  if (error || /外部で更新|競合|失敗|保存しました|差し替えました|撮影リソース/.test(message)) {
+    showStudioToast(message, error);
+  }
   const advice = error ? aiErrorAdvice(message) : null;
   const panel = document.getElementById("ai-error-advice");
   if (advice && panel) {
@@ -359,6 +391,31 @@ function status(message: string, error = false): void {
     element("operation-progress").hidden = false;
   }
 }
+element("status").addEventListener("click", () => {
+  if (document.getElementById("status-history-dialog")) return;
+  const { dialog, body } = featureDialog("お知らせ履歴");
+  dialog.id = "status-history-dialog";
+  if (!statusHistory.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "まだお知らせはありません。";
+    body.append(empty);
+    return;
+  }
+  const list = document.createElement("ul");
+  list.className = "status-history-list";
+  for (const entry of statusHistory) {
+    const item = document.createElement("li");
+    item.className = entry.error ? "status-history-item is-error" : "status-history-item";
+    const timeEl = document.createElement("time");
+    timeEl.textContent = entry.time;
+    const msgEl = document.createElement("span");
+    msgEl.textContent = entry.message;
+    item.append(timeEl, msgEl);
+    list.append(item);
+  }
+  body.append(list);
+});
 function renderProgressLog(): void {
   const log = element<HTMLElement>("progress-log");
   const followTail = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
@@ -761,7 +818,7 @@ function openCurrentAiNotes(): void {
         preferredEditorView = 'edit';
         applyEditorView();
       }
-      milkdown.showSource();
+      switchToSourceWithReturnBanner();
       jumpToSource(editor, note.start, note.end);
       updateCursor();
     },
@@ -1023,20 +1080,41 @@ element('terminal-choose-directory').addEventListener('click',()=>{
 });
 element('terminal-project-directory').addEventListener('click',()=>{input('terminal-working-directory').value=projectRoot;});
 
+const BUSY_LOCK_SELECTOR = "button:not(.progress-control):not(#status):not(.studio-toast-close):not(.document-tabs-scroll)";
+let busyMutationObserver: MutationObserver | null = null;
+function lockButtonWhileBusy(button: HTMLButtonElement): void {
+  if (!busyButtonStates || !button.matches(BUSY_LOCK_SELECTOR)) return;
+  if (button.closest('#document-tabs, #page-list, dialog')) return;
+  if (!busyButtonStates.has(button)) busyButtonStates.set(button, button.disabled);
+  button.disabled = true;
+}
 function setBusy(value: boolean, lockControls = true): void {
   busy = value;
   document.body.setAttribute("aria-busy", String(value));
   if (!lockControls) return;
   if (value && !busyButtonStates) {
-    busyButtonStates = new Map([...document.querySelectorAll<HTMLButtonElement>("button:not(.progress-control)")]
+    busyButtonStates = new Map([...document.querySelectorAll<HTMLButtonElement>(BUSY_LOCK_SELECTOR)]
       .map((button) => [button, button.disabled]));
+    busyMutationObserver = new MutationObserver((records) => {
+      if (!busyButtonStates) return;
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof HTMLElement)) continue;
+          if (node instanceof HTMLButtonElement) lockButtonWhileBusy(node);
+          node.querySelectorAll<HTMLButtonElement>(BUSY_LOCK_SELECTOR).forEach(lockButtonWhileBusy);
+        }
+      }
+    });
+    busyMutationObserver.observe(document.body, { childList: true, subtree: true });
   }
   if (value) {
-    for (const button of document.querySelectorAll<HTMLButtonElement>("button:not(.progress-control)")) {
+    for (const button of document.querySelectorAll<HTMLButtonElement>(BUSY_LOCK_SELECTOR)) {
       if (!busyButtonStates!.has(button)) busyButtonStates!.set(button, button.disabled);
       button.disabled = true;
     }
   } else if (busyButtonStates) {
+    busyMutationObserver?.disconnect();
+    busyMutationObserver = null;
     for (const [button, wasDisabled] of busyButtonStates) button.disabled = wasDisabled;
     busyButtonStates = null;
   }
@@ -1058,11 +1136,25 @@ async function savedBeforeOperation(allowUnsaved=false): Promise<void> {
   await documentPersistence.wait();
   if (dirty&&!allowUnsaved) throw new Error('原稿に未保存の変更があります。保存ボタンまたはCtrl/Cmd+Sで保存してください。');
 }
+let pendingNavigation: { root: string; run: () => Promise<void> } | null = null;
+function scheduleNavigation(run: () => Promise<void>): void {
+  if (!busy) { void work(run); return; }
+  if (!projectRoot) return;
+  pendingNavigation = { root: projectRoot, run };
+}
 async function work(operation: () => Promise<void>, { lockControls = true } = {}): Promise<void> {
   if (busy) return;
   setBusy(true, lockControls);
   try { await operation(); } catch (error) { status(String(error), true); }
-  finally { setBusy(false, lockControls); previewNavigator.updateToolbarState(); }
+  finally {
+    setBusy(false, lockControls);
+    previewNavigator.updateToolbarState();
+    const next = pendingNavigation;
+    pendingNavigation = null;
+    if (next && next.root === projectRoot && !document.querySelector('dialog:modal')) {
+      void work(next.run);
+    }
+  }
 }
 async function confirmDiscard(): Promise<boolean> {
   return !dirty || showUnsavedChangesDialog(documentState?.page || "原稿", async () => {
@@ -1163,6 +1255,7 @@ function retainDocumentTab(): void {
   documentTabs.set(documentState.page, { document: documentState, content: editor.value, start: editor.selectionStart, end: editor.selectionEnd, scroll: editor.scrollTop, richScroll: milkdown.scrollElement.scrollTop, history: editHistory, richState: milkdown.captureState() });
 }
 let documentTabsSignature = '';
+let documentTabsOrderSignature = '';
 async function closeFileTabs(targets:FileTab[]):Promise<void>{
   await documentPersistence.wait();retainDocumentTab();
   const originalDocument=documentState?.page,originalImage=activeImageTab,root=projectRoot;
@@ -1183,42 +1276,154 @@ async function closeFileTabs(targets:FileTab[]):Promise<void>{
   if(documentState&&!documentTabs.has(documentState.page)){documentState=null;documentPersistence.state=null;dirty=false;}
   const nextDocument=originalDocument&&documentTabs.has(originalDocument)?originalDocument:[...documentTabs.keys()].at(-1);
   if(nextDocument)await openPage(nextDocument);
-  else if(!documentState){editor.value='';resetEditHistory();element<HTMLIFrameElement>('markdown-preview').srcdoc='';element('editor-title').textContent='Markdownを編集する';}
+  else if(!documentState){editor.value='';resetEditHistory();resetPreviewFrame();element('editor-title').textContent='Markdownを編集する';}
   const nextImage=originalImage&&imageTabs.has(originalImage)?originalImage:!nextDocument?[...imageTabs].at(-1):undefined;
   if(nextImage)await openImageTab(nextImage);else showDocumentView();
   updateSaveState();renderPages();renderDocumentTabs();
 }
 setupFileTabMenu({tabs:()=>[...[...documentTabs.keys()].map(path=>({kind:'document' as const,path})),...[...imageTabs].map(path=>({kind:'image' as const,path}))],busy:()=>busy,close:targets=>work(()=>closeFileTabs(targets)),report:error=>status(String(error),true)});
+function reorderDocumentTab(sourcePage: string, targetPage: string): void {
+  if (!sourcePage || !targetPage || sourcePage === targetPage) return;
+  const entries = [...documentTabs.entries()];
+  const from = entries.findIndex(([p]) => p === sourcePage);
+  const to = entries.findIndex(([p]) => p === targetPage);
+  if (from < 0 || to < 0) return;
+  const [moved] = entries.splice(from, 1);
+  entries.splice(to, 0, moved);
+  documentTabs.clear();
+  for (const [page, tab] of entries) documentTabs.set(page, tab);
+  documentTabsSignature = '';
+  documentTabsOrderSignature = '';
+  renderDocumentTabs();
+}
+function updateDocumentTabsScrollButtons(): void {
+  const strip = element('document-tabs');
+  const leftBtn = element<HTMLButtonElement>('document-tabs-scroll-left');
+  const rightBtn = element<HTMLButtonElement>('document-tabs-scroll-right');
+  if (strip.hidden) { leftBtn.hidden = true; rightBtn.hidden = true; return; }
+  const overflow = strip.scrollWidth > strip.clientWidth + 2;
+  leftBtn.hidden = !overflow;
+  rightBtn.hidden = !overflow;
+  if (overflow) {
+    leftBtn.disabled = strip.scrollLeft <= 1;
+    rightBtn.disabled = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1;
+  }
+}
+{
+  const strip = element('document-tabs');
+  strip.addEventListener('wheel', event => {
+    if (strip.scrollWidth <= strip.clientWidth) return;
+    if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+      event.preventDefault();
+      strip.scrollLeft += event.deltaY;
+      updateDocumentTabsScrollButtons();
+    }
+  }, { passive: false });
+  strip.addEventListener('scroll', updateDocumentTabsScrollButtons, { passive: true });
+  strip.addEventListener('mousedown', event => {
+    if (event.button === 1 && (event.target as HTMLElement).closest('.document-tab')) event.preventDefault();
+  });
+  strip.addEventListener('auxclick', event => {
+    if (event.button !== 1) return;
+    const tab = (event.target as HTMLElement).closest('.document-tab')?.querySelector<HTMLElement>('[role=tab]');
+    if (!tab) return;
+    event.preventDefault();
+    if (tab.dataset.documentPage !== undefined) {
+      scheduleNavigation(() => closeFileTabs([{ kind: 'document', path: tab.dataset.documentPage! }]));
+    } else if (tab.dataset.imagePage !== undefined) {
+      scheduleNavigation(() => closeFileTabs([{ kind: 'image', path: tab.dataset.imagePage! }]));
+    }
+  });
+  element('document-tabs-scroll-left').addEventListener('click', () => {
+    strip.scrollBy({ left: -180, behavior: 'smooth' });
+  });
+  element('document-tabs-scroll-right').addEventListener('click', () => {
+    strip.scrollBy({ left: 180, behavior: 'smooth' });
+  });
+  new ResizeObserver(updateDocumentTabsScrollButtons).observe(strip);
+}
 function renderDocumentTabs(): void {
   const signature = JSON.stringify([projectRoot, activeImageTab, documentState?.page,
     [...documentTabs].map(([page, tab]) => [page, documentState?.page === page ? dirty : tab.content !== tab.document.content]),
     [...imageTabs]]);
-  if (signature === documentTabsSignature) { updateEditorEmptyState(); return; }
+  if (signature === documentTabsSignature) { updateEditorEmptyState(); updateDocumentTabsScrollButtons(); return; }
   documentTabsSignature = signature;
-  const strip = element('document-tabs'); strip.replaceChildren();
+  const orderSignature = JSON.stringify([projectRoot, [...documentTabs.keys()], [...imageTabs]]);
+  const strip = element('document-tabs');
+  if (orderSignature === documentTabsOrderSignature) {
+    for (const [page, tab] of documentTabs) {
+      const active = !activeImageTab && documentState?.page === page;
+      const changed = active ? dirty : tab.content !== tab.document.content;
+      const button = strip.querySelector<HTMLButtonElement>(`[role=tab][data-document-page="${CSS.escape(page)}"]`);
+      if (button) {
+        button.setAttribute('aria-selected', String(active));
+        button.textContent = `${page.split('/').at(-1)}${changed ? ' *' : ''}`;
+        button.setAttribute('aria-label', `${page}${changed ? '（未保存の変更）' : ''}`);
+      }
+    }
+    for (const path of imageTabs) {
+      const button = strip.querySelector<HTMLButtonElement>(`[role=tab][data-image-page="${CSS.escape(path)}"]`);
+      if (button) button.setAttribute('aria-selected', String(activeImageTab === path));
+    }
+    strip.hidden = !documentTabs.size && !imageTabs.size;
+    element('editor-title').hidden = !strip.hidden;
+    saveDocumentTabSession();
+    updateEditorEmptyState();
+    updateDocumentTabsScrollButtons();
+    return;
+  }
+  documentTabsOrderSignature = orderSignature;
+  strip.replaceChildren();
   for (const [page, tab] of documentTabs) {
     const active = !activeImageTab && documentState?.page === page;
     const changed = active ? dirty : tab.content !== tab.document.content;
-    const group = document.createElement('div'); group.className = 'document-tab';
-    const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.setAttribute('aria-selected', String(active)); button.title = page;
+    const group = document.createElement('div'); group.className = 'document-tab'; group.draggable = true;
+    group.addEventListener('dragstart', event => {
+      if (!event.dataTransfer) return;
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('application/x-munin-tab', page);
+      group.classList.add('is-dragging');
+    });
+    group.addEventListener('dragend', () => {
+      group.classList.remove('is-dragging');
+      strip.querySelectorAll('.document-tab.is-drop-target').forEach(el => el.classList.remove('is-drop-target'));
+    });
+    group.addEventListener('dragover', event => {
+      if (!event.dataTransfer?.types.includes('application/x-munin-tab')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      group.classList.add('is-drop-target');
+    });
+    group.addEventListener('dragleave', () => group.classList.remove('is-drop-target'));
+    group.addEventListener('drop', event => {
+      group.classList.remove('is-drop-target');
+      const source = event.dataTransfer?.getData('application/x-munin-tab');
+      if (!source) return;
+      event.preventDefault();
+      event.stopPropagation();
+      reorderDocumentTab(source, page);
+    });
+    const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.setAttribute('aria-selected', String(active)); button.title = `${page}（中クリックで閉じる・ドラッグで並び替え）`;
     button.textContent = `${page.split('/').at(-1)}${changed ? ' *' : ''}`; button.dataset.documentPage = page;
     button.setAttribute('aria-label', `${page}${changed ? '（未保存の変更）' : ''}`);
-    button.onclick = () => { void work(() => openPage(page)); };
+    button.onclick = () => { scheduleNavigation(() => openPage(page)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${page}を閉じる`);
-    close.onclick = () => { void work(()=>closeFileTabs([{kind:'document',path:page}])).catch(error=>status(String(error),true)); };
+    close.onclick = () => { scheduleNavigation(()=>closeFileTabs([{kind:'document',path:page}])); };
     group.append(button, close); strip.append(group);
   }
   for (const path of imageTabs) {
     const group = document.createElement('div'); group.className = 'document-tab';
-    const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.textContent = path.split('/').at(-1) || path; button.title = path; button.dataset.imagePage = path; button.setAttribute('aria-selected', String(activeImageTab === path)); button.onclick = () => { void work(() => openImageTab(path)); };
+    const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.textContent = path.split('/').at(-1) || path; button.title = `${path}（中クリックで閉じる）`; button.dataset.imagePage = path; button.setAttribute('aria-selected', String(activeImageTab === path)); button.onclick = () => { scheduleNavigation(() => openImageTab(path)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${path}を閉じる`);
-    close.onclick = () => { void work(()=>closeFileTabs([{kind:'image',path}])).catch(error=>status(String(error),true)); };
+    close.onclick = () => { scheduleNavigation(()=>closeFileTabs([{kind:'image',path}])); };
     group.append(button, close); strip.append(group);
   }
   strip.hidden = !documentTabs.size && !imageTabs.size;
   element('editor-title').hidden = !strip.hidden;
   saveDocumentTabSession();
   updateEditorEmptyState();
+  updateDocumentTabsScrollButtons();
 }
 async function confirmAllDocumentTabs(): Promise<boolean> {
   retainDocumentTab();
@@ -1233,20 +1438,29 @@ function updateSaveState(): void {
   const ownerState = documentPersistence.state?.owner === documentState ? documentPersistence.state : null;
   renderDocumentTabs();
   const badge = element("save-state");
-  badge.hidden = !documentState || ownerState?.state !== 'error';
+  const showState = Boolean(documentState && (ownerState?.state === 'error' || ownerState?.state === 'saving' || dirty));
+  badge.hidden = !showState;
   badge.parentElement!.hidden = badge.hidden;
   badge.dataset.state = !documentState ? 'empty' : ownerState?.state || (dirty ? 'dirty' : 'saved');
   const conflicted = ownerState?.state === 'error' && isRevisionConflict(ownerState.message);
   badge.textContent = !documentState ? '原稿を選択してください' : ownerState?.state === 'saving' ? '保存中…' : conflicted ? '外部変更と競合：編集内容を保持' : ownerState?.state === 'error' ? '保存できませんでした' : dirty ? '● 未保存の変更' : '保存済み';
   badge.title = ownerState?.message || (dirty ? '保存ボタンまたはCtrl/Cmd+Sで保存してください。' : '原稿の保存状態');
   badge.setAttribute('role', 'status'); badge.setAttribute('aria-live', 'polite');
+  element('save-page').dataset.dirty = String(Boolean(documentState && !activeImageTab && dirty));
   element('save-retry').hidden = ownerState?.state !== 'error' || conflicted;
   element('save-conflict').hidden = !conflicted;
   updateEditorEmptyState();
 }
 type PreviewSnapshot = { root: string; page: string; body: string; version: number };
-let previewContentKey='';
+let latestPreviewHtml='';
 let renderedPreviewDocument:HTMLDocument|null=null;
+function resetPreviewFrame(): void {
+  const frame = element<HTMLIFrameElement>('markdown-preview');
+  latestPreviewHtml = '';
+  renderedPreviewDocument = null;
+  delete frame.dataset.previewPendingLoad;
+  frame.srcdoc = '';
+}
 const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
   snapshot: () => documentState ? {root: projectRoot, page: documentState.page, body: editor.value, version: documentRequestVersion} : null,
   key: snapshot => JSON.stringify(snapshot),
@@ -1255,9 +1469,17 @@ const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
   loading: () => { previewRequestPending = true; previewNavigator.setStatus('loading'); },
   apply: html => {
     previewRequestPending=false;
-    const frame=element<HTMLIFrameElement>('markdown-preview');const key=JSON.stringify([projectRoot,documentState?.page]);
-    if(key===previewContentKey&&frame.contentDocument===renderedPreviewDocument&&renderedPreviewDocument?.body&&renderedPreviewDocument.head.querySelector('meta[http-equiv="Content-Security-Policy"]')){updatePreviewContent(renderedPreviewDocument,html);initializePreview();}
-    else{previewContentKey=key;renderedPreviewDocument=null;frame.srcdoc=html;}
+    latestPreviewHtml=html;
+    const frame=element<HTMLIFrameElement>('markdown-preview');
+    if(frame.contentDocument===renderedPreviewDocument&&renderedPreviewDocument?.body&&renderedPreviewDocument.head.querySelector('meta[http-equiv="Content-Security-Policy"]')){
+      updatePreviewContent(renderedPreviewDocument,html);
+      initializePreview();
+    }
+    else{
+      renderedPreviewDocument=null;
+      frame.dataset.previewPendingLoad='true';
+      frame.srcdoc=injectPreviewTheme(html);
+    }
     previewNavigator.updateToolbarState();
   },
   error: error => { previewRequestPending = false; previewNavigator.setStatus('error', String(error)); status(`プレビュー: ${String(error)}`, true); },
@@ -1319,6 +1541,8 @@ async function openPage(page: string, check = true, restored?: Document): Promis
   editor.dataset.owner = JSON.stringify([projectRoot, page]);
   document.title = `${page} — Munin Manual Studio`;
   updateSaveState(); updateCursor(); renderPages();
+  element('source-return-banner').hidden = true;
+  if (!element('editor-find-bar').hidden) runEditorFind(0, false);
   element("page-list").querySelector("[aria-current=page]")?.scrollIntoView({ block: "nearest" });
   await renderPreview();
   previewNavigator.pushPage(page);
@@ -1582,6 +1806,18 @@ function renderQualityReport(target: HTMLElement, report: QualityReport, root: s
   filterSelect.onchange = renderRows;
   renderRows();
 }
+function switchToSourceWithReturnBanner(): void {
+  const wasRich = milkdown.isRichEditing;
+  milkdown.showSource();
+  if (wasRich) element('source-return-banner').hidden = false;
+}
+element('return-to-rich-editor').addEventListener('click', () => {
+  element('source-return-banner').hidden = true;
+  milkdown.showRich();
+});
+editor.addEventListener('editor-mode-change', () => {
+  if (milkdown.isRichEditing) element('source-return-banner').hidden = true;
+});
 async function openResourceUsage(usage:ResourceUsage):Promise<void>{
   const root=projectRoot;const docsPrefix=(workspace?.config.docs||'docs').replace(/\/$/,'')+'/';
   const expectedPage=usage.page.startsWith(docsPrefix)&&workspace?.pages.includes(usage.page.slice(docsPrefix.length))?usage.page.slice(docsPrefix.length):usage.page;
@@ -1589,12 +1825,43 @@ async function openResourceUsage(usage:ResourceUsage):Promise<void>{
   if(root!==projectRoot||documentState?.page!==expectedPage)return;
   showDocumentView();chooseTab('editor');
   if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
-  milkdown.showSource();
+  switchToSourceWithReturnBanner();
   let start=usage.snippet&&editor.value.slice(usage.start,usage.start+usage.snippet.length)!==usage.snippet?editor.value.indexOf(usage.snippet,Math.max(0,usage.start-100)):usage.start;
   if(start<0&&usage.snippet)start=editor.value.indexOf(usage.snippet);
   if(start<0){start=editor.value.split('\n').slice(0,usage.line-1).join('\n').length;}
   jumpToSource(editor,start,start+(usage.snippet?.length||0));updateCursor();
 }
+let captureResourceCount = 0;
+let captureHighlightTimer: ReturnType<typeof setTimeout> | undefined;
+function updateCaptureTabBadge(highlight = false): void {
+  const tab = document.getElementById('flexlayout-tabbutton-capture-resources');
+  if (!tab) return;
+  const content = tab.querySelector('.flexlayout__tab_button_content') || tab;
+  let badge = tab.querySelector<HTMLElement>('.capture-tab-badge');
+  const nextText = String(captureResourceCount);
+  if (captureResourceCount > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'capture-tab-badge';
+      badge.textContent = nextText;
+      content.append(badge);
+    } else if (badge.textContent !== nextText) {
+      badge.textContent = nextText;
+    }
+  } else if (badge) {
+    badge.remove();
+  }
+  if (highlight) {
+    tab.classList.remove('has-new-capture');
+    void tab.offsetWidth;
+    tab.classList.add('has-new-capture');
+    if (captureHighlightTimer) clearTimeout(captureHighlightTimer);
+    captureHighlightTimer = setTimeout(() => tab.classList.remove('has-new-capture'), 2400);
+  }
+}
+const captureTabObserver = new MutationObserver(() => updateCaptureTabBadge(false));
+const layoutHost = document.getElementById('app-layout');
+if (layoutHost) captureTabObserver.observe(layoutHost, { childList: true, subtree: true });
 const markitsImages = setupMarkitsImages({
   captureShortcut:async()=>{await markitsKeyLoaded;await markitsKeySave;return markitsKey;},
   root: () => projectRoot,
@@ -1614,6 +1881,7 @@ const captureDock=setupCaptureResources({root:()=>projectRoot,rpc,
   edited:async path=>{await handleEditDocumentImage(path,element<HTMLImageElement>('image-tab-preview'));},
   changed:async()=>{previewScheduler.invalidate();if(documentState)await Promise.all([renderPreview(),milkdown.refreshImages()]);},
   usage:usage=>openResourceUsage({...usage,snippet:usage.snippet||'',end:usage.start+(usage.snippet?.length||0)}),status,setButtonDisabled,
+  onItemsChange:(count,highlight)=>{captureResourceCount=count;updateCaptureTabBadge(Boolean(highlight));},
 });
 setupToolbarCustomization();
 
@@ -1655,7 +1923,7 @@ async function handleEditDocumentImage(imageSource:string,img:HTMLImageElement):
   if(documentImageEditing||!projectRoot)return;
   if(!native){status('MarkItsはデスクトップ版で利用できます。',true);return;}
   const root=projectRoot,page=documentState?.page,expected=editor.value;
-  const candidate=milkdown.imageSourceRange(img)||imageAtSelection(expected,editor.selectionStart,editor.selectionEnd);
+  const candidate=milkdown.imageSourceRange(img)||imageAtSelection(expected,editor.selectionStart,editor.selectionEnd)||documentImages(expected).find(item=>item.src===imageSource);
   const selected=!activeImageTab&&candidate?.src===imageSource?candidate:undefined;
   documentImageEditing=true;
   try{
@@ -1672,6 +1940,30 @@ async function handleEditDocumentImage(imageSource:string,img:HTMLImageElement):
     }
   }catch(error){status(String(error),true);}
   finally{documentImageEditing=false;}
+}
+function handleSaveBase64DocumentImage(dataUrl: string, img: HTMLImageElement): void {
+  if (!documentState || activeImageTab || busy) return;
+  if (!/^data:image\//i.test(dataUrl)) return;
+  const expected = editor.value;
+  const candidate = milkdown.imageSourceRange(img)
+    || imageAtSelection(expected, editor.selectionStart, editor.selectionEnd)
+    || documentImages(expected).find(item => item.src === dataUrl);
+  const selected = candidate?.src === dataUrl ? candidate : undefined;
+  if (!selected) {
+    status('対象のBase64画像が原稿内で見つかりませんでした。', true);
+    return;
+  }
+  const mime = dataUrl.slice(5, dataUrl.indexOf(';')).toLowerCase();
+  const rawExt = mime.split('/')[1]?.replace(/[^a-z0-9]/g, '') || 'png';
+  const ext = rawExt === 'jpeg' ? 'jpg' : rawExt === 'svgxml' ? 'svg' : rawExt;
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const suggestedFilename = `image-${stamp}.${ext}`;
+  const defaultAlt = selected.alt || suggestedFilename.replace(/\.[^.]+$/, '');
+  pendingImageSelection = null;
+  pendingImageReplace = selected;
+  openImageSaveDialog(dataUrl, suggestedFilename, defaultAlt, selected);
 }
 async function refreshWorkspace(reloadPage = false, refreshResources = true): Promise<void> {
   const root = projectRoot;
@@ -2013,7 +2305,7 @@ async function openProject(root: string, check = true): Promise<void> {
   previewScheduler.invalidate();
   editor.value = "";
   resetEditHistory();
-  element<HTMLIFrameElement>("markdown-preview").srcdoc = "";
+  resetPreviewFrame();
   element("editor-title").textContent = "Markdownを編集する";
   document.title = "Munin Manual Studio";
   updateSaveState(); updateCursor();
@@ -2032,14 +2324,19 @@ async function openProject(root: string, check = true): Promise<void> {
   element("workspace-name-label").textContent = root.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || root;
   element<HTMLDialogElement>("workspace-dialog").close();
   renderPages(); renderSettings(); loadAiProgressLogs(root);
+  const docsPrefix = (loaded.config.docs || 'docs').replace(/\/$/, '') + '/';
+  const normalizeSavedPage = (entry: string): string =>
+    entry.startsWith(docsPrefix) && loaded.pages.includes(entry.slice(docsPrefix.length))
+      ? entry.slice(docsPrefix.length)
+      : entry;
   const validPage = (page:unknown): page is string => typeof page === 'string' && (loaded.pages.includes(page) || loaded.project_entries.some(entry => !entry.directory && entry.path === page && /\.md$/i.test(entry.path)));
   let saved: {pages:string[];active:string|null} | null = null;
   try {
     const value = JSON.parse(localStorage.getItem(`manual-studio-document-tabs:${root}`) || 'null');
-    if (value && Array.isArray(value.pages)) saved = {pages:[...new Set(value.pages.filter(validPage))] as string[],active:validPage(value.active)?value.active:null};
+    if (value && Array.isArray(value.pages)) saved = {pages:[...new Set(value.pages.filter(validPage).map(normalizeSavedPage))] as string[],active:validPage(value.active)?normalizeSavedPage(value.active):null};
   } catch { /* Ignore invalid optional session data. */ }
   const preferred = params.get("page");
-  let page = validPage(preferred) ? preferred : saved?.active || saved?.pages.at(-1);
+  let page = validPage(preferred) ? normalizeSavedPage(preferred) : saved?.active || saved?.pages.at(-1);
   try {
     const savedPages=saved?.pages||[];
     const restored:Array<Document|null>=new Array(savedPages.length).fill(null);
@@ -2068,8 +2365,11 @@ async function openProject(root: string, check = true): Promise<void> {
   }
   if(version!==projectRequestVersion)return;
   const restoredDocument = documentState as Document | null;
-  await captureDock.refresh();
-  if(version!==projectRequestVersion)return;
+  void captureDock.refresh().catch(error => {
+    if (version === projectRequestVersion && root === projectRoot) {
+      status(`撮影リソース一覧を読み込めませんでした: ${String(error)}`, true);
+    }
+  });
   if (restoredDocument) status(`プロジェクトを開きました。${restoredDocument.page}を編集できます。`);
   if (!loaded.has_config && !detached) status("原稿の編集・保存・プレビューから始められます。AI接続は上部の「設定 → 文章・図のAI」で設定できます。");
 
@@ -2211,11 +2511,64 @@ element("browse-project").addEventListener("click", () => { void work(async () =
   const path = await invoke<string | null>("choose_project", { initialDirectory: input("project-root").value.trim() || projectRoot });
   if (path) { input("project-root").value = path; await openProject(path); }
 }); });
+function showStaticProjectFileInfo(filePath: string): void {
+  const { dialog, body } = featureDialog("プロジェクトファイル");
+  dialog.id = "static-file-info-dialog";
+  const pathText = document.createElement("p");
+  pathText.innerHTML = `<code>${escape(filePath)}</code>`;
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.textContent = "Studio で直接編集・表示できるのは Markdown（.md）と画像ファイルです。その他のファイルは既定のアプリで開くか、パスをコピーして利用できます。";
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  if (native && projectRoot) {
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "primary";
+    openBtn.textContent = "既定のアプリで開く";
+    openBtn.onclick = () => {
+      const root = projectRoot;
+      dialog.close();
+      void invoke("open_project_file", { root, path: filePath })
+        .then(() => status(`${filePath} を既定のアプリで開きました。`))
+        .catch(error => status(`ファイルを開けませんでした: ${String(error)}`, true));
+    };
+    actions.append(openBtn);
+  }
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.textContent = "パスをコピー";
+  copyBtn.onclick = () => {
+    void copyTextToClipboard(filePath)
+      .then(() => { dialog.close(); status(`パスをコピーしました: ${filePath}`); })
+      .catch(error => status(`コピーできませんでした: ${String(error)}`, true));
+  };
+  actions.append(copyBtn);
+  body.append(pathText, note, actions);
+}
+function setTreeFiltersVisible(visible: boolean, focusSearch = false): void {
+  const filters = element('tree-filters');
+  filters.hidden = !visible;
+  element('tree-search-toggle').setAttribute('aria-expanded', String(visible));
+  if (visible) {
+    if (focusSearch) requestAnimationFrame(() => { input('tree-search').focus(); input('tree-search').select(); });
+  } else {
+    input('tree-search').value = '';
+    element<HTMLSelectElement>('tree-filter').value = 'all';
+    renderPages();
+  }
+}
+element('tree-search-toggle').addEventListener('click', () => {
+  const next = element('tree-filters').hidden;
+  setTreeFiltersVisible(next, next);
+});
 element("page-list").addEventListener("click", (event) => {
   const image = (event.target as HTMLElement).closest<HTMLElement>('[data-image]');
-  if (image) { void work(() => openImageTab(image.dataset.image!)); return; }
+  if (image) { scheduleNavigation(() => openImageTab(image.dataset.image!)); return; }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-page]");
-  if (button) void work(() => openPage(button.dataset.page!));
+  if (button) { scheduleNavigation(() => openPage(button.dataset.page!)); return; }
+  const staticFile = (event.target as HTMLElement).closest<HTMLElement>('[data-file]');
+  if (staticFile?.dataset.file) showStaticProjectFileInfo(staticFile.dataset.file);
 });
 element("page-list").addEventListener("toggle", (event) => {
   const folder = event.target as HTMLDetailsElement;
@@ -2228,10 +2581,7 @@ document.addEventListener('keydown', event => {
   if (event.isComposing || document.querySelector('dialog:modal') || (event.target instanceof Element && event.target.closest('#panel-terminal'))) return;
   if (event.key === 'Escape' && !element('tree-filters').hidden && event.target instanceof Element && event.target.closest('#panel-tree')) {
     event.preventDefault();
-    input('tree-search').value = '';
-    element<HTMLSelectElement>('tree-filter').value = 'all';
-    element('tree-filters').hidden = true;
-    renderPages();
+    setTreeFiltersVisible(false);
     element('page-list').tabIndex = -1;
     element('page-list').focus();
   }
@@ -2291,6 +2641,7 @@ function updateEditorEmptyState(): void {
   setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),!projectRoot||captureInsertionRunning);
   for (const id of ['reader-review','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
   setButtonDisabled(element<HTMLButtonElement>('site-export-open'), !projectRoot);
+  setButtonDisabled(element<HTMLButtonElement>('assets-organizer-open'), !projectRoot);
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
@@ -2376,12 +2727,18 @@ editor.addEventListener("input", (event) => {
 editor.addEventListener("scroll", () => syncScroll(editor, previewScrollElement()));
 milkdown.host.addEventListener("scroll", event => { if (event.target === milkdown.scrollElement) syncScroll(milkdown.scrollElement, previewScrollElement()); }, true);
 function initializePreview():void {
-  const content=element<HTMLIFrameElement>('markdown-preview').contentDocument;
-  if(content?.body){renderedPreviewDocument=content;rememberPreviewContent(content);}
+  const frame=element<HTMLIFrameElement>('markdown-preview');
+  const wasPendingLoad=frame.dataset.previewPendingLoad==='true';
+  delete frame.dataset.previewPendingLoad;
+  const content=frame.contentDocument;
+  if(content?.body&&content.head.querySelector('meta[http-equiv="Content-Security-Policy"]')){
+    if(!wasPendingLoad&&content!==renderedPreviewDocument&&latestPreviewHtml){updatePreviewContent(content,latestPreviewHtml);}
+    renderedPreviewDocument=content;rememberPreviewContent(content);
+  }
   if (documentState && !previewRequestPending) previewNavigator.setStatus('ready');
-  previewNavigator.setupIframeInterception(element<HTMLIFrameElement>("markdown-preview"));
+  previewNavigator.setupIframeInterception(frame);
   previewNavigator.updateToolbarState();
-  const previewDocument = element<HTMLIFrameElement>("markdown-preview").contentDocument;
+  const previewDocument = frame.contentDocument;
   previewDocument?.removeEventListener('keydown', handleDocumentShortcut);
   previewDocument?.addEventListener('keydown', handleDocumentShortcut);
   previewDocument?.querySelectorAll<HTMLElement>('code.language-mermaid, pre.mermaid, .highlight.language-mermaid pre').forEach(code => {
@@ -2418,7 +2775,7 @@ function applyAssist(edit: MarkdownEdit): void {
 function applyMarkdownFormat(format: string): void {
   if (busy) return;
   if (!documentState) { status("先に原稿を開いてください。", true); return; }
-  milkdown.showSource();
+  switchToSourceWithReturnBanner();
   const start = editor.selectionStart;
   const end = editor.selectionEnd;
   const selected = editor.value.slice(start, end);
@@ -2499,12 +2856,97 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
   const command=(['save','preview','refresh','settings'] as ShortcutCommand[]).find(command=>stroke&&bindings[command].includes(stroke));
   if(command){event.preventDefault();runKeyboardCommand(command,event);}
 }
+let editorFindIndex = 0;
+function runEditorFind(step = 0, focusEditorMatch = false): void {
+  const query = input('editor-find-input').value;
+  const countEl = element('editor-find-count');
+  if (!query || !documentState || activeImageTab) {
+    editorFindIndex = 0;
+    countEl.textContent = '';
+    return;
+  }
+  if (milkdown.isRichEditing) {
+    if (step !== 0) editorFindIndex += step;
+    else editorFindIndex = 0;
+    const { total, current } = milkdown.findInRich(query, editorFindIndex);
+    editorFindIndex = current > 0 ? current - 1 : 0;
+    countEl.textContent = total ? `${current} / ${total}` : '0件';
+    if (focusEditorMatch && total) milkdown.focus();
+    return;
+  }
+  const lower = editor.value.toLocaleLowerCase();
+  const needle = query.toLocaleLowerCase();
+  const hits: number[] = [];
+  let offset = 0;
+  while (true) {
+    const found = lower.indexOf(needle, offset);
+    if (found < 0) break;
+    hits.push(found);
+    offset = found + Math.max(1, needle.length);
+  }
+  if (!hits.length) {
+    editorFindIndex = 0;
+    countEl.textContent = '0件';
+    return;
+  }
+  if (step !== 0) editorFindIndex = ((editorFindIndex + step) % hits.length + hits.length) % hits.length;
+  else editorFindIndex = 0;
+  const start = hits[editorFindIndex];
+  const end = start + needle.length;
+  countEl.textContent = `${editorFindIndex + 1} / ${hits.length}`;
+  if (focusEditorMatch) {
+    jumpToSource(editor, start, end);
+  } else {
+    const findInput = input('editor-find-input');
+    const caret = findInput.selectionStart ?? findInput.value.length;
+    jumpToSource(editor, start, end);
+    findInput.focus({ preventScroll: true });
+    findInput.setSelectionRange(caret, caret);
+  }
+  updateCursor();
+}
+function openEditorFindBar(): void {
+  if (!documentState || activeImageTab) return;
+  chooseTab('editor');
+  if (preferredEditorView === 'preview') { preferredEditorView = 'edit'; applyEditorView(); }
+  const bar = element('editor-find-bar');
+  bar.hidden = false;
+  const findInput = input('editor-find-input');
+  if (!findInput.value && editor.selectionStart !== editor.selectionEnd) {
+    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd).split('\n')[0];
+    if (selected && selected.length <= 120) findInput.value = selected;
+  }
+  findInput.focus();
+  findInput.select();
+  if (findInput.value) runEditorFind(0, false);
+}
+function closeEditorFindBar(): void {
+  const bar = element('editor-find-bar');
+  if (bar.hidden) return;
+  bar.hidden = true;
+  element('editor-find-count').textContent = '';
+  if (documentState && !activeImageTab) milkdown.focus();
+}
+input('editor-find-input').addEventListener('input', () => runEditorFind(0, false));
+input('editor-find-input').addEventListener('keydown', event => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    runEditorFind(event.shiftKey ? -1 : 1, false);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeEditorFindBar();
+  }
+});
+element('editor-find-prev').addEventListener('click', () => runEditorFind(-1, false));
+element('editor-find-next').addEventListener('click', () => runEditorFind(1, false));
+element('editor-find-close').addEventListener('click', closeEditorFindBar);
+
 function runKeyboardCommand(command: ShortcutCommand, event: KeyboardEvent): void {
   if(command==='settings'){chooseTab('settings');return;}
   if(command==='treeSearch'){
-    layoutManager?.focusPanel('file-tree');element('tree-filters').hidden=false;
-    requestAnimationFrame(()=>{input('tree-search').focus();input('tree-search').select();});return;
+    layoutManager?.focusPanel('file-tree');setTreeFiltersVisible(true,true);return;
   }
+  if(command==='findInDocument'){openEditorFindBar();return;}
   if(command==='search'){element('manuscript-search-open').click();return;}
   if(command==='sendToTerminal'){void openEditorSendToTerminal();return;}
   if(busy||!documentState||activeImageTab)return;
@@ -2796,6 +3238,7 @@ element("new-folder-form").addEventListener("submit", (event) => {
 });
 let pendingImageDataUrl: string | null = null;
 let pendingImageSelection: { start: number; end: number } | null = null;
+let pendingImageReplace: DocumentImage | null = null;
 let pendingImageOwner: {root:string;page:string;content:string;documentSession:number} | null = null;
 const toolbarImageInput = element<HTMLInputElement>("toolbar-image-input");
 element("insert-image").addEventListener("click", () => {
@@ -2851,7 +3294,10 @@ async function uploadMilkdownImage(file: File): Promise<string> {
   const root = projectRoot;
   // The rich editor edits the text while the upload waits, so only document and project identity are compared.
   const origin = captureInsertionContext(insertionState(), { checksContent: false });
-  const extension = file.name.split('.').at(-1)?.toLowerCase() || '';
+  const nameExt = file.name.includes('.') ? file.name.split('.').at(-1)?.toLowerCase() || '' : '';
+  const mimeSub = file.type.startsWith('image/') ? file.type.slice(6).split(';')[0].toLowerCase() : '';
+  const mimeExt = mimeSub === 'jpeg' ? 'jpg' : mimeSub === 'svg+xml' ? 'svg' : mimeSub.replace(/[^a-z0-9]/g, '');
+  const extension = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(nameExt) ? (nameExt === 'jpeg' ? 'jpg' : nameExt) : mimeExt;
   if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) throw new Error("対応していない画像形式です。");
   const data = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -2865,8 +3311,19 @@ async function uploadMilkdownImage(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("画像を読み込めませんでした。"));
     reader.readAsDataURL(file);
   });
-  const directory = current.page.split('/').slice(0, -1).join('/');
-  const path = `${directory ? `${directory}/` : ''}assets/image-${crypto.randomUUID()}.${extension}`;
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  let filename = `image-${stamp}.${extension}`;
+  if (stamp === lastPastedTimestamp) {
+    pasteCounter++;
+    filename = `image-${stamp}-${pasteCounter}.${extension}`;
+  } else {
+    lastPastedTimestamp = stamp;
+    pasteCounter = 0;
+  }
+  const assetsFolder = (workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`).trim().replace(/\/+$/, "");
+  const path = assetsFolder ? `${assetsFolder}/${filename}` : filename;
   await rpc("save-asset", { path, data }, root);
   // Milkdown ignores an image node update while the editor is read-only.
   // A manuscript save may still be refreshing workspace metadata when the
@@ -2900,13 +3357,15 @@ function updateMarkdownInsertPreview(): void {
   const relPath = computeRelativeMarkdownPath(documentState.page, fullAssetPath, workspace?.config.docs || "docs");
   element("image-markdown-preview").textContent = `![${alt}](${relPath})`;
 }
-function openImageSaveDialog(dataUrl: string, suggestedFilename?: string, defaultAlt?: string): void {
+function openImageSaveDialog(dataUrl: string, suggestedFilename?: string, defaultAlt?: string, replaceTarget: DocumentImage | null = null): void {
   if(!documentState)return;
   pendingImageOwner={root:projectRoot,page:documentState.page,content:editor.value,documentSession:documentRequestVersion};
-  if (!documentState) {
-    status("先にMarkdown原稿を開いてください。", true);
-    return;
-  }
+  pendingImageReplace = replaceTarget;
+  const dialog = element<HTMLDialogElement>("image-save-dialog");
+  const title = dialog.querySelector("h2");
+  if (title) title.textContent = replaceTarget ? "Base64画像をファイルに保存" : "画像を保存して原稿に挿入";
+  const submitButton = element<HTMLButtonElement>("confirm-image-save");
+  submitButton.innerHTML = uiIcon("save") + (replaceTarget ? " 保存して差し替え" : " 保存して挿入");
   pendingImageDataUrl = dataUrl;
   element<HTMLImageElement>("image-save-preview").src = dataUrl;
   const defaultAssets = workspace?.config.assets || `${workspace?.config.docs || "docs"}/assets`;
@@ -2918,7 +3377,7 @@ function openImageSaveDialog(dataUrl: string, suggestedFilename?: string, defaul
   input("image-save-filename").value = filename;
   input("image-save-alt").value = defaultAlt || filename.replace(/\.[^.]+$/, "");
   updateMarkdownInsertPreview();
-  element<HTMLDialogElement>("image-save-dialog").showModal();
+  dialog.showModal();
   input("image-save-filename").focus();
 }
 element("image-save-folder").addEventListener("input", updateMarkdownInsertPreview);
@@ -2929,6 +3388,7 @@ function cancelImageSave():void {
   const restore=owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion;
   pendingImageDataUrl = null;
   pendingImageSelection = null;
+  pendingImageReplace = null;
   pendingImageOwner = null;
   element<HTMLDialogElement>("image-save-dialog").close();
   if(restore&&selection){editor.focus();editor.setSelectionRange(selection.start,selection.end);updateCursor();}
@@ -2948,6 +3408,7 @@ element("image-save-form").addEventListener("submit", (event) => {
   const fullAssetPath = folder ? `${folder}/${filename}` : filename;
   const dataUrl = pendingImageDataUrl;
   const owner=pendingImageOwner;
+  const replaceTarget = pendingImageReplace;
   const selection=pendingImageSelection||{start:editor.selectionStart,end:editor.selectionEnd};
   void work(async () => {
     const valid=()=>owner&&pendingImageOwner===owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion;
@@ -2957,8 +3418,25 @@ element("image-save-form").addEventListener("submit", (event) => {
     if(!valid())throw new Error('原稿が変更されました。保存した画像は撮影一覧に残しています。');
     element<HTMLDialogElement>("image-save-dialog").close();
     pendingImageDataUrl = null;
+    pendingImageReplace = null;
     pendingImageOwner = null;
     const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
+    if (replaceTarget) {
+      pendingImageSelection = null;
+      const expected = owner!.content;
+      const next = !replaceTarget.configured && replaceTarget.raw.startsWith("![")
+        ? expected.slice(0, replaceTarget.start)
+          + `![${alt.replace(/[\[\]\\]/g, '\\$&')}](<${relPath}>${replaceTarget.caption ? ` "${replaceTarget.caption.replace(/["\\]/g, '\\$&')}"` : ''})`
+          + expected.slice(replaceTarget.end)
+        : replaceDocumentImage(expected, { ...replaceTarget, alt }, relPath);
+      changeImageMarkdown(next, expected);
+      await milkdown.refreshImages();
+      previewScheduler.invalidate();
+      void renderPreview();
+      await refreshWorkspace(false, false);
+      status(`画像を ${fullAssetPath} に保存し、原稿の参照を差し替えました。`);
+      return;
+    }
     const markdownCode = `![${alt}](${relPath})`;
     const start = selection.start;
     const end = selection.end;
@@ -3287,58 +3765,6 @@ themePicker.addEventListener("change", () => {
   applyTheme(themePicker.value);
   if (native) void emit("manual-studio-theme-changed", themePicker.value);
 });
-function saveDraftCandidate(root: string, candidate: DraftCandidate): void {
-  try { localStorage.setItem(`manual-studio-draft-candidate:${root}`, JSON.stringify(candidate)); }
-  catch { /* LocalStorage error */ }
-}
-function clearDraftCandidate(root: string): void {
-  try { localStorage.removeItem(`manual-studio-draft-candidate:${root}`); }
-  catch { /* LocalStorage error */ }
-}
-function loadDraftCandidate(root: string): DraftCandidate | null {
-  try {
-    const raw = localStorage.getItem(`manual-studio-draft-candidate:${root}`);
-    return raw ? JSON.parse(raw) as DraftCandidate : null;
-  } catch { return null; }
-}
-async function createFullDraft(templateMode=false):Promise<void>{
-  if(busy)return;
-  const options=templateMode?await askTemplateDestination(workspace?.config.docs||'docs',async()=>JSON.parse(await rpc('target-application',{},projectRoot)) as TargetApplication,()=>rpc('template-guide',{},projectRoot),showTargetApplication):null;
-  if(templateMode&&!options)return;
-  await savedBeforeOperation(true);retainDocumentTab();
-  const root=projectRoot;
-  const snapshots=Array.from(documentTabs,([page,tab])=>({page,content:tab.content,revision:tab.document.revision,dirty:tab.content!==tab.document.content}));
-  const valid=()=>{retainDocumentTab();return root===projectRoot&&snapshots.every(item=>{const tab=documentTabs.get(item.page);return tab?.content===item.content&&tab.document.revision===item.revision;})&&!Array.from(documentTabs).some(([page,tab])=>tab.content!==tab.document.content&&!snapshots.some(item=>item.page===page));};
-  const documents=snapshots.filter(item=>item.dirty);
-  let candidate:DraftCandidate|undefined = templateMode||documents.length?undefined:loadDraftCandidate(root) || undefined;
-  if (!candidate) {
-    await work(async()=>{
-      await ensureAiSettings();activeGenerationRoot=root;element('progress-cancel').hidden=false;element<HTMLButtonElement>('progress-cancel').disabled=false;await beginAiProgress('draft-propose',root);let success=false;
-      try{candidate=JSON.parse(await rpc('draft-propose',{json:{...options,documents}},root)) as DraftCandidate;success=true;if(!templateMode&&!documents.length)saveDraftCandidate(root,candidate);}
-      catch(error){logAiFailure(error);throw error;}
-      finally{await stopAiProgress(success);}
-    });
-  }
-  if(!candidate||root!==projectRoot)return;
-  const pages=await reviewDraft(candidate,valid,path=>rpc('preview-asset',{page:`${candidate!.docs}/${candidate!.pages[0].path}`,asset:path},root));
-  if(!pages){if(!templateMode)clearDraftCandidate(root);status('下書き候補を破棄しました。原稿は変更していません。');return;}
-  await work(async()=>{
-    if(!valid())throw new Error('原稿が変更されました。候補を作り直してください。');
-    const outputPath=(path:string)=>candidate!.docs==='.'?path:`${candidate!.docs.replace(/\/$/,'')}/${path}`;
-    const tabKey=(path:string)=>{const prefix=(workspace?.config.docs||'docs').replace(/\/$/,'')+'/';return path.startsWith(prefix)&&workspace?.pages.includes(path.slice(prefix.length))?path.slice(prefix.length):path;};
-    const inEditor=pages.filter(page=>documents.some(item=>item.page===tabKey(outputPath(page.path))));
-    const persisted=pages.filter(page=>!inEditor.includes(page));
-    if(persisted.length)await rpc('draft-apply',{json:{docs:candidate!.docs,pages:persisted,template:templateMode}},root);
-    if(!templateMode)clearDraftCandidate(root);
-    for(const page of persisted){documentTabs.delete(tabKey(outputPath(page.path)));documentTabs.delete(outputPath(page.path));}
-    for(const page of inEditor){await openPage(tabKey(outputPath(page.path)));replaceMarkdown(0,editor.value.length,page.content,0,0);retainDocumentTab();}
-    await refreshWorkspace();
-    const selectedPage=pages.find(page=>page.path==='index.md')||pages[0];
-    if(selectedPage){await openPage(outputPath(selectedPage.path),inEditor.includes(selectedPage));chooseTab('editor');}
-    status(`${pages.length}ページへ選んだ変更を反映しました。${inEditor.length?'編集中の原稿は未保存のまま保持しています。':'変更前の原稿はバックアップしました。'}`);
-  });
-}
-element('create-ai-template').addEventListener('click',()=>{void createFullDraft(true).catch(error=>status(String(error),true));});
 async function showTargetApplication(){
   const root=projectRoot;if(!root||busy)return false;
   return configureTargetApplication(async(action,settings)=>{
@@ -3346,8 +3772,46 @@ async function showTargetApplication(){
     return JSON.parse(await rpc('target-application',{json:{action,settings}},root)) as TargetApplication;
   });
 }
+element('assets-organizer-open').addEventListener('click', () => {
+  openAssetOrganizerDialog({
+    root: () => projectRoot,
+    rpc,
+    hasUnsavedDocuments: () => {
+      retainDocumentTab();
+      return [...documentTabs.entries()]
+        .filter(([, tab]) => tab.content !== tab.document.content)
+        .map(([page]) => page);
+    },
+    openImage: path => work(() => openImageTab(path)),
+    openUsage: usage => openResourceUsage({ ...usage, snippet: usage.snippet || '', end: usage.start + (usage.snippet?.length || 0) }),
+    onAssetsDeleted: async paths => {
+      const deletedSet = new Set(paths);
+      const imageTargets: FileTab[] = [...imageTabs]
+        .filter(path => deletedSet.has(path))
+        .map(path => ({ kind: 'image' as const, path }));
+      if (imageTargets.length) await closeFileTabs(imageTargets);
+      await refreshWorkspace(false, false);
+      await markitsImages.refresh();
+      await captureDock.refresh();
+      renderPages();
+      renderDocumentTabs();
+    },
+    status,
+  });
+});
 element('target-application-open').addEventListener('click',()=>{void showTargetApplication().catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
+function syncHtmlOutputControls(): void {
+  const outputPath = workspace?.config.output ?? '';
+  const excludeUnused = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
+  const siteName = workspace?.config.mkdocs.site_name ?? '';
+  input('site-output-path').value = outputPath;
+  input('site-exclude-unused-assets').checked = excludeUnused;
+  input('settings-site-output').value = outputPath;
+  input('settings-site-exclude-unused').checked = excludeUnused;
+  input('settings-site-name').value = siteName;
+  element('site-export-settings-summary').textContent = `サイト名: ${siteName || '（未設定）'}`;
+}
 element('site-export-open').addEventListener('click', () => {
   if (busy || !projectRoot || document.querySelector('#site-export-dialog[open]')) return;
   const {dialog, body} = featureDialog('HTML出力');
@@ -3355,11 +3819,16 @@ element('site-export-open').addEventListener('click', () => {
   const controls = element('site-export-controls');
   element<HTMLButtonElement>('browse-site-output').hidden = !native;
   element<HTMLButtonElement>('open-site-html').hidden = !native;
-  input('site-output-path').value = workspace?.config.output ?? '';
-  input('site-exclude-unused-assets').checked = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
+  syncHtmlOutputControls();
   element('site-build-result').textContent = '';
   body.append(controls);
   dialog.addEventListener('close', () => element('site-export-host').append(controls), {once: true});
+});
+element('site-export-open-settings').addEventListener('click', () => {
+  document.querySelector<HTMLDialogElement>('#site-export-dialog[open]')?.close();
+  selectSettingsCategory('html-output');
+  const dialog = element<HTMLDialogElement>('panel-settings');
+  if (!dialog.open) openPanelDialog('panel-settings');
 });
 function browseSiteOutput(dialogId: string, fieldId: string, resultId: string): void {
   const root = projectRoot;
@@ -3419,6 +3888,7 @@ async function saveSiteOutput(
     workspace.config.output = output;
     if (siteName !== undefined) workspace.config.mkdocs.site_name = siteName;
     if (excludeUnused !== undefined) workspace.config.mkdocs.exclude_unused_assets = excludeUnused;
+    syncHtmlOutputControls();
     path.value = output;
     return output;
   } catch (error) {
@@ -3537,7 +4007,7 @@ function installReaderReport(root:string,page:string,expected:string,result:Read
     if(!valid())return false;
     showReaderReport(result,valid,finding=>{
       if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
-      milkdown.showSource();jumpToSource(editor,finding.start,finding.end);updateCursor();
+      switchToSourceWithReturnBanner();jumpToSource(editor,finding.start,finding.end);updateCursor();
     },finding=>{
       if(typeof finding.replacement!=='string'||finding.replacement===finding.quote)return;
       const before=expected;
@@ -3665,7 +4135,7 @@ const manuscriptToolOptions:ManuscriptToolsOptions={
     if(root!==projectRoot)return;
     showDocumentView();chooseTab('editor');
     if(preferredEditorView==='preview'){preferredEditorView='edit';applyEditorView();}
-    milkdown.showSource();jumpToSource(editor,start,end);
+    switchToSourceWithReturnBanner();jumpToSource(editor,start,end);
   },
   applyContent:(next,expected)=>{
     if(!sameOwner(manuscriptOwner(),expected))throw new Error('原稿が変更されています。操作をやり直してください。');

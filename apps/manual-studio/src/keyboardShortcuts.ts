@@ -13,6 +13,7 @@
   { id: 'preview', label: '編集・分割・プレビューの切替', keys: ['Mod+Shift+V'], scope: 'global' },
   { id: 'refresh', label: 'プレビューを再読込', keys: [], scope: 'global' },
   { id: 'treeSearch', label: 'ファイル名・パスを検索', keys: ['Mod+P'], scope: 'global' },
+  { id: 'findInDocument', label: '開いている原稿内を検索', keys: ['Mod+F'], scope: 'global' },
   { id: 'search', label: '全文検索・置換', keys: ['Mod+Shift+F'], scope: 'global' },
   { id: 'sendToTerminal', label: 'AIターミナルへ送る', keys: ['Mod+Shift+T'], scope: 'global' },
   { id: 'insertAiNote', label: 'AIメモを挿入', keys: ['Mod+Shift+M'], scope: 'editor' },
@@ -45,7 +46,10 @@ export function validateBindings(value: ShortcutBindings): string | null {
 let bindings = defaultBindings();
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
-  if (saved && shortcutCommands.every(c => Array.isArray(saved[c.id]) && saved[c.id].every((k: unknown) => typeof k === 'string')) && !validateBindings(saved)) bindings = saved;
+  if (saved && typeof saved === 'object') {
+    const merged = { ...defaultBindings(), ...saved } as ShortcutBindings;
+    if (shortcutCommands.every(c => Array.isArray(merged[c.id]) && merged[c.id].every((k: unknown) => typeof k === 'string')) && !validateBindings(merged)) bindings = merged;
+  }
 } catch { /* Defaults remain available when storage is unavailable. */ }
 export function currentBindings(): ShortcutBindings { return structuredClone(bindings); }
 export function saveBindings(value: ShortcutBindings): void {

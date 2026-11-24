@@ -17,13 +17,15 @@ function sizeDialog(dialog:HTMLDialogElement):void{
   const columns=dialog.querySelector('.proofreading-grid') as HTMLElement|null;
   const wide=dialog.querySelector('table,.selection-diff-columns,.generation-diff,.image-comparison-grid,.settings-grid');
   const rich=dialog.querySelector('textarea,pre,dl')||dialog.querySelectorAll('input,select').length>4;
-  let preferred=isCompactDialog(dialog)?480:columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*280+48:wide?1040:rich?720:520;
+  const initialWidth=Number(dialog.dataset.dialogInitialWidth);
+  const initialHeight=Number(dialog.dataset.dialogInitialHeight);
+  let preferred=initialWidth>0?initialWidth:isCompactDialog(dialog)?480:columns?Number(columns.style.getPropertyValue('--proofreading-columns'))*280+48:wide?1040:rich?720:520;
   const explicitLimit=widthLimits.get(dialog);
   if(explicitLimit!==undefined)preferred=Math.min(preferred,explicitLimit);
   dialog.style.setProperty('width',`${Math.min(preferred,innerWidth*0.92,maxWidth)}px`,'important');
   // Modal dialogs have both block insets set by the browser. `auto` stretches
   // between them; preserve content sizing instead of filling the viewport.
-  dialog.style.height='fit-content';
+  dialog.style.height=initialHeight>0?`${Math.min(initialHeight,maxHeight)}px`:'fit-content';
 }
 
 function schedule(dialog:HTMLDialogElement):void{

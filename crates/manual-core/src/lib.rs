@@ -136,6 +136,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         "image-generation-cancel",
         "image-generation-capabilities",
         "resources-list",
+        "resources-delete-unused",
         "resources-image",
         "resources-thumbnail",
         "resources-detail",
@@ -368,6 +369,12 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         )?
         .to_string()),
         "resources-list" => Ok(resources::list(root)?.to_string()),
+        "resources-delete-unused" => Ok(resources::delete_unused(
+            root,
+            &serde_json::from_str::<serde_json::Value>(json_opt.unwrap_or("{}"))
+                .map_err(|e| e.to_string())?,
+        )?
+        .to_string()),
         "resources-thumbnail" => resources::preview_thumbnail(root, asset_opt.ok_or("画像を選択してください。")?),
         "resources-detail" => Ok(resources::detail(root, asset_opt.ok_or("画像を選択してください。")?)?.to_string()),
         "resources-image" => resources::image_data(root, asset_opt.ok_or("画像を選択してください。")?),

@@ -15,12 +15,12 @@ try {
   }
   server=spawn(process.execPath,[path.resolve('node_modules/vite/bin/vite.js'),'--config','apps/manual-studio/vite.config.ts'],{stdio:'ignore'});
   for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
-  browser=await chromium.launch({channel:'chrome',headless:true});
+  browser=await chromium.launch({channel:process.env.MUNIN_TEST_BROWSER||(process.platform==='win32'?'msedge':'chrome'),headless:true});
   const context=await browser.newContext();let page=await context.newPage();const errors=[];
   function watch(){page.on('pageerror',error=>errors.push(error.message));}watch();
   const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   const tabs=()=>page.locator('[data-document-page]').evaluateAll(nodes=>nodes.map(node=>node.dataset.documentPage));
-  async function open(file){await page.locator('#tree-search').fill(file);await page.locator(`[data-page="docs/${file}"]`).click();await idle();await page.locator('#tree-search').fill('');}
+  async function open(file){const closed=page.locator('details[data-folder="docs"]:not([open]) > summary');if(await closed.count())await closed.click();await page.locator(`[data-page="docs/${file}"]`).click();await idle();}
   await page.goto(`${base}/?root=${encodeURIComponent(root)}`);await idle();
   await open('index.md');await open('guide.md');await open('deep.md');
   await page.locator('[data-document-page="guide.md"]').click();await idle();
@@ -29,19 +29,39 @@ try {
   const requests=[];
   const resourcesReady=new Promise(resolve=>releaseResources=resolve);
   let blockResources=true;
+  let releasePreview;
+  const previewReady=new Promise(resolve=>releasePreview=resolve);
+  let blockInitialPreview=true;
+  let initialPreviewHit;
+  const initialPreviewStarted=new Promise(resolve=>initialPreviewHit=resolve);
   await page.route('**/__manual/rpc',async route=>{
     const request=route.request().postDataJSON();requests.push(request);
-    if(blockResources&&['screenshots-list','resources-list'].includes(request.action))await resourcesReady;
+    if(blockResources&&['screenshots-list','resources-list','capture-resources-list'].includes(request.action))await resourcesReady;
+    if(blockInitialPreview&&request.action==='editor-preview'&&request.options?.page==='guide.md'){
+      blockInitialPreview=false;
+      initialPreviewHit();
+      await previewReady;
+    }
     await route.continue();
   });
 
-  await page.goto(`${base}/?root=${encodeURIComponent(root)}`);await idle();
+  const navigation=page.goto(`${base}/?root=${encodeURIComponent(root)}`);
+  await initialPreviewStarted;
+  await page.locator('[data-document-page="deep.md"]').waitFor();
+  assert.equal(await page.evaluate(()=>document.body.getAttribute('aria-busy')),'true','project opening is still in progress while initial preview runs');
+  await page.locator('[data-document-page="deep.md"]').click();
+  releasePreview();
+  await navigation;
+  await page.waitForFunction(()=>document.querySelector('[data-document-page="deep.md"]')?.getAttribute('aria-selected')==='true');
+  await idle();
   assert.deepEqual(await tabs(),expected,'reopening restores tab order');
   assert.equal(requests.filter(request=>request.action==='state').length,1,'startup reads workspace state once');
   assert.deepEqual(requests.find(request=>request.action==='state').options.json,{editor:true},'editor skips unused publication previews');
   assert.equal(requests.filter(request=>request.action==='editor-read'&&request.options.page==='guide.md').length,1,'active tab content is reused');
-  assert.ok(requests.some(request=>request.action==='resources-list'),'resource loading started in the background');
-  assert.equal(await page.locator('#markdown-editor').evaluate(editor=>editor.readOnly),false,'editor is ready while resource scans are blocked');
+  assert.ok(requests.some(request=>request.action==='capture-resources-list'),'capture resource loading started in the background');
+  assert.equal(await page.locator('#markdown-editor').evaluate(editor=>editor.readOnly),false,'editor is ready while capture resource scans are blocked');
+  await page.locator('[data-document-page="guide.md"]').click();await idle();
+  assert.equal(await page.locator('[data-document-page="guide.md"]').getAttribute('aria-selected'),'true','document tabs can be switched while capture resource scans are blocked');
   blockResources=false;releaseResources();
 
   await page.frameLocator('#markdown-preview').getByRole('heading',{name:'guide.md',exact:true}).waitFor();

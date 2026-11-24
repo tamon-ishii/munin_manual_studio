@@ -474,6 +474,15 @@ fn open_output(root: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_project_file(root: String, path: String) -> Result<(), String> {
+    let target = manual_core::config::project_path(std::path::Path::new(&root), &path)?;
+    if !target.is_file() {
+        return Err("ファイルが見つかりません。".into());
+    }
+    open::that(target).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn open_output_html(root: String, output: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let page = manual_core::builder::published_entry(std::path::Path::new(&root), &output)?;
@@ -678,6 +687,7 @@ fn main() {
             open_proofreading_window,
             open_dialog_window,
             open_output,
+            open_project_file,
             open_output_html,
         ])
         .run(context)

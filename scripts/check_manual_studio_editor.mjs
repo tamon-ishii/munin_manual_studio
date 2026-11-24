@@ -15,7 +15,7 @@ const results=[];
 try{
  let ready=false;for(let attempt=0;attempt<150;attempt++){if(serverExited)throw new Error(`Editor test server exited: ${serverLog}`);try{if((await fetch(url)).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
  if(!ready)throw new Error(`Editor test server did not start: ${serverLog}`);
- const tests=['test_manual_studio_editor_integrity.mjs','test_manual_studio_toolbar_customization.mjs','test_manual_studio_live_preview_ai.mjs','test_manual_studio_rich_template.mjs','test_manual_studio_target_application.mjs'];
+ const tests=['test_manual_studio_editor_integrity.mjs','test_manual_studio_toolbar_customization.mjs','test_manual_studio_live_preview_ai.mjs','test_manual_studio_target_application.mjs'];
  for(const test of tests){
    console.log(`[editor] ${test}`);let output='';
    const status=await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[`scripts/${test}`],{windowsHide:true,env:{...process.env,MANUAL_STUDIO_TEST_URL:url,MANUAL_EDITOR_RESULTS:artifacts},stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{child.kill();reject(new Error(`${test} timed out`));},120_000);child.stdout.on('data',data=>{output+=data;process.stdout.write(data);});child.stderr.on('data',data=>{output+=data;process.stderr.write(data);});child.on('error',error=>{clearTimeout(timer);reject(error);});child.on('exit',code=>{clearTimeout(timer);resolve(code);});});

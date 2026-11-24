@@ -1,22 +1,10 @@
 import { alertIconStyles } from './alertIcons';
 
-/** Keep the isolated Markdown preview in the application's selected palette. */
-export function setupPreviewTheme(iframe: HTMLIFrameElement): void {
-  const apply = (): void => {
-    try {
-      const document = iframe.contentDocument;
-      if (!document?.head) return;
-      const palette = getComputedStyle(window.document.documentElement);
-      const dark = palette.colorScheme === 'dark';
-      document.documentElement.toggleAttribute('data-alert-icons', window.document.documentElement.hasAttribute('data-alert-icons'));
-      const color = (name: string, fallback: string) => palette.getPropertyValue(name).trim() || fallback;
-      let style = document.getElementById('manual-studio-preview-theme') as HTMLStyleElement | null;
-      if (!style) {
-        style = document.createElement('style');
-        style.id = 'manual-studio-preview-theme';
-        document.head.append(style);
-      }
-      style.textContent = `
+function buildPreviewThemeCss(): string {
+  const palette = getComputedStyle(window.document.documentElement);
+  const dark = palette.colorScheme === 'dark';
+  const color = (name: string, fallback: string) => palette.getPropertyValue(name).trim() || fallback;
+  return `
         :root { color-scheme: ${palette.colorScheme || 'light'}; }
         html, body { background: ${color('--surface-bg', '#fff')}; color: ${color('--text-primary', '#26342f')}; }
         body { font-size: ${color('--preview-font-size', '16px')}; }
@@ -54,6 +42,35 @@ export function setupPreviewTheme(iframe: HTMLIFrameElement): void {
         ::selection { background: ${color('--selection-bg', '#dfe9dd')}; }
         ${alertIconStyles(true)}
       `;
+}
+
+/** Inject the active theme style into preview HTML before srcdoc renders so initial load never flashes white. */
+export function injectPreviewTheme(html: string): string {
+  let themed = html;
+  if (window.document.documentElement.hasAttribute('data-alert-icons')) {
+    themed = themed.replace(/<html\b(?![^>]*\bdata-alert-icons\b)/i, '<html data-alert-icons=""');
+  }
+  const styleTag = `<style id="manual-studio-preview-theme">${buildPreviewThemeCss()}</style>`;
+  if (/<\/head>/i.test(themed)) {
+    return themed.replace(/<\/head>/i, () => `${styleTag}</head>`);
+  }
+  return `${styleTag}${themed}`;
+}
+
+/** Keep the isolated Markdown preview in the application's selected palette. */
+export function setupPreviewTheme(iframe: HTMLIFrameElement): void {
+  const apply = (): void => {
+    try {
+      const document = iframe.contentDocument;
+      if (!document?.head) return;
+      document.documentElement.toggleAttribute('data-alert-icons', window.document.documentElement.hasAttribute('data-alert-icons'));
+      let style = document.getElementById('manual-studio-preview-theme') as HTMLStyleElement | null;
+      if (!style) {
+        style = document.createElement('style');
+        style.id = 'manual-studio-preview-theme';
+        document.head.append(style);
+      }
+      style.textContent = buildPreviewThemeCss();
     } catch {
       // A preview being navigated/replaced may not expose its document yet.
     }

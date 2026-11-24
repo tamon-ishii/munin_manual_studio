@@ -65,6 +65,33 @@ fn resolve_document_image(root: &Path, asset: &str, page: Option<&str>) -> Resul
 }
 
 fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<ImageEdit, String> {
+    let temporary = tempfile::Builder::new().prefix("munin-markits-edit-").tempdir().map_err(|e| e.to_string())?;
+    if let Some(rest) = asset.strip_prefix("data:image/") {
+        let (header, encoded) = rest.split_once(',').ok_or("Base64画像の形式が不正です。")?;
+        if !header.to_ascii_lowercase().ends_with(";base64") {
+            return Err("Base64形式の画像のみ編集できます。".into());
+        }
+        let clean: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes = STANDARD.decode(&clean).map_err(|e| format!("Base64画像を読み込めません: {e}"))?;
+        if bytes.len() > 32_000_000 {
+            return Err("画像が大きすぎます。".into());
+        }
+        let decoded = image::load_from_memory(&bytes).map_err(|e| format!("画像を読めません: {e}"))?;
+        let input = temporary.path().join("input.png");
+        if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            fs::write(&input, &bytes).map_err(|e| format!("一時画像を作成できません: {e}"))?;
+        } else {
+            decoded.save_with_format(&input, image::ImageFormat::Png).map_err(|e| format!("一時画像を作成できません: {e}"))?;
+        }
+        let resource_id = manual_core::capture_resources::registered_id(root, &bytes)?;
+        return Ok(ImageEdit {
+            output: temporary.path().join("edited.png"),
+            completion: temporary.path().join("complete.done"),
+            input,
+            resource_id,
+            _temporary: temporary,
+        });
+    }
     let input = resolve_document_image(root, asset, page)?;
     let canonical_root=root.canonicalize().map_err(|e|e.to_string())?;
     let relative=input.strip_prefix(&canonical_root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
@@ -72,7 +99,6 @@ fn prepare_image_edit(root: &Path, asset: &str, page: Option<&str>) -> Result<Im
     let input=manual_core::capture_resources::editing_source(root,&relative)?.unwrap_or(input);
     let bytes = fs::read(&input).map_err(|e| format!("編集する画像を読めません: {e}"))?;
     image::load_from_memory(&bytes).map_err(|e| format!("画像を読めません: {e}"))?;
-    let temporary = tempfile::Builder::new().prefix("munin-markits-edit-").tempdir().map_err(|e| e.to_string())?;
     Ok(ImageEdit {
         output: temporary.path().join("edited.png"),
         completion: temporary.path().join("complete.done"),
@@ -446,6 +472,28 @@ mod tests {
         assert!(!root.path().join(".munin").exists());
         fs::write(manual_core::config::project_path(root.path(), &path).unwrap(), b"external change").unwrap();
         assert!(save_render(root.path(), &rendered).is_err());
+    }
+    #[test]
+    fn base64_data_url_image_prepares_temporary_markits_input() {
+        let root = tempfile::tempdir().unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(24, 18).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let data_url = format!("data:image/png;base64,{}", STANDARD.encode(png.get_ref()));
+        let edit = prepare_image_edit(root.path(), &data_url, Some("index.md")).unwrap();
+        assert!(edit.resource_id.is_none());
+        assert_eq!(fs::read(&edit.input).unwrap(), *png.get_ref());
+        assert!(!edit.input.starts_with(root.path()));
+
+        let mut jpeg = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(16, 12).write_to(&mut jpeg, image::ImageFormat::Jpeg).unwrap();
+        let jpeg_url = format!("data:image/jpeg;base64,{}", STANDARD.encode(jpeg.get_ref()));
+        let jpeg_edit = prepare_image_edit(root.path(), &jpeg_url, Some("index.md")).unwrap();
+        let converted = fs::read(&jpeg_edit.input).unwrap();
+        assert!(converted.starts_with(b"\x89PNG\r\n\x1a\n"));
+        let decoded = image::load_from_memory(&converted).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (16, 12));
+
+        assert!(prepare_image_edit(root.path(), "data:image/png,not-base64", None).is_err());
     }
     fn walkdir_count(path: &Path) -> usize {
         fs::read_dir(path).unwrap().map(|entry| {
