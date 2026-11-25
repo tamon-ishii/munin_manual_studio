@@ -35,6 +35,11 @@ const paths = {
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/>',
   zoom: '<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4.35-4.35"/>',
+  edit: '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/>',
+  keyboard: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M10 13h.01M14 13h.01M18 13h.01M8 16h8"/>',
+  outline: '<path d="M4 6h16M7 12h13M10 18h10M4 12h.01M4 18h.01"/>',
+  hub: '<path d="M12 2 2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5"/>',
 };
 export type UiIconName = keyof typeof paths;
 export function uiIcon(name: keyof typeof paths): string {

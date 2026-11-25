@@ -587,11 +587,16 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             let options: serde_json::Value = serde_json::from_str(json_opt.unwrap_or("{}")).map_err(|error| error.to_string())?;
             let site_name = options.get("site_name").map(|value| value.as_str().ok_or("サイト名を入力してください。")).transpose()?;
             let exclude_unused = options.get("exclude_unused_assets").and_then(|v| v.as_bool());
+            let theme_style: Option<config::HtmlThemeStyle> = options
+                .get("theme_style")
+                .map(|v| serde_json::from_value(v.clone()).map_err(|e| format!("テーマ設定が不正です: {e}")))
+                .transpose()?;
             let output = config::save_html_output_with_options(
                 root,
                 output_opt.ok_or("HTML出力先を指定してください。")?,
                 site_name,
                 exclude_unused,
+                theme_style.as_ref(),
             )?;
             Ok(serde_json::json!({"output":output}).to_string())
         }

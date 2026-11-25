@@ -288,7 +288,7 @@ try {
   const outputPath=exportDialog.getByLabel('出力先フォルダー');
   assert.equal(await outputPath.inputValue(),'manual');
   await outputPath.fill('publish/site');
-  await exportDialog.getByRole('button',{name:'出力先を保存',exact:true}).click();
+  await exportDialog.getByRole('button',{name:'設定を保存',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#site-build-result')?.textContent.includes('publish/site'));
   await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
   for(const action of ['build-zensical','build-mkdocs']){

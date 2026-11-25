@@ -39,6 +39,8 @@ function buildPreviewThemeCss(): string {
         }
         blockquote[class^="markdown-alert-"] > :first-child { margin-block-start: 0; }
         blockquote[class^="markdown-alert-"] > :last-child { margin-block-end: 0; }
+        .mermaid-preview { overflow: auto; padding: 12px; border-radius: 6px; border: 1px solid ${color('--border-color', '#dbe4df')}; background: ${color('--surface-soft', '#f2f5f3')}; color: ${color('--text-primary', '#26342f')}; }
+        .mermaid-preview svg { max-width: 100%; height: auto; }
         ::selection { background: ${color('--selection-bg', '#dfe9dd')}; }
         ${alertIconStyles(true)}
       `;

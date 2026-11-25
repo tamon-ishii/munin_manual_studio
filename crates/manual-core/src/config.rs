@@ -45,6 +45,93 @@ pub struct NavEntry {
     pub hidden: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct HtmlThemeStyle {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub preset: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scheme: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub primary: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub accent: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub background: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub surface: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub font: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub layout: String,
+}
+
+impl HtmlThemeStyle {
+    pub fn is_empty(&self) -> bool {
+        self.preset.is_empty()
+            && self.scheme.is_empty()
+            && self.primary.is_empty()
+            && self.accent.is_empty()
+            && self.background.is_empty()
+            && self.surface.is_empty()
+            && self.text.is_empty()
+            && self.font.is_empty()
+            && self.layout.is_empty()
+    }
+}
+
+pub fn sanitize_hex_color(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.len() == 7
+        && trimmed.starts_with('#')
+        && trimmed[1..].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        Some(trimmed.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+pub fn sanitize_html_theme_style(raw: &HtmlThemeStyle) -> Result<HtmlThemeStyle, String> {
+    let preset = match raw.preset.trim() {
+        "" | "clean-blue" | "forest" | "warm-paper" | "indigo-tech" | "slate-dark" | "midnight-dark" | "custom" => {
+            raw.preset.trim().to_string()
+        }
+        other => return Err(format!("未対応のテーマプリセットです: {other}")),
+    };
+    let scheme = match raw.scheme.trim() {
+        "" | "light" | "dark" => raw.scheme.trim().to_string(),
+        other => return Err(format!("未対応の配色モードです: {other}")),
+    };
+    let font = match raw.font.trim() {
+        "" | "sans" | "serif" | "mono" => raw.font.trim().to_string(),
+        other => return Err(format!("未対応のフォント設定です: {other}")),
+    };
+    let layout = match raw.layout.trim() {
+        "" | "standard" | "wide" | "compact" => raw.layout.trim().to_string(),
+        other => return Err(format!("未対応のレイアウト設定です: {other}")),
+    };
+    let check_color = |label: &str, v: &str| -> Result<String, String> {
+        let t = v.trim();
+        if t.is_empty() {
+            return Ok(String::new());
+        }
+        sanitize_hex_color(t).ok_or_else(|| format!("{label}は #RRGGBB 形式で指定してください。"))
+    };
+    Ok(HtmlThemeStyle {
+        preset,
+        scheme,
+        primary: check_color("メインカラー", &raw.primary)?,
+        accent: check_color("アクセントカラー", &raw.accent)?,
+        background: check_color("背景色", &raw.background)?,
+        surface: check_color("サイドバー背景色", &raw.surface)?,
+        text: check_color("文字色", &raw.text)?,
+        font,
+        layout,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MkDocsConfig {
     pub site_name: String,
@@ -55,6 +142,8 @@ pub struct MkDocsConfig {
     pub nav: Vec<NavEntry>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub exclude_unused_assets: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_style: Option<HtmlThemeStyle>,
 }
 
 impl Default for MkDocsConfig {
@@ -66,6 +155,7 @@ impl Default for MkDocsConfig {
             use_directory_urls: false,
             nav: Vec::new(),
             exclude_unused_assets: false,
+            theme_style: None,
         }
     }
 }
@@ -214,6 +304,15 @@ pub fn read_config(root: &Path) -> ManualConfig {
         }
         if let Some(exclude) = mk.get("exclude_unused_assets").and_then(|v| v.as_bool()) {
             config.mkdocs.exclude_unused_assets = exclude;
+        }
+        if let Some(theme_val) = mk.get("theme_style") {
+            if let Ok(parsed_style) = serde_json::from_value::<HtmlThemeStyle>(theme_val.clone()) {
+                if let Ok(clean) = sanitize_html_theme_style(&parsed_style) {
+                    if !clean.is_empty() {
+                        config.mkdocs.theme_style = Some(clean);
+                    }
+                }
+            }
         }
     }
 
@@ -412,6 +511,14 @@ pub fn save_settings_with_cli_models(
                 if let Some(exclude) = obj.get("exclude_unused_assets").and_then(|v| v.as_bool()) {
                     mkdocs_cfg.exclude_unused_assets = exclude;
                 }
+                if let Some(theme_val) = obj.get("theme_style") {
+                    if theme_val.is_null() {
+                        mkdocs_cfg.theme_style = None;
+                    } else if let Ok(parsed_style) = serde_json::from_value::<HtmlThemeStyle>(theme_val.clone()) {
+                        let clean = sanitize_html_theme_style(&parsed_style)?;
+                        mkdocs_cfg.theme_style = if clean.is_empty() { None } else { Some(clean) };
+                    }
+                }
             }
         }
     }
@@ -497,7 +604,7 @@ pub(crate) fn validate_output_path(root: &Path, docs: &str, docs_path: &Path, ou
 
 #[cfg(test)]
 pub(crate) fn save_html_output(root: &Path, output: &str, site_name: Option<&str>) -> Result<String, String> {
-    save_html_output_with_options(root, output, site_name, None)
+    save_html_output_with_options(root, output, site_name, None, None)
 }
 
 pub(crate) fn save_html_output_with_options(
@@ -505,11 +612,13 @@ pub(crate) fn save_html_output_with_options(
     output: &str,
     site_name: Option<&str>,
     exclude_unused_assets: Option<bool>,
+    theme_style: Option<&HtmlThemeStyle>,
 ) -> Result<String, String> {
     let site_name = site_name.map(str::trim);
     if site_name.is_some_and(|name| name.is_empty() || name.chars().any(char::is_control)) {
         return Err("サイト名を入力してください。".into());
     }
+    let validated_theme = theme_style.map(sanitize_html_theme_style).transpose()?;
     let config = read_config(root);
     let docs_path = project_path(root, &config.docs)?;
     let output_path = validate_output_path(root, &config.docs, &docs_path, output.trim())?;
@@ -533,7 +642,7 @@ pub(crate) fn save_html_output_with_options(
     };
     let fields = settings.as_object_mut().ok_or("プロジェクト設定の形式が不正です。")?;
     fields.insert("output".into(), serde_json::json!(&relative));
-    if site_name.is_some() || exclude_unused_assets.is_some() {
+    if site_name.is_some() || exclude_unused_assets.is_some() || validated_theme.is_some() {
         let mkdocs = fields
             .entry("mkdocs")
             .or_insert_with(|| serde_json::json!({}))
@@ -544,6 +653,13 @@ pub(crate) fn save_html_output_with_options(
         }
         if let Some(exclude) = exclude_unused_assets {
             mkdocs.insert("exclude_unused_assets".into(), serde_json::json!(exclude));
+        }
+        if let Some(style) = validated_theme {
+            if style.is_empty() {
+                mkdocs.remove("theme_style");
+            } else {
+                mkdocs.insert("theme_style".into(), serde_json::to_value(&style).map_err(|e| e.to_string())?);
+            }
         }
     }
     let temporary = tempfile::NamedTempFile::new_in(root).map_err(|error| error.to_string())?;

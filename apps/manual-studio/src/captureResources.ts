@@ -1,6 +1,6 @@
 import {invoke} from '@tauri-apps/api/core';
 import {uiIcon, type UiIconName} from './uiIcons';
-import {confirmAction} from './imageDialogs';
+import {confirmAction, featureDialog} from './imageDialogs';
 
 export interface CaptureResource {
   id:string;name:string;created_at:string;revision:string;recorded:boolean;window_recapture?:boolean;missing?:boolean;pending?:string;
@@ -24,7 +24,8 @@ export function setupCaptureResources(options:Options) {
   const cleanupButton=panel.querySelector<HTMLButtonElement>('#capture-resource-cleanup-btn');
   const restoreTrashButton=panel.querySelector<HTMLButtonElement>('#capture-resource-restore-trash-btn');
   const importButton=panel.querySelector<HTMLButtonElement>('#capture-resource-import-button')!;
-  importButton.innerHTML=uiIcon('image');importButton.setAttribute('aria-label','画像を登録');
+  importButton.classList.add('icon-control');
+  importButton.innerHTML=`${uiIcon('image')}<span>登録</span>`;importButton.setAttribute('aria-label','画像を登録');
   let items:CaptureResource[]=[];
   let latestTrash:{trash_dir:string;archived_at:string;count:number}|null=null;
   let loadedRoot='';
@@ -77,23 +78,33 @@ export function setupCaptureResources(options:Options) {
     if(!shown.length){const p=document.createElement('p');p.textContent=options.root()?'撮影リソースがありません。撮影または画像を登録してください。':'プロジェクトを開いてください。';list.append(p);}
     for(const r of shown){
       const card=document.createElement('article');card.className='capture-resource-card';card.dataset.captureResource=r.id;
-      const img=document.createElement('img');img.alt=r.name||'撮影画像';img.dataset.id=r.id;img.width=240;img.height=150;observer.observe(img);
+      if(r.pending)card.classList.add('has-pending');
+      const img=document.createElement('img');img.alt=r.name||'撮影画像';img.title='原稿へドラッグ＆ドロップして挿入できます';img.dataset.id=r.id;img.width=240;img.height=150;observer.observe(img);
+      const header=document.createElement('div');header.className='capture-resource-card-header';
       const title=document.createElement('strong');title.textContent=r.name||r.created_at;
+      header.append(title);
+      if(r.pending){
+        const pendingBadge=document.createElement('span');pendingBadge.className='capture-pending-badge';pendingBadge.textContent='再撮影候補あり';
+        header.append(pendingBadge);
+      }
       const state=document.createElement('p');state.textContent=`${r.missing?'元画像が欠落':r.recorded?'操作記録あり':r.window_recapture?'ウィンドウを再撮影可能':'操作記録なし'} · 派生 ${r.derived.length}件 · 使用 ${r.usages.length}箇所`;
       const controls=document.createElement('div');controls.className='capture-resource-actions';
-      const button=(label:string,icon:UiIconName,action:()=>Promise<void>,disabled=false)=>{const b=document.createElement('button');b.type='button';b.innerHTML=uiIcon(icon);b.title=label;b.setAttribute('aria-label',label);b.disabled=disabled;b.onclick=()=>void run(action);controls.append(b);};
-      button('MarkItsで編集','annotation',async()=>{await options.edited(await generate(r.id));await refresh();},r.missing);
-      button('再撮影','camera',()=>recapture({id:r.id}),r.missing||!(r.recorded||r.window_recapture));
+      const button=(label:string,icon:UiIconName,action:()=>Promise<void>,disabled=false,shortLabel?:string,className='')=>{const b=document.createElement('button');b.type='button';b.className=`icon-control${className?` ${className}`:''}`;b.innerHTML=shortLabel?`${uiIcon(icon)}<span>${shortLabel}</span>`:uiIcon(icon);b.title=label;b.setAttribute('aria-label',label);b.disabled=disabled;b.onclick=()=>void run(action);controls.append(b);};
+      button('MarkItsで編集','annotation',async()=>{await options.edited(await generate(r.id));await refresh();},r.missing,'編集');
+      button('再撮影','camera',()=>recapture({id:r.id}),r.missing||!(r.recorded||r.window_recapture),'再撮影');
       if(r.pending)button('候補を比較','review',async()=>{
-        const root=options.root();const dialog=document.createElement('dialog');dialog.className='capture-comparison';
-        const heading=document.createElement('h2');heading.textContent='再撮影の比較';
+        const root=options.root();
+        const {dialog,body}=featureDialog('再撮影の比較');
+        dialog.classList.add('capture-comparison');
         const images=document.createElement('div');images.className='capture-comparison-images image-comparison-grid';
         for(const [pending,label] of [[false,'現在'],[true,'再撮影候補']] as const){const figure=document.createElement('figure');const caption=document.createElement('figcaption');caption.textContent=label;const image=document.createElement('img');image.alt=label;image.src=await rpc('capture-resources-thumbnail',{id:r.id,pending},root);figure.append(caption,image);images.append(figure);}
         const feedback=document.createElement('p');feedback.role='status';
-        const cancel=document.createElement('button');cancel.textContent='閉じる';cancel.onclick=()=>dialog.close();
-        const adopt=document.createElement('button');adopt.textContent='候補を採用して画像を更新';adopt.onclick=()=>{adopt.disabled=true;void invoke('adopt_capture_resource',{root,id:r.id}).then(async()=>{if(root===options.root()){await refresh();await options.changed();}dialog.close();}).catch(e=>{feedback.textContent=String(e);adopt.disabled=false;});};
-        dialog.append(heading,images,feedback,cancel,adopt);document.body.append(dialog);dialog.onclose=()=>dialog.remove();dialog.showModal();
-      });
+        const actions=document.createElement('div');actions.className='actions dialog-actions';
+        const cancel=document.createElement('button');cancel.type='button';cancel.textContent='閉じる';cancel.onclick=()=>dialog.close();
+        const adopt=document.createElement('button');adopt.type='button';adopt.className='primary';adopt.textContent='候補を採用して画像を更新';adopt.onclick=()=>{adopt.disabled=true;void invoke('adopt_capture_resource',{root,id:r.id}).then(async()=>{if(root===options.root()){await refresh();await options.changed();}dialog.close();}).catch(e=>{feedback.textContent=String(e);adopt.disabled=false;});};
+        actions.append(cancel,adopt);
+        body.append(images,feedback,actions);
+      },false,'候補を比較','primary');
       button('撮影リソースを削除','trash',async()=>{
         const root=options.root();
         if(!await confirmAction(`「${title.textContent}」の元画像、編集データ、再撮影候補を削除しますか？\n文書用に生成した画像は保持します。`,'削除する'))return;
@@ -102,11 +113,11 @@ export function setupCaptureResources(options:Options) {
         if(root!==options.root())return;
         await refresh();
         options.status('撮影リソースを削除しました。');
-      });
+      },false,undefined,'capture-resource-delete-btn');
       const usages=document.createElement('div');for(const u of r.usages){const link=document.createElement('button');link.type='button';link.className='capture-usage';link.textContent=`${u.page}:${u.line}`;link.onclick=()=>void run(()=>options.usage(u));usages.append(link);}
       // The drag payload identifies a resource; the drop path resolves it asynchronously.
       img.draggable=true;img.ondragstart=e=>{e.stopPropagation();if(e.dataTransfer){e.dataTransfer.effectAllowed='copy';e.dataTransfer.setData('application/x-munin-image',JSON.stringify({root:options.root(),path:`capture-resource:${r.id}`,resource_id:r.id}));}};
-      card.append(img,title,state,controls,usages);list.append(card);
+      card.append(img,header,state,controls,usages);list.append(card);
     }
   }
   async function refresh(onlyIfChanged=false){

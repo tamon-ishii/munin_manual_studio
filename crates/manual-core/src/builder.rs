@@ -825,6 +825,170 @@ fn transform_mermaid_blocks(html: &str) -> (String, bool) {
     (out, found)
 }
 
+struct ResolvedHtmlTheme {
+    preset: String,
+    is_dark: bool,
+    primary: String,
+    accent: String,
+    background: String,
+    surface: String,
+    text: String,
+    muted: String,
+    border: String,
+    code_bg: String,
+    toc_hover: String,
+    font_family: &'static str,
+    max_width: &'static str,
+    mkdocs_grid_max_width: &'static str,
+    content_padding: &'static str,
+}
+
+fn resolve_html_theme(style: Option<&crate::config::HtmlThemeStyle>) -> ResolvedHtmlTheme {
+    let preset_key = style.map(|s| s.preset.as_str()).unwrap_or("clean-blue");
+    let (mut is_dark, p, a, bg, sf, tx, default_font, default_layout) = match preset_key {
+        "forest" => (false, "#285d46", "#3f8b60", "#ffffff", "#f2f5f0", "#22312b", "sans", "standard"),
+        "warm-paper" => (false, "#98613e", "#c27d4a", "#faf7f2", "#f3ece1", "#3a3028", "serif", "standard"),
+        "indigo-tech" => (false, "#4f46e5", "#7c3aed", "#ffffff", "#f5f7fb", "#1e293b", "sans", "wide"),
+        "slate-dark" => (true, "#60a5fa", "#38bdf8", "#161b22", "#1f2630", "#e6edf3", "sans", "standard"),
+        "midnight-dark" => (true, "#6ee7b7", "#34d399", "#141d19", "#1c2822", "#e7f2ec", "sans", "standard"),
+        _ => (false, "#2563eb", "#0ea5e9", "#ffffff", "#f7f8fa", "#1f2937", "sans", "standard"),
+    };
+    let mut primary = p.to_string();
+    let mut accent = a.to_string();
+    let mut background = bg.to_string();
+    let mut surface = sf.to_string();
+    let mut text = tx.to_string();
+    let mut font = default_font;
+    let mut layout = default_layout;
+    let mut resolved_preset = if preset_key.is_empty() { "clean-blue".to_string() } else { preset_key.to_string() };
+
+    if let Some(s) = style {
+        if s.scheme == "dark" {
+            is_dark = true;
+        } else if s.scheme == "light" {
+            is_dark = false;
+        }
+        if let Some(c) = crate::config::sanitize_hex_color(&s.primary) {
+            primary = c;
+        }
+        if let Some(c) = crate::config::sanitize_hex_color(&s.accent) {
+            accent = c;
+        }
+        if let Some(c) = crate::config::sanitize_hex_color(&s.background) {
+            background = c;
+        }
+        if let Some(c) = crate::config::sanitize_hex_color(&s.surface) {
+            surface = c;
+        }
+        if let Some(c) = crate::config::sanitize_hex_color(&s.text) {
+            text = c;
+        }
+        if matches!(s.font.as_str(), "sans" | "serif" | "mono") {
+            font = match s.font.as_str() {
+                "serif" => "serif",
+                "mono" => "mono",
+                _ => "sans",
+            };
+        }
+        if matches!(s.layout.as_str(), "standard" | "wide" | "compact") {
+            layout = match s.layout.as_str() {
+                "wide" => "wide",
+                "compact" => "compact",
+                _ => "standard",
+            };
+        }
+        if !s.preset.is_empty() {
+            resolved_preset = s.preset.clone();
+        }
+    }
+
+    let font_family = match font {
+        "serif" => r#""Noto Serif JP", "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif"#,
+        "mono" => r#""JetBrains Mono", "Noto Sans Mono CJK JP", "Cascadia Mono", Consolas, monospace"#,
+        _ => r#"-apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", sans-serif"#,
+    };
+    // Single-HTML `max_width` sizes the article column alone; MkDocs/Zensical `.md-grid`
+    // wraps all 3 columns (left nav ~242px + article + right TOC ~242px), so it needs
+    // a correspondingly wider container to preserve a comfortable article measure.
+    let (max_width, mkdocs_grid_max_width, content_padding) = match layout {
+        "wide" => ("1160px", "1640px", "36px 48px 72px"),
+        "compact" => ("760px", "1140px", "26px 32px 56px"),
+        _ => ("920px", "1360px", "36px 44px 72px"),
+    };
+    let (muted, border, code_bg, toc_hover) = if is_dark {
+        ("#9aa7b8", "#303a47", "#232b36", "rgba(255, 255, 255, 0.08)")
+    } else {
+        ("#6b7280", "#e5e7eb", "#f3f4f6", "rgba(0, 0, 0, 0.05)")
+    };
+
+    ResolvedHtmlTheme {
+        preset: resolved_preset,
+        is_dark,
+        primary,
+        accent,
+        background,
+        surface,
+        text,
+        muted: muted.to_string(),
+        border: border.to_string(),
+        code_bg: code_bg.to_string(),
+        toc_hover: toc_hover.to_string(),
+        font_family,
+        max_width,
+        mkdocs_grid_max_width,
+        content_padding,
+    }
+}
+
+fn build_mkdocs_theme_css(theme: &ResolvedHtmlTheme) -> String {
+    format!(
+        r#":root, [data-md-color-scheme="default"], [data-md-color-scheme="slate"] {{
+  --md-primary-fg-color: {primary};
+  --md-accent-fg-color: {accent};
+  --md-default-bg-color: {bg};
+  --md-default-fg-color: {text};
+  --md-code-bg-color: {code_bg};
+}}
+body, input {{
+  font-family: {font};
+}}
+.md-grid {{
+  max-width: {grid_max_width};
+}}
+@media screen and (min-width: 76.25em) {{
+  .md-sidebar--primary .md-sidebar__inner {{
+    background: {surface};
+    border-radius: 8px;
+    padding: 0.75rem 0.6rem;
+  }}
+  .md-sidebar--primary .md-nav--primary .md-nav__title {{
+    background: {surface};
+    box-shadow: none;
+  }}
+}}
+@media screen and (min-width: 60em) {{
+  .md-sidebar--secondary .md-sidebar__inner {{
+    background: {surface};
+    border-radius: 8px;
+    padding: 0.75rem 0.6rem;
+  }}
+  .md-sidebar--secondary .md-nav--secondary .md-nav__title {{
+    background: {surface};
+    box-shadow: none;
+  }}
+}}
+"#,
+        primary = theme.primary,
+        accent = theme.accent,
+        bg = theme.background,
+        text = theme.text,
+        code_bg = theme.code_bg,
+        font = theme.font_family,
+        grid_max_width = theme.mkdocs_grid_max_width,
+        surface = theme.surface,
+    )
+}
+
 fn render_single_html_document(
     site_name: &str,
     language: &str,
@@ -832,7 +996,9 @@ fn render_single_html_document(
     nav_items: &[ResolvedNavItem],
     staged_markdown: &[String],
     temp_docs: &Path,
+    theme_style: Option<&crate::config::HtmlThemeStyle>,
 ) -> String {
+    let resolved_theme = resolve_html_theme(theme_style);
     let mut page_anchors = BTreeMap::new();
     for item in nav_items {
         page_anchors.insert(item.rel_posix.clone(), item.anchor_id.clone());
@@ -882,27 +1048,46 @@ fn render_single_html_document(
         ));
     }
 
+    let mermaid_theme = if resolved_theme.is_dark { "dark" } else { "default" };
     let mermaid_script = if has_mermaid {
-        r#"  <script type="module">
-    (async () => {
-      try {
+        format!(
+            r#"  <script type="module">
+    (async () => {{
+      try {{
         const mod = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
         const mermaid = mod.default || mod;
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
-        await mermaid.run({ querySelector: '.mermaid' });
-      } catch (_offlineFallback) {
+        mermaid.initialize({{ startOnLoad: false, securityLevel: 'strict', theme: '{mermaid_theme}' }});
+        await mermaid.run({{ querySelector: '.mermaid' }});
+      }} catch (_offlineFallback) {{
         // Offline or blocked: keep readable <pre class="mermaid"> source block as-is.
-      }
-    })();
+      }}
+    }})();
   </script>
 "#
+        )
     } else {
-        ""
+        String::new()
     };
+
+    let alert_css = if resolved_theme.is_dark {
+        r#"    .markdown-alert-note { border-left-color: #60a5fa; background: rgba(96, 165, 250, 0.14); }
+    .markdown-alert-tip { border-left-color: #34d399; background: rgba(52, 211, 153, 0.14); }
+    .markdown-alert-important { border-left-color: #a78bfa; background: rgba(167, 139, 250, 0.14); }
+    .markdown-alert-warning { border-left-color: #fbbf24; background: rgba(251, 191, 36, 0.14); }
+    .markdown-alert-caution { border-left-color: #f87171; background: rgba(248, 113, 113, 0.14); }"#
+    } else {
+        r#"    .markdown-alert-note { border-left-color: #2563eb; background: #eff6ff; }
+    .markdown-alert-tip { border-left-color: #16a34a; background: #f0fdf4; }
+    .markdown-alert-important { border-left-color: #7c3aed; background: #f5f3ff; }
+    .markdown-alert-warning { border-left-color: #d97706; background: #fffbeb; }
+    .markdown-alert-caution { border-left-color: #dc2626; background: #fef2f2; }"#
+    };
+    let color_scheme = if resolved_theme.is_dark { "dark" } else { "light" };
+    let btn_text = if resolved_theme.is_dark { "#0f172a" } else { "#ffffff" };
 
     format!(
         r#"<!doctype html>
-<html lang="{lang}">
+<html lang="{lang}" data-munin-theme="{theme_preset}" data-munin-scheme="{color_scheme}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -910,18 +1095,21 @@ fn render_single_html_document(
   <title>{title}</title>
   <style>
     :root {{
-      --bg: #ffffff;
-      --surface: #f7f8fa;
-      --text: #1f2937;
-      --muted: #6b7280;
-      --border: #e5e7eb;
-      --accent: #2563eb;
-      --code-bg: #f3f4f6;
+      color-scheme: {color_scheme};
+      --bg: {bg};
+      --surface: {surface};
+      --text: {text};
+      --muted: {muted};
+      --border: {border};
+      --primary: {primary};
+      --accent: {accent};
+      --code-bg: {code_bg};
+      --toc-hover: {toc_hover};
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", sans-serif;
+      font-family: {font_family};
       color: var(--text);
       background: var(--bg);
       line-height: 1.75;
@@ -944,6 +1132,7 @@ fn render_single_html_document(
       margin: 0 0 6px;
       font-size: 1.1rem;
       line-height: 1.35;
+      color: var(--primary);
     }}
     .site-meta {{
       margin: 0 0 14px;
@@ -954,10 +1143,11 @@ fn render_single_html_document(
       width: 100%;
       margin-bottom: 16px;
       padding: 8px 12px;
-      border: 1px solid var(--accent);
+      border: 1px solid var(--primary);
       border-radius: 6px;
-      background: var(--accent);
-      color: #fff;
+      background: var(--primary);
+      color: {btn_text};
+      font-weight: 600;
       font-size: 0.88rem;
       cursor: pointer;
     }}
@@ -984,12 +1174,12 @@ fn render_single_html_document(
       font-size: 0.9rem;
     }}
     .toc-item.toc-nested a {{ padding-left: 18px; }}
-    .toc-item a:hover {{ background: #e8eefc; color: var(--accent); }}
+    .toc-item a:hover {{ background: var(--toc-hover); color: var(--primary); }}
     .content {{
-      max-width: 920px;
+      max-width: {max_width};
       width: 100%;
       margin: 0 auto;
-      padding: 36px 44px 72px;
+      padding: {content_padding};
     }}
     .manual-page + .manual-page {{
       margin-top: 52px;
@@ -997,7 +1187,7 @@ fn render_single_html_document(
       border-top: 2px solid var(--border);
     }}
     h1, h2, h3, h4 {{ line-height: 1.35; margin-top: 1.5em; }}
-    .manual-page > h1:first-child {{ margin-top: 0; }}
+    .manual-page > h1:first-child {{ margin-top: 0; color: var(--primary); }}
     a {{ color: var(--accent); }}
     img {{ max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); }}
     figure[data-munin-image] {{ margin: 1.2em 0; }}
@@ -1024,18 +1214,14 @@ fn render_single_html_document(
     blockquote {{
       margin: 1em 0;
       padding: 10px 14px;
-      border-left: 4px solid var(--border);
+      border-left: 4px solid var(--primary);
       background: var(--surface);
       border-radius: 0 6px 6px 0;
     }}
     .markdown-alert {{ border-left-width: 4px; }}
-    .markdown-alert-note {{ border-left-color: #2563eb; background: #eff6ff; }}
-    .markdown-alert-tip {{ border-left-color: #16a34a; background: #f0fdf4; }}
-    .markdown-alert-important {{ border-left-color: #7c3aed; background: #f5f3ff; }}
-    .markdown-alert-warning {{ border-left-color: #d97706; background: #fffbeb; }}
-    .markdown-alert-caution {{ border-left-color: #dc2626; background: #fef2f2; }}
+{alert_css}
     .markdown-alert-title {{ font-weight: 700; margin: 0 0 4px; }}
-    .mermaid-diagram {{ margin: 1.2em 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow-x: auto; }}
+    .mermaid-diagram {{ margin: 1.2em 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow-x: auto; }}
     .mermaid-diagram pre.mermaid {{ margin: 0; background: transparent; padding: 0; }}
     .mermaid-diagram svg {{ display: block; margin: 0 auto; max-width: 100%; height: auto; }}
     @media (max-width: 860px) {{
@@ -1079,7 +1265,23 @@ fn render_single_html_document(
 </html>
 "#,
         lang = escape_html(language),
+        theme_preset = escape_html(&resolved_theme.preset),
+        color_scheme = color_scheme,
         title = escape_html(site_name),
+        bg = resolved_theme.background,
+        surface = resolved_theme.surface,
+        text = resolved_theme.text,
+        muted = resolved_theme.muted,
+        border = resolved_theme.border,
+        primary = resolved_theme.primary,
+        accent = resolved_theme.accent,
+        code_bg = resolved_theme.code_bg,
+        toc_hover = resolved_theme.toc_hover,
+        font_family = resolved_theme.font_family,
+        btn_text = btn_text,
+        max_width = resolved_theme.max_width,
+        content_padding = resolved_theme.content_padding,
+        alert_css = alert_css,
         built_at = escape_html(built_at),
         toc = toc_html,
         sections = sections_html,
@@ -1174,6 +1376,7 @@ fn build_inner(
         use_directory_urls: use_dir_urls,
         nav: nav_config,
         exclude_unused_assets,
+        theme_style,
     } = config.map(|config| config.mkdocs).unwrap_or_default();
 
     // markdown 以外の静的ファイルをコピー
@@ -1256,6 +1459,7 @@ fn build_inner(
             &nav_items,
             &staged_markdown,
             &temp_docs,
+            theme_style.as_ref(),
         );
         fs::write(temp_site.join("index.html"), single_html).map_err(|e| e.to_string())?;
         fs::create_dir_all(output_root).map_err(|e| e.to_string())?;
@@ -1274,6 +1478,24 @@ fn build_inner(
         SiteEngine::Zensical => "  variant: classic\n".into(),
         SiteEngine::SingleHtml => unreachable!(),
     };
+    let (palette_yaml, extra_css_yaml) = if let Some(ref style) = theme_style {
+        if !style.is_empty() {
+            let resolved = resolve_html_theme(Some(style));
+            let css_path = temp_docs.join("_munin_theme.css");
+            fs::write(&css_path, build_mkdocs_theme_css(&resolved)).map_err(|e| e.to_string())?;
+            let palette = if engine == SiteEngine::Zensical || theme_name == "material" {
+                let scheme_name = if resolved.is_dark { "slate" } else { "default" };
+                format!("  palette:\n    scheme: {scheme_name}\n")
+            } else {
+                String::new()
+            };
+            (palette, "extra_css:\n  - _munin_theme.css\n".to_string())
+        } else {
+            (String::new(), String::new())
+        }
+    } else {
+        (String::new(), String::new())
+    };
     let alert_theme = if (engine == SiteEngine::Zensical || theme_name == "material") && root.is_some_and(crate::gfm::alert_icons_enabled) {
         crate::gfm::mkdocs_alert_icons(&temp_root)?
     } else {
@@ -1282,7 +1504,7 @@ fn build_inner(
     let config_yaml = format!(
         concat!(
             "site_name: {}\ntheme:\n{}  language: {}\n",
-            "{}use_directory_urls: {}\nsite_dir: site\n",
+            "{}{}use_directory_urls: {}\nsite_dir: site\n{}",
             "markdown_extensions:\n",
             "  - tables\n",
             "  - footnotes\n",
@@ -1300,8 +1522,10 @@ fn build_inner(
         serde_json::to_string(&site_name).unwrap(),
         theme,
         theme_lang,
+        palette_yaml,
         alert_theme,
         if use_dir_urls { "true" } else { "false" },
+        extra_css_yaml,
         nav_lines
     );
 
@@ -1494,6 +1718,79 @@ mod site_tests {
         assert!(!custom_items.iter().any(|i| i.rel_posix == "secret.md"));
         let yaml = build_nav_yaml(&custom_items);
         assert!(yaml.contains("  - \"基本操作\":\n      - \"最初に読む手順\": \"beta.md\"\n      - \"アルファ概要\": \"alpha.md\""));
+    }
+
+    #[test]
+    fn single_html_applies_custom_theme_style_and_persists_via_save_html_output() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/index.md"), "# テーマ検証\n\n```mermaid\ngraph TD\n  A --> B\n```\n").unwrap();
+        fs::write(
+            root.join("manual_setting.json"),
+            r#"{"docs":"docs","output":"site","assets":"docs/assets","mkdocs":{"site_name":"Theme Guide","theme":"material","language":"ja","use_directory_urls":false}}"#,
+        )
+        .unwrap();
+
+        let save_json = serde_json::json!({
+            "site_name": "Theme Guide",
+            "theme_style": {
+                "preset": "custom",
+                "scheme": "dark",
+                "primary": "#12ab34",
+                "accent": "#56cd78",
+                "background": "#101418",
+                "surface": "#1a2028",
+                "text": "#f1f5f9",
+                "font": "serif",
+                "layout": "wide"
+            }
+        })
+        .to_string();
+        crate::run(root, "save-html-output", &[("--output", "site"), ("--json", &save_json)]).unwrap();
+
+        let cfg = crate::config::read_config(root);
+        let style = cfg.mkdocs.theme_style.expect("theme_style should persist");
+        assert_eq!(style.preset, "custom");
+        assert_eq!(style.scheme, "dark");
+        assert_eq!(style.primary, "#12ab34");
+        assert_eq!(style.font, "serif");
+        assert_eq!(style.layout, "wide");
+
+        crate::run(root, "build-single-html", &[]).unwrap();
+        let html = fs::read_to_string(root.join("site/index.html")).unwrap();
+        assert!(html.contains(r#"data-munin-theme="custom""#));
+        assert!(html.contains(r#"data-munin-scheme="dark""#));
+        assert!(html.contains("--primary: #12ab34;"));
+        assert!(html.contains("--accent: #56cd78;"));
+        assert!(html.contains("--bg: #101418;"));
+        assert!(html.contains("max-width: 1160px;"));
+        assert!(html.contains("Noto Serif JP"));
+        assert!(html.contains("theme: 'dark'"));
+
+        // MkDocs/Zensical `.md-grid` wraps left nav + content + right TOC, so its max-width
+        // must reserve room for all 3 columns instead of reusing Single-HTML's article width.
+        let standard_css = build_mkdocs_theme_css(&resolve_html_theme(Some(&crate::config::HtmlThemeStyle {
+            preset: "warm-paper".into(),
+            ..Default::default()
+        })));
+        assert!(standard_css.contains("max-width: 1360px;"));
+        assert!(standard_css.contains("Noto Serif JP"));
+        assert!(standard_css.contains(".md-sidebar--primary .md-sidebar__inner"));
+        assert!(standard_css.contains(".md-nav__title"));
+
+        let wide_css = build_mkdocs_theme_css(&resolve_html_theme(Some(&crate::config::HtmlThemeStyle {
+            preset: "indigo-tech".into(),
+            ..Default::default()
+        })));
+        assert!(wide_css.contains("max-width: 1640px;"));
+
+        let compact_css = build_mkdocs_theme_css(&resolve_html_theme(Some(&crate::config::HtmlThemeStyle {
+            preset: "clean-blue".into(),
+            layout: "compact".into(),
+            ..Default::default()
+        })));
+        assert!(compact_css.contains("max-width: 1140px;"));
     }
 
     #[test]

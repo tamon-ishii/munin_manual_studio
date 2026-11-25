@@ -14,9 +14,11 @@
   { id: 'refresh', label: 'プレビューを再読込', keys: [], scope: 'global' },
   { id: 'treeSearch', label: 'ファイル名・パスを検索', keys: ['Mod+P'], scope: 'global' },
   { id: 'findInDocument', label: '開いている原稿内を検索', keys: ['Mod+F'], scope: 'global' },
+  { id: 'replaceInDocument', label: '開いている原稿内を置換', keys: ['Mod+H'], scope: 'global' },
   { id: 'search', label: '全文検索・置換', keys: ['Mod+Shift+F'], scope: 'global' },
   { id: 'sendToTerminal', label: 'AIターミナルへ送る', keys: ['Mod+Shift+T'], scope: 'global' },
   { id: 'insertAiNote', label: 'AIメモを挿入', keys: ['Mod+Shift+M'], scope: 'editor' },
+  { id: 'shortcutHelp', label: 'キーボード操作一覧を表示', keys: ['Mod+/'], scope: 'global' },
   { id: 'settings', label: '設定を開く', keys: ['Mod+,', 'Mod+K Mod+S'], scope: 'global' },
 ] as const;
 export type ShortcutCommand = typeof shortcutCommands[number]['id'];

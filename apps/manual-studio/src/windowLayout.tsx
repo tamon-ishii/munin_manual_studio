@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from "react";
 import { createRoot, Root } from "react-dom/client";
+import { positionFloatingMenu } from "./floatingMenu";
 import {
   Layout,
   Model,
@@ -18,12 +19,13 @@ export interface PanelDef {
 
 export const PANELS: PanelDef[] = [
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
+  { id: "outline", name: "目次", elementId: "panel-outline" },
   { id: "capture-resources", name: "撮影リソース一覧", elementId: "panel-capture-resources" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
 ];
 
-export const STORAGE_KEY = "manual-studio-flexlayout-model-v7";
+export const STORAGE_KEY = "manual-studio-flexlayout-model-v8";
 
 export const defaultLayoutJson: IJsonModel = {
   global: {
@@ -49,6 +51,13 @@ export const defaultLayoutJson: IJsonModel = {
             id: "file-tree",
             name: "ファイルツリー",
             component: "file-tree",
+            enableClose: true,
+          },
+          {
+            type: "tab",
+            id: "outline",
+            name: "目次",
+            component: "outline",
             enableClose: true,
           },
           {type:"tab",id:"capture-resources",name:"撮影リソース一覧",component:"capture-resources",enableClose:true},
@@ -118,7 +127,7 @@ function loadStoredModel(): Model {
     localStorage.removeItem("manual-studio-flexlayout-model-v3");
     localStorage.removeItem("manual-studio-flexlayout-model-v4");
     const current = localStorage.getItem(STORAGE_KEY);
-    const raw = current ?? localStorage.getItem("manual-studio-flexlayout-model-v5");
+    const raw = current ?? localStorage.getItem("manual-studio-flexlayout-model-v7") ?? localStorage.getItem("manual-studio-flexlayout-model-v5");
     if (raw) {
       const parsed = JSON.parse(raw);
       const str = JSON.stringify(parsed);
@@ -136,6 +145,20 @@ function loadStoredModel(): Model {
           }
         });
         removedTabs.forEach((id) => restored.doAction(Actions.deleteTab(id)));
+        if (!current && !restored.getNodeById("outline")) {
+          const left = restored.getNodeById("tabset-left");
+          if (left instanceof TabSetNode) {
+            restored.doAction(
+              Actions.addNode(
+                { type: "tab", id: "outline", name: "目次", component: "outline", enableClose: true },
+                left.getId(),
+                DockLocation.CENTER,
+                1,
+                false,
+              ),
+            );
+          }
+        }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(restored.toJson()));
         return restored;
       }
@@ -294,7 +317,7 @@ export const FlexLayoutApp: React.FC<{
       let targetTabsetId = "";
       let savedParent:ReturnType<Model['getNodeById']>;
       if(componentId==='capture-resources')try{savedParent=model.getNodeById(localStorage.getItem('manual-studio-capture-dock-parent')||'');}catch{/* Use the default group. */}
-      const preferredTabset = savedParent instanceof TabSetNode?savedParent:model.getNodeById(componentId === "file-tree" || componentId === "capture-resources" ? "tabset-left" : "tabset-editor");
+      const preferredTabset = savedParent instanceof TabSetNode?savedParent:model.getNodeById(componentId === "file-tree" || componentId === "capture-resources" || componentId === "outline" ? "tabset-left" : "tabset-editor");
       const activeTabset = preferredTabset instanceof TabSetNode ? preferredTabset : model.getActiveTabset();
       if (activeTabset) {
         targetTabsetId = activeTabset.getId();
@@ -421,12 +444,21 @@ export function setupWindowLayout(containerId = "app-layout"): WindowLayoutManag
   const viewMenuBtn = document.getElementById("view-menu-button");
   const viewMenuDropdown = document.getElementById("view-menu-dropdown");
   if (viewMenuBtn && viewMenuDropdown) {
+    const positionViewMenu = () => {
+      if (!viewMenuDropdown.hidden) positionFloatingMenu(viewMenuBtn, viewMenuDropdown, "right");
+    };
+    const scheduleViewMenuPosition = () => {
+      positionViewMenu();
+      requestAnimationFrame(positionViewMenu);
+    };
     viewMenuBtn.onclick = (e) => {
       e.stopPropagation();
       const willShow = viewMenuDropdown.hidden;
       viewMenuDropdown.hidden = !willShow;
       viewMenuBtn.setAttribute("aria-expanded", String(willShow));
+      if (willShow) scheduleViewMenuPosition();
     };
+    window.addEventListener("resize", scheduleViewMenuPosition);
 
     document.addEventListener("click", (e) => {
       if (!viewMenuDropdown.hidden && !viewMenuDropdown.contains(e.target as Node) && e.target !== viewMenuBtn) {

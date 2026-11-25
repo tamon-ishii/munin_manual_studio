@@ -234,6 +234,7 @@ fn init_template_inner(
             use_directory_urls: false,
             nav: Vec::new(),
             exclude_unused_assets: false,
+            theme_style: None,
         },
     };
     let setting_dest = config_path(root);

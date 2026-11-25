@@ -17,7 +17,8 @@ import {applyReviewCorrections} from './reviewCorrections';
 import {showReaderReport,type ReaderReport} from './readerReview';
 import {configureTargetApplication,type TargetApplication} from './targetApplication';
 import {setupPathPickers,addPathBrowse} from './pathPicker';
-import {setupFileTabMenu,type FileTab} from './fileTabMenu';
+import { setupFileTabMenu, type FileTab } from './fileTabMenu';
+import { bindFloatingDetailsMenu } from './floatingMenu';
 import { AiProgressManager } from './aiProgressManager';
 import {documentImages,imageAtSelection,renderFigure,replaceDocumentImage,type DocumentImage} from './imagePresentation';
 import type {ResourceUsage} from './types';
@@ -59,6 +60,8 @@ import { emit } from "@tauri-apps/api/event";
 import "./style.css";
 import { captureInsertionContext, isInsertionCurrent, STALE_INSERTION_MESSAGE } from "./insertionContext";
 import {setupManuscriptSearch} from './manuscriptSearch';
+import {setupManuscriptOutline} from './manuscriptOutline';
+import {showShortcutHelp} from './shortcutHelp';
 import {sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions} from './manuscriptTools';
 import {setupGlossarySettings} from './glossarySettings';
 import {
@@ -73,8 +76,9 @@ import {
 } from './aiCollaboration';
 import { openAiCollabHubDialog, type HubTabId } from './aiCollabHub';
 import { copyTextToClipboard } from './clipboardText';
+import { createHtmlThemePicker, htmlThemeEquals, themeStyleLabel } from './htmlThemePicker';
 
-import type { State, Document } from "./types";
+import type { State, Document, HtmlThemeStyle } from "./types";
 
 const element = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const input = (id: string): HTMLInputElement => element(id);
@@ -971,6 +975,23 @@ function openAiCollabHub(initialTab: HubTabId = 'dashboard'): void {
 
 const terminalPanel = element<HTMLElement>("panel-terminal");
 let terminalWorkingDirectory='';
+let lastTerminalState: "connected" | "stopped" | "starting" | "stopping" | "error" = "stopped";
+function updateTerminalHeaderIndicator(state = lastTerminalState, message?: string): void {
+  lastTerminalState = state;
+  const indicator = document.getElementById('terminal-status-indicator');
+  const chip = document.getElementById('terminal-cwd-chip');
+  const labels = { connected: "接続中", stopped: "未接続", starting: "起動中", stopping: "終了中", error: "接続失敗" };
+  const dir = (terminalWorkingDirectory || projectRoot || '').replace(/[\\/]+$/, '');
+  const dirName = dir ? (dir.split(/[\\/]/).at(-1) || dir) : '';
+  if (indicator) {
+    indicator.dataset.state = state;
+    indicator.title = `AIターミナル: ${labels[state]}${dir ? ` (${dir})` : ''}${message ? ` — ${message}` : ''}`;
+  }
+  if (chip) {
+    chip.textContent = dirName;
+    chip.hidden = !dirName;
+  }
+}
 function openManualTerminal(): void {
   if (!terminalPanel || terminalController) return;
   terminalController = setupTerminalPane(terminalPanel, {
@@ -1044,6 +1065,7 @@ function openManualTerminal(): void {
       return prepared.prompt;
     },
     onStatusChange: (state, message) => {
+      updateTerminalHeaderIndicator(state, message);
       element<HTMLSelectElement>('terminal-cli-agent').disabled=['connected','starting','stopping'].includes(state);
       for(const id of ['terminal-directory-settings','terminal-working-directory','terminal-choose-directory','terminal-project-directory'])element<HTMLInputElement|HTMLButtonElement>(id).disabled=['connected','starting','stopping'].includes(state);
       if (state === 'connected') {
@@ -1071,6 +1093,7 @@ element('terminal-directory-form').addEventListener('submit',event=>{
   event.preventDefault();
   terminalWorkingDirectory=input('terminal-working-directory').value.trim()||projectRoot;
   element('terminal-directory-settings').title=terminalWorkingDirectory;
+  updateTerminalHeaderIndicator();
   element<HTMLDialogElement>('terminal-directory-dialog').close();
 });
 document.querySelectorAll('#terminal-directory-dialog [data-close-dialog]').forEach(button=>button.addEventListener('click',()=>element<HTMLDialogElement>('terminal-directory-dialog').close()));
@@ -1187,6 +1210,9 @@ function openPanelDialog(panelId: string): void {
     for (const id of ['settings-site-name','settings-site-output','settings-site-exclude-unused','settings-site-save','settings-site-browse']) {
       element<HTMLInputElement | HTMLButtonElement>(id).disabled = !projectRoot;
     }
+    settingsSiteThemePicker.setDisabled(!projectRoot);
+    settingsSiteThemePicker.setValue(workspace?.config.mkdocs.theme_style);
+    settingsSiteThemePicker.setSiteName(workspace?.config.mkdocs.site_name ?? '');
   }
   dlg.show();
 }
@@ -1342,12 +1368,35 @@ function updateDocumentTabsScrollButtons(): void {
   });
   new ResizeObserver(updateDocumentTabsScrollButtons).observe(strip);
 }
+function setDocumentTabContent(button: HTMLButtonElement, page: string, changed: boolean, duplicateName: boolean): void {
+  const parts = page.split('/');
+  const filename = parts.at(-1) || page;
+  const parentDir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+  button.replaceChildren(document.createTextNode(filename));
+  if (duplicateName && parentDir) {
+    const dir = document.createElement('span');
+    dir.className = 'document-tab-dir';
+    dir.textContent = ` (${parentDir})`;
+    button.append(dir);
+  }
+  if (changed) {
+    const mark = document.createElement('span');
+    mark.className = 'document-tab-dirty';
+    mark.textContent = ' *';
+    button.append(mark);
+  }
+}
 function renderDocumentTabs(): void {
   const signature = JSON.stringify([projectRoot, activeImageTab, documentState?.page,
     [...documentTabs].map(([page, tab]) => [page, documentState?.page === page ? dirty : tab.content !== tab.document.content]),
     [...imageTabs]]);
   if (signature === documentTabsSignature) { updateEditorEmptyState(); updateDocumentTabsScrollButtons(); return; }
   documentTabsSignature = signature;
+  const nameCounts = new Map<string, number>();
+  for (const page of documentTabs.keys()) {
+    const base = page.split('/').at(-1) || page;
+    nameCounts.set(base, (nameCounts.get(base) || 0) + 1);
+  }
   const orderSignature = JSON.stringify([projectRoot, [...documentTabs.keys()], [...imageTabs]]);
   const strip = element('document-tabs');
   if (orderSignature === documentTabsOrderSignature) {
@@ -1357,13 +1406,18 @@ function renderDocumentTabs(): void {
       const button = strip.querySelector<HTMLButtonElement>(`[role=tab][data-document-page="${CSS.escape(page)}"]`);
       if (button) {
         button.setAttribute('aria-selected', String(active));
-        button.textContent = `${page.split('/').at(-1)}${changed ? ' *' : ''}`;
+        setDocumentTabContent(button, page, changed, (nameCounts.get(page.split('/').at(-1) || page) || 0) > 1);
         button.setAttribute('aria-label', `${page}${changed ? '（未保存の変更）' : ''}`);
+        button.closest('.document-tab')?.classList.toggle('is-dirty', changed);
+        button.closest('.document-tab')?.classList.toggle('is-active', active);
       }
     }
     for (const path of imageTabs) {
       const button = strip.querySelector<HTMLButtonElement>(`[role=tab][data-image-page="${CSS.escape(path)}"]`);
-      if (button) button.setAttribute('aria-selected', String(activeImageTab === path));
+      if (button) {
+        button.setAttribute('aria-selected', String(activeImageTab === path));
+        button.closest('.document-tab')?.classList.toggle('is-active', activeImageTab === path);
+      }
     }
     strip.hidden = !documentTabs.size && !imageTabs.size;
     element('editor-title').hidden = !strip.hidden;
@@ -1378,6 +1432,8 @@ function renderDocumentTabs(): void {
     const active = !activeImageTab && documentState?.page === page;
     const changed = active ? dirty : tab.content !== tab.document.content;
     const group = document.createElement('div'); group.className = 'document-tab'; group.draggable = true;
+    group.classList.toggle('is-dirty', changed);
+    group.classList.toggle('is-active', active);
     group.addEventListener('dragstart', event => {
       if (!event.dataTransfer) return;
       event.stopPropagation();
@@ -1405,7 +1461,8 @@ function renderDocumentTabs(): void {
       reorderDocumentTab(source, page);
     });
     const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.setAttribute('aria-selected', String(active)); button.title = `${page}（中クリックで閉じる・ドラッグで並び替え）`;
-    button.textContent = `${page.split('/').at(-1)}${changed ? ' *' : ''}`; button.dataset.documentPage = page;
+    setDocumentTabContent(button, page, changed, (nameCounts.get(page.split('/').at(-1) || page) || 0) > 1);
+    button.dataset.documentPage = page;
     button.setAttribute('aria-label', `${page}${changed ? '（未保存の変更）' : ''}`);
     button.onclick = () => { scheduleNavigation(() => openPage(page)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${page}を閉じる`);
@@ -1414,6 +1471,7 @@ function renderDocumentTabs(): void {
   }
   for (const path of imageTabs) {
     const group = document.createElement('div'); group.className = 'document-tab';
+    group.classList.toggle('is-active', activeImageTab === path);
     const button = document.createElement('button'); button.type = 'button'; button.role = 'tab'; button.textContent = path.split('/').at(-1) || path; button.title = `${path}（中クリックで閉じる）`; button.dataset.imagePage = path; button.setAttribute('aria-selected', String(activeImageTab === path)); button.onclick = () => { scheduleNavigation(() => openImageTab(path)); };
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `${path}を閉じる`);
     close.onclick = () => { scheduleNavigation(()=>closeFileTabs([{kind:'image',path}])); };
@@ -1485,11 +1543,39 @@ const previewScheduler = new PreviewScheduler<PreviewSnapshot>({
   error: error => { previewRequestPending = false; previewNavigator.setStatus('error', String(error)); status(`プレビュー: ${String(error)}`, true); },
 });
 function renderPreview(force = false): Promise<void> { return previewScheduler.request(force); }
+let manuscriptOutline: { refresh: () => void } | null = null;
 function updateCursor(): void {
-
-  const lines = editor.value.slice(0, editor.selectionStart).split("\n");
-  element("cursor-position").textContent = `${lines.length}:${lines.at(-1)!.length + 1}`;
+  const hasDoc = Boolean(documentState && !activeImageTab);
+  const cursorEl = element("cursor-position");
+  const countEl = document.getElementById("editor-word-count");
+  const modeEl = document.getElementById("editor-mode-badge");
+  if (!hasDoc) {
+    cursorEl.textContent = "1:1";
+    if (countEl) countEl.hidden = true;
+    if (modeEl) modeEl.hidden = true;
+    updateRichAiNotesBanner();
+    manuscriptOutline?.refresh();
+    return;
+  }
+  const value = editor.value;
+  const start = editor.selectionStart ?? 0;
+  const end = editor.selectionEnd ?? start;
+  const lines = value.slice(0, start).split("\n");
+  cursorEl.textContent = `${lines.length}:${lines.at(-1)!.length + 1}`;
+  if (countEl) {
+    const totalChars = value.replace(/\r?\n/g, "").length;
+    const selectedChars = end > start ? value.slice(start, end).replace(/\r?\n/g, "").length : 0;
+    countEl.textContent = selectedChars > 0
+      ? `選択 ${selectedChars.toLocaleString("ja-JP")} / ${totalChars.toLocaleString("ja-JP")}文字`
+      : `${totalChars.toLocaleString("ja-JP")}文字`;
+    countEl.hidden = false;
+  }
+  if (modeEl) {
+    modeEl.textContent = milkdown.isRichEditing ? "リッチ" : "ソース";
+    modeEl.hidden = false;
+  }
   updateRichAiNotesBanner();
+  manuscriptOutline?.refresh();
 }
 function previewScrollElement(): Element | null {
   try { return element<HTMLIFrameElement>("markdown-preview").contentDocument?.scrollingElement || null; }
@@ -2588,13 +2674,12 @@ document.addEventListener('keydown', event => {
 });
 input("tree-search").addEventListener("input", renderPages);
 element("tree-filter").addEventListener("change", renderPages);
+const formatInsertMenu = document.querySelector<HTMLDetailsElement>(".format-insert-menu");
+if (formatInsertMenu) bindFloatingDetailsMenu(formatInsertMenu, ".format-insert-actions", "right");
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
   const openMenu = document.querySelector<HTMLDetailsElement>(".format-insert-menu[open]");
   if (openMenu) { openMenu.open = false; openMenu.querySelector<HTMLElement>("summary")?.focus(); }
-});
-document.querySelector(".format-insert-actions")?.addEventListener("click", event => {
-  if ((event.target as HTMLElement).closest("button")) document.querySelector<HTMLDetailsElement>(".format-insert-menu")!.open = false;
 });
 type EditorView = "edit" | "split" | "preview";
 let preferredEditorView: EditorView | null = null;
@@ -2629,6 +2714,46 @@ new ResizeObserver(() => { if (element('markdown-preview').getClientRects().leng
 editor.addEventListener("editor-mode-change", () => {
   if (preferredEditorView === "preview") { preferredEditorView = "edit"; applyEditorView(); }
 });
+let emptyRecentLoadedFor: string | null = null;
+function refreshEmptyRecentWorkspaces(): void {
+  const container = document.getElementById('empty-recent-workspaces');
+  if (!container) return;
+  if (workspace) {
+    container.hidden = true;
+    emptyRecentLoadedFor = null;
+    return;
+  }
+  if (emptyRecentLoadedFor === 'loaded') return;
+  emptyRecentLoadedFor = 'loaded';
+  void loadWorkspaceHistory(native).then(history => {
+    if (workspace) { container.hidden = true; return; }
+    const recent = history.slice(0, 5);
+    container.replaceChildren();
+    if (!recent.length) { container.hidden = true; return; }
+    const heading = document.createElement('p');
+    heading.className = 'empty-recent-heading muted';
+    heading.textContent = '最近開いたフォルダー';
+    const list = document.createElement('div');
+    list.className = 'empty-recent-list';
+    for (const root of recent) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'empty-recent-entry';
+      btn.dataset.recentWorkspace = root;
+      btn.title = root;
+      const name = document.createElement('strong');
+      name.textContent = root.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || root;
+      const pathEl = document.createElement('span');
+      pathEl.className = 'muted';
+      pathEl.textContent = root;
+      btn.append(name, pathEl);
+      btn.onclick = () => { void work(() => openProject(root)); };
+      list.append(btn);
+    }
+    container.append(heading, list);
+    container.hidden = false;
+  }).catch(() => { container.hidden = true; });
+}
 function updateEditorEmptyState(): void {
   const empty = !documentState && !activeImageTab;
   element('editor-empty-state').hidden = !empty;
@@ -2637,11 +2762,15 @@ function updateEditorEmptyState(): void {
   element('empty-open-folder').hidden = Boolean(workspace);
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
+  refreshEmptyRecentWorkspaces();
   element('panel-editor').classList.toggle('editor-is-empty', empty);
   setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),!projectRoot||captureInsertionRunning);
   for (const id of ['reader-review','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
   setButtonDisabled(element<HTMLButtonElement>('site-export-open'), !projectRoot);
   setButtonDisabled(element<HTMLButtonElement>('assets-organizer-open'), !projectRoot);
+  const hubBtn = document.getElementById('workspace-ai-hub-open') as HTMLButtonElement | null;
+  if (hubBtn) setButtonDisabled(hubBtn, !projectRoot);
+  updateTerminalHeaderIndicator();
 }
 element('empty-open-folder').addEventListener('click', () => element('open-existing-workspace').click());
 element('empty-create-page').addEventListener('click', () => { contextCreateParent = null; element('new-page').click(); });
@@ -2704,10 +2833,7 @@ element('save-conflict').addEventListener('click', () => { void work(async () =>
 }); });
 element('workspace-name').addEventListener('keydown', event => { if (event.key === 'ArrowDown' && !document.getElementById('workspace-history-dialog')) { event.preventDefault(); element('workspace-name').click(); } });
 for (const id of ['tree-create-menu']) {
-  const menu = element<HTMLDetailsElement>(id);
-  menu.addEventListener('click', event => { if ((event.target as HTMLElement).closest('button')) menu.open = false; });
-  menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); } });
-  document.addEventListener('click', event => { if (!menu.contains(event.target as Node)) menu.open = false; });
+  bindFloatingDetailsMenu(element<HTMLDetailsElement>(id), '.editor-more-menu', 'right');
 }
 element("undo-edit").addEventListener("click", () => stepEditHistory(-1));
 element("redo-edit").addEventListener("click", () => stepEditHistory(1));
@@ -2744,7 +2870,6 @@ function initializePreview():void {
   previewDocument?.querySelectorAll<HTMLElement>('code.language-mermaid, pre.mermaid, .highlight.language-mermaid pre').forEach(code => {
     const target = previewDocument.createElement("div");
     target.className = "mermaid-preview";
-    target.style.cssText = "overflow:auto;background:#fff;padding:12px";
     const original=code.closest("pre")||code;rememberPreviewReplacement(original,target);original.replaceWith(target);
     void renderMermaid(target, code.textContent || "");
   });
@@ -2753,8 +2878,16 @@ function initializePreview():void {
   previewScrollWindow?.addEventListener("scroll", onPreviewScroll);
   syncScroll(editor.hidden ? milkdown.scrollElement : editor, previewScrollElement());
 }
+window.addEventListener("manual-studio-theme-change", () => {
+  const previewDocument = element<HTMLIFrameElement>("markdown-preview").contentDocument;
+  previewDocument?.querySelectorAll<HTMLElement>(".mermaid-preview[data-mermaid-source]").forEach(target => {
+    if (target.dataset.mermaidSource) void renderMermaid(target, target.dataset.mermaidSource);
+  });
+});
 element<HTMLIFrameElement>("markdown-preview").addEventListener("load",initializePreview);
 editor.addEventListener("click", updateCursor); editor.addEventListener("keyup", updateCursor); editor.addEventListener("select", updateCursor);
+editor.addEventListener("editor-selection-change", updateCursor);
+editor.addEventListener("editor-mode-change", updateCursor);
 function replaceMarkdown(start: number, end: number, replacement: string, selectStart: number, selectEnd = selectStart): void {
   milkdown.showSource();
   rememberCurrentSelection();
@@ -2857,33 +2990,39 @@ function handleDocumentShortcut(event: KeyboardEvent): void {
   if(command){event.preventDefault();runKeyboardCommand(command,event);}
 }
 let editorFindIndex = 0;
+let editorFindCaseSensitive = false;
+function findSourceMatches(text: string, query: string, caseSensitive: boolean): number[] {
+  const hay = caseSensitive ? text : text.toLocaleLowerCase();
+  const needle = caseSensitive ? query : query.toLocaleLowerCase();
+  const hits: number[] = [];
+  let offset = 0;
+  while (true) {
+    const found = hay.indexOf(needle, offset);
+    if (found < 0) break;
+    hits.push(found);
+    offset = found + Math.max(1, needle.length);
+  }
+  return hits;
+}
 function runEditorFind(step = 0, focusEditorMatch = false): void {
   const query = input('editor-find-input').value;
   const countEl = element('editor-find-count');
   if (!query || !documentState || activeImageTab) {
     editorFindIndex = 0;
     countEl.textContent = '';
+    milkdown.clearFindHighlight();
     return;
   }
   if (milkdown.isRichEditing) {
     if (step !== 0) editorFindIndex += step;
     else editorFindIndex = 0;
-    const { total, current } = milkdown.findInRich(query, editorFindIndex);
+    const { total, current } = milkdown.findInRich(query, editorFindIndex, editorFindCaseSensitive);
     editorFindIndex = current > 0 ? current - 1 : 0;
     countEl.textContent = total ? `${current} / ${total}` : '0件';
     if (focusEditorMatch && total) milkdown.focus();
     return;
   }
-  const lower = editor.value.toLocaleLowerCase();
-  const needle = query.toLocaleLowerCase();
-  const hits: number[] = [];
-  let offset = 0;
-  while (true) {
-    const found = lower.indexOf(needle, offset);
-    if (found < 0) break;
-    hits.push(found);
-    offset = found + Math.max(1, needle.length);
-  }
+  const hits = findSourceMatches(editor.value, query, editorFindCaseSensitive);
   if (!hits.length) {
     editorFindIndex = 0;
     countEl.textContent = '0件';
@@ -2892,7 +3031,7 @@ function runEditorFind(step = 0, focusEditorMatch = false): void {
   if (step !== 0) editorFindIndex = ((editorFindIndex + step) % hits.length + hits.length) % hits.length;
   else editorFindIndex = 0;
   const start = hits[editorFindIndex];
-  const end = start + needle.length;
+  const end = start + query.length;
   countEl.textContent = `${editorFindIndex + 1} / ${hits.length}`;
   if (focusEditorMatch) {
     jumpToSource(editor, start, end);
@@ -2905,19 +3044,67 @@ function runEditorFind(step = 0, focusEditorMatch = false): void {
   }
   updateCursor();
 }
-function openEditorFindBar(): void {
+function setEditorReplaceVisible(visible: boolean): void {
+  const row = element('editor-replace-row');
+  const toggle = element('editor-find-replace-toggle');
+  row.hidden = !visible;
+  toggle.setAttribute('aria-expanded', String(visible));
+  toggle.textContent = visible ? '▾' : '▸';
+}
+function runEditorReplace(all: boolean): void {
+  if (busy || !documentState || activeImageTab || editor.disabled || editor.readOnly) return;
+  const query = input('editor-find-input').value;
+  if (!query) return;
+  const replacement = input('editor-replace-input').value;
+  if (milkdown.isRichEditing) {
+    const count = milkdown.replaceInRich(query, replacement, editorFindIndex, all, editorFindCaseSensitive);
+    if (count > 0) {
+      status(all ? `${count}箇所を置換しました。` : '1箇所を置換しました。');
+      runEditorFind(0, false);
+    }
+    return;
+  }
+  const hits = findSourceMatches(editor.value, query, editorFindCaseSensitive);
+  if (!hits.length) return;
+  rememberCurrentSelection();
+  if (all) {
+    let next = editor.value;
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const start = hits[i];
+      next = next.slice(0, start) + replacement + next.slice(start + query.length);
+    }
+    editor.setRangeText(next, 0, editor.value.length, 'end');
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    status(`${hits.length}箇所を置換しました。`);
+    runEditorFind(0, false);
+  } else {
+    const idx = ((editorFindIndex % hits.length) + hits.length) % hits.length;
+    const start = hits[idx];
+    editor.setRangeText(replacement, start, start + query.length, 'end');
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    status('1箇所を置換しました。');
+    runEditorFind(0, false);
+  }
+}
+function openEditorFindBar(showReplace = false): void {
   if (!documentState || activeImageTab) return;
   chooseTab('editor');
   if (preferredEditorView === 'preview') { preferredEditorView = 'edit'; applyEditorView(); }
   const bar = element('editor-find-bar');
   bar.hidden = false;
+  setEditorReplaceVisible(showReplace);
   const findInput = input('editor-find-input');
   if (!findInput.value && editor.selectionStart !== editor.selectionEnd) {
     const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd).split('\n')[0];
     if (selected && selected.length <= 120) findInput.value = selected;
   }
-  findInput.focus();
-  findInput.select();
+  if (showReplace && findInput.value) {
+    input('editor-replace-input').focus();
+    input('editor-replace-input').select();
+  } else {
+    findInput.focus();
+    findInput.select();
+  }
   if (findInput.value) runEditorFind(0, false);
 }
 function closeEditorFindBar(): void {
@@ -2925,6 +3112,7 @@ function closeEditorFindBar(): void {
   if (bar.hidden) return;
   bar.hidden = true;
   element('editor-find-count').textContent = '';
+  milkdown.clearFindHighlight();
   if (documentState && !activeImageTab) milkdown.focus();
 }
 input('editor-find-input').addEventListener('input', () => runEditorFind(0, false));
@@ -2937,16 +3125,39 @@ input('editor-find-input').addEventListener('keydown', event => {
     closeEditorFindBar();
   }
 });
+element('editor-find-replace-toggle').addEventListener('click', () => {
+  const next = element('editor-replace-row').hidden;
+  setEditorReplaceVisible(next);
+  if (next) input('editor-replace-input').focus();
+});
+element('editor-find-case').addEventListener('click', () => {
+  editorFindCaseSensitive = !editorFindCaseSensitive;
+  element('editor-find-case').setAttribute('aria-pressed', String(editorFindCaseSensitive));
+  runEditorFind(0, false);
+});
+input('editor-replace-input').addEventListener('keydown', event => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    runEditorReplace(Boolean(event.ctrlKey || event.metaKey || event.shiftKey));
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeEditorFindBar();
+  }
+});
+element('editor-replace-one').addEventListener('click', () => runEditorReplace(false));
+element('editor-replace-all').addEventListener('click', () => runEditorReplace(true));
 element('editor-find-prev').addEventListener('click', () => runEditorFind(-1, false));
 element('editor-find-next').addEventListener('click', () => runEditorFind(1, false));
 element('editor-find-close').addEventListener('click', closeEditorFindBar);
 
 function runKeyboardCommand(command: ShortcutCommand, event: KeyboardEvent): void {
   if(command==='settings'){chooseTab('settings');return;}
+  if(command==='shortcutHelp'){showShortcutHelp();return;}
   if(command==='treeSearch'){
     layoutManager?.focusPanel('file-tree');setTreeFiltersVisible(true,true);return;
   }
-  if(command==='findInDocument'){openEditorFindBar();return;}
+  if(command==='findInDocument'){openEditorFindBar(false);return;}
+  if(command==='replaceInDocument'){openEditorFindBar(true);return;}
   if(command==='search'){element('manuscript-search-open').click();return;}
   if(command==='sendToTerminal'){void openEditorSendToTerminal();return;}
   if(busy||!documentState||activeImageTab)return;
@@ -2984,6 +3195,10 @@ function updateShortcutTitles():void {
   const keys=(command:ShortcutCommand)=>bindings[command].map(bindingLabel).join(' / ')||'未割り当て';
   element('save-page').title=`原稿を保存 (${keys('save')})`;
   element('application-settings').title=`設定 (${keys('settings')})`;
+  const helpBtn = document.getElementById('shortcut-help-open');
+  if (helpBtn) helpBtn.title = `キーボード操作一覧 (${keys('shortcutHelp')})`;
+  const replaceToggle = document.getElementById('editor-find-replace-toggle');
+  if (replaceToggle) replaceToggle.title = `置換を表示 (${keys('replaceInDocument')})`;
   document.querySelectorAll<HTMLButtonElement>('#panel-editor button[data-editor-view]').forEach(button=>{button.title=`${button.getAttribute('aria-label')||button.textContent} (${keys('preview')})`;});
 }
 updateShortcutTitles();window.addEventListener('manual-studio-keybindings-change',updateShortcutTitles);
@@ -3801,24 +4016,63 @@ element('assets-organizer-open').addEventListener('click', () => {
 });
 element('target-application-open').addEventListener('click',()=>{void showTargetApplication().catch(error=>status(String(error),true));});
 actionButton("quality-check", "quality-check", () => ({}), "publish-result");
+let syncingHtmlThemePickers = false;
+const siteExportThemePicker = createHtmlThemePicker(element('site-export-theme-picker'), {
+  idPrefix: 'site-export',
+  onChange: (style) => {
+    if (syncingHtmlThemePickers) return;
+    syncingHtmlThemePickers = true;
+    settingsSiteThemePicker.setValue(style);
+    syncingHtmlThemePickers = false;
+    updateSiteExportSettingsSummary(style);
+  },
+});
+const settingsSiteThemePicker = createHtmlThemePicker(element('settings-site-theme-picker'), {
+  idPrefix: 'settings-site',
+  onChange: (style) => {
+    if (syncingHtmlThemePickers) return;
+    syncingHtmlThemePickers = true;
+    siteExportThemePicker.setValue(style);
+    syncingHtmlThemePickers = false;
+    updateSiteExportSettingsSummary(style);
+  },
+});
+input('settings-site-name').addEventListener('input', () => {
+  const name = input('settings-site-name').value;
+  settingsSiteThemePicker.setSiteName(name);
+  siteExportThemePicker.setSiteName(name);
+});
+function updateSiteExportSettingsSummary(themeStyle?: HtmlThemeStyle | null): void {
+  const siteName = workspace?.config.mkdocs.site_name ?? '';
+  const theme = themeStyle ?? siteExportThemePicker.getValue();
+  element('site-export-settings-summary').textContent =
+    `サイト名: ${siteName || '（未設定）'} · テーマ: ${themeStyleLabel(theme)}`;
+}
 function syncHtmlOutputControls(): void {
   const outputPath = workspace?.config.output ?? '';
   const excludeUnused = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
   const siteName = workspace?.config.mkdocs.site_name ?? '';
+  const themeStyle = workspace?.config.mkdocs.theme_style;
   input('site-output-path').value = outputPath;
   input('site-exclude-unused-assets').checked = excludeUnused;
   input('settings-site-output').value = outputPath;
   input('settings-site-exclude-unused').checked = excludeUnused;
   input('settings-site-name').value = siteName;
-  element('site-export-settings-summary').textContent = `サイト名: ${siteName || '（未設定）'}`;
+  syncingHtmlThemePickers = true;
+  siteExportThemePicker.setValue(themeStyle);
+  settingsSiteThemePicker.setValue(themeStyle);
+  siteExportThemePicker.setSiteName(siteName);
+  settingsSiteThemePicker.setSiteName(siteName);
+  syncingHtmlThemePickers = false;
+  updateSiteExportSettingsSummary(themeStyle);
 }
 element('site-export-open').addEventListener('click', () => {
   if (busy || !projectRoot || document.querySelector('#site-export-dialog[open]')) return;
   const {dialog, body} = featureDialog('HTML出力');
   dialog.id = 'site-export-dialog';
+  dialog.dataset.dialogInitialWidth = '760';
   const controls = element('site-export-controls');
   element<HTMLButtonElement>('browse-site-output').hidden = !native;
-  element<HTMLButtonElement>('open-site-html').hidden = !native;
   syncHtmlOutputControls();
   element('site-build-result').textContent = '';
   body.append(controls);
@@ -3857,6 +4111,7 @@ async function saveSiteOutput(
   resultId = 'site-build-result',
   siteName?: string,
   excludeUnused?: boolean,
+  themeStyle?: HtmlThemeStyle,
 ): Promise<string> {
   const root = projectRoot;
   const path = input(fieldId);
@@ -3866,10 +4121,12 @@ async function saveSiteOutput(
     if (!value) throw new Error('出力先フォルダーを入力してください。');
     if (siteName !== undefined && !siteName) throw new Error('サイト名を入力してください。');
     const currentExclude = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
+    const themeUnchanged = themeStyle === undefined || htmlThemeEquals(themeStyle, workspace?.config.mkdocs.theme_style);
     if (
       value === workspace?.config.output &&
       (siteName === undefined || siteName === workspace.config.mkdocs.site_name) &&
-      (excludeUnused === undefined || excludeUnused === currentExclude)
+      (excludeUnused === undefined || excludeUnused === currentExclude) &&
+      themeUnchanged
     ) {
       path.value = value;
       return value;
@@ -3877,6 +4134,7 @@ async function saveSiteOutput(
     const jsonPayload: Record<string, unknown> = {};
     if (siteName !== undefined) jsonPayload.site_name = siteName;
     if (excludeUnused !== undefined) jsonPayload.exclude_unused_assets = excludeUnused;
+    if (themeStyle !== undefined) jsonPayload.theme_style = themeStyle;
     const {output} = JSON.parse(
       await rpc(
         'save-html-output',
@@ -3888,6 +4146,7 @@ async function saveSiteOutput(
     workspace.config.output = output;
     if (siteName !== undefined) workspace.config.mkdocs.site_name = siteName;
     if (excludeUnused !== undefined) workspace.config.mkdocs.exclude_unused_assets = excludeUnused;
+    if (themeStyle !== undefined) workspace.config.mkdocs.theme_style = { ...themeStyle };
     syncHtmlOutputControls();
     path.value = output;
     return output;
@@ -3904,9 +4163,10 @@ element('settings-site-save').addEventListener('click', () => {
     const name = input('settings-site-name');
     const siteName = name.value.trim();
     const excludeUnused = input('settings-site-exclude-unused').checked;
+    const themeStyle = settingsSiteThemePicker.getValue();
     name.disabled = true;
     try {
-      await saveSiteOutput('settings-site-output', 'settings-site-result', siteName, excludeUnused);
+      await saveSiteOutput('settings-site-output', 'settings-site-result', siteName, excludeUnused, themeStyle);
       name.value = siteName;
       element('settings-site-result').textContent = '保存しました。';
     } finally {
@@ -3916,8 +4176,14 @@ element('settings-site-save').addEventListener('click', () => {
 });
 element('save-site-output').addEventListener('click', () => {
   void work(async () => {
-    const output = await saveSiteOutput('site-output-path', 'site-build-result', undefined, input('site-exclude-unused-assets').checked);
-    element('site-build-result').textContent = `出力先を保存しました · ${output}`;
+    const output = await saveSiteOutput(
+      'site-output-path',
+      'site-build-result',
+      undefined,
+      input('site-exclude-unused-assets').checked,
+      siteExportThemePicker.getValue(),
+    );
+    element('site-build-result').textContent = `設定を保存しました · ${output}`;
   });
 });
 element('build-site').addEventListener('click', () => {
@@ -3930,7 +4196,13 @@ element('build-site').addEventListener('click', () => {
         ? 'build-single-html'
         : 'build-mkdocs';
   void work(async () => {
-    const output = await saveSiteOutput('site-output-path', 'site-build-result', undefined, input('site-exclude-unused-assets').checked);
+    const output = await saveSiteOutput(
+      'site-output-path',
+      'site-build-result',
+      undefined,
+      input('site-exclude-unused-assets').checked,
+      siteExportThemePicker.getValue(),
+    );
     await runAction(action, {output}, 'site-build-result');
     if (!native || root !== projectRoot) return;
     const result = element('site-build-result');
@@ -3943,19 +4215,6 @@ element('build-site').addEventListener('click', () => {
       status(message, true);
     }
   });
-});
-element('open-site-html').addEventListener('click', () => {
-  if (!native || !projectRoot) return;
-  const result = element('site-build-result');
-  void work(async () => {
-    try {
-      await invoke('open_output_html', {root: projectRoot, output: input('site-output-path').value.trim()});
-      result.textContent = '出力済みのHTMLを開きました。';
-    } catch (error) {
-      result.textContent = String(error);
-      throw error;
-    }
-  }, {lockControls: false});
 });
 setBusy(false);
 updateSaveState();
@@ -4082,6 +4341,8 @@ element('manage-ai-notes')?.addEventListener('click',()=>{openCurrentAiNotes();}
 element('send-to-terminal')?.addEventListener('click',()=>{void openEditorSendToTerminal();});
 element('terminal-send-editor-btn')?.addEventListener('click',()=>{void openEditorSendToTerminal();});
 element('open-ai-collab-hub')?.addEventListener('click',()=>{openAiCollabHub('dashboard');});
+element('workspace-ai-hub-open')?.addEventListener('click',()=>{openAiCollabHub('dashboard');});
+element('shortcut-help-open')?.addEventListener('click',()=>{showShortcutHelp();});
 element('terminal-external-changes-btn')?.addEventListener('click',()=>{void openExternalChangeTray();});
 
 let captureInsertionRunning=false;
@@ -4167,3 +4428,5 @@ const manuscriptToolOptions:ManuscriptToolsOptions={
 };
 const openManuscriptSearch=setupManuscriptSearch(manuscriptToolOptions);
 element('manuscript-search-open').addEventListener('click',openManuscriptSearch);
+manuscriptOutline=setupManuscriptOutline(manuscriptToolOptions);
+manuscriptOutline.refresh();

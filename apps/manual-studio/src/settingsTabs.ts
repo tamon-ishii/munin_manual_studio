@@ -6,13 +6,13 @@ export function setupSettingsTabs(extraNodes?: { glossary?: Element[] }): (categ
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', '設定の種類');
   const glossaryNodes = extraNodes?.glossary ?? (document.getElementById('glossary-settings') ? [document.getElementById('glossary-settings')!] : []);
-  const categories: {id: SettingsCategory;label: string;nodes: Element[]}[] = [
-    {id:'keyboard',label:'キーボード',nodes:[document.getElementById('keyboard-shortcut-settings')!]},
-    {id:'capture',label:'撮影',nodes:[document.getElementById('markits-shortcut-settings')!]},
-    {id:'text-ai',label:'文章・図のAI',nodes:[document.getElementById('ai-connection-type')!.closest('.card')!]},
-    {id:'glossary',label:'用語集',nodes:glossaryNodes},
-    {id:'html-output',label:'HTML出力',nodes:[document.getElementById('html-output-settings')!]},
-    {id:'appearance',label:'外観',nodes:Array.from(document.querySelectorAll('#panel-appearance > .card'))},
+  const categories: {id: SettingsCategory;label: string;saveMode: string;nodes: Element[]}[] = [
+    {id:'keyboard',label:'キーボード',saveMode:'ボタンで保存',nodes:[document.getElementById('keyboard-shortcut-settings')!]},
+    {id:'capture',label:'撮影',saveMode:'自動保存',nodes:[document.getElementById('markits-shortcut-settings')!]},
+    {id:'text-ai',label:'文章・図のAI',saveMode:'自動保存',nodes:[document.getElementById('ai-connection-type')!.closest('.card')!]},
+    {id:'glossary',label:'用語集',saveMode:'操作ごとに自動保存',nodes:glossaryNodes},
+    {id:'html-output',label:'HTML出力',saveMode:'ボタンで保存',nodes:[document.getElementById('html-output-settings')!]},
+    {id:'appearance',label:'外観',saveMode:'即時反映・自動保存',nodes:Array.from(document.querySelectorAll('#panel-appearance > .card'))},
   ];
   const buttons = new Map<SettingsCategory, HTMLButtonElement>();
   const panels = new Map<SettingsCategory, HTMLElement>();
@@ -25,14 +25,20 @@ export function setupSettingsTabs(extraNodes?: { glossary?: Element[] }): (categ
     }
     dialog.scrollTop = 0;
   };
-  for (const {id,label,nodes} of categories) {
+  for (const {id,label,saveMode,nodes} of categories) {
     const button = document.createElement('button');
     button.type = 'button';button.id = `settings-tab-${id}`;button.textContent = label;
     button.setAttribute('role','tab');button.setAttribute('aria-controls',`settings-category-${id}`);
     const panel = document.createElement('section');
     panel.id = `settings-category-${id}`;panel.className = 'settings-category-panel';
     panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);
-    panel.append(...nodes);dialog.append(panel);tabs.append(button);
+    const modeNote = document.createElement('div');
+    modeNote.className = 'settings-save-mode-bar';
+    const modeBadge = document.createElement('span');
+    modeBadge.className = 'settings-save-mode-badge';
+    modeBadge.textContent = saveMode;
+    modeNote.append(modeBadge);
+    panel.append(modeNote, ...nodes);dialog.append(panel);tabs.append(button);
     buttons.set(id,button);panels.set(id,panel);
     button.addEventListener('click',()=>select(id));
     button.addEventListener('keydown',event=>{

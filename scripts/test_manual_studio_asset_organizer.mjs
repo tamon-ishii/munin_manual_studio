@@ -86,7 +86,7 @@ try {
   await dialog.waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.querySelectorAll('#asset-organizer-list .asset-organizer-item').length === 3);
 
-  // Verify initial dialog dimensions (~560x840) and zero wasted bottom space below the list.
+  // Verify initial dialog dimensions (~760x840) and zero wasted bottom space below the list.
   const layoutMetrics = await page.evaluate(() => {
     const dlg = document.querySelector('#asset-organizer-dialog');
     const list = document.querySelector('#asset-organizer-list');
@@ -100,9 +100,9 @@ try {
       initialHeightAttr: dlg.dataset.dialogInitialHeight,
     };
   });
-  assert.equal(layoutMetrics.initialWidthAttr, '560');
+  assert.equal(layoutMetrics.initialWidthAttr, '760');
   assert.equal(layoutMetrics.initialHeightAttr, '840');
-  assert.ok(layoutMetrics.width >= 520 && layoutMetrics.width <= 600, `Unexpected initial width: ${layoutMetrics.width}`);
+  assert.ok(layoutMetrics.width >= 720 && layoutMetrics.width <= 800, `Unexpected initial width: ${layoutMetrics.width}`);
   assert.ok(layoutMetrics.height >= 800 && layoutMetrics.height <= 860, `Unexpected initial height: ${layoutMetrics.height}`);
   assert.ok(layoutMetrics.bottomGap >= 0 && layoutMetrics.bottomGap <= 24, `Unexpected bottom gap below list: ${layoutMetrics.bottomGap}px`);
 
@@ -138,6 +138,25 @@ try {
   assert.equal(await dialog.locator('.asset-organizer-item').count(), 1);
   await dialog.locator('#asset-organizer-search').fill('');
   assert.equal(await dialog.locator('.asset-organizer-item').count(), 3);
+
+  // Sort selector reorders assets cleanly.
+  await dialog.locator('#asset-organizer-sort').selectOption('name');
+  const sortedByName = await dialog.locator('.asset-organizer-item').evaluateAll(nodes =>
+    nodes.map(node => node.dataset.assetPath),
+  );
+  assert.deepEqual(sortedByName, [
+    'docs/assets/unused-one.png',
+    'docs/assets/unused-two.png',
+    'docs/assets/used.png',
+  ]);
+  await dialog.locator('#asset-organizer-sort').selectOption('unused');
+
+  // Selecting one unused asset updates bulk button label to selected count.
+  const firstUnusedCheck = dialog.locator('.asset-organizer-item[data-asset-path="docs/assets/unused-one.png"] .asset-organizer-select');
+  await firstUnusedCheck.check();
+  assert.match(await dialog.locator('#asset-organizer-delete-unused').textContent(), /選択した未使用を削除 \(1件\)/);
+  await firstUnusedCheck.uncheck();
+  assert.match(await dialog.locator('#asset-organizer-delete-unused').textContent(), /未使用アセットを削除 \(2件\)/);
 
   // Unsaved document prevents deleting unused assets.
   await dialog.locator('#asset-organizer-delete-unused').click();

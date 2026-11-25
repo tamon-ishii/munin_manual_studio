@@ -33,9 +33,14 @@ const imagePresentationPlugin=$remark('munin-image-presentation',()=>()=>functio
   if(node.type==='paragraph'&&node.children?.length===1&&node.children[0].muninPresentation){const image=node.children[0];delete node.children;Object.assign(node,image);}
 });
 let mermaidModule: Promise<typeof import('mermaid')['default']> | undefined;
+let mermaidThemeMode: 'dark' | 'default' | '' = '';
+function isDarkTheme(): boolean {
+  return document.documentElement.style.colorScheme === 'dark';
+}
 function loadMermaid() {
   return mermaidModule ??= import('mermaid').then(({ default: mermaid }) => {
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true });
+    mermaidThemeMode = isDarkTheme() ? 'dark' : 'default';
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true, theme: mermaidThemeMode });
     return mermaid;
   });
 }
@@ -43,8 +48,14 @@ let diagramId = 0;
 export async function renderMermaid(target: HTMLElement, code: string): Promise<void> {
   const version = String(++diagramId);
   target.dataset.renderVersion = version;
+  target.dataset.mermaidSource = code;
   try {
     const mermaid = await loadMermaid();
+    const desired = isDarkTheme() ? 'dark' : 'default';
+    if (mermaidThemeMode !== desired) {
+      mermaidThemeMode = desired;
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true, theme: desired });
+    }
     const { svg } = await mermaid.render(`manual-mermaid-${version}`, code);
     if (target.dataset.renderVersion === version) { target.innerHTML = svg; target.classList.remove('diagram-error'); }
   } catch (error) {
@@ -120,8 +131,8 @@ export function setupMilkdownEditor(
   overlay.style.display = 'none';
   const editBtn = document.createElement('button');
   editBtn.type = 'button';
-  editBtn.className = 'milkdown-image-edit-btn';
-  editBtn.textContent = '🎨 画像の編集';
+  editBtn.className = 'milkdown-image-edit-btn icon-control';
+  editBtn.innerHTML = `${uiIcon('edit')}<span>画像の編集</span>`;
   editBtn.title = 'MarkItsで画像に注釈やトリミングを加えて編集します';
   overlay.appendChild(editBtn);
   let saveImageBtn: HTMLButtonElement | null = null;
@@ -154,9 +165,12 @@ export function setupMilkdownEditor(
 
   let activeImg: HTMLImageElement | null = null;
   let activeSource = '';
+  let overlayPinnedBySelection = false;
   let hideTimer: number | null = null;
 
-  function hideOverlay() {
+  function hideOverlay(force = false) {
+    if (!force && overlayPinnedBySelection && activeImg?.isConnected) return;
+    overlayPinnedBySelection = false;
     overlay.style.display = 'none';
     activeImg = null;
     activeSource = '';
@@ -224,13 +238,14 @@ export function setupMilkdownEditor(
     overlay.style.display = 'flex';
   }
 
-  function handleImageHover(img: HTMLImageElement) {
+  function handleImageHover(img: HTMLImageElement, pinned = false) {
     if ((!onEditImage&&!onImageSettings&&!onRecaptureImage&&!onSaveBase64Image) || readonly) return;
     cancelHide();
     activeImg = img;
     activeSource = getOriginalSrc(img) || '';
     const isDataImage = /^data:image\//i.test(activeSource);
     if (!activeSource || (activeSource.startsWith('data:') && !isDataImage)) return;
+    overlayPinnedBySelection = pinned;
     if (saveImageBtn) saveImageBtn.hidden = !isDataImage;
     if (recaptureBtn) recaptureBtn.hidden = isDataImage;
     if (askBtn) askBtn.hidden = isDataImage;
@@ -275,7 +290,7 @@ export function setupMilkdownEditor(
   let richOwner: string | null = null;
   let richSource: string | null = null;
   function refresh(force = false) {
-    hideOverlay();
+    hideOverlay(true);
     ++imageRefreshVersion;
     if (!ready || !instance || syncing || (sourceMode && !force)) return;
     syncing = true;
@@ -321,7 +336,7 @@ export function setupMilkdownEditor(
     }));
   }
   function showSource() {
-    hideOverlay();
+    hideOverlay(true);
     sourceMode = true; host.hidden = false; host.dataset.sourceMode = 'true'; source.hidden = false;
     toggle.setAttribute('aria-pressed', 'true');
     source.dispatchEvent(new Event('editor-mode-change'));
@@ -363,18 +378,45 @@ export function setupMilkdownEditor(
   }
   const observer = new MutationObserver(updateReadonly);
   observer.observe(source, { attributes: true, attributeFilter: ['disabled', 'readonly'] });
+  let findHighlight: { query: string; caseSensitive: boolean; currentIndex: number } = { query: '', caseSensitive: false, currentIndex: 0 };
+  const findMatchesInDoc = (doc: EditorState['doc'], query: string, caseSensitive: boolean): Array<{ from: number; to: number }> => {
+    if (!query) return [];
+    const needle = caseSensitive ? query : query.toLocaleLowerCase();
+    const hits: Array<{ from: number; to: number }> = [];
+    doc.descendants((node, pos) => {
+      if (!node.isText || !node.text) return;
+      const hay = caseSensitive ? node.text : node.text.toLocaleLowerCase();
+      let offset = 0;
+      while (true) {
+        const found = hay.indexOf(needle, offset);
+        if (found < 0) break;
+        hits.push({ from: pos + found, to: pos + found + needle.length });
+        offset = found + Math.max(1, needle.length);
+      }
+    });
+    return hits;
+  };
   const bridge = $prose(ctx => new Plugin({
     props: { decorations(state) {
-      const hidden:Decoration[]=[];
+      const decorations: Decoration[] = [];
       const isReference=(node:typeof state.doc)=>node.type.name==='html'&&/^\s*<!--\s*(?:screenshot:ref\s+id=[a-z0-9-]+|\/screenshot:ref)\s*-->\s*$/.test(String(node.attrs.value));
       state.doc.descendants((node,pos)=>{
         if(node.type.name==='paragraph'&&node.childCount>0){
           let referencesOnly=true;node.forEach(child=>{if(!isReference(child))referencesOnly=false;});
-          if(referencesOnly){hidden.push(Decoration.node(pos,pos+node.nodeSize,{class:'screenshot-reference-hidden'}));return false;}
+          if(referencesOnly){decorations.push(Decoration.node(pos,pos+node.nodeSize,{class:'screenshot-reference-hidden'}));return false;}
         }
-        if(isReference(node))hidden.push(Decoration.node(pos,pos+node.nodeSize,{class:'screenshot-reference-hidden'}));
+        if(isReference(node))decorations.push(Decoration.node(pos,pos+node.nodeSize,{class:'screenshot-reference-hidden'}));
       });
-      return DecorationSet.create(state.doc,hidden);
+      if (findHighlight.query) {
+        const hits = findMatchesInDoc(state.doc, findHighlight.query, findHighlight.caseSensitive);
+        const activeIdx = hits.length ? ((findHighlight.currentIndex % hits.length) + hits.length) % hits.length : -1;
+        hits.forEach((hit, idx) => {
+          decorations.push(Decoration.inline(hit.from, hit.to, {
+            class: idx === activeIdx ? 'editor-find-match editor-find-match-current' : 'editor-find-match',
+          }));
+        });
+      }
+      return DecorationSet.create(state.doc, decorations);
     } },
     view: () => ({ update(view, previous) {
       // Async rich-editor transactions must not overwrite newer source edits.
@@ -404,6 +446,15 @@ export function setupMilkdownEditor(
           offset = found + text.length;
         });
         source.setSelectionRange(start, Math.max(start, end));
+        // Show image overlay when an image node is selected via click or keyboard.
+        const sel = view.state.selection;
+        let selectedImg: HTMLImageElement | null = null;
+        if (sel instanceof NodeSelection && ['image', 'image-block'].includes(sel.node.type.name)) {
+          const dom = view.nodeDOM(sel.from);
+          selectedImg = dom instanceof HTMLImageElement ? dom : dom instanceof HTMLElement ? dom.querySelector<HTMLImageElement>('img') : null;
+        }
+        if (selectedImg) handleImageHover(selectedImg, true);
+        else if (overlayPinnedBySelection) hideOverlay(true);
         // Notify after ProseMirror has committed its selection; the native DOM
         // selectionchange event may arrive before that transaction.
         source.dispatchEvent(new Event("editor-selection-change"));
@@ -447,7 +498,7 @@ export function setupMilkdownEditor(
       menu.style.bottom = openAbove ? '100%' : 'auto';
       menu.style.maxHeight = `${openAbove ? above : below}px`;
       menu.style.maxWidth = `${bounds.width}px`;
-      menu.style.left = `${Math.min(0, bounds.right - selector.left - menu.offsetWidth)}px`;
+      menu.style.left = `${Math.max(bounds.left - selector.left, Math.min(0, bounds.right - selector.left - menu.offsetWidth))}px`;
     });
   }
   const menuResizeObserver = new ResizeObserver(fitToolbarMenus);
@@ -771,29 +822,55 @@ export function setupMilkdownEditor(
       view.dispatch(tr.scrollIntoView());return true;
     });
   }
+  window.addEventListener('manual-studio-theme-change', () => {
+    host.querySelectorAll<HTMLElement>('.mermaid-preview[data-mermaid-source]').forEach(target => {
+      if (target.dataset.mermaidSource) void renderMermaid(target, target.dataset.mermaidSource);
+    });
+  });
   return { showSource, showRich, refresh, refreshImages, host, stepHistory,imageSourceRange,runShortcut,
-    findInRich: (query: string, matchIndex: number): { total: number; current: number } => {
-      if (!ready || !instance || sourceMode || !query) return { total: 0, current: 0 };
-      const needle = query.toLocaleLowerCase();
+    findInRich: (query: string, matchIndex: number, caseSensitive = false): { total: number; current: number } => {
+      findHighlight = { query, caseSensitive, currentIndex: matchIndex };
+      if (!ready || !instance || sourceMode) return { total: 0, current: 0 };
       return instance.action(ctx => {
         const view = ctx.get(editorViewCtx);
-        const hits: Array<{ from: number; to: number }> = [];
-        view.state.doc.descendants((node, pos) => {
-          if (!node.isText || !node.text) return;
-          const lower = node.text.toLocaleLowerCase();
-          let offset = 0;
-          while (true) {
-            const found = lower.indexOf(needle, offset);
-            if (found < 0) break;
-            hits.push({ from: pos + found, to: pos + found + needle.length });
-            offset = found + Math.max(1, needle.length);
-          }
-        });
-        if (!hits.length) return { total: 0, current: 0 };
+        const hits = findMatchesInDoc(view.state.doc, query, caseSensitive);
+        if (!hits.length) {
+          findHighlight = { query, caseSensitive, currentIndex: 0 };
+          view.dispatch(view.state.tr.setMeta('addToHistory', false));
+          return { total: 0, current: 0 };
+        }
         const clamped = ((matchIndex % hits.length) + hits.length) % hits.length;
+        findHighlight = { query, caseSensitive, currentIndex: clamped };
         const target = hits[clamped];
-        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, target.from, target.to)).scrollIntoView());
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, target.from, target.to)).setMeta('addToHistory', false).scrollIntoView());
         return { total: hits.length, current: clamped + 1 };
+      });
+    },
+    clearFindHighlight: (): void => {
+      if (!findHighlight.query) return;
+      findHighlight = { query: '', caseSensitive: false, currentIndex: 0 };
+      if (ready && instance && !sourceMode) {
+        instance.action(ctx => {
+          const view = ctx.get(editorViewCtx);
+          view.dispatch(view.state.tr.setMeta('addToHistory', false));
+        });
+      }
+    },
+    replaceInRich: (query: string, replacement: string, matchIndex: number, all: boolean, caseSensitive = false): number => {
+      if (!ready || !instance || sourceMode || !query) return 0;
+      return instance.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        if (!view.editable) return 0;
+        const hits = findMatchesInDoc(view.state.doc, query, caseSensitive);
+        if (!hits.length) return 0;
+        const targets = all ? [...hits].reverse() : [hits[((matchIndex % hits.length) + hits.length) % hits.length]];
+        const tr = view.state.tr;
+        for (const hit of targets) {
+          if (replacement) tr.insertText(replacement, hit.from, hit.to);
+          else tr.delete(hit.from, hit.to);
+        }
+        view.dispatch(tr.scrollIntoView());
+        return targets.length;
       });
     },
     get scrollElement(): HTMLElement { return host.querySelector<HTMLElement>('.ProseMirror') || host; },

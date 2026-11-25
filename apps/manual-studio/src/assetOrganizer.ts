@@ -55,7 +55,7 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
 
   const { dialog, body } = featureDialog('アセットの整理');
   dialog.id = 'asset-organizer-dialog';
-  dialog.dataset.dialogInitialWidth = '560';
+  dialog.dataset.dialogInitialWidth = '760';
   dialog.dataset.dialogInitialHeight = '840';
   body.className = 'asset-organizer-body';
 
@@ -73,6 +73,13 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
   filterSelect.add(new Option('すべて', 'all'));
   filterSelect.add(new Option('未使用のみ', 'unused'));
   filterSelect.add(new Option('使用中のみ', 'used'));
+
+  const sortSelect = document.createElement('select');
+  sortSelect.id = 'asset-organizer-sort';
+  sortSelect.setAttribute('aria-label', '並び替え');
+  sortSelect.add(new Option('未使用優先', 'unused'));
+  sortSelect.add(new Option('サイズが大きい順', 'size'));
+  sortSelect.add(new Option('ファイル名順', 'name'));
 
   const searchInput = document.createElement('input');
   searchInput.id = 'asset-organizer-search';
@@ -92,7 +99,7 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
   deleteUnusedButton.innerHTML = `${uiIcon('trash')}<span>未使用アセットを削除</span>`;
   deleteUnusedButton.disabled = true;
 
-  toolbar.append(filterSelect, searchInput, refreshButton, deleteUnusedButton);
+  toolbar.append(filterSelect, sortSelect, searchInput, refreshButton, deleteUnusedButton);
 
   const feedback = document.createElement('p');
   feedback.id = 'asset-organizer-feedback';
@@ -110,6 +117,7 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
   let loading = false;
   let version = 0;
   let renderGeneration = 0;
+  const selectedUnused = new Set<string>();
   const thumbnailCache = new Map<string, string>();
 
   async function loadThumbnails(queue: Array<{ img: HTMLImageElement; path: string }>, gen: number, currentVersion: number): Promise<void> {
@@ -144,11 +152,21 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
   const isDeletableUnused = (item: ProjectAssetItem): boolean =>
     !item.missing && item.usages.length === 0;
 
+  function syncBulkDeleteButton(): void {
+    const unusedItems = items.filter(isDeletableUnused);
+    const chosenCount = unusedItems.filter(item => selectedUnused.has(item.path)).length;
+    const deleteLabel = deleteUnusedButton.querySelector('span');
+    if (deleteLabel) {
+      if (chosenCount > 0) deleteLabel.textContent = `選択した未使用を削除 (${chosenCount}件)`;
+      else deleteLabel.textContent = unusedItems.length > 0 ? `未使用アセットを削除 (${unusedItems.length}件)` : '未使用アセットを削除';
+    }
+    deleteUnusedButton.disabled = loading || unusedItems.length === 0;
+  }
+
   function setBusy(busy: boolean): void {
     loading = busy;
     refreshButton.disabled = busy;
-    const unusedCount = items.filter(isDeletableUnused).length;
-    deleteUnusedButton.disabled = busy || unusedCount === 0;
+    syncBulkDeleteButton();
   }
 
   function render(): void {
@@ -158,7 +176,13 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
     const pendingThumbnails: Array<{ img: HTMLImageElement; path: string }> = [];
 
     const filter = filterSelect.value;
+    const sortBy = sortSelect.value;
     const query = searchInput.value.trim().toLowerCase();
+
+    const validUnused = new Set(items.filter(isDeletableUnused).map(item => item.path));
+    for (const key of [...selectedUnused]) {
+      if (!validUnused.has(key)) selectedUnused.delete(key);
+    }
 
     const usedItems = items.filter(item => item.usages.length > 0);
     const unusedItems = items.filter(isDeletableUnused);
@@ -169,12 +193,7 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
       `全 ${items.length}件（使用中 ${usedItems.length}件・未使用 ${unusedItems.length}件 / 合計 ${formatBytes(totalBytes)}` +
       `${unusedItems.length > 0 ? `・未使用 ${formatBytes(unusedBytes)}` : ''}）`;
 
-    const deleteLabel = deleteUnusedButton.querySelector('span');
-    if (deleteLabel) {
-      deleteLabel.textContent =
-        unusedItems.length > 0 ? `未使用アセットを削除 (${unusedItems.length}件)` : '未使用アセットを削除';
-    }
-    deleteUnusedButton.disabled = loading || unusedItems.length === 0;
+    syncBulkDeleteButton();
 
     const filtered = items.filter(item => {
       if (filter === 'unused' && item.usages.length > 0) return false;
@@ -184,6 +203,13 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
         if (!haystack.includes(query)) return false;
       }
       return true;
+    }).sort((a, b) => {
+      if (sortBy === 'size') return (b.bytes || 0) - (a.bytes || 0) || a.path.localeCompare(b.path);
+      if (sortBy === 'name') return a.path.localeCompare(b.path);
+      const aUnused = isDeletableUnused(a) ? 0 : 1;
+      const bUnused = isDeletableUnused(b) ? 0 : 1;
+      if (aUnused !== bUnused) return aUnused - bUnused;
+      return a.path.localeCompare(b.path);
     });
 
     if (!filtered.length) {
@@ -287,6 +313,21 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
       }
 
       if (isDeletableUnused(item)) {
+        const selectCheck = document.createElement('input');
+        selectCheck.type = 'checkbox';
+        selectCheck.className = 'asset-organizer-select';
+        selectCheck.checked = selectedUnused.has(item.path);
+        selectCheck.setAttribute('aria-label', `${item.path} を削除対象に選択`);
+        selectCheck.title = 'まとめて削除する対象に選択';
+        selectCheck.onchange = () => {
+          if (selectCheck.checked) selectedUnused.add(item.path);
+          else selectedUnused.delete(item.path);
+          row.classList.toggle('is-selected', selectCheck.checked);
+          syncBulkDeleteButton();
+        };
+        row.classList.toggle('is-selected', selectCheck.checked);
+        actions.prepend(selectCheck);
+
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'asset-organizer-delete-one';
@@ -399,10 +440,13 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
   }
 
   filterSelect.onchange = render;
+  sortSelect.onchange = render;
   searchInput.oninput = render;
   refreshButton.onclick = () => { void load(true); };
   deleteUnusedButton.onclick = () => {
-    void handleDelete(items.filter(isDeletableUnused));
+    const unused = items.filter(isDeletableUnused);
+    const chosen = unused.filter(item => selectedUnused.has(item.path));
+    void handleDelete(chosen.length > 0 ? chosen : unused);
   };
 
   void load();

@@ -84,6 +84,60 @@ try {
   assert.equal(await page.locator('#tree-filters').isVisible(), false);
   assert.equal(await page.locator('#tree-search-toggle').getAttribute('aria-expanded'), 'false');
 
+  // Floating menus (#tree-create-menu, #view-menu-dropdown, Milkdown top-bar dropdown) must not clip at panel/viewport borders
+  const assertMenuUnclipped = async (menuSelector, buttonSelector, label) => {
+    const info = await page.evaluate(({ menuSel, btnSel }) => {
+      const menu = document.querySelector(menuSel);
+      const btn = document.querySelector(btnSel);
+      if (!menu || !btn) return null;
+      const m = menu.getBoundingClientRect();
+      const b = btn.getBoundingClientRect();
+      const leftHit = document.elementFromPoint(b.left + 6, b.top + b.height / 2);
+      const rightHit = document.elementFromPoint(b.right - 6, b.top + b.height / 2);
+      return {
+        vw: window.innerWidth,
+        vh: window.innerHeight,
+        menu: { left: m.left, right: m.right, top: m.top, bottom: m.bottom, width: m.width, height: m.height },
+        btn: { left: b.left, right: b.right, top: b.top, bottom: b.bottom },
+        leftHitOk: Boolean(leftHit && btn.contains(leftHit)),
+        rightHitOk: Boolean(rightHit && btn.contains(rightHit)),
+      };
+    }, { menuSel: menuSelector, btnSel: buttonSelector });
+    assert.ok(info, `${label}: menu and button exist`);
+    assert.ok(info.menu.left >= 0 && info.menu.right <= info.vw, `${label}: menu stays within horizontal viewport (${JSON.stringify(info.menu)}, vw=${info.vw})`);
+    assert.ok(info.menu.top >= 0 && info.menu.bottom <= info.vh, `${label}: menu stays within vertical viewport (${JSON.stringify(info.menu)}, vh=${info.vh})`);
+    assert.equal(info.leftHitOk, true, `${label}: button left side is hit-testable (not clipped)`);
+    assert.equal(info.rightHitOk, true, `${label}: button right side is hit-testable (not clipped by adjacent pane)`);
+  };
+  await page.locator('#tree-create-menu > summary').click();
+  await assertMenuUnclipped('.editor-more-menu[data-menu-owner="tree-create-menu"]', '#new-page', 'tree-create-menu #new-page (1440px)');
+  await assertMenuUnclipped('.editor-more-menu[data-menu-owner="tree-create-menu"]', '#new-folder', 'tree-create-menu #new-folder (1440px)');
+  // Clicking the right half of #new-folder must open the dialog and close the menu
+  const folderBox = await page.locator('#new-folder').boundingBox();
+  await page.mouse.click(folderBox.x + folderBox.width - 10, folderBox.y + folderBox.height / 2);
+  await page.locator('#new-folder-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#tree-create-menu').getAttribute('open'), null);
+  await page.locator('#cancel-new-folder').click();
+
+  await page.locator('#view-menu-button').click();
+  await assertMenuUnclipped('#view-menu-dropdown', '#view-menu-dropdown .view-menu-reset-btn', 'view-menu-dropdown (1440px)');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#view-menu-dropdown').isVisible(), false);
+
+  await page.setViewportSize({ width: 700, height: 700 });
+  await page.locator('#tree-create-menu > summary').click();
+  await assertMenuUnclipped('.editor-more-menu[data-menu-owner="tree-create-menu"]', '#new-folder', 'tree-create-menu #new-folder (700px)');
+  await page.locator('#panel-editor').click({ position: { x: 10, y: 10 } });
+  assert.equal(await page.locator('#tree-create-menu').getAttribute('open'), null);
+  await page.locator('#view-menu-button').click();
+  await assertMenuUnclipped('#view-menu-dropdown', '#view-menu-dropdown .view-menu-reset-btn', 'view-menu-dropdown (700px)');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 960 });
+
+  await page.locator('#milkdown-editor .milkdown-top-bar .top-bar-heading-button').first().click();
+  await assertMenuUnclipped('#milkdown-editor .top-bar-heading-dropdown', '#milkdown-editor .top-bar-heading-dropdown button', 'milkdown top-bar heading dropdown');
+  await page.keyboard.press('Escape');
+
   // #3: Ctrl+F opens in-document find bar (not tree search) and matches in rich mode
   await page.locator('#milkdown-editor .ProseMirror p').first().click();
   await page.keyboard.press('Control+f');

@@ -1,5 +1,41 @@
 import {moveSection,sameOwner,type ManuscriptOwner,type ManuscriptToolsOptions,type OutlineHeading} from './manuscriptTools';
 
+function parseLocalOutline(content: string): OutlineHeading[] {
+  const raw: Array<{ start: number; heading_end: number; level: number; label: string }> = [];
+  let offset = 0;
+  let fence = '';
+  for (const line of content.split(/(?<=\n)/)) {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/);
+    if (marker) {
+      if (!fence) fence = marker[1][0];
+      else if (marker[1][0] === fence) fence = '';
+    }
+    if (!fence) {
+      const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+      if (match) {
+        raw.push({
+          start: offset,
+          heading_end: offset + line.replace(/\r?\n$/, '').length,
+          level: match[1].length,
+          label: match[2].trim(),
+        });
+      }
+    }
+    offset += line.length;
+  }
+  return raw.map((item, idx) => {
+    let parent: number | null = null;
+    for (let j = idx - 1; j >= 0; j--) {
+      if (raw[j].level < item.level) { parent = j; break; }
+    }
+    let end = content.length;
+    for (let j = idx + 1; j < raw.length; j++) {
+      if (raw[j].level <= item.level) { end = raw[j].start; break; }
+    }
+    return { ...item, end, parent };
+  });
+}
+
 export function setupManuscriptOutline(options:ManuscriptToolsOptions):{refresh:()=>void} {
   const host=document.getElementById('manuscript-outline-list')!;
   let timer:ReturnType<typeof setTimeout>|undefined,version=0,source:ManuscriptOwner|null=null,headings:OutlineHeading[]=[];
@@ -15,17 +51,22 @@ export function setupManuscriptOutline(options:ManuscriptToolsOptions):{refresh:
     headings.forEach((heading,index)=>{
       const row=document.createElement('div');row.className='manuscript-outline-row';row.dataset.outlineIndex=String(index);row.style.paddingInlineStart=`${(heading.level-1)*12}px`;
       row.draggable=!options.busy();
-      row.ondragstart=event=>{if(!source||!sameOwner(options.current(),source))return;dragged={index,version,owner:source};event.dataTransfer?.setData('application/x-munin-heading',JSON.stringify({index,version}));if(event.dataTransfer)event.dataTransfer.effectAllowed='move';};
-      row.ondragover=event=>{if(event.dataTransfer?.types.includes('application/x-munin-heading'))event.preventDefault();};
-      row.ondrop=event=>{const value=event.dataTransfer?.getData('application/x-munin-heading');if(!value)return;event.preventDefault();try{const data=JSON.parse(value);if(!dragged||dragged.version!==version||data.version!==version||data.index!==dragged.index||!sameOwner(options.current(),dragged.owner))throw new Error('原稿が変更されました。ドラッグし直してください。');move(dragged.index,index);}catch(error){options.report(String(error),true);}finally{dragged=null;}};
-      row.ondragend=()=>{dragged=null;};
-      const jump=document.createElement('button');jump.textContent=`H${heading.level} ${heading.label||'（無題）'}`;jump.className='manuscript-outline-jump';jump.disabled=options.busy();
+      row.ondragstart=event=>{if(!source||!sameOwner(options.current(),source))return;dragged={index,version,owner:source};row.classList.add('is-dragging');event.dataTransfer?.setData('application/x-munin-heading',JSON.stringify({index,version}));if(event.dataTransfer)event.dataTransfer.effectAllowed='move';};
+      row.ondragover=event=>{if(event.dataTransfer?.types.includes('application/x-munin-heading')){event.preventDefault();row.classList.add('is-drop-target');}};
+      row.ondragleave=()=>{row.classList.remove('is-drop-target');};
+      row.ondrop=event=>{row.classList.remove('is-drop-target');const value=event.dataTransfer?.getData('application/x-munin-heading');if(!value)return;event.preventDefault();try{const data=JSON.parse(value);if(!dragged||dragged.version!==version||data.version!==version||data.index!==dragged.index||!sameOwner(options.current(),dragged.owner))throw new Error('原稿が変更されました。ドラッグし直してください。');move(dragged.index,index);}catch(error){options.report(String(error),true);}finally{dragged=null;}};
+      row.ondragend=()=>{dragged=null;host.querySelectorAll('.is-dragging,.is-drop-target').forEach(el=>el.classList.remove('is-dragging','is-drop-target'));};
+      const jump=document.createElement('button');jump.type='button';jump.className='manuscript-outline-jump';jump.disabled=options.busy();
+      const levelBadge=document.createElement('span');levelBadge.className='manuscript-outline-level';levelBadge.textContent=`H${heading.level}`;
+      const labelSpan=document.createElement('span');labelSpan.className='manuscript-outline-label';labelSpan.textContent=heading.label||'（無題）';
+      jump.title=heading.label||'（無題）';
+      jump.append(levelBadge,labelSpan);
       jump.onclick=()=>{const owner=source;if(!owner||!sameOwner(options.current(),owner))return;void options.work(async()=>{await options.navigate(owner.page,heading.start,heading.heading_end);});};
       const siblings=headings.map((h,i)=>({h,i})).filter(({h})=>h.parent===heading.parent&&h.level===heading.level);
       const position=siblings.findIndex(({i})=>i===index);
-      const up=document.createElement('button');up.textContent='↑';up.setAttribute('aria-label',`${heading.label}を上へ`);up.disabled=options.busy()||position===0;
+      const up=document.createElement('button');up.type='button';up.className='manuscript-outline-move';up.textContent='↑';up.title=`${heading.label}を上へ`;up.setAttribute('aria-label',`${heading.label}を上へ`);up.disabled=options.busy()||position===0;
       up.onclick=()=>move(index,siblings[position-1].i);
-      const down=document.createElement('button');down.textContent='↓';down.setAttribute('aria-label',`${heading.label}を下へ`);down.disabled=options.busy()||position===siblings.length-1;
+      const down=document.createElement('button');down.type='button';down.className='manuscript-outline-move';down.textContent='↓';down.title=`${heading.label}を下へ`;down.setAttribute('aria-label',`${heading.label}を下へ`);down.disabled=options.busy()||position===siblings.length-1;
       down.onclick=()=>move(index,siblings[position+1].i,true);
       row.append(jump,up,down);host.append(row);
     });
@@ -35,14 +76,14 @@ export function setupManuscriptOutline(options:ManuscriptToolsOptions):{refresh:
     if(source&&owner&&sameOwner(owner,source)){render();return;}
     clearTimeout(timer);const requestVersion=++version;
     if(!owner){source=null;headings=[];render();return;}
-    source=null;headings=[];render();
+    // Immediately render local outline so navigation feels instant.
+    source=owner;headings=parseLocalOutline(owner.content);render();
     timer=setTimeout(()=>{void(async()=>{
       try{
-        const result=JSON.parse(await options.request('editor-outline',{json:{content:owner.content}},owner.root)) as {headings:OutlineHeading[]};
+        const result=JSON.parse(await options.request('editor-outline',{json:{content:owner.content}},owner.root)) as {headings?:OutlineHeading[]};
         if(requestVersion!==version||!sameOwner(options.current(),owner))return;
-        if(!Array.isArray(result.headings))throw new Error('見出しの応答が不正です。');
-        source=owner;headings=result.headings;render();
-      }catch(error){if(requestVersion===version){host.textContent=`見出しを読み取れません: ${String(error)}`;}}
+        if(Array.isArray(result.headings)){source=owner;headings=result.headings;render();}
+      }catch{/* Local outline remains active if backend outline RPC is unavailable. */}
     })();},180);
   };
   return {refresh};

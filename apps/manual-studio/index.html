@@ -6,23 +6,27 @@
     <div class="brand"><span class="brand-icon">M</span><div><strong>Munin Manual Studio</strong><small>原稿・画面画像・公開まで</small></div></div>
     <div class="header-workspace">
       <div class="header-group header-project" role="group" aria-label="プロジェクト操作"><button type="button" id="workspace-name" aria-haspopup="dialog" aria-expanded="false" title="最近開いたフォルダーを選択"><span id="workspace-name-label">フォルダー未選択</span><span class="folder-selector-arrow" aria-hidden="true">▾</span></button><button type="button" id="open-existing-workspace" data-ui-icon="open">開く</button></div>
-      <div class="header-group header-preferences" role="group" aria-label="設定と表示"><div class="view-menu-container"><button type="button" id="view-menu-button" data-ui-icon="eye" aria-haspopup="true" aria-expanded="false" title="パネルの表示・非表示とレイアウト初期化">表示 ▾</button><div id="view-menu-dropdown" class="view-menu-dropdown" hidden></div></div><button type="button" id="application-settings" data-ui-icon="settings" aria-haspopup="dialog">設定</button></div>
+      <div class="header-group header-preferences" role="group" aria-label="設定と表示"><div class="view-menu-container"><button type="button" id="view-menu-button" data-ui-icon="eye" aria-haspopup="true" aria-expanded="false" title="パネルの表示・非表示とレイアウト初期化">表示 ▾</button><div id="view-menu-dropdown" class="view-menu-dropdown" hidden></div></div><button type="button" id="shortcut-help-open" data-ui-icon="keyboard" aria-haspopup="dialog" title="キーボード操作一覧" aria-label="キーボード操作一覧"></button><button type="button" id="application-settings" data-ui-icon="settings" aria-haspopup="dialog">設定</button></div>
     </div>
   </header>
   <nav class="workspace-tabs" aria-label="作業">
     <button type="button" id="assets-organizer-open" data-ui-icon="image" aria-haspopup="dialog">アセットの整理</button>
-    <button type="button" id="target-application-open" data-ui-icon="settings" aria-haspopup="dialog">対象アプリケーションの設定</button>
+    <button type="button" id="target-application-open" data-ui-icon="application" aria-haspopup="dialog">対象アプリケーションの設定</button>
+    <button type="button" id="workspace-ai-hub-open" data-ui-icon="hub" aria-haspopup="dialog" title="構成ダッシュボード・目次順・事実裏取り・読者別出力">AI協業</button>
     <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影して撮影リソース一覧へ登録">撮影</button><button type="button" id="reader-review" data-ui-icon="review" aria-haspopup="dialog">原稿チェック</button><button type="button" id="site-export-open" data-ui-icon="export" aria-haspopup="dialog">HTML出力</button></div>
   </nav>
   <div class="app-layout" id="app-layout"></div>
   <div id="layout-panel-pool" style="display:none">
     <section id="panel-capture-resources" class="panel capture-resource-panel" aria-label="撮影リソース一覧">
-      <div class="capture-resource-toolbar"><button type="button" id="capture-resource-import-button" title="画像を登録" aria-label="画像を登録"></button><input type="file" id="capture-resource-import" accept="image/png" hidden /></div>
-      <div class="capture-resource-toolbar"><select id="capture-resource-usage" aria-label="撮影リソースの使用状況"><option value="all">すべて</option><option value="used">使用中</option><option value="unused">未使用</option></select><span id="capture-resource-count">0件</span><button type="button" id="capture-resource-cleanup-btn" title="未使用の撮影リソースを .munin/trash へ退避して整理" disabled>未使用を整理</button><button type="button" id="capture-resource-restore-trash-btn" title="直前に退避した未使用の撮影リソースを元に戻す" hidden>整理を戻す</button></div>
+      <div class="capture-resource-toolbar"><button type="button" id="capture-resource-import-button" title="画像を登録" aria-label="画像を登録">登録</button><input type="file" id="capture-resource-import" accept="image/png" hidden /><select id="capture-resource-usage" aria-label="撮影リソースの使用状況"><option value="all">すべて</option><option value="used">使用中</option><option value="unused">未使用</option></select><span id="capture-resource-count">0件</span><button type="button" id="capture-resource-cleanup-btn" title="未使用の撮影リソースを .munin/trash へ退避して整理" disabled>未使用を整理</button><button type="button" id="capture-resource-restore-trash-btn" title="直前に退避した未使用の撮影リソースを元に戻す" hidden>整理を戻す</button></div>
       <div id="capture-resource-list" class="capture-resource-list"></div>
     </section>
+    <aside id="panel-outline" class="panel panel-outline" aria-label="目次（アウトライン）">
+      <div class="page-heading"><p class="eyebrow">見出し・目次</p><span class="muted outline-hint">ドラッグで節を移動</span></div>
+      <div id="manuscript-outline-list" class="manuscript-outline-list"><p class="muted">原稿を選択すると見出しが表示されます。</p></div>
+    </aside>
     <aside id="panel-tree" class="sidebar">
-      <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><div class="tree-heading-actions"><button type="button" id="tree-search-toggle" class="tree-search-toggle" aria-expanded="false" aria-controls="tree-filters" title="ファイル名・パスを検索 (Ctrl/Cmd+P)">🔍</button><details id="tree-create-menu" class="editor-more"><summary>＋ 作成 ▾</summary><div class="editor-more-menu"><button type="button" id="new-page" data-ui-icon="newFile">原稿を作成</button><button type="button" id="new-folder" data-ui-icon="newFolder">フォルダーを作成</button></div></details></div></div>
+      <div class="page-heading"><p class="eyebrow">ファイルツリー <span id="tree-root-label">プロジェクト</span></p><div class="tree-heading-actions"><button type="button" id="tree-search-toggle" class="tree-search-toggle" data-ui-icon="search" aria-expanded="false" aria-controls="tree-filters" aria-label="ファイル名・パスを検索" title="ファイル名・パスを検索 (Ctrl/Cmd+P)"></button><details id="tree-create-menu" class="editor-more"><summary>＋ 作成 ▾</summary><div class="editor-more-menu"><button type="button" id="new-page" data-ui-icon="newFile">原稿を作成</button><button type="button" id="new-folder" data-ui-icon="newFolder">フォルダーを作成</button></div></details></div></div>
       <div id="tree-filters" class="tree-filters" hidden><input id="tree-search" type="search" aria-label="ファイル名・パスを検索" placeholder="ファイル名・パスを検索" /><select id="tree-filter" aria-label="ファイルの表示範囲"><option value="all">すべて</option><option value="markdown">原稿のみ</option></select></div>
       <button type="button" id="manuscript-search-open">全文検索・置換</button>
 
@@ -30,7 +34,7 @@
     </aside>
     <section id="panel-editor" class="panel panel-editor-standalone">
       <div class="document-heading"><h1 id="editor-title">Markdownを編集する</h1><div class="document-tabs-wrap"><button type="button" id="document-tabs-scroll-left" class="document-tabs-scroll" aria-label="左のタブへスクロール" hidden>‹</button><div id="document-tabs" class="document-tabs" role="tablist" aria-label="開いている原稿" hidden></div><button type="button" id="document-tabs-scroll-right" class="document-tabs-scroll" aria-label="右のタブへスクロール" hidden>›</button></div><div class="editor-view-controls" role="toolbar" aria-label="原稿の表示と操作"><button type="button" id="document-image-retry" data-ui-icon="refresh" hidden>画像の編集保存を再試行</button><span id="ai-workflow-status" class="ai-workflow-status" role="status" aria-live="polite" hidden></span></div><div class="editor-mode-controls"></div><div class="editor-display-group" role="group" aria-label="編集画面の表示"><button type="button" data-editor-view="edit" data-ui-icon="file" aria-label="編集のみ" title="編集のみ"></button><button type="button" data-editor-view="split" data-ui-icon="library" aria-label="編集＋プレビュー" title="編集＋プレビュー"></button><button type="button" data-editor-view="preview" data-ui-icon="eye" aria-label="プレビューのみ" title="プレビューのみ"></button></div></div>
-      <section id="editor-empty-state" class="editor-empty-state"><h2 id="editor-empty-title">フォルダーを開いて始める</h2><p id="editor-empty-description">原稿と画像を保存しているフォルダーを選択してください。</p><div class="actions"><button type="button" id="empty-open-folder" class="primary">フォルダーを開く</button><button type="button" id="empty-select-page" hidden>原稿を選択</button><button type="button" id="empty-create-page" hidden>原稿を作成</button></div></section>
+      <section id="editor-empty-state" class="editor-empty-state"><h2 id="editor-empty-title">フォルダーを開いて始める</h2><p id="editor-empty-description">原稿と画像を保存しているフォルダーを選択してください。</p><div class="actions"><button type="button" id="empty-open-folder" class="primary">フォルダーを開く</button><button type="button" id="empty-select-page" hidden>原稿を選択</button><button type="button" id="empty-create-page" hidden>原稿を作成</button></div><div id="empty-recent-workspaces" class="empty-recent-workspaces" hidden></div></section>
       <section id="image-tab-view" class="image-tab-view" hidden><div class="actions"><button type="button" id="image-tab-zoom" data-ui-icon="zoom">実寸表示</button><span id="image-tab-size" class="muted"></span></div><div class="image-tab-canvas"><img id="image-tab-preview" alt="画像" /></div></section>
       <details id="execution-result" class="execution-result" hidden></details>
       <div class="editor-tools">
@@ -66,7 +70,22 @@
       </div>
       <div id="rich-ai-notes-banner" class="rich-ai-notes-banner" hidden></div>
       <div id="source-return-banner" class="source-return-banner" hidden><span>該当箇所の確認のため Markdown ソース表示へ切り替えました。</span><button type="button" id="return-to-rich-editor">リッチ編集へ戻る</button></div>
-      <div id="editor-find-bar" class="editor-find-bar" role="search" aria-label="開いている原稿内を検索" hidden><input id="editor-find-input" type="search" aria-label="この原稿内を検索" placeholder="この原稿内を検索…" /><span id="editor-find-count" class="muted" aria-live="polite"></span><button type="button" id="editor-find-prev" title="前の一致 (Shift+Enter)" aria-label="前の一致">↑</button><button type="button" id="editor-find-next" title="次の一致 (Enter)" aria-label="次の一致">↓</button><button type="button" id="editor-find-close" title="検索を閉じる (Esc)" aria-label="検索を閉じる">×</button></div>
+      <div id="editor-find-bar" class="editor-find-bar" role="search" aria-label="開いている原稿内を検索・置換" hidden>
+        <div class="editor-find-row">
+          <button type="button" id="editor-find-replace-toggle" class="editor-find-toggle" aria-expanded="false" aria-controls="editor-replace-row" title="置換を表示 (Ctrl/Cmd+H)" aria-label="置換欄を開閉">▸</button>
+          <input id="editor-find-input" type="search" aria-label="この原稿内を検索" placeholder="この原稿内を検索…" />
+          <button type="button" id="editor-find-case" class="editor-find-case" aria-pressed="false" title="大文字・小文字を区別" aria-label="大文字・小文字を区別">Aa</button>
+          <span id="editor-find-count" class="muted" aria-live="polite"></span>
+          <button type="button" id="editor-find-prev" title="前の一致 (Shift+Enter)" aria-label="前の一致">↑</button>
+          <button type="button" id="editor-find-next" title="次の一致 (Enter)" aria-label="次の一致">↓</button>
+          <button type="button" id="editor-find-close" title="検索を閉じる (Esc)" aria-label="検索を閉じる">×</button>
+        </div>
+        <div id="editor-replace-row" class="editor-replace-row" hidden>
+          <input id="editor-replace-input" type="text" aria-label="置換後の文字" placeholder="置換後の文字…" />
+          <button type="button" id="editor-replace-one" title="現在の一致を置換">置換</button>
+          <button type="button" id="editor-replace-all" title="この原稿内の一致をすべて置換">すべて置換</button>
+        </div>
+      </div>
       <div id="editor-workspace" class="editor-workspace">
         <div class="editor-split">
           <div class="editor-column"><textarea id="markdown-editor" spellcheck="false" aria-label="Markdown原稿" placeholder="# はじめに&#10;&#10;ここにマニュアルを書きます。" disabled></textarea></div>
@@ -83,6 +102,7 @@
       <div class="terminal-toolbar">
         <div hidden><span id="terminal-badge">未接続</span><span id="terminal-agent-name">AI CLI</span></div>
         <div class="actions">
+          <span id="terminal-status-indicator" class="terminal-status-indicator" data-state="stopped" title="AIターミナル: 未接続"><span class="terminal-status-dot" aria-hidden="true"></span><span id="terminal-cwd-chip" class="terminal-cwd-chip"></span></span>
           <select id="terminal-cli-agent" aria-label="ターミナルのAI"><option value="codex">Codex</option><option value="claude">Claude</option><option value="agy">Agy</option></select>
           <button type="button" id="terminal-connect-btn" data-ui-icon="connect">接続</button>
           <button type="button" id="terminal-auto-review" aria-pressed="false" title="AIが承認依頼を自動審査します。次の接続から有効です。">自動承認</button>
@@ -115,7 +135,7 @@
         <button type="button" class="dialog-close" data-close-dialog="panel-appearance">閉じる</button>
       </div>
     </div>
-    <details class="card" id="toolbar-customization"><summary>エディタのツールバー</summary><div id="toolbar-customization-list" class="toolbar-customization-list"></div><button type="button" id="reset-toolbar-customization">標準に戻す</button></details>
+    <details class="card" id="toolbar-customization" open><summary>エディタのツールバー</summary><div id="toolbar-customization-list" class="toolbar-customization-list"></div><button type="button" id="reset-toolbar-customization">標準に戻す</button></details>
     <div class="card display-settings"><h2>表示設定</h2><label for="editor-font-size">編集画面の文字サイズ（px）<input id="editor-font-size" type="number" min="12" max="28" step="1" value="14" /></label><label for="preview-font-size">プレビューの文字サイズ（px）<input id="preview-font-size" type="number" min="12" max="32" step="1" value="16" /></label><label for="terminal-font-size">AIターミナルの文字サイズ（px）<input id="terminal-font-size" type="number" min="11" max="24" step="1" value="13" /></label><label for="terminal-font-family">AIターミナルのフォント<select id="terminal-font-family"><option value="jetbrains">JetBrains Mono（推奨・美しい等幅コードフォント）</option><option value="noto">Noto Sans Mono（標準等幅）</option><option value="system">システム等幅フォント</option></select></label><label for="ui-theme">カラーテーマ<select id="ui-theme"><optgroup label="白ベース"><option value="forest">フォレスト</option><option value="blue">ブルー</option><option value="warm">ウォーム</option></optgroup><optgroup label="黒ベース"><option value="charcoal">チャコール</option><option value="midnight">ミッドナイト</option><option value="dark-forest">ダークフォレスト</option></optgroup></select></label></div>
   </dialog>
   <dialog id="panel-settings" class="panel-dialog"><div class="panel-header"><h1>設定</h1><button type="button" data-close-dialog="panel-settings">閉じる</button></div>
@@ -129,6 +149,7 @@
         <button id="settings-site-browse" type="button" data-ui-icon="folder" hidden>参照…</button>
       </div>
       <label class="setting-checkbox"><input type="checkbox" id="settings-site-exclude-unused" /> <span>未使用の画像をHTML出力に含めない</span></label>
+      <div id="settings-site-theme-picker" class="html-theme-picker-host"></div>
       <div class="actions"><button id="settings-site-save" type="button">保存</button><span id="settings-site-result" role="status" aria-live="polite"></span></div>
     </div>
     <div class="card" id="markits-shortcut-settings"><h2>MarkItsの撮影設定</h2><label><input type="checkbox" id="capture-default-include-cursor" /> 新規撮影でカーソルを含める</label><p id="capture-default-include-cursor-status" role="status"></p><p>アプリ外でも使う撮影ショートカットです。キーを選ぶと自動保存します。初期値はCtrl+Shift+Eです。</p><label>キーの組み合わせ<input id="markits-capture-key" readonly placeholder="ここを選んでキーを押す" /></label><button type="button" id="markits-capture-key-save">撮影キーを保存</button><button type="button" id="markits-capture-key-reset">Ctrl+Shift+Eに戻す</button><p id="markits-capture-key-status" role="status" aria-live="polite"></p></div>
@@ -150,11 +171,13 @@
         <button id="browse-site-output" type="button" data-ui-icon="folder">参照…</button>
       </div>
       <label class="setting-checkbox"><input type="checkbox" id="site-exclude-unused-assets" /> <span>未使用の画像をHTML出力に含めない</span></label>
-      <p id="site-output-path-help" class="muted">プロジェクト内のフォルダーを指定します。絶対パスは保存時に相対パスに変換します。出力先と未使用画像の除外設定は「設定 → HTML出力」と連動します。</p>
+      <div id="site-export-theme-picker" class="html-theme-picker-host"></div>
+      <p id="site-output-path-help" class="muted">プロジェクト内のフォルダーを指定します。絶対パスは保存時に相対パスに変換します。出力先・未使用画像の除外・テーマは「設定 → HTML出力」と連動します。</p>
       <div class="site-export-settings-row"><span id="site-export-settings-summary" class="muted"></span><button type="button" id="site-export-open-settings">サイト名・詳細設定を開く</button></div>
-      <button id="save-site-output" type="button">出力先を保存</button>
-      <button id="build-site" type="button" data-ui-icon="export">HTMLを作成</button>
-      <button id="open-site-html" type="button" hidden>HTMLを開く</button>
+      <div class="actions">
+        <button id="save-site-output" type="button">設定を保存</button>
+        <button id="build-site" type="button" class="primary" data-ui-icon="export">HTMLを作成</button>
+      </div>
       <pre id="site-build-result" class="result" aria-live="polite"></pre>
     </div>
   </section>
@@ -168,7 +191,7 @@
   </section>
   <div class="progress-compact"><button type="button" id="progress-open" class="progress-control progress-open" hidden>AI実行ログを表示</button><button type="button" id="progress-compact-cancel" class="progress-control" data-ui-icon="close" hidden>生成を中断</button></div>
   <div id="studio-toast-stack" class="studio-toast-stack" aria-live="polite"></div>
-  <footer><button type="button" id="cancel-image-paste" class="progress-control" hidden>画像の挿入をキャンセル</button><span id="status-busy-dot" class="status-busy-dot" aria-hidden="true"></span><button type="button" id="status" class="status-button" role="status" aria-live="polite" title="クリックしてお知らせ履歴を表示">プロジェクトのフォルダーを開いてください。</button><div class="document-save-status" hidden><span id="save-state" role="status" aria-live="polite">原稿を選択してください</span><button type="button" id="save-retry" hidden>再試行</button><button type="button" id="save-conflict" hidden>変更を確認</button></div><span id="cursor-position" class="footer-cursor" aria-label="カーソル位置">1:1</span></footer>
+  <footer><button type="button" id="cancel-image-paste" class="progress-control" hidden>画像の挿入をキャンセル</button><span id="status-busy-dot" class="status-busy-dot" aria-hidden="true"></span><button type="button" id="status" class="status-button" role="status" aria-live="polite" title="クリックしてお知らせ履歴を表示">プロジェクトのフォルダーを開いてください。</button><div class="document-save-status" hidden><span id="save-state" role="status" aria-live="polite">原稿を選択してください</span><button type="button" id="save-retry" hidden>再試行</button><button type="button" id="save-conflict" hidden>変更を確認</button></div><div class="footer-right"><span id="editor-word-count" class="footer-meta" aria-label="文字数" hidden></span><span id="editor-mode-badge" class="footer-meta" aria-label="編集モード" hidden></span><span id="cursor-position" class="footer-cursor" aria-label="カーソル位置">1:1</span></div></footer>
   <dialog id="workspace-dialog"><form id="project-form"><h2>フォルダーを開く</h2><label for="project-root">フォルダーのパス</label><div class="folder-picker"><input type="text" role="textbox" id="project-root" aria-label="フォルダーのパス" placeholder="フォルダーを選ぶ、またはパスを入力" /><button type="button" id="browse-project" data-ui-icon="folder">フォルダーを選ぶ</button></div><div class="actions"><button type="button" id="cancel-open-workspace">キャンセル</button><button type="submit" class="primary">開く</button></div></form></dialog>
   <dialog id="new-page-dialog"><form id="new-page-form"><h2>原稿を作る</h2><label>原稿フォルダーからの相対パス<input id="new-page-path" placeholder="getting-started.md" required /></label><label>原稿タイトル<input id="new-page-title" placeholder="使い始める" required /></label><div class="actions"><button type="button" id="cancel-new-page">キャンセル</button><button type="submit" class="primary">作成して編集</button></div></form></dialog>
   <dialog id="new-folder-dialog"><form id="new-folder-form"><h2>フォルダーを作る</h2><p id="new-folder-parent" class="muted">原稿フォルダー内に作成します。</p><label>フォルダー名または相対パス<input id="new-folder-path" placeholder="guide/advanced" required /></label><div class="actions"><button type="button" id="cancel-new-folder">キャンセル</button><button type="submit" class="primary">作成</button></div></form></dialog>

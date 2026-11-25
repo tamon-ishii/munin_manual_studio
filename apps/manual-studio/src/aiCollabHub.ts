@@ -72,7 +72,9 @@ export function openAiCollabHubDialog(
   const selectTab = (id: HubTabId) => {
     for (const def of tabDefs) {
       const active = def.id === id;
-      tabButtons.get(def.id)!.setAttribute("aria-selected", String(active));
+      const btn = tabButtons.get(def.id)!;
+      btn.setAttribute("aria-selected", String(active));
+      btn.tabIndex = active ? 0 : -1;
       tabPanels.get(def.id)!.hidden = !active;
     }
     if (id === "dashboard" && !dashboardLoaded) void loadDashboard();
@@ -80,7 +82,25 @@ export function openAiCollabHubDialog(
   };
 
   for (const def of tabDefs) {
-    tabButtons.get(def.id)!.onclick = () => selectTab(def.id);
+    const btn = tabButtons.get(def.id)!;
+    btn.onclick = () => selectTab(def.id);
+    btn.addEventListener("keydown", (event) => {
+      const idx = tabDefs.findIndex((item) => item.id === def.id);
+      const next =
+        event.key === "ArrowRight"
+          ? (idx + 1) % tabDefs.length
+          : event.key === "ArrowLeft"
+            ? (idx + tabDefs.length - 1) % tabDefs.length
+            : event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? tabDefs.length - 1
+                : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      selectTab(tabDefs[next].id);
+      tabButtons.get(tabDefs[next].id)!.focus();
+    });
   }
 
   body.append(tabsNav, ...tabDefs.map((d) => tabPanels.get(d.id)!));
@@ -88,22 +108,26 @@ export function openAiCollabHubDialog(
   // ---------- Tab 1: Dashboard & Audience ----------
   const dashPanel = tabPanels.get("dashboard")!;
   dashPanel.innerHTML = `
-    <div class="actions">
-      <button type="button" class="primary" id="hub-dashboard-refresh">構成・整合性を再集計</button>
-      <label class="ai-hub-inline-label">読者別HTML出力:
-        <select id="hub-audience-build-target" aria-label="出力する読者">
-          <option value="user">user（利用者）</option>
-          <option value="developer">developer（開発者）</option>
-          <option value="maintainer">maintainer（保守者）</option>
+    <div class="ai-hub-toolbar-groups">
+      <div class="actions ai-hub-toolbar-group" role="group" aria-label="構成と目次">
+        <button type="button" class="primary" id="hub-dashboard-refresh">構成・整合性を再集計</button>
+        <button type="button" id="hub-nav-save-btn">目次順・公開設定を保存</button>
+      </div>
+      <div class="actions ai-hub-toolbar-group" role="group" aria-label="読者別HTML出力">
+        <label class="ai-hub-inline-label">読者別HTML出力:
+          <select id="hub-audience-build-target" aria-label="出力する読者">
+            <option value="user">user（利用者）</option>
+            <option value="developer">developer（開発者）</option>
+            <option value="maintainer">maintainer（保守者）</option>
+          </select>
+        </label>
+        <select id="hub-audience-build-engine" aria-label="読者別HTML出力ツール">
+          <option value="mkdocs">MkDocs</option>
+          <option value="zensical">Zensical</option>
+          <option value="single-html">単一HTML（Python不要）</option>
         </select>
-      </label>
-      <select id="hub-audience-build-engine" aria-label="読者別HTML出力ツール">
-        <option value="mkdocs">MkDocs</option>
-        <option value="zensical">Zensical</option>
-        <option value="single-html">単一HTML（Python不要）</option>
-      </select>
-      <button type="button" id="hub-audience-build-btn">読者別HTMLを作成</button>
-      <button type="button" id="hub-nav-save-btn">目次順・公開設定を保存</button>
+        <button type="button" id="hub-audience-build-btn">読者別HTMLを作成</button>
+      </div>
     </div>
     <p id="hub-dashboard-status" class="muted" role="status"></p>
     <div id="hub-dashboard-diagnostics" class="ai-hub-list"></div>
@@ -400,7 +424,7 @@ export function openAiCollabHubDialog(
       const head = document.createElement("div");
       head.className = "ai-hub-card-header";
       const badge = document.createElement("span");
-      badge.className = f.verdict === "supported" ? "quality-badge quality-badge-warning" : "quality-badge quality-badge-error";
+      badge.className = f.verdict === "supported" ? "quality-badge quality-badge-success" : "quality-badge quality-badge-error";
       badge.textContent = f.verdict === "supported" ? "根拠あり" : "根拠未確認";
       const title = document.createElement("strong");
       title.textContent = `行 ${f.line}: ${f.claim}`;
