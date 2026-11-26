@@ -281,6 +281,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
     let mut endpoint_url_opt: Option<&str> = None;
     let mut api_key_opt: Option<&str> = None;
     let mut assets_opt: Option<&str> = None;
+    let mut working_directory_opt: Option<&str> = None;
 
     for (key, value) in options {
         match *key {
@@ -326,6 +327,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
             "--path" => path_opt = Some(*value),
             "--data" => data_opt = Some(*value),
             "--assets" => assets_opt = Some(*value),
+            "--working-directory" => working_directory_opt = Some(*value),
             _ => return Err(format!("Unsupported manual option: {key}")),
         }
     }
@@ -342,7 +344,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
         project_path(root, o)?
     } else if matches!(action, "build" | "build-mkdocs" | "build-zensical" | "build-single-html") {
         if let Some(audience) = audience_opt {
-            project_path(root, &format!("{}/{audience}", cfg.output))?
+            project_path(root, &format!("{}-{audience}", cfg.output.trim_end_matches('/')))?
         } else {
             project_path(root, &cfg.output)?
         }
@@ -591,12 +593,17 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                 .get("theme_style")
                 .map(|v| serde_json::from_value(v.clone()).map_err(|e| format!("テーマ設定が不正です: {e}")))
                 .transpose()?;
+            let working_directory = options
+                .get("working_directory")
+                .map(|value| value.as_str().ok_or("ワーキングフォルダは文字列で指定してください。"))
+                .transpose()?;
             let output = config::save_html_output_with_options(
                 root,
                 output_opt.ok_or("HTML出力先を指定してください。")?,
                 site_name,
                 exclude_unused,
                 theme_style.as_ref(),
+                working_directory,
             )?;
             Ok(serde_json::json!({"output":output}).to_string())
         }
@@ -642,7 +649,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                 _ => builder::SiteEngine::MkDocs,
             };
             let result = if let Some(audience) = audience_opt {
-                audience::build_with_engine(
+                audience::build_with_engine_in(
                     root,
                     &templates_path,
                     &generated_path,
@@ -650,19 +657,21 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                     draft_flag,
                     audience,
                     engine,
+                    working_directory_opt,
                 )
             } else {
-                builder::build_with_engine(
+                builder::build_with_engine_in(
                     &templates_path,
                     &generated_path,
                     &output_path,
                     draft_flag,
                     Some(root),
                     engine,
+                    working_directory_opt,
                 )
             }?;
             if action == "build-mkdocs" && result.contains("MkDocs site build skipped:") {
-                return Err("MkDocsが見つかりません。プロジェクトのPython環境へ mkdocs-material をインストールしてください。HTMLは作成されていません。".into());
+                return Err("MkDocsが見つかりません。プロジェクトまたは親フォルダーの .venv に mkdocs-material をインストールするか、HTML出力の「ワーキングフォルダ」でPython環境（.venvを含むフォルダー）を指定してください。HTMLは作成されていません。".into());
             }
             Ok(result)
         }
@@ -676,6 +685,7 @@ fn run_inner(root: &Path, action: &str, options: &[(&str, &str)]) -> Result<Stri
                 engine,
                 output_opt,
                 draft_flag,
+                working_directory_opt,
             )?;
             Ok(res.to_string())
         }
@@ -1014,6 +1024,7 @@ pub fn request(request: serde_json::Value) -> Result<String, String> {
             options["engine"].as_str().unwrap_or("mkdocs"),
             options["output"].as_str(),
             options["draft"].as_bool().unwrap_or(false),
+            options["working_directory"].as_str(),
         )),
         "derivative-generate" => Some({
             let kind = options["kind"].as_str().ok_or("派生種別を指定してください。")?;

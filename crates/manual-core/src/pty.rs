@@ -12,6 +12,7 @@ struct PtySession {
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     output_buffer: Arc<Mutex<Vec<u8>>>,
+    utf8_pending: Vec<u8>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     owner: Option<String>,
     insertion: Option<tempfile::TempDir>,
@@ -55,7 +56,7 @@ pub fn working_directory(root:&Path,value:Option<&str>)->Result<std::path::PathB
         Some(value)=>root.join(value),
         None=>root.to_path_buf(),
     };
-    let directory=path.canonicalize().map_err(|_|"作業フォルダが見つかりません。既存のフォルダを指定してください。".to_string())?;
+    let directory=crate::platform::canonical_clean(&path).map_err(|_|"作業フォルダが見つかりません。既存のフォルダを指定してください。".to_string())?;
     if !directory.is_dir(){return Err("作業フォルダにはフォルダを指定してください。".into());}
     Ok(directory)
 }
@@ -125,6 +126,7 @@ fn pty_spawn_owned_in(command:&str,args:&[String],cols:u16,rows:u16,owner:Option
         master: Arc::new(Mutex::new(pair.master)),
         writer: Arc::new(Mutex::new(writer)),
         output_buffer,
+        utf8_pending: Vec::new(),
         child,
         owner: owner.map(String::from),
         insertion,
@@ -181,8 +183,41 @@ pub fn pty_read(session_id: &str) -> Result<(String, bool), String> {
         .output_buffer
         .lock()
         .map_err(|e| format!("Buffer lock poisoned: {}", e))?;
-    let bytes = std::mem::take(&mut *buffer);
-    Ok((String::from_utf8_lossy(&bytes).to_string(), alive))
+    let mut bytes = std::mem::take(&mut session.utf8_pending);
+    bytes.extend_from_slice(&buffer);
+    buffer.clear();
+    let decoded = decode_utf8_stream(&bytes, &mut session.utf8_pending, !alive);
+    Ok((decoded, alive))
+}
+
+fn decode_utf8_stream(bytes: &[u8], pending: &mut Vec<u8>, flush: bool) -> String {
+    let mut out = String::new();
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(valid) => {
+                out.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let valid_len = error.valid_up_to();
+                if valid_len > 0 {
+                    out.push_str(std::str::from_utf8(&rest[..valid_len]).unwrap());
+                }
+                if let Some(err_len) = error.error_len() {
+                    out.push('\u{FFFD}');
+                    rest = &rest[valid_len + err_len..];
+                } else if flush {
+                    out.push('\u{FFFD}');
+                    break;
+                } else {
+                    pending.extend_from_slice(&rest[valid_len..]);
+                    break;
+                }
+            }
+        }
+    }
+    out
 }
 
 pub fn pty_resize(session_id: &str, cols: u16, rows: u16) -> Result<(), String> {
@@ -256,10 +291,24 @@ pub fn execute_pty_request(
 ) -> Result<String, String> {
     match action {
         "pty-spawn" => {
+            let default_shell = if cfg!(windows) {
+                if crate::agent::which_binary("pwsh").is_some() {
+                    "pwsh.exe".to_string()
+                } else if crate::agent::which_binary("powershell").is_some() {
+                    "powershell.exe".to_string()
+                } else {
+                    "cmd.exe".to_string()
+                }
+            } else {
+                std::env::var("SHELL")
+                    .ok()
+                    .filter(|shell| !shell.trim().is_empty() && Path::new(shell).is_file())
+                    .unwrap_or_else(|| "sh".to_string())
+            };
             let command = options
                 .get("command")
                 .and_then(|v| v.as_str())
-                .unwrap_or_else(|| if cfg!(windows) { "cmd.exe" } else { "sh" });
+                .unwrap_or(default_shell.as_str());
             let mut args: Vec<String> = options
                 .get("args")
                 .and_then(|v| {
@@ -440,6 +489,7 @@ fn send_to_daemon(
         if stream.is_none() {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let mut cmd = std::process::Command::new(exe);
+            crate::platform::no_window(&mut cmd);
             cmd.arg("--pty-daemon")
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -615,12 +665,25 @@ process.stdin.on('data',data=>{require('node:fs').appendFileSync('terminal-input
     #[test]
     fn working_directory_defaults_to_root_and_validates_custom_folders(){
         let root=tempfile::tempdir().unwrap();
-        assert_eq!(working_directory(root.path(),None).unwrap(),root.path().canonicalize().unwrap());
+        assert_eq!(working_directory(root.path(),None).unwrap(),crate::platform::canonical_clean(root.path()).unwrap());
         let custom=root.path().join("application source");std::fs::create_dir(&custom).unwrap();
-        assert_eq!(working_directory(root.path(),Some("application source")).unwrap(),custom.canonicalize().unwrap());
+        assert_eq!(working_directory(root.path(),Some("application source")).unwrap(),crate::platform::canonical_clean(&custom).unwrap());
         std::fs::write(root.path().join("file.txt"),"not a directory").unwrap();
         assert!(working_directory(root.path(),Some("file.txt")).is_err());
         assert!(working_directory(root.path(),Some("missing")).is_err());
+    }
+
+    #[test]
+    fn utf8_stream_decoder_preserves_multibyte_japanese_across_chunks() {
+        let sample = "日本語テスト出力".as_bytes();
+        let mut pending = Vec::new();
+        // Split right in the middle of a 3-byte Japanese character
+        let part1 = decode_utf8_stream(&sample[..4], &mut pending, false);
+        let mut chunk2 = std::mem::take(&mut pending);
+        chunk2.extend_from_slice(&sample[4..]);
+        let part2 = decode_utf8_stream(&chunk2, &mut pending, true);
+        assert_eq!(format!("{part1}{part2}"), "日本語テスト出力");
+        assert!(pending.is_empty());
     }
 
     #[cfg(unix)]

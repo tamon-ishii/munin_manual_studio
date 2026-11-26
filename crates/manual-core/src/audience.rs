@@ -50,6 +50,19 @@ pub(crate) fn build_with_engine(
     audience: &str,
     engine: builder::SiteEngine,
 ) -> Result<String, String> {
+    build_with_engine_in(root, docs, generated, output, draft, audience, engine, None)
+}
+
+pub(crate) fn build_with_engine_in(
+    root: &Path,
+    docs: &Path,
+    generated: &Path,
+    output: &Path,
+    draft: bool,
+    audience: &str,
+    engine: builder::SiteEngine,
+    working_directory_override: Option<&str>,
+) -> Result<String, String> {
     if !["user", "developer", "maintainer"].contains(&audience) {
         return Err("--audience must be user, developer, or maintainer".into());
     }
@@ -57,13 +70,24 @@ pub(crate) fn build_with_engine(
     let selected = temporary.path().join("docs");
     fs::create_dir_all(&selected).map_err(|error| error.to_string())?;
     let mut pages = 0;
-    let mut has_index = false;
     let published = output.canonicalize().unwrap_or_else(|_| output.to_path_buf());
     let configured = crate::config::project_path(root, &crate::config::read_config(root).output).ok();
     for entry in WalkDir::new(docs).into_iter().filter_entry(|entry| {
-        !entry.path().starts_with(&published)
-            && !configured.as_ref().is_some_and(|output| entry.path().starts_with(output))
-            && !(entry.depth() > 0 && entry.file_type().is_dir() && builder::is_published_site(entry.path()))
+        if entry.path().starts_with(&published)
+            || configured.as_ref().is_some_and(|output| entry.path().starts_with(output))
+            || (entry.depth() > 0 && entry.file_type().is_dir() && builder::is_published_site(entry.path()))
+        {
+            return false;
+        }
+        if entry.depth() == 0 {
+            return true;
+        }
+        let name = entry.file_name().to_string_lossy();
+        !name.starts_with('.')
+            && !matches!(
+                name.as_ref(),
+                "node_modules" | "target" | "dist" | "__pycache__" | "venv" | "manual_setting.json"
+            )
     }) {
         let entry = entry.map_err(|error| error.to_string())?;
         if !entry.file_type().is_file() {
@@ -75,16 +99,14 @@ pub(crate) fn build_with_engine(
             .map_err(|error| error.to_string())?;
         if relative
             .extension()
-            .is_some_and(|extension| extension == "md")
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
         {
             let content = fs::read_to_string(entry.path()).map_err(|error| error.to_string())?;
             if !included(&content, audience)? {
                 continue;
             }
             pages += 1;
-            if relative == Path::new("index.md") {
-                has_index = true;
-            }
         }
         let destination = selected.join(relative);
         if let Some(parent) = destination.parent() {
@@ -92,10 +114,18 @@ pub(crate) fn build_with_engine(
         }
         fs::copy(entry.path(), destination).map_err(|error| error.to_string())?;
     }
-    if pages == 0 || !has_index {
-        return Err(format!("Audience {audience} needs an included index.md"));
+    if pages == 0 {
+        return Err(format!("対象読者（{audience}）に含まれる原稿がありません。"));
     }
-    builder::build_with_engine(&selected, generated, output, draft, Some(root), engine)
+    builder::build_with_engine_in(
+        &selected,
+        generated,
+        output,
+        draft,
+        Some(root),
+        engine,
+        working_directory_override,
+    )
 }
 
 #[cfg(test)]
@@ -113,5 +143,37 @@ mod tests {
         )
         .unwrap());
         assert!(included("<!-- ai:audience unknown -->", "user").is_err());
+    }
+
+    #[test]
+    fn audience_build_succeeds_without_index_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(
+            docs.join("index.md"),
+            "<!-- ai:audience developer -->\n# Dev Home\n",
+        )
+        .unwrap();
+        std::fs::write(
+            docs.join("guide.md"),
+            "<!-- ai:audience user -->\n# User Guide\n",
+        )
+        .unwrap();
+        let generated = tmp.path().join(".munin/generated");
+        let out = tmp.path().join("site-user");
+        super::build_with_engine(
+            tmp.path(),
+            &docs,
+            &generated,
+            &out,
+            true,
+            "user",
+            crate::builder::SiteEngine::SingleHtml,
+        )
+        .unwrap();
+        let html = std::fs::read_to_string(out.join("index.html")).unwrap();
+        assert!(html.contains("User Guide"));
+        assert!(!html.contains("Dev Home"));
     }
 }

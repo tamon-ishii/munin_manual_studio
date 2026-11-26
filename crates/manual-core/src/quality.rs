@@ -79,14 +79,35 @@ fn anchors(content: &str) -> BTreeSet<String> {
                     .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || c.is_whitespace())
                     .map(|c| if c.is_whitespace() { '-' } else { c })
                     .collect();
+                let mut collapsed = String::new();
+                let mut prev_hyphen = false;
+                for ch in slug.chars() {
+                    if ch == '-' {
+                        if !prev_hyphen && !collapsed.is_empty() {
+                            collapsed.push('-');
+                            prev_hyphen = true;
+                        }
+                    } else {
+                        collapsed.push(ch);
+                        prev_hyphen = false;
+                    }
+                }
+                let collapsed = collapsed.trim_end_matches('-').to_string();
                 let count = counts.entry(slug.clone()).or_insert(0);
-                let id = if *count == 0 {
-                    slug
+                if *count == 0 {
+                    found.insert(slug);
+                    if !collapsed.is_empty() {
+                        found.insert(collapsed);
+                    }
                 } else {
-                    format!("{slug}-{count}")
-                };
+                    found.insert(format!("{slug}-{count}"));
+                    found.insert(format!("{slug}_{count}"));
+                    if !collapsed.is_empty() {
+                        found.insert(format!("{collapsed}-{count}"));
+                        found.insert(format!("{collapsed}_{count}"));
+                    }
+                }
                 *count += 1;
-                found.insert(id);
             }
             _ => {}
         }
@@ -220,17 +241,38 @@ fn extract_text_steps(section: &str) -> (Vec<u32>, BTreeSet<u32>) {
     let plain = strip_code_fences(section);
     let mut order = Vec::new();
     let mut set = BTreeSet::new();
-    let paren_re = Regex::new(r"[（(](\d{1,2})[）)]").unwrap();
+    let fullwidth_paren_re = Regex::new(r"（(\d{1,2})）").unwrap();
+    let ascii_paren_re = Regex::new(r"\((\d{1,2})\)").unwrap();
 
-    // Collect positions of both circled numbers and parenthesized numbers in order.
+    // Collect positions of both circled numbers and parenthesized step markers in order.
     let mut events: Vec<(usize, u32)> = Vec::new();
     for (byte_idx, ch) in plain.char_indices() {
         if let Some(pos) = CIRCLED_NUMBERS.iter().position(|c| *c == ch) {
             events.push((byte_idx, (pos + 1) as u32));
         }
     }
-    for cap in paren_re.captures_iter(&plain) {
+    for cap in fullwidth_paren_re.captures_iter(&plain) {
         if let (Some(m), Some(num)) = (cap.get(0), cap.get(1)) {
+            if let Ok(step) = num.as_str().parse::<u32>() {
+                if (1..=20).contains(&step) {
+                    events.push((m.start(), step));
+                }
+            }
+        }
+    }
+    for cap in ascii_paren_re.captures_iter(&plain) {
+        if let (Some(m), Some(num)) = (cap.get(0), cap.get(1)) {
+            let prev = plain[..m.start()].chars().next_back();
+            let looks_like_step_ref = match prev {
+                None => true,
+                Some(c) => {
+                    c.is_whitespace()
+                        || matches!(c, '-' | '*' | '>' | '・' | '、' | '。' | ':' | '：' | 'の' | 'は' | 'を' | 'に' | 'で')
+                }
+            };
+            if !looks_like_step_ref {
+                continue;
+            }
             if let Ok(step) = num.as_str().parse::<u32>() {
                 if (1..=20).contains(&step) {
                     events.push((m.start(), step));
@@ -540,16 +582,21 @@ pub fn check_page(root: &Path, target_page: Option<&str>) -> Result<Value, Strin
                     Event::Start(Tag::Link { dest_url, .. }) => {
                         vec![(dest_url.to_string(), false, range)]
                     }
-                    Event::Html(html) | Event::InlineHtml(html) => html_links
-                        .captures_iter(&html)
-                        .map(|cap| {
-                            (
-                                decode_html_attr(&cap[2]),
-                                cap[1].eq_ignore_ascii_case("src"),
-                                range.clone(),
-                            )
-                        })
-                        .collect(),
+                    Event::Html(html) | Event::InlineHtml(html) => {
+                        let stripped = Regex::new(r"(?s)<!--.*?-->")
+                            .unwrap()
+                            .replace_all(&html, "");
+                        html_links
+                            .captures_iter(&stripped)
+                            .map(|cap| {
+                                (
+                                    decode_html_attr(&cap[2]),
+                                    cap[1].eq_ignore_ascii_case("src"),
+                                    range.clone(),
+                                )
+                            })
+                            .collect()
+                    }
                     _ => vec![],
                 })
                 .collect();
@@ -591,12 +638,16 @@ pub fn check_page(root: &Path, target_page: Option<&str>) -> Result<Value, Strin
                 Ok(target) => {
                     if let Some((_, fragment)) = url.split_once('#') {
                         if !fragment.is_empty()
-                            && target.extension().is_some_and(|ext| ext == "md")
+                            && target
+                                .extension()
+                                .and_then(|ext| ext.to_str())
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
                         {
-                            let value =
-                                percent_encoding::percent_decode_str(fragment).decode_utf8_lossy();
+                            let value = percent_encoding::percent_decode_str(fragment)
+                                .decode_utf8_lossy()
+                                .to_lowercase();
                             let source = fs::read_to_string(target).map_err(|e| e.to_string())?;
-                            if !anchors(&source).contains(value.as_ref()) {
+                            if !anchors(&source).contains(&value) {
                                 Some(format!("見出しがありません: {url}"))
                             } else {
                                 None
@@ -645,9 +696,22 @@ pub fn check_page(root: &Path, target_page: Option<&str>) -> Result<Value, Strin
 pub fn require_ready(root: &Path) -> Result<(), String> {
     let report = check(root)?;
     if report["passed"] == false {
-        return Err(format!(
-            "完成版の品質チェックに失敗しました。下書きは作成できます。\n{}",
+        let mut lines = Vec::new();
+        for item in report["issues"].as_array().into_iter().flatten() {
+            if item["severity"].as_str() == Some("error") {
+                let page = item["page"].as_str().unwrap_or("");
+                let line = item["line"].as_u64().unwrap_or(0);
+                let msg = item["message"].as_str().unwrap_or("");
+                lines.push(format!("- {page}:{line}: {msg}"));
+            }
+        }
+        let summary = if lines.is_empty() {
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        } else {
+            lines.join("\n")
+        };
+        return Err(format!(
+            "完成版の品質チェックに失敗しました。下書きは作成できます。\n{summary}"
         ));
     }
     Ok(())

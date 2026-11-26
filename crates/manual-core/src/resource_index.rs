@@ -183,7 +183,7 @@ impl ProjectIndex {
             if name.starts_with('.')
                 || matches!(
                     name.as_str(),
-                    "node_modules" | "target" | "dist" | "__pycache__" | "site"
+                    "node_modules" | "target" | "dist" | "__pycache__" | "venv"
                 )
                 || Path::new(&name).components().count() != 1
                 || name.contains(['/', '\\'])
@@ -191,6 +191,9 @@ impl ProjectIndex {
                 continue;
             }
             let path = directory.join(&name);
+            if entry.directory && crate::builder::is_published_site(&path) {
+                continue;
+            }
             let child = if relative.is_empty() {
                 name
             } else {
@@ -199,7 +202,10 @@ impl ProjectIndex {
             if entry.directory {
                 let _ = self.visit(&child);
             } else if entry.file
-                && (path.extension().is_some_and(|ext| ext == "md")
+                && (path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
                     || crate::resources::image_extension(&path))
             {
                 self.files.push(self.root.join(&child));
@@ -240,16 +246,21 @@ impl ProjectIndex {
                     Event::Start(Tag::Image { dest_url, .. }) => {
                         vec![(dest_url.to_string(), range)]
                     }
-                    Event::Html(html) | Event::InlineHtml(html) => html_images
-                        .captures_iter(&html)
-                        .map(|cap| {
-                            let m = cap.get(0).unwrap();
-                            (
-                                crate::quality::decode_html_attr(&cap[1]),
-                                range.start + m.start()..range.start + m.end(),
-                            )
-                        })
-                        .collect(),
+                    Event::Html(html) | Event::InlineHtml(html) => {
+                        let stripped = regex::Regex::new(r"(?s)<!--.*?-->")
+                            .unwrap()
+                            .replace_all(&html, "");
+                        html_images
+                            .captures_iter(&stripped)
+                            .map(|cap| {
+                                let m = cap.get(0).unwrap();
+                                (
+                                    crate::quality::decode_html_attr(&cap[1]),
+                                    range.start + m.start()..range.start + m.end(),
+                                )
+                            })
+                            .collect()
+                    }
                     _ => Vec::new(),
                 };
                 for (url, range) in images {

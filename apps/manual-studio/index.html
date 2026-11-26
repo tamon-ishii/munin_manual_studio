@@ -124,6 +124,7 @@
       <p class="muted">初期値はプロジェクトルートです。変更は次の接続から使います。</p>
       <label for="terminal-working-directory">作業フォルダ</label>
       <div class="terminal-directory-picker"><input id="terminal-working-directory" type="text" placeholder="プロジェクトルート" /><button type="button" id="terminal-choose-directory">選択</button></div>
+      <p id="terminal-directory-error" class="dialog-error" role="alert" hidden></p>
       <button type="button" id="terminal-project-directory">プロジェクトルートに戻す</button>
       <div class="actions dialog-actions"><button type="button" data-close-dialog="terminal-directory-dialog">キャンセル</button><button type="submit" class="primary">設定する</button></div>
     </form>
@@ -148,6 +149,11 @@
         <input id="settings-site-output" type="text">
         <button id="settings-site-browse" type="button" data-ui-icon="folder" hidden>参照…</button>
       </div>
+      <label for="settings-site-working-directory">ワーキングフォルダ（MkDocs / Zensical の .venv 探索元・省略可）</label>
+      <div class="folder-picker">
+        <input id="settings-site-working-directory" type="text" placeholder="空欄時はプロジェクトと親フォルダーの .venv を自動探索">
+        <button id="settings-site-working-directory-browse" type="button" data-ui-icon="folder" hidden>参照…</button>
+      </div>
       <label class="setting-checkbox"><input type="checkbox" id="settings-site-exclude-unused" /> <span>未使用の画像をHTML出力に含めない</span></label>
       <div id="settings-site-theme-picker" class="html-theme-picker-host"></div>
       <div class="actions"><button id="settings-site-save" type="button">保存</button><span id="settings-site-result" role="status" aria-live="polite"></span></div>
@@ -170,6 +176,14 @@
         <input id="site-output-path" type="text" aria-describedby="site-output-path-help">
         <button id="browse-site-output" type="button" data-ui-icon="folder">参照…</button>
       </div>
+      <div id="site-working-directory-group">
+        <label for="site-working-directory">ワーキングフォルダ（.venv 探索元・省略可）</label>
+        <div class="folder-picker">
+          <input id="site-working-directory" type="text" placeholder="空欄時はプロジェクトと親フォルダーの .venv を自動探索" aria-describedby="site-working-directory-help">
+          <button id="browse-site-working-directory" type="button" data-ui-icon="folder">参照…</button>
+        </div>
+        <p id="site-working-directory-help" class="muted">空欄ならプロジェクトと親フォルダーの .venv を自動探索します。別フォルダーの .venv を使う場合は親フォルダーや .venv を指定してください（相対・絶対パス可）。</p>
+      </div>
       <label class="setting-checkbox"><input type="checkbox" id="site-exclude-unused-assets" /> <span>未使用の画像をHTML出力に含めない</span></label>
       <div id="site-export-theme-picker" class="html-theme-picker-host"></div>
       <p id="site-output-path-help" class="muted">プロジェクト内のフォルダーを指定します。絶対パスは保存時に相対パスに変換します。出力先・未使用画像の除外・テーマは「設定 → HTML出力」と連動します。</p>
@@ -179,6 +193,7 @@
         <button id="build-site" type="button" class="primary" data-ui-icon="export">HTMLを作成</button>
       </div>
       <pre id="site-build-result" class="result" aria-live="polite"></pre>
+      <div id="site-build-recovery" class="actions site-build-recovery" hidden></div>
     </div>
   </section>
   <section id="operation-progress" class="operation-progress" role="dialog" aria-modal="false" aria-labelledby="progress-label" hidden>
@@ -192,10 +207,10 @@
   <div class="progress-compact"><button type="button" id="progress-open" class="progress-control progress-open" hidden>AI実行ログを表示</button><button type="button" id="progress-compact-cancel" class="progress-control" data-ui-icon="close" hidden>生成を中断</button></div>
   <div id="studio-toast-stack" class="studio-toast-stack" aria-live="polite"></div>
   <footer><button type="button" id="cancel-image-paste" class="progress-control" hidden>画像の挿入をキャンセル</button><span id="status-busy-dot" class="status-busy-dot" aria-hidden="true"></span><button type="button" id="status" class="status-button" role="status" aria-live="polite" title="クリックしてお知らせ履歴を表示">プロジェクトのフォルダーを開いてください。</button><div class="document-save-status" hidden><span id="save-state" role="status" aria-live="polite">原稿を選択してください</span><button type="button" id="save-retry" hidden>再試行</button><button type="button" id="save-conflict" hidden>変更を確認</button></div><div class="footer-right"><span id="editor-word-count" class="footer-meta" aria-label="文字数" hidden></span><span id="editor-mode-badge" class="footer-meta" aria-label="編集モード" hidden></span><span id="cursor-position" class="footer-cursor" aria-label="カーソル位置">1:1</span></div></footer>
-  <dialog id="workspace-dialog"><form id="project-form"><h2>フォルダーを開く</h2><label for="project-root">フォルダーのパス</label><div class="folder-picker"><input type="text" role="textbox" id="project-root" aria-label="フォルダーのパス" placeholder="フォルダーを選ぶ、またはパスを入力" /><button type="button" id="browse-project" data-ui-icon="folder">フォルダーを選ぶ</button></div><div class="actions"><button type="button" id="cancel-open-workspace">キャンセル</button><button type="submit" class="primary">開く</button></div></form></dialog>
-  <dialog id="new-page-dialog"><form id="new-page-form"><h2>原稿を作る</h2><label>原稿フォルダーからの相対パス<input id="new-page-path" placeholder="getting-started.md" required /></label><label>原稿タイトル<input id="new-page-title" placeholder="使い始める" required /></label><div class="actions"><button type="button" id="cancel-new-page">キャンセル</button><button type="submit" class="primary">作成して編集</button></div></form></dialog>
-  <dialog id="new-folder-dialog"><form id="new-folder-form"><h2>フォルダーを作る</h2><p id="new-folder-parent" class="muted">原稿フォルダー内に作成します。</p><label>フォルダー名または相対パス<input id="new-folder-path" placeholder="guide/advanced" required /></label><div class="actions"><button type="button" id="cancel-new-folder">キャンセル</button><button type="submit" class="primary">作成</button></div></form></dialog>
-  <dialog id="image-save-dialog"><form id="image-save-form"><h2>画像を保存して原稿に挿入</h2><div class="image-preview-container"><img id="image-save-preview" alt="貼り付け画像のプレビュー" /></div><label>保存先フォルダー（プロジェクト相対）<input id="image-save-folder" value="docs/assets" required /></label><label>ファイル名<input id="image-save-filename" placeholder="image.png" required /></label><label>代替テキスト（省略可）<input id="image-save-alt" placeholder="画像の説明" /></label><div class="markdown-insert-preview"><span class="muted">挿入記法:</span><code id="image-markdown-preview">![alt](path)</code></div><div class="actions"><button type="button" id="cancel-image-save">キャンセル</button><button type="submit" class="primary" id="confirm-image-save" data-ui-icon="save">保存して挿入</button></div></form></dialog>
+  <dialog id="workspace-dialog"><form id="project-form"><h2>フォルダーを開く</h2><label for="project-root">フォルダーのパス</label><div class="folder-picker"><input type="text" role="textbox" id="project-root" aria-label="フォルダーのパス" placeholder="フォルダーを選ぶ、またはパスを入力" required /><button type="button" id="browse-project" data-ui-icon="folder">フォルダーを選ぶ</button></div><p id="workspace-dialog-error" class="dialog-error" role="alert" hidden></p><div class="actions"><button type="button" id="cancel-open-workspace">キャンセル</button><button type="submit" class="primary">開く</button></div></form></dialog>
+  <dialog id="new-page-dialog"><form id="new-page-form"><h2>原稿を作る</h2><label>原稿フォルダーからの相対パス<input id="new-page-path" placeholder="getting-started.md" required /></label><label>原稿タイトル<input id="new-page-title" placeholder="使い始める" required /></label><p id="new-page-error" class="dialog-error" role="alert" hidden></p><div class="actions"><button type="button" id="cancel-new-page">キャンセル</button><button type="submit" class="primary">作成して編集</button></div></form></dialog>
+  <dialog id="new-folder-dialog"><form id="new-folder-form"><h2>フォルダーを作る</h2><p id="new-folder-parent" class="muted">原稿フォルダー内に作成します。</p><label>フォルダー名または相対パス<input id="new-folder-path" placeholder="guide/advanced" required /></label><p id="new-folder-error" class="dialog-error" role="alert" hidden></p><div class="actions"><button type="button" id="cancel-new-folder">キャンセル</button><button type="submit" class="primary">作成</button></div></form></dialog>
+  <dialog id="image-save-dialog"><form id="image-save-form"><h2>画像を保存して原稿に挿入</h2><div class="image-preview-container"><img id="image-save-preview" alt="貼り付け画像のプレビュー" /></div><label>保存先フォルダー（プロジェクト相対）<input id="image-save-folder" value="docs/assets" required /></label><label>ファイル名<input id="image-save-filename" placeholder="image.png" required /></label><label>代替テキスト（省略可）<input id="image-save-alt" placeholder="画像の説明" /></label><div class="markdown-insert-preview"><span class="muted">挿入記法:</span><code id="image-markdown-preview">![alt](path)</code></div><p id="image-save-error" class="dialog-error" role="alert" hidden></p><div class="actions"><button type="button" id="cancel-image-save">キャンセル</button><button type="submit" class="primary" id="confirm-image-save" data-ui-icon="save">保存して挿入</button></div></form></dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

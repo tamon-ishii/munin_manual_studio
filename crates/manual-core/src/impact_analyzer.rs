@@ -14,7 +14,13 @@ use std::{
 };
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    let git_bin = crate::agent::which_binary("git")
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "git".to_string());
+    let mut cmd = Command::new(git_bin);
+    crate::platform::no_window(&mut cmd);
+    let output = cmd
+        .args(["-c", "core.quotepath=false"])
         .args(args)
         .current_dir(repo)
         .output()
@@ -86,6 +92,14 @@ pub fn analyze(
     }
     let base = base_ref.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("HEAD~1");
 
+    // Verify this directory belongs to a Git repository before collecting diffs.
+    if let Err(err) = run_git(&repo, &["rev-parse", "--is-inside-work-tree"]) {
+        return Err(format!(
+            "対象フォルダーはGitリポジトリではないか、gitを実行できませんでした（{}）: {err}",
+            repo.display()
+        ));
+    }
+
     let mut changed_files = BTreeSet::new();
     let mut diff_text = String::new();
 
@@ -101,11 +115,23 @@ pub fn analyze(
     if let Ok(status) = run_git(&repo, &["status", "--porcelain"]) {
         for line in status.lines() {
             if line.len() > 3 {
-                changed_files.insert(line[3..].trim().trim_matches('"').replace('\\', "/"));
+                let raw = line[3..].trim();
+                let target = raw
+                    .rsplit_once(" -> ")
+                    .map(|(_, dst)| dst)
+                    .unwrap_or(raw)
+                    .trim_matches('"')
+                    .replace('\\', "/");
+                if !target.is_empty() {
+                    changed_files.insert(target);
+                }
             }
         }
     }
     if diff_text.is_empty() {
+        if let Ok(staged) = run_git(&repo, &["diff", "--cached", "-U0"]) {
+            diff_text.push_str(&staged);
+        }
         if let Ok(unstaged) = run_git(&repo, &["diff", "-U0"]) {
             diff_text.push_str(&unstaged);
         }

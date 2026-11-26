@@ -18,11 +18,16 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
             "--literal-pathspecs".to_string(),
             "-c".to_string(),
             "color.ui=false".to_string(),
+            "-c".to_string(),
+            "core.quotepath=false".to_string(),
         ],
         args.iter().map(|s| s.to_string()).collect(),
     ]
     .concat();
-    let mut command = agent::cli_command("git", &arguments, root);
+    let git_bin = agent::which_binary("git")
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "git".to_string());
+    let mut command = agent::cli_command(&git_bin, &arguments, root);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -66,8 +71,12 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
         std::thread::sleep(Duration::from_millis(20));
     };
     if !status.success() {
-        let message = fs::read_to_string(&stderr).unwrap_or_default();
-        let output = fs::read_to_string(&stdout).unwrap_or_default();
+        let message = fs::read(&stderr)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
+        let output = fs::read(&stdout)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
         return Err(format!(
             "Git: {}",
             format!("{message}\n{output}")
@@ -80,7 +89,8 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     if fs::metadata(&stdout).map_err(|e| e.to_string())?.len() > 3_000_000 {
         return Err("Gitの結果が3MBを超えています。対象を絞ってください。".into());
     }
-    fs::read_to_string(stdout).map_err(|e| e.to_string())
+    let bytes = fs::read(stdout).map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn repository(root: &Path) -> Result<PathBuf, String> {

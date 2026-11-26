@@ -32,31 +32,52 @@ fn revision(content: &[u8]) -> String {
 pub fn document_path(root: &Path, page: &str) -> Result<PathBuf, String> {
     if page.trim().is_empty()
         || Path::new(page).is_absolute()
-        || Path::new(page)
+        || !Path::new(page)
             .extension()
-            .is_none_or(|extension| extension != "md")
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
     {
         return Err("Markdownページの相対パスを指定してください。".into());
     }
     let config = read_config(root);
-    let direct_path = project_path(root, page)?;
-    if direct_path.is_file() {
-        return Ok(direct_path);
-    }
+    let clean_page = page.trim().replace('\\', "/");
+    let clean_docs = config
+        .docs
+        .trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_end_matches('/')
+        .to_string();
+    // Match known target pages first so `index.md` resolves to `docs/index.md`
+    // rather than an unrelated `<root>/index.md`.
     if let Some((_, path)) = collect_target_markdown_files(root, &config)
         .into_iter()
-        .find(|(name, _)| name == page)
+        .find(|(name, _)| name == &clean_page)
     {
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
         return project_path(root, &relative.to_string_lossy());
     }
+    let direct_path = project_path(root, &clean_page)?;
+    if direct_path.is_file() {
+        return Ok(direct_path);
+    }
+    if !clean_docs.is_empty()
+        && clean_docs != "."
+        && clean_page.starts_with(&format!("{clean_docs}/"))
+    {
+        return Ok(direct_path);
+    }
     if config.targets.iter().any(|target| {
-        target == page && Path::new(target).extension().is_some_and(|ext| ext == "md")
+        target == &clean_page
+            && Path::new(target)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
     }) {
-        return project_path(root, page);
+        return Ok(direct_path);
     }
     let docs = project_path(root, &config.docs)?;
-    project_path(&docs, page)
+    project_path(&docs, &clean_page)
 }
 
 pub fn create_folder(root: &Path, folder: &str) -> Result<String, String> { create_folder_at(root,folder,false) }
@@ -216,6 +237,22 @@ pub fn save_asset(root: &Path, target_path: &str, data: &str) -> Result<SavedAss
     if crate::capture_resources::has_private_metadata(&bytes) {
         crate::capture_resources::store_upload(root,&clean_path,&bytes)?;
         return Ok(SavedAsset{path:clean_path});
+    }
+
+    if abs_path.exists() {
+        if let Ok(existing_bytes) = fs::read(&abs_path) {
+            if existing_bytes != bytes {
+                if let Ok(backup_dir) = project_path(
+                    root,
+                    &format!(".munin/asset-backups/{}", crate::screenshots::new_id("asset")),
+                ) {
+                    let _ = fs::create_dir_all(&backup_dir);
+                    if let Some(name) = abs_path.file_name() {
+                        let _ = fs::write(backup_dir.join(name), &existing_bytes);
+                    }
+                }
+            }
+        }
     }
 
     let mut temporary = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;

@@ -38,8 +38,7 @@ fn directory(root: &Path, settings: &Settings) -> Result<PathBuf, String> {
             root.join(path)
         }
     };
-    let path = value
-        .canonicalize()
+    let path = crate::platform::canonical_clean(&value)
         .map_err(|e| format!("ワーキングフォルダを確認してください：{e}"))?;
     if !path.is_dir() {
         return Err("ワーキングフォルダにはフォルダーを指定してください。".into());
@@ -98,23 +97,24 @@ pub(crate) fn context(root: &Path) -> Value {
 fn command(root: &Path, settings: &Settings) -> Result<Command, String> {
     validate(root, settings)?;
     let cwd = directory(root, settings)?;
-    let local = cwd.join(&settings.command);
-    let executable = if local.is_file() {
-        local
-    } else {
-        PathBuf::from(&settings.command)
-    };
+    let (executable, args) =
+        crate::platform::application_command_in(&cwd, &settings.command, &settings.arguments)
+            .unwrap_or_else(|_| {
+                let local = cwd.join(&settings.command);
+                let exe = if local.is_file() {
+                    local
+                } else {
+                    PathBuf::from(&settings.command)
+                };
+                (exe, settings.arguments.clone())
+            });
     let mut cmd = Command::new(executable);
-    cmd.args(&settings.arguments)
+    crate::platform::no_window(&mut cmd);
+    cmd.args(&args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
+        .stderr(Stdio::piped());
     Ok(cmd)
 }
 pub(crate) fn launch(root: &Path) -> Result<Value, String> {
@@ -126,6 +126,27 @@ pub(crate) fn launch(root: &Path) -> Result<Value, String> {
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("対象アプリケーションを起動できません：{e}"))?;
+    let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    if let Some(mut stderr) = child.stderr.take() {
+        let sink = stderr_buf.clone();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut chunk = [0u8; 2048];
+            loop {
+                match stderr.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if let Ok(mut buf) = sink.lock() {
+                            if buf.len() < 8192 {
+                                let room = 8192 - buf.len();
+                                buf.extend_from_slice(&chunk[..n.min(room)]);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
     let pid = child.id();
     let started = Instant::now();
     let mut stable = 0;
@@ -138,7 +159,7 @@ pub(crate) fn launch(root: &Path) -> Result<Value, String> {
             .filter(|w| {
                 owners
                     .iter()
-                    .any(|(id, owner)| id == &w.id && *owner == pid)
+                    .any(|(id, owner)| id == &w.id && (*owner == pid || crate::platform::process_descends_from(*owner, pid)))
             })
             .cloned()
             .collect();
@@ -159,7 +180,19 @@ pub(crate) fn launch(root: &Path) -> Result<Value, String> {
         }
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
             if !status.success() {
-                return Err(format!("対象アプリケーションの起動コマンドが終了しました（{status}）。引数とワーキングフォルダを確認してください。"));
+                let detail = stderr_buf
+                    .lock()
+                    .ok()
+                    .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
+                    .filter(|text| !text.is_empty());
+                return Err(match detail {
+                    Some(msg) => format!(
+                        "対象アプリケーションの起動コマンドが終了しました（{status}）。引数とワーキングフォルダを確認してください。\n{msg}"
+                    ),
+                    None => format!(
+                        "対象アプリケーションの起動コマンドが終了しました（{status}）。引数とワーキングフォルダを確認してください。"
+                    ),
+                });
             }
             if started.elapsed() > Duration::from_secs(2) && !windows.is_empty() {
                 return Ok(

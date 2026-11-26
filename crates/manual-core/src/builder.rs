@@ -134,8 +134,11 @@ fn publish_site_inner(
 
     let manifest_path = output_root.join(SITE_MANIFEST);
     let legacy_site = !manifest_path.exists()
-        && fs::read_to_string(output_root.join("index.html"))
-            .is_ok_and(|html| html.contains("name=\"generator\" content=\"mkdocs-"));
+        && fs::read_to_string(output_root.join("index.html")).is_ok_and(|html| {
+            html.contains("name=\"generator\" content=\"mkdocs-")
+                || html.contains("name=\"generator\" content=\"munin-manual-studio-single-html\"")
+                || html.contains("name=\"generator\" content=\"zensical")
+        });
     let old_files: BTreeSet<String> = if manifest_path.is_file() {
         serde_json::from_slice::<Vec<String>>(&fs::read(&manifest_path).map_err(|e| e.to_string())?)
             .map_err(|e| format!("Invalid site manifest: {e}"))?
@@ -165,7 +168,11 @@ fn publish_site_inner(
         }
         let dest = output_root.join(rel);
         let top_level = name.split('/').next().unwrap_or("");
-        if ["ai", "brief.md", ".backup"].contains(&top_level) {
+        if ["ai", "brief.md", ".backup"].contains(&top_level)
+            && output_root.join(top_level).exists()
+            && !old_files.contains(&name)
+            && !legacy_site
+        {
             return Err(format!(
                 "Generated site conflicts with manual source data: {name}"
             ));
@@ -199,7 +206,11 @@ fn publish_site_inner(
     let old_output = staging.path().join("previous");
     let had_output = output_root.exists();
     if had_output {
-        fs::rename(output_root, &old_output).map_err(|e| e.to_string())?;
+        fs::rename(output_root, &old_output).map_err(|e| {
+            format!(
+                "出力先フォルダーを更新できませんでした（エクスプローラーや他アプリで開いている場合は閉じて再試行してください）: {e}"
+            )
+        })?;
     }
     let publish_result = if fail_after_old_rename {
         Err("Simulated publication failure".to_string())
@@ -309,7 +320,7 @@ fn stage_page_links(
     referenced_assets: &mut HashSet<PathBuf>,
 ) -> Result<String, String> {
     let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
-    let mut resolve = |url: &str| -> Result<Option<String>, String> {
+    let mut resolve = |url: &str, is_asset: bool| -> Result<Option<String>, String> {
         if url.is_empty()
             || url.starts_with(['#', '/'])
             || regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
@@ -335,7 +346,12 @@ fn stage_page_links(
                 Component::CurDir => {}
                 Component::ParentDir => {
                     if parts.pop().is_none() {
-                        return Err("Linked asset escapes the project".into());
+                        if is_asset {
+                            return Err("Linked asset escapes the project".into());
+                        }
+                        // Plain hyperlinks to parent repo files (e.g. ../README.md when
+                        // opening docs/ as root) are left untouched instead of aborting build.
+                        return Ok(None);
                     }
                 }
                 _ => return Ok(None),
@@ -392,12 +408,29 @@ fn stage_page_links(
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     for (event, range) in parser.into_offset_iter() {
         match event {
-            Event::Start(Tag::Image { dest_url, .. } | Tag::Link { dest_url, .. }) => {
+            Event::Start(Tag::Image { dest_url, .. }) => {
                 if let Some(captures) = destination_pattern
                     .captures_iter(&body[range.clone()])
                     .last()
                 {
-                    if let Some(new_url) = resolve(&dest_url)? {
+                    if let Some(new_url) = resolve(&dest_url, true)? {
+                        let found = captures
+                            .name("angle")
+                            .or_else(|| captures.name("plain"))
+                            .unwrap();
+                        edits.push((
+                            range.start + found.start()..range.start + found.end(),
+                            new_url,
+                        ));
+                    }
+                }
+            }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                if let Some(captures) = destination_pattern
+                    .captures_iter(&body[range.clone()])
+                    .last()
+                {
+                    if let Some(new_url) = resolve(&dest_url, false)? {
                         let found = captures
                             .name("angle")
                             .or_else(|| captures.name("plain"))
@@ -414,8 +447,10 @@ fn stage_page_links(
                     continue;
                 }
                 for captures in html_pattern.captures_iter(&body[range.clone()]) {
+                    let whole = captures.get(0).unwrap().as_str();
+                    let is_src = whole.trim_start().to_ascii_lowercase().starts_with("src");
                     let found = captures.name("url").unwrap();
-                    if let Some(new_url) = resolve(found.as_str())? {
+                    if let Some(new_url) = resolve(found.as_str(), is_src)? {
                         edits.push((
                             range.start + found.start()..range.start + found.end(),
                             new_url,
@@ -427,7 +462,7 @@ fn stage_page_links(
         }
     }
     for (url, range) in definitions {
-        if let Some(new_url) = resolve(&url)? {
+        if let Some(new_url) = resolve(&url, false)? {
             if let Some(captures) = destination_pattern.captures(&body[range.clone()]) {
                 let found = captures
                     .name("angle")
@@ -483,12 +518,55 @@ pub(crate) fn build_with_engine(
     root: Option<&Path>,
     engine: SiteEngine,
 ) -> Result<String, String> {
+    build_with_engine_in(templates, generated, output_root, draft, root, engine, None)
+}
+
+pub(crate) fn build_with_engine_in(
+    templates: &Path,
+    generated: &Path,
+    output_root: &Path,
+    draft: bool,
+    root: Option<&Path>,
+    engine: SiteEngine,
+    working_directory_override: Option<&str>,
+) -> Result<String, String> {
     if engine == SiteEngine::SingleHtml {
         return build_inner(templates, generated, output_root, draft, root, engine, None);
     }
-    let command = site_command(root, engine);
+    let override_working_dir = working_directory_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let saved_working_dir = root
+        .map(read_config)
+        .map(|cfg| cfg.mkdocs.working_directory.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let explicit_working_dir = if let Some(raw) = override_working_dir {
+        let resolved = if let Some(root) = root {
+            crate::config::resolve_mkdocs_working_directory(root, raw)?
+        } else {
+            let candidate = PathBuf::from(raw);
+            let canonical = candidate
+                .canonicalize()
+                .map_err(|_| format!("ワーキングフォルダが見つかりません: {raw}"))?;
+            if !canonical.is_dir() {
+                return Err(format!(
+                    "ワーキングフォルダにはフォルダーを指定してください: {raw}"
+                ));
+            }
+            Some(canonical)
+        };
+        resolved.map(|path| crate::platform::strip_windows_verbatim(&path))
+    } else if let Some(raw) = saved_working_dir {
+        // A saved working_directory may belong to another machine; fall back cleanly to
+        // auto-discovery instead of aborting when that folder is absent locally.
+        root.and_then(|r| crate::config::resolve_mkdocs_working_directory(r, &raw).ok().flatten())
+            .map(|path| crate::platform::strip_windows_verbatim(&path))
+    } else {
+        None
+    };
+    let command = site_command(root, explicit_working_dir.as_deref(), engine);
     if engine == SiteEngine::Zensical && command.is_none() {
-        return Err("Zensicalが見つかりません。Studioから参照できるPATHに zensical を追加するか、プロジェクトの .venv にインストールしてください。PATHを変更した場合はStudioを再起動してください。".into());
+        return Err("Zensicalが見つかりません。Studioから参照できるPATHに zensical を追加するか、プロジェクトまたは親フォルダーの .venv にインストールしてください。別の場所にある場合はHTML出力の「ワーキングフォルダ」を指定してください。PATHを変更した場合はStudioを再起動してください。".into());
     }
     build_inner(templates, generated, output_root, draft, root, engine, command)
 }
@@ -737,7 +815,14 @@ fn inline_single_html_assets(html: &str, temp_docs: &Path, page_dir: &Path) -> S
                             bytes
                         };
                         let data_uri = format!("data:{mime_type};base64,{}", BASE64.encode(&public_bytes));
-                        out.push_str(&m.as_str().replace(src, &data_uri));
+                        let src_match = cap.name("src").unwrap();
+                        let rel_start = src_match.start() - m.start();
+                        let rel_end = src_match.end() - m.start();
+                        let mut replaced = String::with_capacity(m.as_str().len() + data_uri.len());
+                        replaced.push_str(&m.as_str()[..rel_start]);
+                        replaced.push_str(&data_uri);
+                        replaced.push_str(&m.as_str()[rel_end..]);
+                        out.push_str(&replaced);
                         last = m.end();
                         continue;
                     }
@@ -751,26 +836,108 @@ fn inline_single_html_assets(html: &str, temp_docs: &Path, page_dir: &Path) -> S
     out
 }
 
+fn heading_slug(text: &str) -> String {
+    let mut out = String::new();
+    let mut prev_hyphen = false;
+    for ch in text.trim().to_lowercase().chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            out.push(ch);
+            prev_hyphen = false;
+        } else if ch == '-' || ch.is_whitespace() {
+            if !prev_hyphen && !out.is_empty() {
+                out.push('-');
+                prev_hyphen = true;
+            }
+        }
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+fn add_single_html_heading_ids(html: &str, page_anchor: &str) -> (String, BTreeMap<String, String>) {
+    let heading_re = regex::Regex::new(r#"(?is)<h([1-6])([^>]*)>(.*?)</h[1-6]>"#).unwrap();
+    let tag_re = regex::Regex::new(r"(?s)<[^>]+>").unwrap();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut slug_to_id: BTreeMap<String, String> = BTreeMap::new();
+    let mut out = String::with_capacity(html.len() + 64);
+    let mut last = 0usize;
+    for cap in heading_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        out.push_str(&html[last..m.start()]);
+        let level = &cap[1];
+        let attrs = &cap[2];
+        let inner = &cap[3];
+        if attrs.to_ascii_lowercase().contains("id=") {
+            out.push_str(m.as_str());
+        } else {
+            let plain = tag_re.replace_all(inner, "");
+            let base = heading_slug(&plain);
+            let slug = if base.is_empty() {
+                format!("section-{}", counts.len() + 1)
+            } else {
+                base
+            };
+            let count = counts.entry(slug.clone()).or_insert(0);
+            let local_slug = if *count == 0 {
+                slug.clone()
+            } else {
+                format!("{slug}-{count}")
+            };
+            *count += 1;
+            let unique_id = format!("{page_anchor}--{local_slug}");
+            slug_to_id.entry(local_slug.clone()).or_insert_with(|| unique_id.clone());
+            slug_to_id.entry(slug).or_insert_with(|| unique_id.clone());
+            out.push_str(&format!(
+                "<h{level}{attrs} id=\"{}\">{inner}</h{level}>",
+                escape_html(&unique_id)
+            ));
+        }
+        last = m.end();
+    }
+    out.push_str(&html[last..]);
+    (out, slug_to_id)
+}
+
 fn rewrite_single_html_links(
     html: &str,
     current_rel: &str,
     page_anchors: &BTreeMap<String, String>,
+    page_headings: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> String {
-    let link_re = regex::Regex::new(r#"(?i)\bhref\s*=\s*"(?P<href>[^"]+)""#).unwrap();
+    let link_re = regex::Regex::new(r#"(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')"#).unwrap();
     let current_parent = Path::new(current_rel).parent().unwrap_or(Path::new(""));
     let mut out = String::with_capacity(html.len());
     let mut last = 0usize;
     for cap in link_re.captures_iter(html) {
         let m = cap.get(0).unwrap();
         out.push_str(&html[last..m.start()]);
-        let href = cap.name("href").unwrap().as_str();
+        let href = cap
+            .get(1)
+            .or_else(|| cap.get(2))
+            .map(|x| x.as_str())
+            .unwrap_or("");
         let lower = href.to_ascii_lowercase();
-        if !href.starts_with('#')
-            && !lower.starts_with("http://")
+        if let Some(fragment) = href.strip_prefix('#') {
+            let decoded = percent_encoding::percent_decode_str(fragment)
+                .decode_utf8_lossy()
+                .to_lowercase();
+            let slug = heading_slug(&decoded);
+            if let Some(target_id) = page_headings
+                .get(current_rel)
+                .and_then(|map| map.get(&decoded).or_else(|| map.get(&slug)))
+            {
+                out.push_str(&format!(r##"href="#{}""##, escape_html(target_id)));
+                last = m.end();
+                continue;
+            }
+        } else if !lower.starts_with("http://")
             && !lower.starts_with("https://")
             && !lower.starts_with("mailto:")
         {
-            let clean = href.split(['?', '#']).next().unwrap_or(href);
+            let (before_hash, fragment) = match href.split_once('#') {
+                Some((left, right)) => (left, Some(right)),
+                None => (href, None),
+            };
+            let clean = before_hash.split('?').next().unwrap_or(before_hash);
             let decoded = percent_encoding::percent_decode_str(clean)
                 .decode_utf8()
                 .map(|c| c.into_owned())
@@ -798,7 +965,19 @@ fn rewrite_single_html_links(
                 .collect::<Vec<_>>()
                 .join("/");
             if let Some(anchor) = page_anchors.get(&resolved) {
-                out.push_str(&format!(r##"href="#{anchor}""##));
+                let target = fragment
+                    .and_then(|frag| {
+                        let dec = percent_encoding::percent_decode_str(frag)
+                            .decode_utf8_lossy()
+                            .to_lowercase();
+                        let slug = heading_slug(&dec);
+                        page_headings
+                            .get(&resolved)
+                            .and_then(|map| map.get(&dec).or_else(|| map.get(&slug)))
+                    })
+                    .map(String::as_str)
+                    .unwrap_or(anchor.as_str());
+                out.push_str(&format!(r##"href="#{}""##, escape_html(target)));
                 last = m.end();
                 continue;
             }
@@ -1024,7 +1203,8 @@ fn render_single_html_document(
         ));
     }
 
-    let mut sections_html = String::new();
+    let mut rendered_pages: Vec<(String, String)> = Vec::with_capacity(nav_items.len());
+    let mut page_headings: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut has_mermaid = false;
     for item in nav_items {
         let md = &staged_markdown[item.page_index];
@@ -1040,7 +1220,15 @@ fn render_single_html_document(
             .unwrap_or(temp_docs)
             .to_path_buf();
         let with_images = inline_single_html_assets(&with_mermaid, temp_docs, &page_dir);
-        let with_links = rewrite_single_html_links(&with_images, &item.rel_posix, &page_anchors);
+        let (with_ids, heading_map) = add_single_html_heading_ids(&with_images, &item.anchor_id);
+        page_headings.insert(item.rel_posix.clone(), heading_map);
+        rendered_pages.push((item.rel_posix.clone(), with_ids));
+    }
+
+    let mut sections_html = String::new();
+    for (item, (rel_posix, with_ids)) in nav_items.iter().zip(rendered_pages) {
+        let with_links =
+            rewrite_single_html_links(&with_ids, &rel_posix, &page_anchors, &page_headings);
         sections_html.push_str(&format!(
             "<article class=\"manual-page\" id=\"{}\">\n{}\n</article>\n",
             escape_html(&item.anchor_id),
@@ -1377,6 +1565,7 @@ fn build_inner(
         nav: nav_config,
         exclude_unused_assets,
         theme_style,
+        ..
     } = config.map(|config| config.mkdocs).unwrap_or_default();
 
     // markdown 以外の静的ファイルをコピー
@@ -1390,20 +1579,21 @@ fn build_inner(
             }
             if !root_is_source || entry.depth() == 0 { return true; }
             let name = entry.file_name().to_string_lossy();
-            !name.starts_with('.') && !matches!(name.as_ref(), "node_modules" | "target" | "dist" | "__pycache__" | "manual_setting.json")
+            !name.starts_with('.') && !matches!(name.as_ref(), "node_modules" | "target" | "dist" | "__pycache__" | "venv" | "manual_setting.json")
         })
         .filter_map(|e| e.ok())
     {
         if entry.file_type().is_file() {
-            if entry.path().extension().map_or(true, |ext| ext != "md") {
+            if entry
+                .path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map_or(true, |ext| !ext.eq_ignore_ascii_case("md"))
+            {
                 if exclude_unused_assets && root.is_some() && is_image_file(entry.path()) {
-                    let canon = entry
-                        .path()
-                        .canonicalize()
-                        .unwrap_or_else(|_| entry.path().to_path_buf());
-                    if !referenced_assets.contains(&canon) {
-                        continue;
-                    }
+                    // Images referenced by pages are already staged under `_assets/`.
+                    // Skip unreferenced images (and avoid duplicating referenced ones).
+                    continue;
                 }
                 let rel = entry.path().strip_prefix(templates).unwrap_or(entry.path());
                 let dest = temp_docs.join(rel);
@@ -1532,8 +1722,6 @@ fn build_inner(
     let temp_config = temp_root.join("mkdocs.yml");
     fs::write(&temp_config, config_yaml).map_err(|e| e.to_string())?;
 
-    fs::create_dir_all(output_root).map_err(|e| e.to_string())?;
-
     if let Some(cmd_parts) = command {
         let (prog, args) = cmd_parts.split_first().unwrap();
         let mut final_args: Vec<String> = args.to_vec();
@@ -1546,9 +1734,25 @@ fn build_inner(
             final_args.extend(["-d".to_string(), temp_site.to_string_lossy().into_owned()]);
         }
 
-        let output = Command::new(prog)
-            .args(&final_args)
+        let mut cmd = Command::new(prog);
+        crate::platform::no_window(&mut cmd);
+        cmd.args(&final_args)
             .current_dir(temp_root)
+            .env("PYTHONUTF8", "1")
+            .env("PYTHONIOENCODING", "utf-8");
+        if let Some(prog_dir) = Path::new(prog)
+            .parent()
+            .filter(|dir| !dir.as_os_str().is_empty())
+        {
+            let mut paths = vec![prog_dir.to_path_buf()];
+            if let Some(existing) = std::env::var_os("PATH") {
+                paths.extend(std::env::split_paths(&existing));
+            }
+            if let Ok(joined) = std::env::join_paths(paths) {
+                cmd.env("PATH", joined);
+            }
+        }
+        let output = cmd
             .output()
             .map_err(|e| format!("Failed to run {}: {e}", engine.command()))?;
 
@@ -1561,8 +1765,16 @@ fn build_inner(
                 out.trim()
             };
             let name = if engine == SiteEngine::MkDocs { "MkDocs" } else { "Zensical" };
-            return Err(format!("{name} site build failed: {msg}"));
+            let hint = if engine == SiteEngine::MkDocs
+                && (msg.contains("pymdownx") || msg.contains("Unrecognised theme name") || msg.contains("material"))
+            {
+                "\nヒント: `mkdocs-material`（および `pymdown-extensions`）が Python 環境に入っていない可能性があります。`pip install mkdocs-material` を実行するか、「単一HTML（Python不要）」をお試しください。"
+            } else {
+                ""
+            };
+            return Err(format!("{name} site build failed: {msg}{hint}"));
         }
+        fs::create_dir_all(output_root).map_err(|e| e.to_string())?;
         publish_site(&temp_site, output_root)?;
         Ok(format!(
             "{}\nSite: {}",
@@ -2006,28 +2218,197 @@ mod site_tests {
     }
 }
 
-fn site_command(root: Option<&Path>, engine: SiteEngine) -> Option<Vec<String>> {
+fn normalize_search_path(path: &Path) -> PathBuf {
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let mut normalized = PathBuf::new();
+    for component in abs.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(normalized.components().next_back(), Some(Component::Normal(_))) {
+                    normalized.pop();
+                }
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    crate::platform::strip_windows_verbatim(&normalized)
+}
+
+fn executable_in_dir(directory: &Path, windows: bool, name: &str) -> Option<PathBuf> {
+    if windows {
+        for suffix in [".exe", ".cmd", ".bat"] {
+            let candidate = directory.join(format!("{name}{suffix}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        None
+    } else {
+        let candidate = directory.join(name);
+        candidate.is_file().then_some(candidate)
+    }
+}
+
+fn venv_executable_in(dir: &Path, windows: bool, name: &str) -> Option<PathBuf> {
+    let scripts_dir = if windows { "Scripts" } else { "bin" };
+    for venv_name in [".venv", "venv"] {
+        let directory = dir.join(venv_name).join(scripts_dir);
+        if let Some(executable) = executable_in_dir(&directory, windows, name) {
+            return Some(executable);
+        }
+    }
+    if dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case(".venv") || value.eq_ignore_ascii_case("venv"))
+    {
+        if let Some(executable) = executable_in_dir(&dir.join(scripts_dir), windows, name) {
+            return Some(executable);
+        }
+    }
+    None
+}
+
+fn probe_python_module(binary: &Path, engine: SiteEngine) -> Option<Vec<String>> {
     let name = engine.command();
-    root.and_then(|root| project_site_command(root, cfg!(windows), name))
+    let probe = if engine == SiteEngine::MkDocs {
+        "--version"
+    } else {
+        "--help"
+    };
+    let mut cmd = Command::new(binary);
+    crate::platform::no_window(&mut cmd);
+    cmd.args(["-m", name, probe])
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .output()
+        .ok()?
+        .status
+        .success()
+        .then(|| vec![binary.to_string_lossy().into_owned(), "-m".into(), name.into()])
+}
+
+fn venv_python_in(dir: &Path, windows: bool) -> Option<PathBuf> {
+    for python_name in if windows { ["python", "python3"] } else { ["python3", "python"] } {
+        if let Some(binary) = venv_executable_in(dir, windows, python_name) {
+            return Some(binary);
+        }
+    }
+    None
+}
+
+fn ancestor_search_roots(start: &Path) -> Vec<PathBuf> {
+    let normalized = normalize_search_path(start);
+    let mut roots = vec![normalized.clone()];
+    if let Ok(canonical) = start.canonicalize() {
+        let clean = crate::platform::strip_windows_verbatim(&canonical);
+        if clean != normalized {
+            roots.push(clean);
+        }
+    }
+    roots
+}
+
+fn project_python_module_command(root: &Path, windows: bool, engine: SiteEngine) -> Option<Vec<String>> {
+    for base in ancestor_search_roots(root) {
+        for ancestor in base.ancestors() {
+            if let Some(python) = venv_python_in(ancestor, windows) {
+                if let Some(command) = probe_python_module(&python, engine) {
+                    return Some(command);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn working_dir_site_command(
+    working_dir: &Path,
+    windows: bool,
+    name: &str,
+    engine: SiteEngine,
+) -> Option<Vec<String>> {
+    let scripts_dir = if windows { "Scripts" } else { "bin" };
+    let clean = normalize_search_path(working_dir);
+    if let Some(executable) = executable_in_dir(&clean, windows, name) {
+        return Some(vec![executable.to_string_lossy().into_owned()]);
+    }
+    if let Some(executable) = executable_in_dir(&clean.join(scripts_dir), windows, name) {
+        return Some(vec![executable.to_string_lossy().into_owned()]);
+    }
+    if let Some(command) = project_site_command(&clean, windows, name) {
+        return Some(command);
+    }
+    for python_name in if windows { ["python", "python3"] } else { ["python3", "python"] } {
+        if let Some(python) = executable_in_dir(&clean, windows, python_name)
+            .or_else(|| executable_in_dir(&clean.join(scripts_dir), windows, python_name))
+        {
+            if let Some(command) = probe_python_module(&python, engine) {
+                return Some(command);
+            }
+        }
+    }
+    project_python_module_command(&clean, windows, engine)
+}
+
+fn env_venv_site_command(windows: bool, name: &str, engine: SiteEngine) -> Option<Vec<String>> {
+    let scripts_dir = if windows { "Scripts" } else { "bin" };
+    for var in ["VIRTUAL_ENV", "CONDA_PREFIX"] {
+        let Some(venv) = std::env::var_os(var) else { continue; };
+        let venv_dir = PathBuf::from(venv);
+        if let Some(executable) = executable_in_dir(&venv_dir.join(scripts_dir), windows, name) {
+            return Some(vec![executable.to_string_lossy().into_owned()]);
+        }
+        for python_name in if windows { ["python", "python3"] } else { ["python3", "python"] } {
+            if let Some(python) = executable_in_dir(&venv_dir.join(scripts_dir), windows, python_name)
+                .or_else(|| executable_in_dir(&venv_dir, windows, python_name))
+            {
+                if let Some(command) = probe_python_module(&python, engine) {
+                    return Some(command);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn site_command(
+    root: Option<&Path>,
+    working_dir: Option<&Path>,
+    engine: SiteEngine,
+) -> Option<Vec<String>> {
+    let name = engine.command();
+    let windows = cfg!(windows);
+    working_dir
+        .and_then(|dir| working_dir_site_command(dir, windows, name, engine))
+        .or_else(|| root.and_then(|root| project_site_command(root, windows, name)))
+        .or_else(|| root.and_then(|root| project_python_module_command(root, windows, engine)))
+        .or_else(|| env_venv_site_command(windows, name, engine))
         .or_else(|| which_binary(name).map(|binary| vec![binary.to_string_lossy().into_owned()]))
         .or_else(|| {
             ["python3", "python"].into_iter().find_map(|python| {
                 let binary = which_binary(python)?;
-                let probe = if engine == SiteEngine::MkDocs { "--version" } else { "--help" };
-                Command::new(&binary).args(["-m", name, probe]).output().ok()?
-                    .status.success().then(|| vec![binary.to_string_lossy().into_owned(), "-m".into(), name.into()])
+                probe_python_module(&binary, engine)
             })
         })
 }
 
 fn project_site_command(root: &Path, windows: bool, name: &str) -> Option<Vec<String>> {
-    let directory = root
-        .join(".venv")
-        .join(if windows { "Scripts" } else { "bin" });
-    let executable = directory.join(if windows { format!("{name}.exe") } else { name.into() });
-    executable
-        .is_file()
-        .then(|| vec![executable.to_string_lossy().into_owned()])
+    for base in ancestor_search_roots(root) {
+        for ancestor in base.ancestors() {
+            if let Some(executable) = venv_executable_in(ancestor, windows, name) {
+                return Some(vec![executable.to_string_lossy().into_owned()]);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -2047,5 +2428,233 @@ mod portability_tests {
                 assert!(project_site_command(root.path(), !windows, name).is_none());
             }
         }
+    }
+
+    #[test]
+    fn site_builders_are_found_in_parent_virtual_environments_and_inside_venv() {
+        for engine in [SiteEngine::MkDocs, SiteEngine::Zensical] {
+            let name = engine.command();
+            for (windows, scripts_dir) in [(true, "Scripts"), (false, "bin")] {
+                let repo = tempfile::tempdir().unwrap();
+                let venv_bin = repo.path().join(".venv").join(scripts_dir);
+                let exe = venv_bin.join(if windows {
+                    format!("{name}.exe")
+                } else {
+                    name.into()
+                });
+                fs::create_dir_all(&venv_bin).unwrap();
+                fs::write(&exe, []).unwrap();
+
+                // Subfolder under repo containing .venv
+                let nested_docs = repo.path().join("packages").join("app").join("docs");
+                fs::create_dir_all(&nested_docs).unwrap();
+                assert_eq!(
+                    project_site_command(&nested_docs, windows, name).unwrap()[0],
+                    exe.to_string_lossy()
+                );
+
+                // Folder literally inside .venv
+                let under_venv = repo.path().join(".venv").join("docs");
+                fs::create_dir_all(&under_venv).unwrap();
+                assert_eq!(
+                    project_site_command(&under_venv, windows, name).unwrap()[0],
+                    exe.to_string_lossy()
+                );
+
+                // Closer .venv in child folder takes precedence over parent .venv
+                let child_bin = nested_docs.join(".venv").join(scripts_dir);
+                let child_exe = child_bin.join(if windows {
+                    format!("{name}.exe")
+                } else {
+                    name.into()
+                });
+                fs::create_dir_all(&child_bin).unwrap();
+                fs::write(&child_exe, []).unwrap();
+                assert_eq!(
+                    project_site_command(&nested_docs, windows, name).unwrap()[0],
+                    child_exe.to_string_lossy()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_working_directory_resolves_venv_custom_env_and_persists_in_settings() {
+        let workspace = tempfile::tempdir().unwrap();
+        let docs_project = workspace.path().join("manual_sub");
+        let sibling_env = workspace.path().join("python_env");
+        fs::create_dir_all(docs_project.join("docs")).unwrap();
+        fs::create_dir_all(&sibling_env).unwrap();
+        fs::write(docs_project.join("docs/index.md"), "# Hello\n").unwrap();
+        fs::write(
+            docs_project.join("manual_setting.json"),
+            r#"{"docs":"docs","output":"site","mkdocs":{"site_name":"Test","theme":"material","language":"ja","use_directory_urls":false}}"#,
+        )
+        .unwrap();
+
+        for (windows, scripts_dir) in [(true, "Scripts"), (false, "bin")] {
+            let bin = sibling_env.join(".venv").join(scripts_dir);
+            let exe = bin.join(if windows { "mkdocs.exe" } else { "mkdocs" });
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(&exe, []).unwrap();
+
+            // 1. Folder containing .venv
+            assert_eq!(
+                working_dir_site_command(&sibling_env, windows, "mkdocs", SiteEngine::MkDocs)
+                    .unwrap()[0],
+                exe.to_string_lossy()
+            );
+            // 2. .venv directory itself
+            assert_eq!(
+                working_dir_site_command(
+                    &sibling_env.join(".venv"),
+                    windows,
+                    "mkdocs",
+                    SiteEngine::MkDocs
+                )
+                .unwrap()[0],
+                exe.to_string_lossy()
+            );
+            // 3. Scripts / bin directory itself
+            assert_eq!(
+                working_dir_site_command(&bin, windows, "mkdocs", SiteEngine::MkDocs).unwrap()[0],
+                exe.to_string_lossy()
+            );
+        }
+
+        // Invalid working_directory is rejected without altering manual_setting.json
+        let before = fs::read(docs_project.join("manual_setting.json")).unwrap();
+        let invalid_json = serde_json::json!({ "working_directory": "does-not-exist" }).to_string();
+        assert!(crate::run(
+            &docs_project,
+            "save-html-output",
+            &[("--output", "site"), ("--json", &invalid_json)]
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(docs_project.join("manual_setting.json")).unwrap(),
+            before
+        );
+
+        // Relative working_directory ("../python_env") saves and loads cleanly
+        let save_json = serde_json::json!({ "working_directory": "../python_env" }).to_string();
+        crate::run(
+            &docs_project,
+            "save-html-output",
+            &[("--output", "site"), ("--json", &save_json)],
+        )
+        .unwrap();
+        assert_eq!(
+            crate::config::read_config(&docs_project)
+                .mkdocs
+                .working_directory,
+            "../python_env"
+        );
+
+        // Clearing working_directory removes it cleanly
+        let clear_json = serde_json::json!({ "working_directory": "" }).to_string();
+        crate::run(
+            &docs_project,
+            "save-html-output",
+            &[("--output", "site"), ("--json", &clear_json)],
+        )
+        .unwrap();
+        assert_eq!(
+            crate::config::read_config(&docs_project)
+                .mkdocs
+                .working_directory,
+            ""
+        );
+    }
+
+    #[test]
+    fn build_mkdocs_executes_from_parent_venv_and_explicit_working_directory() {
+        let workspace = tempfile::tempdir().unwrap();
+        let docs_root = workspace.path().join("sub/docs_root");
+        fs::create_dir_all(docs_root.join("docs")).unwrap();
+        fs::write(docs_root.join("docs/index.md"), "# Parent Venv Test\n").unwrap();
+        fs::write(
+            docs_root.join("manual_setting.json"),
+            r#"{"docs":"docs","output":"site","mkdocs":{"site_name":"Parent Test","theme":"material","language":"ja","use_directory_urls":false}}"#,
+        )
+        .unwrap();
+
+        let create_mock_mkdocs = |venv_root: &Path, marker: &str| {
+            #[cfg(windows)]
+            {
+                let bin = venv_root.join(".venv").join("Scripts");
+                fs::create_dir_all(&bin).unwrap();
+                let script = bin.join("mkdocs.cmd");
+                let body = format!(
+                    "@echo off\r\nsetlocal\r\nset OUT=\r\n:loop\r\nif \"%~1\"==\"\" goto done\r\nif \"%~1\"==\"-d\" (\r\n  set \"OUT=%~2\"\r\n  shift\r\n)\r\nshift\r\ngoto loop\r\n:done\r\nif not exist \"%OUT%\" mkdir \"%OUT%\"\r\n> \"%OUT%\\index.html\" echo ^<h1^>{marker}^</h1^>\r\n"
+                );
+                fs::write(&script, body).unwrap();
+            }
+            #[cfg(not(windows))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let bin = venv_root.join(".venv").join("bin");
+                fs::create_dir_all(&bin).unwrap();
+                let script = bin.join("mkdocs");
+                let body = format!(
+                    "#!/bin/sh\nout=\"\"\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"-d\" ]; then out=\"$2\"; shift 2; continue; fi\n  shift\ndone\nmkdir -p \"$out\"\necho '<h1>{marker}</h1>' > \"$out/index.html\"\n"
+                );
+                fs::write(&script, body).unwrap();
+                fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        };
+
+        // 1. Parent directory .venv is discovered automatically without any setting
+        create_mock_mkdocs(workspace.path(), "FROM_PARENT_VENV");
+        let out1 = crate::run(&docs_root, "build-mkdocs", &[("--draft", "")]).unwrap();
+        assert!(out1.contains("Site:"));
+        assert!(fs::read_to_string(docs_root.join("site/index.html"))
+            .unwrap()
+            .contains("FROM_PARENT_VENV"));
+
+        // 2. Explicit working_directory takes precedence over parent .venv
+        let custom_dir = workspace.path().join("custom_env");
+        create_mock_mkdocs(&custom_dir, "FROM_CUSTOM_WORKDIR");
+        let save_json = serde_json::json!({
+            "working_directory": custom_dir.to_string_lossy()
+        })
+        .to_string();
+        crate::run(
+            &docs_root,
+            "save-html-output",
+            &[("--output", "site"), ("--json", &save_json)],
+        )
+        .unwrap();
+        let out2 = crate::run(&docs_root, "build-mkdocs", &[("--draft", "")]).unwrap();
+        assert!(out2.contains("Site:"));
+        assert!(fs::read_to_string(docs_root.join("site/index.html"))
+            .unwrap()
+            .contains("FROM_CUSTOM_WORKDIR"));
+    }
+
+    #[test]
+    fn parent_hyperlink_and_single_html_heading_anchors_work_cleanly() {
+        let workspace = tempdir().unwrap();
+        let docs_root = workspace.path().join("manual");
+        fs::create_dir_all(docs_root.join("docs/ai")).unwrap();
+        fs::write(workspace.path().join("README.md"), "# Outside").unwrap();
+        fs::write(
+            docs_root.join("docs/index.md"),
+            "# トップ\n\n[親README](../README.md)\n[詳細へ](ai/intro.md#setup)\n[同ページ](#local-sec)\n\n## Local Sec\n\n本文\n",
+        )
+        .unwrap();
+        fs::write(
+            docs_root.join("docs/ai/intro.md"),
+            "# AIガイド\n\n## Setup\n\n手順\n",
+        )
+        .unwrap();
+        let out = crate::run(&docs_root, "build-single-html", &[("--draft", ""), ("--output", "site")]).unwrap();
+        assert!(out.contains("Single HTML:"));
+        let html = fs::read_to_string(docs_root.join("site/index.html")).unwrap();
+        assert!(html.contains("href=\"../README.md\""));
+        assert!(html.contains("id=\"page-2--setup\""));
+        assert!(html.contains("href=\"#page-2--setup\""));
+        assert!(html.contains("id=\"page-1--local-sec\""));
+        assert!(html.contains("href=\"#page-1--local-sec\""));
     }
 }

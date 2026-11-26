@@ -1,5 +1,8 @@
+import { invoke } from "@tauri-apps/api/core";
 import { featureDialog } from "./imageDialogs";
 import { reviewSelection } from "./selectionAi";
+
+const isNative = "__TAURI_INTERNALS__" in window;
 
 export type HubTabId = "dashboard" | "fact-check" | "impact" | "recording-draft" | "derivative";
 
@@ -12,7 +15,7 @@ export interface AiCollabHubOptions {
   getPages: () => string[];
   openPage: (page: string, line?: number) => Promise<void>;
   insertMarkdownWithDiff: (markdown: string, title: string) => Promise<void>;
-  createPageWithContent: (relativePage: string, markdown: string) => Promise<void>;
+  createPageWithContent: (relativePage: string, markdown: string, allowOverwrite?: boolean) => Promise<void>;
   sendToTerminal: (options: {
     title: string;
     page: string;
@@ -35,6 +38,8 @@ export function openAiCollabHubDialog(
 
   const { dialog, body } = featureDialog("AI協業ツール");
   dialog.id = "ai-collab-hub-dialog";
+  dialog.dataset.dialogInitialWidth = "1040";
+  dialog.dataset.dialogInitialHeight = "760";
 
   const tabsNav = document.createElement("div");
   tabsNav.className = "settings-category-tabs ai-hub-tabs";
@@ -252,8 +257,9 @@ export function openAiCollabHubDialog(
         try {
           const selected = checks.filter((c) => c.input.checked).map((c) => c.aud);
           await options.rpc("page-audience-save", { page: item.page, audiences: selected }, root);
+          item.audiences = selected;
+          statusEl.textContent = `${item.page} の対象読者設定を保存しました。`;
           options.reportStatus(`${item.page} の対象読者設定を保存しました。`);
-          await loadDashboard();
         } catch (error) {
           statusEl.textContent = `保存失敗: ${String(error)}`;
         } finally {
@@ -353,21 +359,45 @@ export function openAiCollabHubDialog(
     }
   };
 
+  const audienceEngineSelect = dashPanel.querySelector<HTMLSelectElement>("#hub-audience-build-engine")!;
+  try {
+    const savedEngine = localStorage.getItem("manual-studio-site-engine");
+    if (savedEngine === "build-zensical") audienceEngineSelect.value = "zensical";
+    else if (savedEngine === "build-single-html") audienceEngineSelect.value = "single-html";
+    else if (savedEngine === "build-mkdocs") audienceEngineSelect.value = "mkdocs";
+  } catch { /* Optional persistence. */ }
+
   dashPanel.querySelector<HTMLButtonElement>("#hub-dashboard-refresh")!.onclick = () =>
     void loadDashboard();
   dashPanel.querySelector<HTMLButtonElement>("#hub-audience-build-btn")!.onclick = async () => {
     const statusEl = dashPanel.querySelector<HTMLElement>("#hub-dashboard-status")!;
     const audience = dashPanel.querySelector<HTMLSelectElement>("#hub-audience-build-target")!.value;
-    const engine = dashPanel.querySelector<HTMLSelectElement>("#hub-audience-build-engine")!.value;
+    const engine = audienceEngineSelect.value;
     statusEl.textContent = `${audience} 向け HTML を作成しています…`;
     try {
       const res = JSON.parse(
         await options.rpc("build-audience", { audience, engine, draft: true }, root),
       ) as { output: string; summary: string };
       statusEl.textContent = `${audience} 向け HTML を作成しました（出力先: ${res.output}）。`;
+      if (isNative) {
+        const openHtmlBtn = document.createElement("button");
+        openHtmlBtn.type = "button";
+        openHtmlBtn.textContent = "出力HTMLを開く";
+        openHtmlBtn.style.marginLeft = "8px";
+        openHtmlBtn.onclick = () => {
+          void invoke("open_output_html", { root, output: res.output }).catch((err) => {
+            options.reportStatus(`出力HTMLを開けませんでした: ${String(err)}`, true);
+          });
+        };
+        statusEl.append(openHtmlBtn);
+      }
       options.reportStatus(`${audience} 向け HTML を作成しました。`);
     } catch (error) {
-      statusEl.textContent = `読者別出力に失敗しました: ${String(error)}`;
+      const message = String(error);
+      const hint = engine !== "single-html" && /見つかりません|MkDocs|Zensical|Python|\.venv/i.test(message)
+        ? " （ツールを「単一HTML（Python不要）」へ切り替えるか、HTML出力設定でワーキングフォルダを指定できます）"
+        : "";
+      statusEl.textContent = `読者別出力に失敗しました: ${message}${hint}`;
     }
   };
 
@@ -377,7 +407,10 @@ export function openAiCollabHubDialog(
     <p class="muted">現在の原稿内のコマンド・フラグ・パス・UI表記（「」）を、対象アプリのソースコードと撮影画像のUIMapに照合して裏取りします。</p>
     <div class="ai-hub-form-row">
       <label>照合元ソースフォルダー
-        <input type="text" id="hub-fact-source-dir" />
+        <div class="ai-hub-path-row">
+          <input type="text" id="hub-fact-source-dir" />
+          <button type="button" id="hub-fact-source-browse" hidden>参照…</button>
+        </div>
       </label>
       <button type="button" class="primary" id="hub-fact-run">現在の原稿を裏取り</button>
     </div>
@@ -393,6 +426,23 @@ export function openAiCollabHubDialog(
   `;
   const factDirInput = factPanel.querySelector<HTMLInputElement>("#hub-fact-source-dir")!;
   factDirInput.value = options.getWorkingDirectory() || root;
+  const factBrowseBtn = factPanel.querySelector<HTMLButtonElement>("#hub-fact-source-browse")!;
+  if (isNative) {
+    factBrowseBtn.hidden = false;
+    factBrowseBtn.onclick = async () => {
+      try {
+        const picked = await invoke<string | null>("choose_path", {
+          initialPath: factDirInput.value.trim() || root,
+          folder: true,
+          baseDirectory: root,
+          title: "照合元ソースフォルダーを選択",
+        });
+        if (picked) factDirInput.value = picked;
+      } catch (error) {
+        options.reportStatus(String(error), true);
+      }
+    };
+  }
   const factFilter = factPanel.querySelector<HTMLSelectElement>("#hub-fact-filter")!;
   let lastFactResult: {
     page: string;
@@ -487,7 +537,8 @@ export function openAiCollabHubDialog(
         ),
       );
       lastFactResult = res;
-      statusEl.textContent = `根拠あり ${res.supported}件 / 未確認 ${res.unverified}件（ソース ${res.indexed_source_files}件・UIMap ${res.indexed_uimap_labels}語を照合）`;
+      const hintSuffix = res.indexed_source_files === 0 && res.hint ? ` — ${res.hint}` : "";
+      statusEl.textContent = `根拠あり ${res.supported}件 / 未確認 ${res.unverified}件（ソース ${res.indexed_source_files}件・UIMap ${res.indexed_uimap_labels}語を照合）${hintSuffix}`;
       renderFactFindings();
     } catch (error) {
       statusEl.textContent = `裏取りに失敗しました: ${String(error)}`;
@@ -500,7 +551,10 @@ export function openAiCollabHubDialog(
     <p class="muted">対象アプリリポジトリのGit差分から、変更されたUI文言・識別子・関連撮影画像と影響を受けるマニュアルページを抽出します。</p>
     <div class="ai-hub-form-row">
       <label>対象アプリのリポジトリパス
-        <input type="text" id="hub-impact-repo" />
+        <div class="ai-hub-path-row">
+          <input type="text" id="hub-impact-repo" />
+          <button type="button" id="hub-impact-repo-browse" hidden>参照…</button>
+        </div>
       </label>
       <label>比較基準（base_ref）
         <input type="text" id="hub-impact-base" value="HEAD~1" />
@@ -512,6 +566,23 @@ export function openAiCollabHubDialog(
   `;
   const impactRepoInput = impactPanel.querySelector<HTMLInputElement>("#hub-impact-repo")!;
   impactRepoInput.value = options.getWorkingDirectory() || root;
+  const impactBrowseBtn = impactPanel.querySelector<HTMLButtonElement>("#hub-impact-repo-browse")!;
+  if (isNative) {
+    impactBrowseBtn.hidden = false;
+    impactBrowseBtn.onclick = async () => {
+      try {
+        const picked = await invoke<string | null>("choose_path", {
+          initialPath: impactRepoInput.value.trim() || root,
+          folder: true,
+          baseDirectory: root,
+          title: "対象アプリのリポジトリを選択",
+        });
+        if (picked) impactRepoInput.value = picked;
+      } catch (error) {
+        options.reportStatus(String(error), true);
+      }
+    };
+  }
   const impactBaseInput = impactPanel.querySelector<HTMLInputElement>("#hub-impact-base")!;
 
   impactPanel.querySelector<HTMLButtonElement>("#hub-impact-run")!.onclick = async () => {
@@ -608,7 +679,10 @@ export function openAiCollabHubDialog(
         <select id="hub-rec-resource"><option value="">（画像パスを直接指定）</option></select>
       </label>
       <label>またはプロジェクト内のPNGパス
-        <input type="text" id="hub-rec-image-path" placeholder="docs/assets/step.png" />
+        <div class="ai-hub-path-row">
+          <input type="text" id="hub-rec-image-path" placeholder="docs/assets/step.png" />
+          <button type="button" id="hub-rec-image-browse" hidden>参照…</button>
+        </div>
       </label>
     </div>
     <div class="ai-hub-form-row">
@@ -630,6 +704,24 @@ export function openAiCollabHubDialog(
   `;
   let recordingLoaded = false;
   let generatedRecDraft = "";
+  const recImageInput = recPanel.querySelector<HTMLInputElement>("#hub-rec-image-path")!;
+  const recImageBrowseBtn = recPanel.querySelector<HTMLButtonElement>("#hub-rec-image-browse")!;
+  if (isNative) {
+    recImageBrowseBtn.hidden = false;
+    recImageBrowseBtn.onclick = async () => {
+      try {
+        const picked = await invoke<string | null>("choose_path", {
+          initialPath: recImageInput.value.trim(),
+          folder: false,
+          projectRoot: root,
+          title: "PNG画像を選択",
+        });
+        if (picked) recImageInput.value = picked;
+      } catch (error) {
+        options.reportStatus(String(error), true);
+      }
+    };
+  }
 
   async function loadRecordingSources(): Promise<void> {
     recordingLoaded = true;
@@ -705,7 +797,7 @@ export function openAiCollabHubDialog(
   };
   recPanel.querySelector<HTMLButtonElement>("#hub-rec-send-terminal")!.onclick = async () => {
     if (!generatedRecDraft) return;
-    const page = options.getCurrentPage() || "docs/index.md";
+    const page = options.getCurrentPage() || options.getPages()[0] || "index.md";
     dialog.close();
     await options.sendToTerminal({
       title: "操作記録ドラフトのブラッシュアップ",
@@ -739,6 +831,9 @@ export function openAiCollabHubDialog(
       <p id="hub-deriv-status" class="muted" role="status"></p>
       <pre id="hub-deriv-preview" class="external-tray-preview" hidden></pre>
       <div class="actions" id="hub-deriv-actions" hidden>
+        <label class="ai-hub-inline-filename">保存先ファイル名
+          <input type="text" id="hub-deriv-filename" placeholder="faq.md" />
+        </label>
         <button type="button" class="primary" id="hub-deriv-create">新規原稿として作成して開く</button>
         <button type="button" id="hub-deriv-insert">現在の原稿へ差分挿入</button>
       </div>
@@ -798,7 +893,28 @@ export function openAiCollabHubDialog(
     transDstSelect.selectedIndex = 1;
   }
 
+  const transRunBtn = derivPanel.querySelector<HTMLButtonElement>("#hub-trans-run")!;
+  const transStatusEl = derivPanel.querySelector<HTMLElement>("#hub-trans-status")!;
+  const syncTransButtonState = () => {
+    if (allPages.length < 2) {
+      transRunBtn.disabled = true;
+      transStatusEl.textContent = "差分翻訳同期には基準言語と翻訳先の2ページ以上が必要です。";
+    } else if (transSrcSelect.value === transDstSelect.value) {
+      transRunBtn.disabled = true;
+      transStatusEl.textContent = "基準言語ページと翻訳先ページには異なるページを選択してください。";
+    } else {
+      transRunBtn.disabled = false;
+      if (/2ページ以上|異なるページ/.test(transStatusEl.textContent || "")) {
+        transStatusEl.textContent = "";
+      }
+    }
+  };
+  transSrcSelect.onchange = syncTransButtonState;
+  transDstSelect.onchange = syncTransButtonState;
+  syncTransButtonState();
+
   let derivResult: { suggested_page: string; markdown: string } | null = null;
+  const derivFilenameInput = derivPanel.querySelector<HTMLInputElement>("#hub-deriv-filename")!;
   derivPanel.querySelector<HTMLButtonElement>("#hub-deriv-run")!.onclick = async () => {
     const pages = derivChecks.filter((c) => c.input.checked).map((c) => c.page);
     const kind = derivPanel.querySelector<HTMLSelectElement>("#hub-deriv-kind")!.value;
@@ -812,6 +928,7 @@ export function openAiCollabHubDialog(
         await options.rpc("derivative-generate", { kind, pages, use_ai: useAi }, root),
       ) as { suggested_page: string; markdown: string; ai_refined: boolean };
       derivResult = res;
+      derivFilenameInput.value = res.suggested_page;
       previewEl.textContent = res.markdown;
       previewEl.hidden = false;
       actionsEl.hidden = false;
@@ -822,9 +939,14 @@ export function openAiCollabHubDialog(
   };
   derivPanel.querySelector<HTMLButtonElement>("#hub-deriv-create")!.onclick = async () => {
     if (!derivResult) return;
-    const target = derivResult.suggested_page;
-    dialog.close();
-    await options.createPageWithContent(target, derivResult.markdown);
+    const statusEl = derivPanel.querySelector<HTMLElement>("#hub-deriv-status")!;
+    const target = derivFilenameInput.value.trim() || derivResult.suggested_page;
+    try {
+      await options.createPageWithContent(target, derivResult.markdown);
+      dialog.close();
+    } catch (error) {
+      statusEl.textContent = `原稿を作成できませんでした（別名を指定してください）: ${String(error)}`;
+    }
   };
   derivPanel.querySelector<HTMLButtonElement>("#hub-deriv-insert")!.onclick = async () => {
     if (!derivResult) return;
@@ -896,7 +1018,7 @@ export function openAiCollabHubDialog(
     );
     if (decision.action !== "adopt" || decision.content === plan.target_before) return;
     dialog.close();
-    await options.createPageWithContent(plan.target_page, decision.content);
+    await options.createPageWithContent(plan.target_page, decision.content, true);
   };
 
   selectTab(initialTab);

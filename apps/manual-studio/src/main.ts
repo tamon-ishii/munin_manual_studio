@@ -51,7 +51,7 @@ import { jumpToSource } from "./editorNavigation";
 import {reviewSelection} from "./selectionAi";
 import {reviewProofreading} from './proofreadingReview';
 import { showUnsavedChangesDialog } from "./unsavedChangesDialog";
-import { loadWorkspaceHistory, recordWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
+import { loadWorkspaceHistory, recordWorkspaceHistory, removeWorkspaceHistory, showWorkspaceHistory } from "./workspaceHistory";
 import { changeHeadingLevel, toggleStrikethrough, toggleTaskList, changeIndent, continueMarkdownList, type MarkdownEdit } from "./markdownAssists";
 import { applyTheme, currentTheme, initializeTheme, isThemeId, type ThemeId } from "./theme";
 import { aiErrorAdvice } from "./aiErrors";
@@ -378,6 +378,12 @@ function showStudioToast(message: string, error = false): void {
   while (stack.children.length > 4) stack.firstElementChild?.remove();
   timer = setTimeout(dismiss, error ? 8000 : 4000);
 }
+function setDialogError(id: string, message = ""): void {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = !message;
+}
 function status(message: string, error = false): void {
   const statusEl = element("status");
   statusEl.textContent = message;
@@ -391,7 +397,22 @@ function status(message: string, error = false): void {
   const advice = error ? aiErrorAdvice(message) : null;
   const panel = document.getElementById("ai-error-advice");
   if (advice && panel) {
-    panel.hidden = false; panel.textContent = `${advice.title}。${advice.action}`;
+    panel.hidden = false;
+    panel.replaceChildren();
+    const textSpan = document.createElement("span");
+    textSpan.textContent = `${advice.title}。${advice.action}`;
+    panel.append(textSpan);
+    if (advice.openSettings) {
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.textContent = "AI設定を開く";
+      openBtn.style.marginLeft = "8px";
+      openBtn.onclick = () => {
+        selectSettingsCategory("text-ai");
+        chooseTab("settings");
+      };
+      panel.append(openBtn);
+    }
     element("operation-progress").hidden = false;
   }
 }
@@ -951,18 +972,22 @@ function openAiCollabHub(initialTab: HubTabId = 'dashboard'): void {
         changeImageMarkdown(decision.content, before);
         status(`${title}を原稿に反映しました。`);
       },
-      createPageWithContent: async (relativePage, markdown) => {
+      createPageWithContent: async (relativePage, markdown, allowOverwrite = false) => {
         const root = projectRoot;
         const target = relativePage.replace(/^\/+/, '');
         const cleanPage = docsPrefix !== '.' && target.startsWith(`${docsPrefix}/`)
           ? target.slice(docsPrefix.length + 1)
           : target;
-        await rpc('editor-save', { page: cleanPage, json: { content: markdown } }, root);
+        await rpc(
+          'editor-save',
+          { page: cleanPage, json: allowOverwrite ? { content: markdown } : { content: markdown, revision: null } },
+          root,
+        );
         await refreshWorkspace(false, false);
         await openPage(cleanPage, false);
         showDocumentView();
         chooseTab('editor');
-        status(`${cleanPage} を作成して開きました。`);
+        status(allowOverwrite ? `${cleanPage} を更新して開きました。` : `${cleanPage} を作成して開きました。`);
       },
       sendToTerminal: async (opts) => {
         await openEditorSendToTerminal(opts);
@@ -1072,6 +1097,7 @@ function openManualTerminal(): void {
         void ensureTerminalSnapshot(projectRoot);
       }
       if (state === "error" && message) status(message, true);
+      else if (state === "stopped" && message && message !== "未接続") status(message, /先にプロジェクト|失敗|できません/.test(message));
     },
     onUnload: (ownerId, root) => {
       const request = { root, action: "pty-close-owner", options: { ownerId } };
@@ -1085,25 +1111,32 @@ function openManualTerminal(): void {
 }
 window.addEventListener("manual-studio-terminal-open", openManualTerminal);
 element('terminal-directory-settings').addEventListener('click',()=>{
+  setDialogError('terminal-directory-error');
   input('terminal-working-directory').value=terminalWorkingDirectory||projectRoot;
   element<HTMLDialogElement>('terminal-directory-dialog').showModal();
   input('terminal-working-directory').focus();
 });
+element('terminal-working-directory').addEventListener('input',()=>setDialogError('terminal-directory-error'));
 element('terminal-directory-form').addEventListener('submit',event=>{
   event.preventDefault();
+  setDialogError('terminal-directory-error');
   terminalWorkingDirectory=input('terminal-working-directory').value.trim()||projectRoot;
+  if (projectRoot) {
+    try { localStorage.setItem(`manual-studio-terminal-cwd:${projectRoot}`, terminalWorkingDirectory); } catch { /* Optional persistence. */ }
+  }
   element('terminal-directory-settings').title=terminalWorkingDirectory;
   updateTerminalHeaderIndicator();
   element<HTMLDialogElement>('terminal-directory-dialog').close();
 });
 document.querySelectorAll('#terminal-directory-dialog [data-close-dialog]').forEach(button=>button.addEventListener('click',()=>element<HTMLDialogElement>('terminal-directory-dialog').close()));
 element('terminal-choose-directory').addEventListener('click',()=>{
-  if(!native){status('作業フォルダのパスを入力してください。');return;}
-  void invoke<string|null>('choose_project',{initialDirectory:input('terminal-working-directory').value.trim()||projectRoot}).then(path=>{if(path)input('terminal-working-directory').value=path;}).catch(error=>status(String(error),true));
+  if(!native){setDialogError('terminal-directory-error','ブラウザー表示では作業フォルダのパスを直接入力してください。');return;}
+  setDialogError('terminal-directory-error');
+  void invoke<string|null>('choose_project',{initialDirectory:input('terminal-working-directory').value.trim()||projectRoot}).then(path=>{if(path)input('terminal-working-directory').value=path;}).catch(error=>{setDialogError('terminal-directory-error',String(error));status(String(error),true);});
 });
-element('terminal-project-directory').addEventListener('click',()=>{input('terminal-working-directory').value=projectRoot;});
+element('terminal-project-directory').addEventListener('click',()=>{setDialogError('terminal-directory-error');input('terminal-working-directory').value=projectRoot;});
 
-const BUSY_LOCK_SELECTOR = "button:not(.progress-control):not(#status):not(.studio-toast-close):not(.document-tabs-scroll)";
+const BUSY_LOCK_SELECTOR = "button:not(.progress-control):not(#status):not(.studio-toast-close):not(.document-tabs-scroll):not([data-close-dialog]):not(.dialog-close)";
 let busyMutationObserver: MutationObserver | null = null;
 function lockButtonWhileBusy(button: HTMLButtonElement): void {
   if (!busyButtonStates || !button.matches(BUSY_LOCK_SELECTOR)) return;
@@ -1204,10 +1237,20 @@ function openPanelDialog(panelId: string): void {
   if (panelId === 'panel-settings') {
     input('settings-site-name').value = workspace?.config.mkdocs.site_name ?? '';
     input('settings-site-output').value = workspace?.config.output ?? '';
+    input('settings-site-working-directory').value = workspace?.config.mkdocs.working_directory ?? '';
     input('settings-site-exclude-unused').checked = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
     element('settings-site-result').textContent = '';
     element<HTMLButtonElement>('settings-site-browse').hidden = !native;
-    for (const id of ['settings-site-name','settings-site-output','settings-site-exclude-unused','settings-site-save','settings-site-browse']) {
+    element<HTMLButtonElement>('settings-site-working-directory-browse').hidden = !native;
+    for (const id of [
+      'settings-site-name',
+      'settings-site-output',
+      'settings-site-working-directory',
+      'settings-site-exclude-unused',
+      'settings-site-save',
+      'settings-site-browse',
+      'settings-site-working-directory-browse',
+    ]) {
       element<HTMLInputElement | HTMLButtonElement>(id).disabled = !projectRoot;
     }
     settingsSiteThemePicker.setDisabled(!projectRoot);
@@ -2205,6 +2248,20 @@ function renderSettings(): void {
   element<HTMLSelectElement>("ai-agent").value = preferred;
   if (preferred !== workspace.config.agent) input("ai-model").value = "";
 
+  const termAgentEl = document.getElementById("terminal-cli-agent") as HTMLSelectElement | null;
+  if (termAgentEl && workspace.agents.length) {
+    let savedTermAgent = "";
+    try { savedTermAgent = localStorage.getItem("manual-studio-terminal-agent") || ""; } catch { /* Optional */ }
+    const currentTermAgent = savedTermAgent || termAgentEl.value;
+    termAgentEl.innerHTML = workspace.agents
+      .map((agent) => `<option value="${escape(agent.id)}">${escape(agent.label)}${agent.available ? "" : "（CLI未検出）"}</option>`)
+      .join("");
+    const selectedAvailable = workspace.agents.find((a) => a.id === currentTermAgent && a.available);
+    const firstAvailable = workspace.agents.find((a) => a.available);
+    const fallbackExists = workspace.agents.find((a) => a.id === currentTermAgent);
+    termAgentEl.value = (selectedAvailable || firstAvailable || fallbackExists || workspace.agents[0]).id;
+  }
+
   const connectionType = workspace.config.connection_type || "cli";
   element<HTMLSelectElement>("ai-connection-type").value = connectionType;
   input("ai-endpoint-url").value = workspace.config.endpoint_url || "";
@@ -2382,8 +2439,10 @@ async function openProject(root: string, check = true): Promise<void> {
   externalChangesCache = [];
   updateExternalChangesButton();
   void glossarySettings.reload(root);
-  terminalWorkingDirectory=root;
-  element('terminal-directory-settings').title=root;
+  let savedTerminalDir = "";
+  try { savedTerminalDir = localStorage.getItem(`manual-studio-terminal-cwd:${root}`) || ""; } catch { /* Optional */ }
+  terminalWorkingDirectory = savedTerminalDir || root;
+  element('terminal-directory-settings').title = terminalWorkingDirectory;
   if (version !== projectRequestVersion) return;
   documentPersistence.state = null;
   setAiPhase(element('ai-workflow-status'), 'idle');
@@ -2484,6 +2543,7 @@ async function runAction(action: string, options: Record<string, unknown> = {}, 
   let succeeded = false;
   let completionMessage = action === "build-zensical" ? "ZensicalでHTMLを作成しました。" :
     action === "build-mkdocs" ? "MkDocsでHTMLを作成しました。" :
+    action === "build-single-html" ? "単一HTMLを作成しました。" :
     action === "recapture" || action === "capture-window" ? "画像を更新し、撮影元を保存しました。" : "処理が完了しました。";
   let completionHasError = false;
   try {
@@ -2565,37 +2625,81 @@ document.querySelectorAll<HTMLDialogElement>('dialog.panel-dialog[id^="panel-"]'
     if (e.key === "Escape") dialog.close();
   });
   dialog.addEventListener("close", () => {
+    if (dialog.id === "panel-settings") void saveAiSettings().catch(() => {});
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => {
       button.classList.toggle("active", button.dataset.tab === activeWorkspaceTab);
     });
   });
 });
 
+element("terminal-cli-agent").addEventListener("change", () => {
+  try { localStorage.setItem("manual-studio-terminal-agent", element<HTMLSelectElement>("terminal-cli-agent").value); } catch { /* Optional */ }
+});
+
 element("open-existing-workspace").addEventListener("click", () => {
+  setDialogError("workspace-dialog-error");
   input("project-root").value = projectRoot;
   element<HTMLDialogElement>("workspace-dialog").showModal();
   input("project-root").focus();
 });
+element("project-root").addEventListener("input", () => setDialogError("workspace-dialog-error"));
 element("cancel-open-workspace").addEventListener("click", () => element<HTMLDialogElement>("workspace-dialog").close());
 element("workspace-name").addEventListener("click", () => {
   if (document.getElementById("workspace-history-dialog")) return;
   void work(async () => {
     const history = await loadWorkspaceHistory(native);
     const request=rpc;
-    showWorkspaceHistory(history, projectRoot, root => work(() => openProject(root)), projectRoot ? [
-      {label:'原稿・画像の保存先',run:()=>{void showWorkspacePaths({root:()=>projectRoot,request,
-        prepare:async()=>{if(busy)throw new Error('処理が終わってから変更してください。');await savedBeforeOperation();return confirmAllDocumentTabs();},
-        changed:async root=>{if(root===projectRoot)await work(()=>openProject(root,false));},
-      }).catch(error=>status(String(error),true));}},
-      {label:'撮影・挿入の処理時間',run:()=>{void showOperationTimings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}},
-    ] : []);
+    showWorkspaceHistory(
+      history,
+      projectRoot,
+      root => work(() => openProject(root)),
+      projectRoot ? [
+        {label:'原稿・画像の保存先',run:()=>{void showWorkspacePaths({root:()=>projectRoot,request,
+          prepare:async()=>{if(busy)throw new Error('処理が終わってから変更してください。');await savedBeforeOperation();return confirmAllDocumentTabs();},
+          changed:async root=>{if(root===projectRoot)await work(()=>openProject(root,false));},
+        }).catch(error=>status(String(error),true));}},
+        {label:'撮影・挿入の処理時間',run:()=>{void showOperationTimings({root:()=>projectRoot,request}).catch(error=>status(String(error),true));}},
+      ] : [],
+      async (root) => {
+        await removeWorkspaceHistory(native, root);
+        emptyRecentLoadedFor = null;
+        refreshEmptyRecentWorkspaces();
+      },
+    );
   });
 });
-element("project-form").addEventListener("submit", (event) => { event.preventDefault(); void work(() => openProject(input("project-root").value.trim())); });
+element("project-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  setDialogError("workspace-dialog-error");
+  const target = input("project-root").value.trim();
+  if (!target) {
+    setDialogError("workspace-dialog-error", "フォルダーのパスを入力してください。");
+    input("project-root").focus();
+    return;
+  }
+  void work(async () => {
+    try {
+      await openProject(target);
+    } catch (error) {
+      setDialogError("workspace-dialog-error", String(error));
+      throw error;
+    }
+  });
+});
 element("browse-project").addEventListener("click", () => { void work(async () => {
-  if (!native) { status("ブラウザーでの開発表示では、プロジェクトのパスを入力して「開く」を押してください。"); input("project-root").focus(); return; }
-  const path = await invoke<string | null>("choose_project", { initialDirectory: input("project-root").value.trim() || projectRoot });
-  if (path) { input("project-root").value = path; await openProject(path); }
+  setDialogError("workspace-dialog-error");
+  if (!native) {
+    setDialogError("workspace-dialog-error", "ブラウザーでの開発表示では、プロジェクトのパスを入力して「開く」を押してください。");
+    input("project-root").focus();
+    return;
+  }
+  try {
+    const path = await invoke<string | null>("choose_project", { initialDirectory: input("project-root").value.trim() || projectRoot });
+    if (path) { input("project-root").value = path; await openProject(path); }
+  } catch (error) {
+    setDialogError("workspace-dialog-error", String(error));
+    throw error;
+  }
 }); });
 function showStaticProjectFileInfo(filePath: string): void {
   const { dialog, body } = featureDialog("プロジェクトファイル");
@@ -2758,7 +2862,11 @@ function updateEditorEmptyState(): void {
   const empty = !documentState && !activeImageTab;
   element('editor-empty-state').hidden = !empty;
   element('editor-empty-title').textContent = workspace ? '原稿を選ぶか、作成してください' : 'フォルダーを開いて始める';
-  element('editor-empty-description').textContent = workspace ? '左のファイルツリーから原稿を選択できます。' : '原稿と画像を保存しているフォルダーを選択してください。';
+  element('editor-empty-description').textContent = !workspace
+    ? '原稿と画像を保存しているフォルダーを選択してください。'
+    : workspace.pages.length
+      ? '左のファイルツリーから原稿を選択できます。'
+      : 'まだ原稿がありません。「原稿を作成」から始められます。';
   element('empty-open-folder').hidden = Boolean(workspace);
   element('empty-select-page').hidden = !workspace || !workspace.pages.length;
   element('empty-create-page').hidden = !workspace;
@@ -2768,6 +2876,7 @@ function updateEditorEmptyState(): void {
   for (const id of ['reader-review','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
   setButtonDisabled(element<HTMLButtonElement>('site-export-open'), !projectRoot);
   setButtonDisabled(element<HTMLButtonElement>('assets-organizer-open'), !projectRoot);
+  setButtonDisabled(element<HTMLButtonElement>('target-application-open'), !projectRoot);
   const hubBtn = document.getElementById('workspace-ai-hub-open') as HTMLButtonElement | null;
   if (hubBtn) setButtonDisabled(hubBtn, !projectRoot);
   updateTerminalHeaderIndicator();
@@ -3204,7 +3313,7 @@ function updateShortcutTitles():void {
 updateShortcutTitles();window.addEventListener('manual-studio-keybindings-change',updateShortcutTitles);
 let closingApproved = false;
 let closingPrompt = false;
-window.addEventListener("beforeunload", (event) => { if ((briefDirty || briefSaving > 0 || dirty || [...documentTabs.entries()].some(([page,tab]) => page !== documentState?.page && tab.content !== tab.document.content)) && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
+window.addEventListener("beforeunload", (event) => { if ((aiSavePending || briefDirty || briefSaving > 0 || dirty || [...documentTabs.entries()].some(([page,tab]) => page !== documentState?.page && tab.content !== tab.document.content)) && !closingApproved) { event.preventDefault(); event.returnValue = ""; } });
 window.addEventListener("pagehide", () => terminalController?.disconnectOnUnload());
 if (native) void getCurrentWindow().onCloseRequested(event => {
   if (closingApproved) return;
@@ -3215,6 +3324,7 @@ if (native) void getCurrentWindow().onCloseRequested(event => {
   void (async () => {
     try {
       const activeAtClose = documentState?.page || null;
+      await saveAiSettings();
       await saveBriefSettings();
       if (!await confirmAllDocumentTabs()) return;
       saveDocumentTabSession(activeAtClose);
@@ -3232,6 +3342,7 @@ element("new-page").addEventListener("click", (event) => {
   element<HTMLDetailsElement>("tree-create-menu").open = false;
   if (event.isTrusted) contextCreateParent = null;
   if (!projectRoot) { status("先にプロジェクトを開いてください。", true); return; }
+  setDialogError("new-page-error");
   if (contextCreateParent !== null) { input('new-page-path').value = contextCreateParent ? contextCreateParent + '/' : ''; input('new-page-title').value = ''; }
   element<HTMLDialogElement>("new-page-dialog").showModal(); input("new-page-path").focus();
 });
@@ -3416,39 +3527,55 @@ document.addEventListener('dragover',event=>{
 });
 function clearResourceDragHover(){if(resourceDragHover)clearTimeout(resourceDragHover);resourceDragHover=undefined;}
 document.addEventListener('dragleave',event=>{if(event.target instanceof Element&&event.target.closest(editorNavigationSelector)&&!(event.relatedTarget instanceof Element&&event.relatedTarget.closest(editorNavigationSelector)))clearResourceDragHover();},true);document.addEventListener('dragend',clearResourceDragHover);document.addEventListener('drop',clearResourceDragHover);
+element("new-page-path").addEventListener("input", () => setDialogError("new-page-error"));
+element("new-page-title").addEventListener("input", () => setDialogError("new-page-error"));
 element("cancel-new-page").addEventListener("click", () => element<HTMLDialogElement>("new-page-dialog").close());
 element("new-page-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  setDialogError("new-page-error");
   void work(async () => {
-    let page = input("new-page-path").value.trim().replace(/\\/g, "/");
-    const docsRoot = `${workspace?.config.docs || "docs"}/`;
-    if (page.startsWith(docsRoot)) page = page.slice(docsRoot.length);
-    await rpc("editor-save", { page, json: { content: `# ${input("new-page-title").value.trim()}\n\n`, revision: null } });
-    element<HTMLDialogElement>("new-page-dialog").close();
-    await refreshWorkspace(); await openPage(page, false); status(`${page}を作成しました。`);
+    try {
+      let page = input("new-page-path").value.trim().replace(/\\/g, "/");
+      const docsRoot = `${workspace?.config.docs || "docs"}/`;
+      if (page.startsWith(docsRoot)) page = page.slice(docsRoot.length);
+      await rpc("editor-save", { page, json: { content: `# ${input("new-page-title").value.trim()}\n\n`, revision: null } });
+      element<HTMLDialogElement>("new-page-dialog").close();
+      await refreshWorkspace(); await openPage(page, false); status(`${page}を作成しました。`);
+    } catch (error) {
+      setDialogError("new-page-error", String(error));
+      throw error;
+    }
   });
 });
 element("new-folder").addEventListener("click", (event) => {
   element<HTMLDetailsElement>("tree-create-menu").open = false;
   if (event.isTrusted) contextCreateParent = null;
   if (!projectRoot || !workspace) { status("先にプロジェクトを開いてください。", true); return; }
+  setDialogError("new-folder-error");
   element("new-folder-parent").textContent = `作成先: ${workspace.config.docs}`;
   input("new-folder-path").value = contextCreateParent ? contextCreateParent + '/' : '';
   if (contextCreateParent !== null) element('new-folder-parent').textContent = `作成先: ${contextCreateParent || 'プロジェクト直下'}`;
   element<HTMLDialogElement>("new-folder-dialog").showModal();
   input("new-folder-path").focus();
 });
+element("new-folder-path").addEventListener("input", () => setDialogError("new-folder-error"));
 element("cancel-new-folder").addEventListener("click", () => element<HTMLDialogElement>("new-folder-dialog").close());
 element("new-folder-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  setDialogError("new-folder-error");
   void work(async () => {
-    if (!projectRoot || !workspace) throw new Error("先にプロジェクトを開いてください。");
-    const relative = input("new-folder-path").value.trim().replace(/\\/g, "/");
-    const created = await rpc("create-folder", { path: relative, json: { project_relative: contextCreateParent !== null } });
-    for (const [index] of created.split("/").entries()) expandedFolders.add(created.split("/").slice(0, index + 1).join("/"));
-    element<HTMLDialogElement>("new-folder-dialog").close();
-    await refreshWorkspace();
-    status(`${created} フォルダーを作成しました。`);
+    try {
+      if (!projectRoot || !workspace) throw new Error("先にプロジェクトを開いてください。");
+      const relative = input("new-folder-path").value.trim().replace(/\\/g, "/");
+      const created = await rpc("create-folder", { path: relative, json: { project_relative: contextCreateParent !== null } });
+      for (const [index] of created.split("/").entries()) expandedFolders.add(created.split("/").slice(0, index + 1).join("/"));
+      element<HTMLDialogElement>("new-folder-dialog").close();
+      await refreshWorkspace();
+      status(`${created} フォルダーを作成しました。`);
+    } catch (error) {
+      setDialogError("new-folder-error", String(error));
+      throw error;
+    }
   });
 });
 let pendingImageDataUrl: string | null = null;
@@ -3591,12 +3718,13 @@ function openImageSaveDialog(dataUrl: string, suggestedFilename?: string, defaul
   const filename = suggestedFilename || `image-${stamp}.png`;
   input("image-save-filename").value = filename;
   input("image-save-alt").value = defaultAlt || filename.replace(/\.[^.]+$/, "");
+  setDialogError("image-save-error");
   updateMarkdownInsertPreview();
   dialog.showModal();
   input("image-save-filename").focus();
 }
-element("image-save-folder").addEventListener("input", updateMarkdownInsertPreview);
-element("image-save-filename").addEventListener("input", updateMarkdownInsertPreview);
+element("image-save-folder").addEventListener("input", () => { setDialogError("image-save-error"); updateMarkdownInsertPreview(); });
+element("image-save-filename").addEventListener("input", () => { setDialogError("image-save-error"); updateMarkdownInsertPreview(); });
 element("image-save-alt").addEventListener("input", updateMarkdownInsertPreview);
 function cancelImageSave():void {
   const owner=pendingImageOwner,selection=pendingImageSelection;
@@ -3612,12 +3740,13 @@ element("cancel-image-save").addEventListener("click", cancelImageSave);
 element("image-save-dialog").addEventListener("cancel", event=>{event.preventDefault();cancelImageSave();});
 element("image-save-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  setDialogError("image-save-error");
   if (!pendingImageDataUrl || !documentState) return;
   const folder = input("image-save-folder").value.trim().replace(/\/+$/, "");
   const filename = input("image-save-filename").value.trim();
   const alt = input("image-save-alt").value.trim();
   if (!filename) {
-    status("ファイル名を入力してください。", true);
+    setDialogError("image-save-error", "ファイル名を入力してください。");
     return;
   }
   const fullAssetPath = folder ? `${folder}/${filename}` : filename;
@@ -3626,38 +3755,43 @@ element("image-save-form").addEventListener("submit", (event) => {
   const replaceTarget = pendingImageReplace;
   const selection=pendingImageSelection||{start:editor.selectionStart,end:editor.selectionEnd};
   void work(async () => {
-    const valid=()=>owner&&pendingImageOwner===owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion;
-    if(!valid())throw new Error('原稿が変更されました。画像の挿入をやり直してください。');
-    await rpc("save-asset", { path: fullAssetPath, data: dataUrl },owner!.root);
-    if(pendingImageOwner!==owner){if(owner!.root===projectRoot)status('画像を保存しました。挿入はキャンセルされました。');return;}
-    if(!valid())throw new Error('原稿が変更されました。保存した画像は撮影一覧に残しています。');
-    element<HTMLDialogElement>("image-save-dialog").close();
-    pendingImageDataUrl = null;
-    pendingImageReplace = null;
-    pendingImageOwner = null;
-    const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
-    if (replaceTarget) {
+    try {
+      const valid=()=>owner&&pendingImageOwner===owner&&owner.root===projectRoot&&owner.page===documentState?.page&&owner.content===editor.value&&owner.documentSession===documentRequestVersion;
+      if(!valid())throw new Error('原稿が変更されました。画像の挿入をやり直してください。');
+      await rpc("save-asset", { path: fullAssetPath, data: dataUrl },owner!.root);
+      if(pendingImageOwner!==owner){if(owner!.root===projectRoot)status('画像を保存しました。挿入はキャンセルされました。');return;}
+      if(!valid())throw new Error('原稿が変更されました。保存した画像は撮影一覧に残しています。');
+      element<HTMLDialogElement>("image-save-dialog").close();
+      pendingImageDataUrl = null;
+      pendingImageReplace = null;
+      pendingImageOwner = null;
+      const relPath = computeRelativeMarkdownPath(documentState!.page, fullAssetPath, workspace?.config.docs || "docs");
+      if (replaceTarget) {
+        pendingImageSelection = null;
+        const expected = owner!.content;
+        const next = !replaceTarget.configured && replaceTarget.raw.startsWith("![")
+          ? expected.slice(0, replaceTarget.start)
+            + `![${alt.replace(/[\[\]\\]/g, '\\$&')}](<${relPath}>${replaceTarget.caption ? ` "${replaceTarget.caption.replace(/["\\]/g, '\\$&')}"` : ''})`
+            + expected.slice(replaceTarget.end)
+          : replaceDocumentImage(expected, { ...replaceTarget, alt }, relPath);
+        changeImageMarkdown(next, expected);
+        await milkdown.refreshImages();
+        previewScheduler.invalidate();
+        void renderPreview();
+        await refreshWorkspace(false, false);
+        status(`画像を ${fullAssetPath} に保存し、原稿の参照を差し替えました。`);
+        return;
+      }
+      const markdownCode = `![${alt}](${relPath})`;
+      const start = selection.start;
+      const end = selection.end;
       pendingImageSelection = null;
-      const expected = owner!.content;
-      const next = !replaceTarget.configured && replaceTarget.raw.startsWith("![")
-        ? expected.slice(0, replaceTarget.start)
-          + `![${alt.replace(/[\[\]\\]/g, '\\$&')}](<${relPath}>${replaceTarget.caption ? ` "${replaceTarget.caption.replace(/["\\]/g, '\\$&')}"` : ''})`
-          + expected.slice(replaceTarget.end)
-        : replaceDocumentImage(expected, { ...replaceTarget, alt }, relPath);
-      changeImageMarkdown(next, expected);
-      await milkdown.refreshImages();
-      previewScheduler.invalidate();
-      void renderPreview();
-      await refreshWorkspace(false, false);
-      status(`画像を ${fullAssetPath} に保存し、原稿の参照を差し替えました。`);
-      return;
+      insertSourceImage(markdownCode, start, end);
+      status(`画像を ${fullAssetPath} に保存し、原稿に挿入しました。`);
+    } catch (error) {
+      setDialogError("image-save-error", String(error));
+      throw error;
     }
-    const markdownCode = `![${alt}](${relPath})`;
-    const start = selection.start;
-    const end = selection.end;
-    pendingImageSelection = null;
-    insertSourceImage(markdownCode, start, end);
-    status(`画像を ${fullAssetPath} に保存し、原稿に挿入しました。`);
   });
 });
 let lastPastedTimestamp = "";
@@ -3877,14 +4011,12 @@ editor.addEventListener("paste", (event: ClipboardEvent) => {
 });
 
 function canPasteImageIntoEditor(): boolean {
+  if (document.querySelector("dialog[open]")) return false;
   const active = document.activeElement;
   if (active && milkdown.host.contains(active)) return false;
   if (active && active !== editor && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return false;
   if (element('panel-editor').hidden) return false;
-  if (!documentState) {
-    status("先にMarkdown原稿を開いてください。", true);
-    return false;
-  }
+  if (!documentState) return false;
   return true;
 }
 document.addEventListener("paste", (event: ClipboardEvent) => {
@@ -3900,6 +4032,7 @@ document.addEventListener("paste", (event: ClipboardEvent) => {
 
 window.addEventListener("keydown", (event: KeyboardEvent) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+    if (document.activeElement === editor) return;
     if (!canPasteImageIntoEditor()) return;
     if (native) void tryNativeImagePaste();
   }
@@ -3985,7 +4118,7 @@ async function showTargetApplication(){
   return configureTargetApplication(async(action,settings)=>{
     if(root!==projectRoot)throw new Error('プロジェクトが切り替わりました。');
     return JSON.parse(await rpc('target-application',{json:{action,settings}},root)) as TargetApplication;
-  });
+  }, root);
 }
 element('assets-organizer-open').addEventListener('click', () => {
   openAssetOrganizerDialog({
@@ -4048,14 +4181,71 @@ function updateSiteExportSettingsSummary(themeStyle?: HtmlThemeStyle | null): vo
   element('site-export-settings-summary').textContent =
     `サイト名: ${siteName || '（未設定）'} · テーマ: ${themeStyleLabel(theme)}`;
 }
+function clearSiteBuildRecovery(): void {
+  const recovery = document.getElementById('site-build-recovery');
+  if (!recovery) return;
+  recovery.replaceChildren();
+  recovery.hidden = true;
+}
+function showSiteBuildRecovery(errorText: string, action: string): void {
+  clearSiteBuildRecovery();
+  if (action === 'build-single-html') return;
+  if (!/見つかりません|MkDocs|Zensical|Python|\.venv/i.test(errorText)) return;
+  const recovery = document.getElementById('site-build-recovery');
+  if (!recovery) return;
+  const fallbackBtn = document.createElement('button');
+  fallbackBtn.type = 'button';
+  fallbackBtn.className = 'primary';
+  fallbackBtn.textContent = '単一HTML（Python不要）で今すぐ作成';
+  fallbackBtn.onclick = () => {
+    const engineSelect = element<HTMLSelectElement>('site-engine');
+    engineSelect.value = 'build-single-html';
+    try { localStorage.setItem('manual-studio-site-engine', engineSelect.value); } catch { /* Optional */ }
+    syncSiteWorkingDirectoryVisibility();
+    clearSiteBuildRecovery();
+    element<HTMLButtonElement>('build-site').click();
+  };
+  recovery.append(fallbackBtn);
+  if (native) {
+    const browseBtn = document.createElement('button');
+    browseBtn.type = 'button';
+    browseBtn.textContent = 'ワーキングフォルダを参照…';
+    browseBtn.onclick = () => {
+      element<HTMLButtonElement>('browse-site-working-directory').click();
+    };
+    recovery.append(browseBtn);
+  }
+  recovery.hidden = false;
+  recovery.scrollIntoView({ block: 'nearest' });
+}
+function syncSiteWorkingDirectoryVisibility(): void {
+  const selectedEngine = element<HTMLSelectElement>('site-engine').value;
+  element('site-working-directory-group').hidden = selectedEngine === 'build-single-html';
+}
+element('site-engine').addEventListener('change', () => {
+  try { localStorage.setItem('manual-studio-site-engine', element<HTMLSelectElement>('site-engine').value); } catch { /* Optional */ }
+  clearSiteBuildRecovery();
+  syncSiteWorkingDirectoryVisibility();
+});
+{
+  try {
+    const savedEngine = localStorage.getItem('manual-studio-site-engine');
+    if (savedEngine === 'build-mkdocs' || savedEngine === 'build-zensical' || savedEngine === 'build-single-html') {
+      element<HTMLSelectElement>('site-engine').value = savedEngine;
+    }
+  } catch { /* Optional */ }
+}
 function syncHtmlOutputControls(): void {
   const outputPath = workspace?.config.output ?? '';
   const excludeUnused = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
   const siteName = workspace?.config.mkdocs.site_name ?? '';
+  const workingDirectory = workspace?.config.mkdocs.working_directory ?? '';
   const themeStyle = workspace?.config.mkdocs.theme_style;
   input('site-output-path').value = outputPath;
+  input('site-working-directory').value = workingDirectory;
   input('site-exclude-unused-assets').checked = excludeUnused;
   input('settings-site-output').value = outputPath;
+  input('settings-site-working-directory').value = workingDirectory;
   input('settings-site-exclude-unused').checked = excludeUnused;
   input('settings-site-name').value = siteName;
   syncingHtmlThemePickers = true;
@@ -4064,6 +4254,7 @@ function syncHtmlOutputControls(): void {
   siteExportThemePicker.setSiteName(siteName);
   settingsSiteThemePicker.setSiteName(siteName);
   syncingHtmlThemePickers = false;
+  syncSiteWorkingDirectoryVisibility();
   updateSiteExportSettingsSummary(themeStyle);
 }
 element('site-export-open').addEventListener('click', () => {
@@ -4073,16 +4264,28 @@ element('site-export-open').addEventListener('click', () => {
   dialog.dataset.dialogInitialWidth = '760';
   const controls = element('site-export-controls');
   element<HTMLButtonElement>('browse-site-output').hidden = !native;
+  element<HTMLButtonElement>('browse-site-working-directory').hidden = !native;
   syncHtmlOutputControls();
+  clearSiteBuildRecovery();
   element('site-build-result').textContent = '';
   body.append(controls);
   dialog.addEventListener('close', () => element('site-export-host').append(controls), {once: true});
 });
 element('site-export-open-settings').addEventListener('click', () => {
+  const draftOutput = input('site-output-path').value;
+  const draftWorkingDir = input('site-working-directory').value;
+  const draftExcludeUnused = input('site-exclude-unused-assets').checked;
+  const draftTheme = siteExportThemePicker.getValue();
   document.querySelector<HTMLDialogElement>('#site-export-dialog[open]')?.close();
   selectSettingsCategory('html-output');
   const dialog = element<HTMLDialogElement>('panel-settings');
   if (!dialog.open) openPanelDialog('panel-settings');
+  input('settings-site-output').value = draftOutput;
+  input('settings-site-working-directory').value = draftWorkingDir;
+  input('settings-site-exclude-unused').checked = draftExcludeUnused;
+  syncingHtmlThemePickers = true;
+  settingsSiteThemePicker.setValue(draftTheme);
+  syncingHtmlThemePickers = false;
 });
 function browseSiteOutput(dialogId: string, fieldId: string, resultId: string): void {
   const root = projectRoot;
@@ -4104,14 +4307,40 @@ function browseSiteOutput(dialogId: string, fieldId: string, resultId: string): 
     }
   });
 }
+function browseSiteWorkingDirectory(dialogId: string, fieldId: string, resultId: string): void {
+  const root = projectRoot;
+  const dialog = document.querySelector<HTMLDialogElement>(`#${dialogId}[open]`);
+  if (!native || !root || !dialog || busy) return;
+  void work(async () => {
+    const field = input(fieldId);
+    try {
+      const selected = await invoke<string|null>('choose_path', {
+        initialPath: field.value.trim(),
+        folder: true,
+        baseDirectory: root,
+        title: 'ワーキングフォルダを選択',
+      });
+      if (selected && dialog.open && root === projectRoot) {
+        field.value = selected;
+        element(resultId).textContent = '';
+      }
+    } catch (error) {
+      if (dialog.open && root === projectRoot) element(resultId).textContent = String(error);
+      throw error;
+    }
+  });
+}
 element('browse-site-output').addEventListener('click', () => browseSiteOutput('site-export-dialog', 'site-output-path', 'site-build-result'));
 element('settings-site-browse').addEventListener('click', () => browseSiteOutput('panel-settings', 'settings-site-output', 'settings-site-result'));
+element('browse-site-working-directory').addEventListener('click', () => browseSiteWorkingDirectory('site-export-dialog', 'site-working-directory', 'site-build-result'));
+element('settings-site-working-directory-browse').addEventListener('click', () => browseSiteWorkingDirectory('panel-settings', 'settings-site-working-directory', 'settings-site-result'));
 async function saveSiteOutput(
   fieldId = 'site-output-path',
   resultId = 'site-build-result',
   siteName?: string,
   excludeUnused?: boolean,
   themeStyle?: HtmlThemeStyle,
+  workingDirectory?: string,
 ): Promise<string> {
   const root = projectRoot;
   const path = input(fieldId);
@@ -4121,11 +4350,14 @@ async function saveSiteOutput(
     if (!value) throw new Error('出力先フォルダーを入力してください。');
     if (siteName !== undefined && !siteName) throw new Error('サイト名を入力してください。');
     const currentExclude = Boolean(workspace?.config.mkdocs.exclude_unused_assets);
+    const currentWorkingDir = workspace?.config.mkdocs.working_directory ?? '';
+    const trimmedWorkingDir = workingDirectory === undefined ? undefined : workingDirectory.trim();
     const themeUnchanged = themeStyle === undefined || htmlThemeEquals(themeStyle, workspace?.config.mkdocs.theme_style);
     if (
       value === workspace?.config.output &&
       (siteName === undefined || siteName === workspace.config.mkdocs.site_name) &&
       (excludeUnused === undefined || excludeUnused === currentExclude) &&
+      (trimmedWorkingDir === undefined || trimmedWorkingDir === currentWorkingDir) &&
       themeUnchanged
     ) {
       path.value = value;
@@ -4135,6 +4367,9 @@ async function saveSiteOutput(
     if (siteName !== undefined) jsonPayload.site_name = siteName;
     if (excludeUnused !== undefined) jsonPayload.exclude_unused_assets = excludeUnused;
     if (themeStyle !== undefined) jsonPayload.theme_style = themeStyle;
+    if (trimmedWorkingDir !== undefined && trimmedWorkingDir !== currentWorkingDir) {
+      jsonPayload.working_directory = trimmedWorkingDir;
+    }
     const {output} = JSON.parse(
       await rpc(
         'save-html-output',
@@ -4147,6 +4382,7 @@ async function saveSiteOutput(
     if (siteName !== undefined) workspace.config.mkdocs.site_name = siteName;
     if (excludeUnused !== undefined) workspace.config.mkdocs.exclude_unused_assets = excludeUnused;
     if (themeStyle !== undefined) workspace.config.mkdocs.theme_style = { ...themeStyle };
+    if (trimmedWorkingDir !== undefined) workspace.config.mkdocs.working_directory = trimmedWorkingDir;
     syncHtmlOutputControls();
     path.value = output;
     return output;
@@ -4164,9 +4400,10 @@ element('settings-site-save').addEventListener('click', () => {
     const siteName = name.value.trim();
     const excludeUnused = input('settings-site-exclude-unused').checked;
     const themeStyle = settingsSiteThemePicker.getValue();
+    const workingDirectory = input('settings-site-working-directory').value.trim();
     name.disabled = true;
     try {
-      await saveSiteOutput('settings-site-output', 'settings-site-result', siteName, excludeUnused, themeStyle);
+      await saveSiteOutput('settings-site-output', 'settings-site-result', siteName, excludeUnused, themeStyle, workingDirectory);
       name.value = siteName;
       element('settings-site-result').textContent = '保存しました。';
     } finally {
@@ -4176,12 +4413,14 @@ element('settings-site-save').addEventListener('click', () => {
 });
 element('save-site-output').addEventListener('click', () => {
   void work(async () => {
+    clearSiteBuildRecovery();
     const output = await saveSiteOutput(
       'site-output-path',
       'site-build-result',
       undefined,
       input('site-exclude-unused-assets').checked,
       siteExportThemePicker.getValue(),
+      input('site-working-directory').value.trim(),
     );
     element('site-build-result').textContent = `設定を保存しました · ${output}`;
   });
@@ -4196,14 +4435,29 @@ element('build-site').addEventListener('click', () => {
         ? 'build-single-html'
         : 'build-mkdocs';
   void work(async () => {
+    clearSiteBuildRecovery();
+    const workingDirectory = input('site-working-directory').value.trim();
     const output = await saveSiteOutput(
       'site-output-path',
       'site-build-result',
       undefined,
       input('site-exclude-unused-assets').checked,
       siteExportThemePicker.getValue(),
+      action === 'build-single-html' ? undefined : workingDirectory,
     );
-    await runAction(action, {output}, 'site-build-result');
+    try {
+      await runAction(
+        action,
+        {
+          output,
+          ...(workingDirectory && action !== 'build-single-html' ? { working_directory: workingDirectory } : {}),
+        },
+        'site-build-result',
+      );
+    } catch (error) {
+      showSiteBuildRecovery(String(error), action);
+      throw error;
+    }
     if (!native || root !== projectRoot) return;
     const result = element('site-build-result');
     try {
@@ -4219,8 +4473,22 @@ element('build-site').addEventListener('click', () => {
 setBusy(false);
 updateSaveState();
 {
-  const initialRoot = params.get("root") || localStorage.getItem("manual-studio-project");
-  if (initialRoot) void work(() => openProject(initialRoot));
+  const paramRoot = params.get("root");
+  const initialRoot = paramRoot || localStorage.getItem("manual-studio-project");
+  if (initialRoot) {
+    void work(async () => {
+      try {
+        await openProject(initialRoot);
+      } catch (error) {
+        if (!paramRoot) {
+          try { localStorage.removeItem("manual-studio-project"); } catch { /* Optional */ }
+          status(`前回開いたフォルダーを開けませんでした（${String(error)}）。別のフォルダーを選択してください。`, true);
+          return;
+        }
+        throw error;
+      }
+    });
+  }
 }
 
 function saveReaderReviewSession(root: string, page: string, expected: string, report: ReaderReport): void {

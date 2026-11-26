@@ -805,7 +805,7 @@ pub fn run(
                         .unwrap_or_default();
                     let working_directory = value.get("workingDirectory").and_then(Value::as_str).filter(|path| !path.trim().is_empty()).map(PathBuf::from).unwrap_or_else(|| root.to_path_buf());
                     let working_directory = if working_directory.is_absolute() { working_directory } else { root.join(working_directory) };
-                    let working_directory = working_directory.canonicalize().map_err(|_| format!("Working directory does not exist: {}", working_directory.display()))?;
+                    let working_directory = crate::platform::canonical_clean(&working_directory).map_err(|_| format!("Working directory does not exist: {}", working_directory.display()))?;
                     if !working_directory.is_dir() { return Err(format!("Working directory is not a directory: {}", working_directory.display())); }
                     let args: Vec<String> = args.into_iter().map(str::to_owned).collect();
                     let (executable, args) = super::platform::application_command_in(&working_directory, program, &args)?;

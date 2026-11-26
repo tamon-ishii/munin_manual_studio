@@ -31,6 +31,7 @@ export interface State {
       nav?: Array<{ page: string; title?: string; section?: string; hidden?: boolean }>;
       exclude_unused_assets?: boolean;
       theme_style?: HtmlThemeStyle;
+      working_directory?: string;
     };
   };
   execution_results?: Record<string, {status:string;error?:string;run_id:string}>;

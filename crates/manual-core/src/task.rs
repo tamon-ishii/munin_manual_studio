@@ -310,8 +310,26 @@ pub fn answer_regex() -> Regex {
 
 pub fn collect_markdown_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() && entry.path().extension().map_or(false, |ext| ext == "md")
+    for entry in WalkDir::new(dir)
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.depth() == 0
+                || !entry.file_type().is_dir()
+                || (!entry.file_name().to_string_lossy().starts_with('.')
+                    && !matches!(
+                        entry.file_name().to_str(),
+                        Some("node_modules" | "target" | "dist" | "__pycache__" | "venv")
+                    )
+                    && !crate::builder::is_published_site(entry.path()))
+        })
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_file()
+            && entry
+                .path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         {
             files.push(entry.path().to_path_buf());
         }
@@ -340,7 +358,11 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
             continue;
         }
         if target_path.is_file() {
-            if target_path.extension().map_or(false, |ext| ext == "md") {
+            if target_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            {
                 let canon = target_path
                     .canonicalize()
                     .unwrap_or_else(|_| target_path.clone());
@@ -357,11 +379,15 @@ pub fn collect_target_markdown_files(root: &Path, config: &ManualConfig) -> Vec<
                     && !(entry.file_type().is_dir() && crate::builder::is_published_site(entry.path()))
                     && (config.docs != "." || entry.depth() == 0 || !entry.file_type().is_dir()
                     || (!entry.file_name().to_string_lossy().starts_with('.')
-                        && !matches!(entry.file_name().to_str(), Some("node_modules" | "target" | "dist" | "__pycache__")))))
+                        && !matches!(entry.file_name().to_str(), Some("node_modules" | "target" | "dist" | "__pycache__" | "venv")))))
                 .filter_map(|e| e.ok())
             {
                 if entry.file_type().is_file()
-                    && entry.path().extension().map_or(false, |ext| ext == "md")
+                    && entry
+                        .path()
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
                 {
                     let path = entry.path().to_path_buf();
                     let canon = path.canonicalize().unwrap_or_else(|_| path.clone());

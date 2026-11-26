@@ -166,13 +166,18 @@ try {
         if (typeof req.options.json?.exclude_unused_assets === 'boolean') {
           state.config.mkdocs.exclude_unused_assets = req.options.json.exclude_unused_assets;
         }
+        if (typeof req.options.json?.working_directory === 'string') {
+          state.config.mkdocs.working_directory = req.options.json.working_directory;
+        }
         output = { output: state.config.output };
         break;
       case 'build-single-html':
       case 'build-mkdocs':
       case 'build-zensical':
         builtActions.push({ action: req.action, options: req.options });
-        output = 'site\nSingle HTML: site/index.html';
+        output = req.action === 'build-single-html'
+          ? 'site\nSingle HTML: site/index.html'
+          : 'site\nSite: site';
         break;
       case 'project-dashboard':
         output = {
@@ -313,10 +318,30 @@ try {
   await page.goto(`${base}/?root=C:/test-project`, { waitUntil: 'networkidle' });
   await page.waitForSelector('#page-list [data-page]');
 
-  // 1. HTML出力ダイアログ: 単一HTML選択 + 未使用画像除外の保存・ビルド + 閉じる
+  // 1. HTML出力ダイアログ: MkDocsでワーキングフォルダ表示・保存 + 単一HTMLでは非表示 + 未使用画像除外 + 閉じる
   await page.click('#site-export-open');
   await page.waitForSelector('#site-export-dialog[open]');
+  assert.equal(await page.locator('#site-working-directory-group').isVisible(), true);
+  const mkdocsExportRect = await page.locator('#site-export-dialog').boundingBox();
+  assert.ok(mkdocsExportRect && mkdocsExportRect.width <= 1366 && mkdocsExportRect.height <= 860, 'site-export-dialog (MkDocs) fits viewport');
+  const engineBox = await page.locator('#site-engine').boundingBox();
+  const outputPathBox = await page.locator('#site-output-path').boundingBox();
+  const workingDirBox = await page.locator('#site-working-directory').boundingBox();
+  assert.ok(engineBox && outputPathBox && workingDirBox, 'HTML export inputs have bounding boxes');
+  assert.ok(outputPathBox.width >= engineBox.width * 0.7, `site-output-path should stretch horizontally (${outputPathBox.width} vs ${engineBox.width})`);
+  assert.ok(workingDirBox.width >= engineBox.width * 0.7, `site-working-directory should stretch horizontally (${workingDirBox.width} vs ${engineBox.width})`);
+  await page.fill('#site-working-directory', '..');
+  await page.click('#build-site');
+  await page.waitForFunction(() =>
+    document.querySelector('#site-build-result')?.textContent?.includes('Site: site'),
+  );
+  await page.waitForFunction(() => document.body.getAttribute('aria-busy') === 'false');
+  assert.equal(savedHtmlPayloads.at(-1).json.working_directory, '..');
+  assert.equal(builtActions.at(-1).action, 'build-mkdocs');
+  assert.equal(builtActions.at(-1).options.working_directory, '..');
+
   await page.selectOption('#site-engine', 'build-single-html');
+  assert.equal(await page.locator('#site-working-directory-group').isVisible(), false);
   await page.check('#site-exclude-unused-assets');
   await page.click('#build-site');
   await page.waitForFunction(() =>
@@ -324,22 +349,34 @@ try {
   );
   assert.equal(savedHtmlPayloads.at(-1).json.exclude_unused_assets, true);
   assert.equal(builtActions.at(-1).action, 'build-single-html');
+  assert.equal(builtActions.at(-1).options.working_directory, undefined);
   const exportRect = await page.locator('#site-export-dialog').boundingBox();
   assert.ok(exportRect && exportRect.width <= 1366 && exportRect.height <= 860, 'site-export-dialog fits viewport');
   await page.locator('#site-export-dialog').getByRole('button', { name: '閉じる', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('#site-export-dialog[open]'));
 
-  // 1b. 設定 -> HTML出力タブ: exclude_unused_assets が同期され保存できること
+  // 1b. 設定 -> HTML出力タブ: exclude_unused_assets と working_directory が同期され保存できること
   await page.click('#application-settings');
   await page.waitForSelector('#panel-settings[open]');
   await page.locator('#panel-settings').getByRole('tab', { name: 'HTML出力' }).click();
+  const settingsCardBox = await page.locator('#html-output-settings').boundingBox();
+  const settingsSiteNameBox = await page.locator('#settings-site-name').boundingBox();
+  const settingsOutputBox = await page.locator('#settings-site-output').boundingBox();
+  const settingsWorkingDirBox = await page.locator('#settings-site-working-directory').boundingBox();
+  assert.ok(settingsCardBox && settingsSiteNameBox && settingsOutputBox && settingsWorkingDirBox, 'Settings HTML output inputs have bounding boxes');
+  assert.ok(settingsSiteNameBox.width >= settingsCardBox.width * 0.7, `settings-site-name should stretch horizontally (${settingsSiteNameBox.width} vs ${settingsCardBox.width})`);
+  assert.ok(settingsOutputBox.width >= settingsCardBox.width * 0.7, `settings-site-output should stretch horizontally (${settingsOutputBox.width} vs ${settingsCardBox.width})`);
+  assert.ok(settingsWorkingDirBox.width >= settingsCardBox.width * 0.7, `settings-site-working-directory should stretch horizontally (${settingsWorkingDirBox.width} vs ${settingsCardBox.width})`);
   assert.equal(await page.locator('#settings-site-exclude-unused').isChecked(), true);
+  assert.equal(await page.locator('#settings-site-working-directory').inputValue(), '..');
+  await page.locator('#settings-site-working-directory').fill('C:/shared-venv');
   await page.locator('#settings-site-exclude-unused').uncheck();
   await page.click('#settings-site-save');
   await page.waitForFunction(() =>
     document.querySelector('#settings-site-result')?.textContent?.includes('保存しました'),
   );
   assert.equal(state.config.mkdocs.exclude_unused_assets, false);
+  assert.equal(state.config.mkdocs.working_directory, 'C:/shared-venv');
   await page.locator('[data-close-dialog="panel-settings"]').click();
 
   // 2. AI協業ツール -> 構成・読者: 目次順の並び替え・セクション/表示名・非表示・保存

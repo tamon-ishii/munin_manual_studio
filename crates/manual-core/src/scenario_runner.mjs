@@ -9,13 +9,24 @@ if (!['http:', 'https:', 'file:'].includes(url.protocol)) {
   throw new Error('Scenario base_url must use http, https, or file');
 }
 
-const browserOptions = { headless: true };
-if (process.env.MODULELOOM_CHROME_PATH) {
-  browserOptions.executablePath = process.env.MODULELOOM_CHROME_PATH;
-} else {
-  browserOptions.channel = 'chrome';
+async function launchBrowser() {
+  if (process.env.MODULELOOM_CHROME_PATH) {
+    return chromium.launch({ headless: true, executablePath: process.env.MODULELOOM_CHROME_PATH });
+  }
+  const attempts = process.platform === 'win32'
+    ? [{ headless: true, channel: 'chrome' }, { headless: true, channel: 'msedge' }, { headless: true }]
+    : [{ headless: true, channel: 'chrome' }, { headless: true }];
+  let lastError;
+  for (const opts of attempts) {
+    try {
+      return await chromium.launch(opts);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
-const browser = await chromium.launch(browserOptions);
+const browser = await launchBrowser();
 const captured = [];
 let expectations = {};
 try { expectations = JSON.parse(await readFile(path.join(process.cwd(), '.munin/capture-expectations.json'), 'utf8')); }

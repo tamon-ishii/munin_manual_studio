@@ -218,11 +218,14 @@ fn plan(root: &Path, source: &str, destination: &str) -> Result<Plan, String> {
     if !from.is_file() {
         return Err("移動するファイルが見つかりません。".into());
     }
-    if to.exists() {
+    let case_only_rename = source.eq_ignore_ascii_case(destination)
+        && from
+            .canonicalize()
+            .ok()
+            .zip(to.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
+    if to.exists() && !case_only_rename {
         return Err("移動先には同じ名前のファイルがあります。上書きは行いません。".into());
-    }
-    if !to.parent().is_some_and(Path::is_dir) {
-        return Err("移動先フォルダーが見つかりません。先に作成してください。".into());
     }
     if fs::metadata(&from).map_err(|e| e.to_string())?.len() > 64_000_000 {
         return Err("移動対象は64MB以内にしてください。".into());
@@ -232,7 +235,11 @@ fn plan(root: &Path, source: &str, destination: &str) -> Result<Plan, String> {
     let mut paths: BTreeSet<_> = index
         .files
         .iter()
-        .filter(|p| p.extension().is_some_and(|e| e == "md"))
+        .filter(|p| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        })
         .cloned()
         .collect();
     for (_, path) in
@@ -251,7 +258,13 @@ fn plan(root: &Path, source: &str, destination: &str) -> Result<Plan, String> {
                 "{page} は3MBを超えているため、リンクを安全に更新できません。"
             ));
         }
-        let before = fs::read_to_string(project_path(root, &page)?).map_err(|e| e.to_string())?;
+        let Ok(before) = fs::read_to_string(project_path(root, &page)?) else {
+            // Skip unreadable/non-UTF-8 unrelated Markdown files rather than aborting the move.
+            if page == source {
+                return Err(format!("{page} をUTF-8として読み込めません。"));
+            }
+            continue;
+        };
         let target = if page == source {
             destination.to_string()
         } else {
@@ -268,13 +281,17 @@ fn plan(root: &Path, source: &str, destination: &str) -> Result<Plan, String> {
             });
         }
     }
-    // Keep current managed asset locations and explicit publication targets consistent.
+    // Keep current managed asset locations, capture resources, and explicit publication targets/nav consistent.
     let mut metadata = Vec::new();
     let settings = project_path(root, "manual_setting.json")?;
     if settings.is_file() {
         metadata.push(settings);
     }
-    for directory in [".munin/screenshots", ".munin/generated-images"] {
+    for directory in [
+        ".munin/screenshots",
+        ".munin/generated-images",
+        ".munin/capture-resources",
+    ] {
         let home = project_path(root, directory)?;
         if home.is_dir() {
             for entry in walkdir::WalkDir::new(home)
@@ -297,7 +314,9 @@ fn plan(root: &Path, source: &str, destination: &str) -> Result<Plan, String> {
             .map_err(|e| e.to_string())?
             .to_string_lossy()
             .replace('\\', "/");
-        let before = fs::read_to_string(project_path(root, &page)?).map_err(|e| e.to_string())?;
+        let Ok(before) = fs::read_to_string(project_path(root, &page)?) else {
+            continue;
+        };
         let Ok(mut value) = serde_json::from_str::<Value>(&before) else {
             continue;
         };
@@ -311,11 +330,53 @@ fn plan(root: &Path, source: &str, destination: &str) -> Result<Plan, String> {
                     }
                 }
             }
+            let docs_prefix = value["docs"]
+                .as_str()
+                .unwrap_or("docs")
+                .trim()
+                .replace('\\', "/")
+                .trim_end_matches('/')
+                .to_string();
+            let source_docs_rel = if !docs_prefix.is_empty() && docs_prefix != "." {
+                source.strip_prefix(&format!("{docs_prefix}/"))
+            } else {
+                None
+            };
+            let dest_docs_rel = if !docs_prefix.is_empty() && docs_prefix != "." {
+                destination.strip_prefix(&format!("{docs_prefix}/"))
+            } else {
+                None
+            };
+            if let Some(nav) = value["mkdocs"]["nav"].as_array_mut() {
+                for entry in nav {
+                    if let Some(nav_page) = entry["page"].as_str() {
+                        if nav_page == source {
+                            entry["page"] = json!(destination);
+                            changed = true;
+                        } else if source_docs_rel == Some(nav_page) {
+                            if let Some(next_rel) = dest_docs_rel {
+                                entry["page"] = json!(next_rel);
+                            } else {
+                                entry["page"] = json!(destination);
+                            }
+                            changed = true;
+                        }
+                    }
+                }
+            }
         } else {
             for field in ["path", "output", "source_image"] {
                 if value[field].as_str() == Some(source) {
                     value[field] = json!(destination);
                     changed = true;
+                }
+            }
+            if let Some(derived) = value["derived"].as_array_mut() {
+                for entry in derived {
+                    if entry["path"].as_str() == Some(source) {
+                        entry["path"] = json!(destination);
+                        changed = true;
+                    }
                 }
             }
         }
@@ -425,11 +486,20 @@ pub(crate) fn execute(root: &Path, options: &Value) -> Result<Value, String> {
             "移動対象または参照原稿が変更されています。移動候補を作成し直してください。".into(),
         );
     }
-    let mut names: BTreeSet<_> = plan.changes.iter().map(|c| c.page.as_str()).collect();
-    names.insert(&source);
-    names.insert(&destination);
-    let _locks = names
-        .into_iter()
+    let mut names_by_key: std::collections::BTreeMap<String, &str> = std::collections::BTreeMap::new();
+    for c in &plan.changes {
+        names_by_key
+            .entry(c.page.to_ascii_lowercase())
+            .or_insert(c.page.as_str());
+    }
+    names_by_key
+        .entry(source.to_ascii_lowercase())
+        .or_insert(source.as_str());
+    names_by_key
+        .entry(destination.to_ascii_lowercase())
+        .or_insert(destination.as_str());
+    let _locks = names_by_key
+        .into_values()
         .map(|p| workflow::resource_lock(root, p))
         .collect::<Result<Vec<_>, _>>()?;
     let from = project_path(root, &source)?;
@@ -453,10 +523,34 @@ pub(crate) fn execute(root: &Path, options: &Value) -> Result<Value, String> {
         fs::write(home.join(format!("{i}.before")), &change.before).map_err(|e| e.to_string())?;
     }
     fs::write(home.join("manifest.json"),serde_json::to_vec_pretty(&json!({"source":source,"destination":destination,"files":plan.changes.iter().enumerate().map(|(i,c)|json!({"path":c.page,"destination":c.target,"backup":format!("{i}.before")})).collect::<Vec<_>>() })).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-    // hard_link creates the destination atomically without replacing an existing file.
-    fs::hard_link(&from, &to).map_err(|e| {
-        format!("ファイルを移動できません（同じファイルシステム内で移動してください）: {e}")
-    })?;
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let case_only_rename = source.eq_ignore_ascii_case(&destination)
+        && from
+            .canonicalize()
+            .ok()
+            .zip(to.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
+    if case_only_rename {
+        let tmp_rename = from
+            .parent()
+            .unwrap()
+            .join(format!(".munin-case-rename-{}", crate::screenshots::new_id("mv")));
+        fs::rename(&from, &tmp_rename).map_err(|e| e.to_string())?;
+        if let Err(error) = fs::rename(&tmp_rename, &to) {
+            let _ = fs::rename(&tmp_rename, &from);
+            return Err(format!("ファイル名の大文字・小文字を変更できませんでした: {error}"));
+        }
+    } else if fs::hard_link(&from, &to).is_err() {
+        // Fallback for filesystems without hard-link support (FAT32/exFAT/SMB/cloud drives).
+        let mut temp = tempfile::NamedTempFile::new_in(to.parent().unwrap())
+            .map_err(|e| format!("移動先フォルダーへ書き込めません: {e}"))?;
+        temp.write_all(&original).map_err(|e| e.to_string())?;
+        temp.as_file().sync_all().map_err(|e| e.to_string())?;
+        temp.persist_noclobber(&to)
+            .map_err(|e| format!("ファイルを移動できません: {e}"))?;
+    }
     let mut applied: Vec<&Change> = Vec::new();
     let result = (|| -> Result<(), String> {
         for change in &plan.changes {
@@ -470,10 +564,12 @@ pub(crate) fn execute(root: &Path, options: &Value) -> Result<Value, String> {
                 applied.push(change);
             }
         }
-        if fs::read(project_path(root, &source)?).map_err(|e| e.to_string())? != original {
-            return Err("移動中に元ファイルが変更されました。".into());
+        if !case_only_rename {
+            if fs::read(project_path(root, &source)?).map_err(|e| e.to_string())? != original {
+                return Err("移動中に元ファイルが変更されました。".into());
+            }
+            fs::remove_file(&from).map_err(|e| e.to_string())?;
         }
-        fs::remove_file(&from).map_err(|e| e.to_string())?;
         Ok(())
     })();
     if let Err(error) = result {
@@ -641,5 +737,45 @@ mod tests {
             &json!({"source":"a.md","destination":"../outside.md"})
         )
         .is_err());
+    }
+
+    #[test]
+    fn move_creates_missing_parent_updates_nav_and_handles_case_rename() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs")).unwrap();
+        fs::write(
+            root.path().join("manual_setting.json"),
+            r#"{"docs":"docs","mkdocs":{"nav":[{"page":"docs/guide.md","title":"ガイド"}]}}"#,
+        )
+        .unwrap();
+        fs::write(root.path().join("docs/guide.md"), "# Guide\n").unwrap();
+
+        // Move into a new nested directory and verify nav updates
+        let preview = execute(
+            root.path(),
+            &json!({"source":"docs/guide.md","destination":"docs/sub/guide.md"}),
+        )
+        .unwrap();
+        execute(
+            root.path(),
+            &json!({"source":"docs/guide.md","destination":"docs/sub/guide.md","apply":true,"token":preview["token"]}),
+        )
+        .unwrap();
+        assert!(root.path().join("docs/sub/guide.md").is_file());
+        let setting = fs::read_to_string(root.path().join("manual_setting.json")).unwrap();
+        assert!(setting.contains("docs/sub/guide.md"));
+
+        // Case-only rename on Windows/macOS/Linux
+        let preview2 = execute(
+            root.path(),
+            &json!({"source":"docs/sub/guide.md","destination":"docs/sub/Guide.md"}),
+        )
+        .unwrap();
+        execute(
+            root.path(),
+            &json!({"source":"docs/sub/guide.md","destination":"docs/sub/Guide.md","apply":true,"token":preview2["token"]}),
+        )
+        .unwrap();
+        assert!(root.path().join("docs/sub/Guide.md").is_file());
     }
 }

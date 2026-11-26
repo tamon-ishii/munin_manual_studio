@@ -433,34 +433,64 @@ pub fn analyze_git_impact(root: &Path, git_ref_opt: Option<&str>) -> Result<Impa
 
     let git_ref = git_ref_opt.unwrap_or("HEAD~1").to_string();
 
+    let git_bin = crate::agent::which_binary("git")
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "git".to_string());
+    let run_git_cmd = |args: &[&str]| -> Result<std::process::Output, String> {
+        let mut cmd = Command::new(&git_bin);
+        crate::platform::no_window(&mut cmd);
+        cmd.current_dir(root)
+            .args(["-c", "core.quotepath=false"])
+            .args(args)
+            .output()
+            .map_err(|error| format!("Failed to run git {}: {error}", args.first().copied().unwrap_or("")))
+    };
+
+    // Map paths relative to project `root` when `root` is a subfolder of a Git repo.
+    let root_prefix_in_repo = run_git_cmd(&["rev-parse", "--show-toplevel"])
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            let repo_root = PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()).canonicalize().ok()?;
+            let canon_root = root.canonicalize().ok()?;
+            canon_root
+                .strip_prefix(&repo_root)
+                .ok()
+                .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+                .filter(|rel| !rel.is_empty())
+        });
+    let normalize_git_file = |raw: &str| -> String {
+        let path = raw.trim().trim_matches('"').replace('\\', "/");
+        if let Some(prefix) = &root_prefix_in_repo {
+            if let Some(stripped) = path.strip_prefix(&format!("{prefix}/")) {
+                return stripped.to_string();
+            }
+        }
+        path
+    };
+
     // 1. Get changed files via git
     let mut changed_files = Vec::new();
 
-    let diff_output = Command::new("git")
-        .current_dir(root)
-        .args(["diff", "--name-only", &git_ref])
-        .output()
-        .map_err(|error| format!("Failed to run git diff: {error}"))?;
+    let diff_output = run_git_cmd(&["diff", "--name-only", &git_ref])?;
     if !diff_output.status.success() {
-        return Err(format!(
-            "Failed to compare Git ref {git_ref}: {}",
-            String::from_utf8_lossy(&diff_output.stderr).trim()
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&diff_output.stdout);
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            changed_files.push(trimmed.to_string());
+        let stderr_text = String::from_utf8_lossy(&diff_output.stderr).trim().to_string();
+        if git_ref_opt.is_some() {
+            return Err(format!("Failed to compare Git ref {git_ref}: {stderr_text}"));
+        }
+        // Single-commit repo where default HEAD~1 does not exist: continue with working tree status.
+    } else {
+        let stdout = String::from_utf8_lossy(&diff_output.stdout);
+        for line in stdout.lines() {
+            let normalized = normalize_git_file(line);
+            if !normalized.is_empty() && !changed_files.contains(&normalized) {
+                changed_files.push(normalized);
+            }
         }
     }
 
     // Also include working tree changes (git status --porcelain)
-    let status_output = Command::new("git")
-        .current_dir(root)
-        .args(["status", "--porcelain"])
-        .output()
-        .map_err(|error| format!("Failed to run git status: {error}"))?;
+    let status_output = run_git_cmd(&["status", "--porcelain"])?;
     if !status_output.status.success() {
         return Err(format!(
             "Failed to read Git status: {}",
@@ -470,9 +500,11 @@ pub fn analyze_git_impact(root: &Path, git_ref_opt: Option<&str>) -> Result<Impa
     let stdout = String::from_utf8_lossy(&status_output.stdout);
     for line in stdout.lines() {
         if line.len() >= 3 {
-            let file_path = line[3..].trim();
-            if !file_path.is_empty() && !changed_files.contains(&file_path.to_string()) {
-                changed_files.push(file_path.to_string());
+            let raw = line[3..].trim();
+            let target = raw.rsplit_once(" -> ").map(|(_, dst)| dst).unwrap_or(raw);
+            let normalized = normalize_git_file(target);
+            if !normalized.is_empty() && !changed_files.contains(&normalized) {
+                changed_files.push(normalized);
             }
         }
     }
@@ -524,11 +556,7 @@ pub fn analyze_git_impact(root: &Path, git_ref_opt: Option<&str>) -> Result<Impa
         {
             let mut source = fs::read_to_string(root.join(file)).unwrap_or_default();
             // Also consider selectors removed by the change.
-            if let Ok(previous) = Command::new("git")
-                .current_dir(root)
-                .args(["show", &format!("{git_ref}:{file}")])
-                .output()
-            {
+            if let Ok(previous) = run_git_cmd(&["show", &format!("{git_ref}:{file}")]) {
                 if previous.status.success() {
                     source.push_str(&String::from_utf8_lossy(&previous.stdout));
                 }

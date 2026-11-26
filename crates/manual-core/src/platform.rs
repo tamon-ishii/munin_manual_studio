@@ -1,6 +1,36 @@
 //! Native executable identity used to match an existing window to a launched app.
 use std::path::{Path, PathBuf};
 
+/// Remove the Windows `\\?\` verbatim prefix produced by `fs::canonicalize`,
+/// which breaks `cmd.exe`, Explorer, Python/Node tools, and frontend path matching.
+pub fn strip_windows_verbatim(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path.to_path_buf()
+}
+
+pub fn canonical_clean(path: &Path) -> std::io::Result<PathBuf> {
+    path.canonicalize().map(|p| strip_windows_verbatim(&p))
+}
+
+/// Prevent background child processes from flashing a console window on Windows.
+pub fn no_window(command: &mut std::process::Command) -> &mut std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+}
+
 pub fn application_executable(program: &str) -> Result<PathBuf, String> {
     let path = Path::new(program);
     #[cfg(target_os = "macos")]
@@ -23,17 +53,15 @@ pub fn application_executable(program: &str) -> Result<PathBuf, String> {
             return Err("Invalid application bundle executable".into());
         }
         let executable = path.join("Contents/MacOS").join(name);
-        return executable
-            .canonicalize()
+        return canonical_clean(&executable)
             .map_err(|e| format!("Application executable is missing: {e}"));
     }
     if path.is_file() {
-        return path.canonicalize().map_err(|e| e.to_string());
+        return canonical_clean(path).map_err(|e| e.to_string());
     }
-    crate::agent::which_binary(program)
-        .ok_or_else(|| format!("Application executable not found: {program}"))?
-        .canonicalize()
-        .map_err(|e| e.to_string())
+    let resolved = crate::agent::which_binary(program)
+        .ok_or_else(|| format!("Application executable not found: {program}"))?;
+    canonical_clean(&resolved).map_err(|e| e.to_string())
 }
 
 pub fn application_executable_in(root: &Path, program: &str) -> Result<PathBuf, String> {
@@ -126,7 +154,20 @@ pub fn process_descends_from(pid: u32, ancestor: u32) -> bool {
             stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()
         })
     }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(target_os = "macos")]
+    {
+        follows_parent_chain(pid, ancestor, |child| {
+            let output = std::process::Command::new("/bin/ps")
+                .args(["-o", "ppid=", "-p", &child.to_string()])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+        })
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     { false }
 }
 
@@ -231,7 +272,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let executable = dir.path().join("app with spaces.exe");
         std::fs::write(&executable, "test").unwrap();
-        let expected = executable.canonicalize().unwrap();
+        let expected = canonical_clean(&executable).unwrap();
         assert_eq!(application_command_in(dir.path(), "app with spaces.exe", &[]).unwrap(), (expected.clone(), vec![]));
         let command = format!("\"{}\" run \"script with spaces.py\" ''", executable.display());
         assert_eq!(application_command_in(dir.path(), &command, &["--extra".into()]).unwrap(),
@@ -245,12 +286,9 @@ mod tests {
     }
     #[test]
     fn current_process_has_the_expected_executable() {
-        let expected = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let expected = canonical_clean(&std::env::current_exe().unwrap()).unwrap();
         assert_eq!(
-            process_executable(std::process::id())
-                .unwrap()
-                .canonicalize()
-                .unwrap(),
+            canonical_clean(&process_executable(std::process::id()).unwrap()).unwrap(),
             expected
         );
         assert_eq!(
@@ -263,7 +301,7 @@ mod tests {
         std::fs::write(&executable, "test").unwrap();
         assert_eq!(
             application_executable_in(dir.path(), "local-app").unwrap(),
-            executable.canonicalize().unwrap()
+            canonical_clean(&executable).unwrap()
         );
     }
     #[cfg(target_os = "macos")]

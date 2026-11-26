@@ -29,9 +29,9 @@ fn write_terminal_markdown(path: &Path, content: &str) -> std::io::Result<()> {
 }
 
 pub fn prepare_in(root:&Path,working_directory:Option<&str>)->Result<Value,String>{
-    let root=root.canonicalize().map_err(|e|e.to_string())?;
+    let root=crate::platform::canonical_clean(root).map_err(|e|e.to_string())?;
     let working_directory=crate::pty::working_directory(&root,working_directory)?;
-    let directory=project_path(&root,".munin/ai-terminal")?;
+    let directory=crate::platform::strip_windows_verbatim(&project_path(&root,".munin/ai-terminal")?);
     fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
     let config=read_config(&root);
     let executable=std::env::current_exe().map_err(|e|e.to_string())?;

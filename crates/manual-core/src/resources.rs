@@ -93,7 +93,7 @@ pub fn usages(root: &Path) -> Result<BTreeMap<String, Vec<Value>>, String> {
     index.save();
     Ok(result)
 }
-fn is_in_output_dir(config: &crate::config::ManualConfig, rel_path: &str) -> bool {
+fn is_in_output_dir(root: &Path, config: &crate::config::ManualConfig, rel_path: &str) -> bool {
     let normalize = |value: &str| {
         value
             .trim()
@@ -102,19 +102,28 @@ fn is_in_output_dir(config: &crate::config::ManualConfig, rel_path: &str) -> boo
             .to_string()
     };
     let output = normalize(&config.output);
-    if output.is_empty() || output == "." {
-        return false;
-    }
     let docs = normalize(&config.docs);
     let assets = normalize(&config.assets);
-    if output == docs
-        || output == assets
-        || docs.starts_with(&format!("{output}/"))
-        || assets.starts_with(&format!("{output}/"))
+    if !output.is_empty()
+        && output != "."
+        && output != docs
+        && output != assets
+        && !docs.starts_with(&format!("{output}/"))
+        && !assets.starts_with(&format!("{output}/"))
+        && (rel_path == output || rel_path.starts_with(&format!("{output}/")))
     {
-        return false;
+        return true;
     }
-    rel_path == output || rel_path.starts_with(&format!("{output}/"))
+    // Also exclude any published site directory (e.g., audience builds like site-user/).
+    let mut cursor = root.to_path_buf();
+    let parts: Vec<&str> = rel_path.split('/').collect();
+    for segment in parts.iter().take(parts.len().saturating_sub(1)) {
+        cursor.push(segment);
+        if crate::builder::is_published_site(&cursor) {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn list(root: &Path) -> Result<Value, String> {
@@ -137,7 +146,7 @@ pub fn list(root: &Path) -> Result<Value, String> {
     for file in &index.files {
         if image_extension(file) {
             let path = file.strip_prefix(root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
-            if is_in_output_dir(&config, &path) {
+            if is_in_output_dir(root, &config, &path) {
                 continue;
             }
             records.entry(path.clone()).or_insert_with(||json!({"path":path,"name":file.file_name().unwrap_or_default().to_string_lossy(),"kind":"imported"}));
@@ -191,8 +200,8 @@ pub fn delete_unused(root: &Path, options: &Value) -> Result<Value, String> {
                 .ok_or("削除対象のパスは文字列で指定してください。")?
                 .replace('\\', "/");
             if raw.is_empty()
-                || raw.split('/').any(|p| matches!(p, ".git" | ".munin" | "node_modules" | "target" | "dist"))
-                || is_in_output_dir(&config, &raw)
+                || raw.split('/').any(|p| matches!(p, ".git" | ".munin" | "node_modules" | "target" | "dist" | "venv"))
+                || is_in_output_dir(&root, &config, &raw)
             {
                 return Err(format!("プロジェクト内の画像アセットを指定してください: {raw}"));
             }

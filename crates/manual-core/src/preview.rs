@@ -110,6 +110,7 @@ pub fn inline_html_assets(output: &Path, html_text: &str) -> String {
             let mime = match ext.as_str() {
                 "png" => Some("image/png"),
                 "jpg" | "jpeg" => Some("image/jpeg"),
+                "gif" => Some("image/gif"),
                 "webp" => Some("image/webp"),
                 "svg" => Some("image/svg+xml"),
                 _ => None,
@@ -119,9 +120,14 @@ pub fn inline_html_assets(output: &Path, html_text: &str) -> String {
                     if metadata.len() < 10_000_000 {
                         if let Ok(bytes) = fs::read(&img_path) {
                             let b64 = BASE64.encode(bytes);
-                            let tag = m
-                                .as_str()
-                                .replace(src, &format!("data:{mime_type};base64,{b64}"));
+                            let data_uri = format!("data:{mime_type};base64,{b64}");
+                            let src_match = cap.name("src").unwrap();
+                            let rel_start = src_match.start() - m.start();
+                            let rel_end = src_match.end() - m.start();
+                            let mut tag = String::with_capacity(m.as_str().len() + data_uri.len());
+                            tag.push_str(&m.as_str()[..rel_start]);
+                            tag.push_str(&data_uri);
+                            tag.push_str(&m.as_str()[rel_end..]);
                             step2.push_str(&tag);
                             last_idx = m.end();
                             continue;
@@ -219,17 +225,25 @@ pub fn preview_html(root: &Path, page: &str) -> Result<String, String> {
 pub fn resolve_asset_path(root: &Path, page: &str, asset: &str) -> Result<PathBuf, String> {
     let config = read_config(root);
     let templates = project_path(root, &config.docs)?;
+    let configured_assets = project_path(root, &config.assets).ok();
     let generated = root.join("manual").join("ai");
     let page_path = super::editor::document_path(root, page)?;
 
-    let clean_asset = asset.trim_start_matches('<').trim_end_matches('>').trim();
+    let unescaped = crate::quality::decode_html_attr(
+        asset.trim_start_matches('<').trim_end_matches('>').trim(),
+    );
+    let without_suffix = unescaped.split(['?', '#']).next().unwrap_or(&unescaped);
+    let decoded = percent_encoding::percent_decode_str(without_suffix)
+        .decode_utf8_lossy()
+        .into_owned();
+    let clean_asset = decoded.trim();
     let asset_path = Path::new(clean_asset);
     if asset_path.is_absolute() {
         return Err("Preview image must be project-relative".to_string());
     }
     let asset_name = asset_path.file_name().unwrap_or_default();
 
-    let candidate_paths = [
+    let mut candidate_paths = vec![
         page_path
             .parent()
             .map(|p| p.join(clean_asset))
@@ -240,6 +254,10 @@ pub fn resolve_asset_path(root: &Path, page: &str, asset: &str) -> Result<PathBu
         templates.join("assets").join(clean_asset),
         generated.join("assets").join(asset_name),
     ];
+    if let Some(assets_dir) = configured_assets {
+        candidate_paths.push(assets_dir.join(clean_asset));
+        candidate_paths.push(assets_dir.join(asset_name));
+    }
 
     let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
     for cand in &candidate_paths {
@@ -353,7 +371,7 @@ fn collect_workspace_tree(root: &Path, config: &crate::config::ManualConfig) -> 
             entry.depth() == 0
                 || (!matches!(
                     name.as_ref(),
-                    "node_modules" | "target" | "dist" | "__pycache__"
+                    "node_modules" | "target" | "dist" | "__pycache__" | "venv"
                 ) && (!entry.file_type().is_dir()
                     || !name.starts_with('.')
                     || name == ".github"))
@@ -444,7 +462,11 @@ fn workspace_state(root: &Path, legacy_previews: bool) -> Result<serde_json::Val
             }
         }
     }
-    let has_html = if legacy_previews { !preview_html_content.is_empty() } else { index_html.is_file() };
+    let has_html = if legacy_previews {
+        !preview_html_content.is_empty()
+    } else {
+        crate::builder::published_entry(root, &config.output).is_ok()
+    };
 
     Ok(json!({
         "has_config": has_cfg,

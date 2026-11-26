@@ -10,20 +10,19 @@ pub fn validate(root: &Path, options: &Value) -> Result<String, String> {
     {
         return Err("新規ワークスペースの絶対パスを指定してください。".into());
     }
-    if root.symlink_metadata().is_ok() {
-        return Err("保存先は既に存在します。既存のワークスペースを開くか、新しいフォルダー名を指定してください。".into());
+    if let Ok(meta) = root.symlink_metadata() {
+        let is_empty_dir = meta.is_dir()
+            && !meta.file_type().is_symlink()
+            && fs::read_dir(root)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+        if !is_empty_dir {
+            return Err("保存先は既に存在します。既存のワークスペースを開くか、新しいフォルダー名を指定してください。".into());
+        }
     }
     let parent = root.parent().ok_or("保存先の親フォルダーがありません。")?;
     if !parent.is_dir() {
         return Err("保存先の親フォルダーが見つかりません。".into());
-    }
-    if parent
-        .metadata()
-        .map_err(|e| e.to_string())?
-        .permissions()
-        .readonly()
-    {
-        return Err("保存先の親フォルダーに書き込めません。".into());
     }
     if options["step"].as_u64() == Some(0) {
         return Ok("{}".into());
@@ -32,16 +31,18 @@ pub fn validate(root: &Path, options: &Value) -> Result<String, String> {
         .canonicalize()
         .map_err(|e| e.to_string())?
         .join(root.file_name().unwrap());
+    let docs_raw = options["docs"].as_str().unwrap_or("docs");
+    let assets_raw = options["assets"].as_str().unwrap_or("docs/assets");
     let folder = |key: &str, default: &str| {
         crate::config::project_path(&normalized, options[key].as_str().unwrap_or(default))
     };
     let docs = folder("docs", "docs")?;
     let output = folder("output", "manual")?;
     let assets = folder("assets", "docs/assets")?;
-    if docs.starts_with(&output) || output.starts_with(&docs) {
+    if docs.starts_with(&output) || (output.starts_with(&docs) && docs_raw.trim() != ".") {
         return Err("原稿フォルダーとHTML出力先は、重ならない別の場所にしてください。".into());
     }
-    if assets.starts_with(&output) || output.starts_with(&assets) {
+    if assets.starts_with(&output) || (output.starts_with(&assets) && assets_raw.trim() != ".") {
         return Err("画像保存フォルダーとHTML出力先は、重ならない別の場所にしてください。".into());
     }
     if options["site_name"]
@@ -64,8 +65,15 @@ pub fn create(root: &Path, options: &Value) -> Result<String, String> {
     if !root.is_absolute() || root.file_name().is_none() {
         return Err("新規ワークスペースの絶対パスを指定してください。".into());
     }
-    if root.symlink_metadata().is_ok() {
-        return Err("保存先は既に存在します。既存のワークスペースを開くか、新しいフォルダー名を指定してください。".into());
+    if let Ok(meta) = root.symlink_metadata() {
+        let is_empty_dir = meta.is_dir()
+            && !meta.file_type().is_symlink()
+            && fs::read_dir(root)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+        if !is_empty_dir {
+            return Err("保存先は既に存在します。既存のワークスペースを開くか、新しいフォルダー名を指定してください。".into());
+        }
     }
     let parent = root.parent().ok_or("保存先の親フォルダーがありません。")?;
     let stage = tempfile::Builder::new()
@@ -106,13 +114,20 @@ pub fn create(root: &Path, options: &Value) -> Result<String, String> {
     )
     .map_err(|e| e.to_string())?;
     // Reserve the destination exclusively after all settings have been validated.
-    fs::create_dir(root).map_err(|e| format!("ワークスペースを作成できません: {e}"))?;
+    if !root.exists() {
+        fs::create_dir(root).map_err(|e| format!("ワークスペースを作成できません: {e}"))?;
+    }
     for entry in fs::read_dir(stage.path()).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         fs::rename(entry.path(), root.join(entry.file_name()))
             .map_err(|e| format!("初期ファイルの保存に失敗しました: {e}"))?;
     }
-    Ok(json!({"root": root, "page": format!("{}/index.md", cfg.docs)}).to_string())
+    let initial_page = if cfg.docs == "." {
+        "index.md".to_string()
+    } else {
+        format!("{}/index.md", cfg.docs)
+    };
+    Ok(json!({"root": root, "page": initial_page}).to_string())
 }
 
 #[cfg(test)]
@@ -157,5 +172,16 @@ mod tests {
             assert!(create(&root, &options).is_err());
             assert!(!root.exists());
         }
+    }
+    #[test]
+    fn creates_workspace_in_existing_empty_dir_and_dot_docs() {
+        let existing = tempfile::tempdir().unwrap();
+        create(
+            existing.path(),
+            &json!({"docs":".", "assets":".", "output":"site", "site_name":"Root Docs"}),
+        )
+        .unwrap();
+        assert!(existing.path().join("index.md").is_file());
+        assert!(existing.path().join("manual_setting.json").is_file());
     }
 }

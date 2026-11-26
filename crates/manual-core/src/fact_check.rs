@@ -301,12 +301,19 @@ pub fn audit_manuscript(
         }));
     }
 
+    let hint = if index.files.is_empty() {
+        Some("照合元フォルダー内にソースファイルが見つかりませんでした。マニュアル専用サブフォルダーを開いている場合は、「照合元ソースフォルダー」に対象アプリのリポジトリを指定してください。")
+    } else {
+        None
+    };
+
     Ok(json!({
         "page": normalized_page,
         "indexed_source_files": index.files.len(),
         "indexed_uimap_labels": index.uimap_names.len(),
         "supported": supported_count,
         "unverified": unverified_count,
+        "hint": hint,
         "findings": findings
     }))
 }

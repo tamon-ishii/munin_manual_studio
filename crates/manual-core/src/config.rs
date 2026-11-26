@@ -144,6 +144,8 @@ pub struct MkDocsConfig {
     pub exclude_unused_assets: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme_style: Option<HtmlThemeStyle>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub working_directory: String,
 }
 
 impl Default for MkDocsConfig {
@@ -156,8 +158,33 @@ impl Default for MkDocsConfig {
             nav: Vec::new(),
             exclude_unused_assets: false,
             theme_style: None,
+            working_directory: String::new(),
         }
     }
+}
+
+pub fn resolve_mkdocs_working_directory(root: &Path, value: &str) -> Result<Option<PathBuf>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.len() > 8192 || trimmed.chars().any(char::is_control) {
+        return Err("ワーキングフォルダのパスが不正です。".into());
+    }
+    let candidate = if Path::new(trimmed).is_absolute() {
+        PathBuf::from(trimmed)
+    } else {
+        root.join(trimmed)
+    };
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|_| format!("ワーキングフォルダが見つかりません: {trimmed}"))?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "ワーキングフォルダにはフォルダーを指定してください: {trimmed}"
+        ));
+    }
+    Ok(Some(canonical))
 }
 
 pub fn default_targets() -> Vec<String> {
@@ -226,11 +253,50 @@ pub fn read_config(root: &Path) -> ManualConfig {
     } else if legacy_json.is_file() {
         legacy_json
     } else {
-        // Preserve an existing source tree, but treat a folder containing its own
-        // manuscripts (or an empty document folder) as the document root.
-        let has_root_markdown = fs::read_dir(root).ok().is_some_and(|entries| entries.flatten().any(|entry|
-            entry.path().is_file() && entry.path().extension().is_some_and(|ext| ext == "md")));
-        if root.join("docs").is_dir() && !has_root_markdown {
+        // Preserve an existing source tree with docs/ (even alongside standard repo
+        // docs like README.md or CHANGELOG.md), while treating a flat document folder
+        // containing its own manuscripts (or an empty folder) as the document root.
+        let docs_dir = root.join("docs");
+        let is_repo_meta_doc = |name: &str| {
+            matches!(
+                name.to_ascii_lowercase().as_str(),
+                "readme.md"
+                    | "changelog.md"
+                    | "contributing.md"
+                    | "license.md"
+                    | "agents.md"
+                    | "claude.md"
+                    | "upstream.md"
+                    | "security.md"
+                    | "code_of_conduct.md"
+            )
+        };
+        let docs_has_markdown = docs_dir.is_dir()
+            && fs::read_dir(&docs_dir).ok().is_some_and(|entries| {
+                entries.flatten().any(|entry| {
+                    entry.path().is_file()
+                        && entry
+                            .path()
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                })
+            });
+        let has_custom_root_markdown = fs::read_dir(root).ok().is_some_and(|entries| {
+            entries.flatten().any(|entry| {
+                entry.path().is_file()
+                    && entry
+                        .path()
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                    && !entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(is_repo_meta_doc)
+            })
+        });
+        if docs_dir.is_dir() && (docs_has_markdown || !has_custom_root_markdown) {
             return ManualConfig::default();
         }
         return ManualConfig {
@@ -314,6 +380,9 @@ pub fn read_config(root: &Path) -> ManualConfig {
                 }
             }
         }
+        if let Some(wd) = mk.get("working_directory").and_then(|v| v.as_str()) {
+            config.mkdocs.working_directory = wd.trim().to_string();
+        }
     }
 
     if let Some(ct) = value.get("connection_type").and_then(|v| v.as_str()) {
@@ -366,7 +435,7 @@ pub fn asset_destination(
     if common == 0 {
         return Err("原稿と画像の保存先が一致しません。".into());
     }
-    let link = format!(
+    let raw_link = format!(
         "{}{}",
         "../".repeat(from.len() - common),
         to[common..]
@@ -375,6 +444,11 @@ pub fn asset_destination(
             .collect::<Vec<_>>()
             .join("/")
     );
+    // Encode spaces and parentheses so CommonMark image links always parse cleanly.
+    let link = raw_link
+        .replace(' ', "%20")
+        .replace('(', "%28")
+        .replace(')', "%29");
     Ok((destination, link))
 }
 
@@ -399,7 +473,7 @@ pub fn project_path(root: &Path, value: &str) -> Result<PathBuf, String> {
     }
     let target = root.join(value);
     let mut candidate = target.as_path();
-    while candidate != root {
+    while candidate != root && candidate != abs_root.as_path() {
         if fs::symlink_metadata(candidate).is_ok_and(|meta| meta.file_type().is_symlink()) {
             return Err(format!("Manual path contains a symbolic link: {value}"));
         }
@@ -519,6 +593,11 @@ pub fn save_settings_with_cli_models(
                         mkdocs_cfg.theme_style = if clean.is_empty() { None } else { Some(clean) };
                     }
                 }
+                if let Some(wd) = obj.get("working_directory").and_then(|v| v.as_str()) {
+                    let trimmed = wd.trim();
+                    resolve_mkdocs_working_directory(root, trimmed)?;
+                    mkdocs_cfg.working_directory = trimmed.to_string();
+                }
             }
         }
     }
@@ -528,18 +607,18 @@ pub fn save_settings_with_cli_models(
         .strip_prefix(&abs_root)
         .unwrap_or(&docs_path)
         .to_string_lossy()
-        .into_owned();
+        .replace('\\', "/");
     let rel_docs = if rel_docs.is_empty() { ".".to_string() } else { rel_docs };
     let rel_output = output_path
         .strip_prefix(&abs_root)
         .unwrap_or(&output_path)
         .to_string_lossy()
-        .into_owned();
+        .replace('\\', "/");
 
     let final_targets: Vec<String> = if let Some(t_list) = targets {
         let list: Vec<String> = t_list
             .iter()
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().replace('\\', "/"))
             .filter(|s| !s.is_empty())
             .collect();
         if list.is_empty() {
@@ -550,14 +629,26 @@ pub fn save_settings_with_cli_models(
     } else {
         let current = read_config(root);
         if !current.targets.is_empty() {
-            current.targets
+            current
+                .targets
+                .into_iter()
+                .map(|entry| {
+                    if entry == current.docs {
+                        rel_docs.clone()
+                    } else {
+                        entry.replace('\\', "/")
+                    }
+                })
+                .collect()
         } else {
             vec![rel_docs.clone(), "README.md".to_string()]
         }
     };
 
     let rel_assets = if let Some(a) = assets.map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        a.to_string()
+        a.replace('\\', "/")
+    } else if rel_docs == "." {
+        "assets".to_string()
     } else {
         format!("{rel_docs}/assets")
     };
@@ -604,7 +695,7 @@ pub(crate) fn validate_output_path(root: &Path, docs: &str, docs_path: &Path, ou
 
 #[cfg(test)]
 pub(crate) fn save_html_output(root: &Path, output: &str, site_name: Option<&str>) -> Result<String, String> {
-    save_html_output_with_options(root, output, site_name, None, None)
+    save_html_output_with_options(root, output, site_name, None, None, None)
 }
 
 pub(crate) fn save_html_output_with_options(
@@ -613,17 +704,22 @@ pub(crate) fn save_html_output_with_options(
     site_name: Option<&str>,
     exclude_unused_assets: Option<bool>,
     theme_style: Option<&HtmlThemeStyle>,
+    working_directory: Option<&str>,
 ) -> Result<String, String> {
     let site_name = site_name.map(str::trim);
     if site_name.is_some_and(|name| name.is_empty() || name.chars().any(char::is_control)) {
         return Err("サイト名を入力してください。".into());
     }
     let validated_theme = theme_style.map(sanitize_html_theme_style).transpose()?;
+    let working_directory = working_directory.map(str::trim);
+    if let Some(wd) = working_directory {
+        resolve_mkdocs_working_directory(root, wd)?;
+    }
     let config = read_config(root);
     let docs_path = project_path(root, &config.docs)?;
     let output_path = validate_output_path(root, &config.docs, &docs_path, output.trim())?;
     let assets = project_path(root, &config.assets)?;
-    if assets.starts_with(&output_path) || output_path.starts_with(&assets) {
+    if assets.starts_with(&output_path) || (output_path.starts_with(&assets) && config.assets.trim() != ".") {
         return Err("画像保存先とHTML出力先は重ならない場所にしてください。".into());
     }
     if output_path.exists() && !output_path.is_dir() {
@@ -642,7 +738,11 @@ pub(crate) fn save_html_output_with_options(
     };
     let fields = settings.as_object_mut().ok_or("プロジェクト設定の形式が不正です。")?;
     fields.insert("output".into(), serde_json::json!(&relative));
-    if site_name.is_some() || exclude_unused_assets.is_some() || validated_theme.is_some() {
+    if site_name.is_some()
+        || exclude_unused_assets.is_some()
+        || validated_theme.is_some()
+        || working_directory.is_some()
+    {
         let mkdocs = fields
             .entry("mkdocs")
             .or_insert_with(|| serde_json::json!({}))
@@ -659,6 +759,13 @@ pub(crate) fn save_html_output_with_options(
                 mkdocs.remove("theme_style");
             } else {
                 mkdocs.insert("theme_style".into(), serde_json::to_value(&style).map_err(|e| e.to_string())?);
+            }
+        }
+        if let Some(wd) = working_directory {
+            if wd.is_empty() {
+                mkdocs.remove("working_directory");
+            } else {
+                mkdocs.insert("working_directory".into(), serde_json::json!(wd));
             }
         }
     }
@@ -855,5 +962,22 @@ mod asset_tests {
         assert!(
             asset_destination(root.path(), &root.path().join("README.md"), "../shot.png").is_err()
         );
+        let (_, encoded) = asset_destination(
+            root.path(),
+            &root.path().join("docs/sub/index.md"),
+            "screen (1).png",
+        )
+        .unwrap();
+        assert_eq!(encoded, "../../media/shots/screen%20%281%29.png");
+    }
+
+    #[test]
+    fn default_config_prefers_docs_folder_when_readme_also_exists() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs")).unwrap();
+        fs::write(root.path().join("README.md"), "# Repo").unwrap();
+        fs::write(root.path().join("docs/guide.md"), "# Guide").unwrap();
+        let cfg = read_config(root.path());
+        assert_eq!(cfg.docs, "docs");
     }
 }

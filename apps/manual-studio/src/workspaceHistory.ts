@@ -12,7 +12,21 @@ export async function recordWorkspaceHistory(native: boolean, root: string): Pro
   const history = await loadWorkspaceHistory(false);
   localStorage.setItem(storageKey, JSON.stringify([root, ...history.filter(entry => entry !== root)].slice(0, 20)));
 }
-export function showWorkspaceHistory(history: string[], current: string, open: (root: string) => Promise<void>, actions: Array<{label:string;run:()=>void}> = []): void {
+export async function removeWorkspaceHistory(native: boolean, root: string): Promise<string[]> {
+  if (native) {
+    return validHistory(await invoke("remove_workspace_history", { root }));
+  }
+  const history = (await loadWorkspaceHistory(false)).filter((entry) => entry !== root);
+  localStorage.setItem(storageKey, JSON.stringify(history));
+  return history;
+}
+export function showWorkspaceHistory(
+  history: string[],
+  current: string,
+  open: (root: string) => Promise<void>,
+  actions: Array<{ label: string; run: () => void }> = [],
+  remove?: (root: string) => Promise<void>,
+): void {
   const trigger = document.getElementById('workspace-name')!;
   if (document.getElementById('workspace-history-dialog')) return;
   const list = document.createElement('div');
@@ -29,13 +43,30 @@ export function showWorkspaceHistory(history: string[], current: string, open: (
   const outside = (event: PointerEvent) => { if (!list.contains(event.target as Node) && !trigger.contains(event.target as Node)) close(); };
   const buttons: HTMLButtonElement[] = [];
   for (const root of history) {
+    const row = document.createElement('div');
+    row.className = 'workspace-history-row';
     const button = document.createElement('button'); button.type = 'button'; button.role = 'option';
     button.dataset.workspaceRoot = root; button.className = 'workspace-history-entry';
     button.setAttribute('aria-selected', String(root === current)); button.title = root;
     const name = document.createElement('strong'); name.textContent = `${root === current ? '✓ ' : ''}${root.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || root}`;
     const path = document.createElement('span'); path.textContent = root; button.append(name, path);
     button.onclick = () => { close(); trigger.focus(); if (root !== current) void open(root); };
-    buttons.push(button); recent.append(button);
+    buttons.push(button);
+    row.append(button);
+    if (remove && root !== current) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'workspace-history-remove';
+      del.textContent = '×';
+      del.title = '履歴から削除';
+      del.setAttribute('aria-label', `${root} を履歴から削除`);
+      del.onclick = (event) => {
+        event.stopPropagation();
+        void remove(root).then(() => row.remove());
+      };
+      row.append(del);
+    }
+    recent.append(row);
   }
   if (!history.length) { const empty = document.createElement('p'); empty.textContent = '最近開いたフォルダーはまだありません。'; list.append(empty); }
   list.append(recent);

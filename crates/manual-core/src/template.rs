@@ -235,6 +235,7 @@ fn init_template_inner(
             nav: Vec::new(),
             exclude_unused_assets: false,
             theme_style: None,
+            working_directory: existing_cfg.mkdocs.working_directory.clone(),
         },
     };
     let setting_dest = config_path(root);

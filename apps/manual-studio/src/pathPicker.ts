@@ -3,9 +3,15 @@ import {invoke} from '@tauri-apps/api/core';
 interface Context {root():string;entries():Array<{path:string;directory:boolean}>;}
 let context:Context;
 export function setupPathPickers(value:Context):void {context=value;}
+export function stripVerbatimPrefix(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  if (normalized.startsWith('//?/UNC/')) return `//${normalized.slice(8)}`;
+  if (normalized.startsWith('//?/')) return normalized.slice(4);
+  return normalized;
+}
 export function relativePickedPath(root:string,path:string):string {
-  const base=root.replace(/\\/g,'/').replace(/\/+$/,'');
-  const target=path.replace(/\\/g,'/').replace(/\/+$/,'');
+  const base=stripVerbatimPrefix(root).replace(/\/+$/,'');
+  const target=stripVerbatimPrefix(path).replace(/\/+$/,'');
   const windows=/^[a-z]:/i.test(base)||base.startsWith('//');
   const normalized=windows?target.toLowerCase():target;
   const prefix=windows?base.toLowerCase():base;
@@ -28,15 +34,19 @@ export function addPathBrowse(input:HTMLInputElement,kind:()=> 'folder'|'file',b
       if(!root)throw new Error('先にプロジェクトを開いてください。');
       let selected:string|null;
       if('__TAURI_INTERNALS__' in window){
-        const initial=[root,directory==='.'?'':directory,input.value].filter(Boolean).join('/');
-        const absolute=await invoke<string|null>('choose_path',{initialPath:initial,folder:mode==='folder'});
+        const initial=[stripVerbatimPrefix(root),directory==='.'?'':directory,input.value].filter(Boolean).join('/');
+        const label = input.getAttribute('aria-label') || input.name || (mode === 'folder' ? 'フォルダー' : 'ファイル');
+        const absolute=await invoke<string|null>('choose_path',{initialPath:initial,folder:mode==='folder',title:`${label}を選択`});
         selected=absolute===null?null:relativePickedPath(root,absolute);
       }else{
         selected=await browserPathPicker(mode,context.entries(),directory,input.value);
       }
       if(selected===null||!input.isConnected)return;
       if(context.root()!==root)throw new Error('プロジェクトが切り替わりました。もう一度選択してください。');
-      if(directory!=='.')selected=relativePickedPath(directory,selected);
+      if(directory!=='.'){
+        try{selected=relativePickedPath(directory,selected);}
+        catch{throw new Error(`「${directory}」フォルダー内の保存先を選択してください。`);}
+      }
       input.value=selected;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));
     }catch(reason){error.textContent=String(reason);error.hidden=false;}
     finally{button.disabled=false;}
@@ -53,8 +63,9 @@ function browserPathPicker(kind:'folder'|'file',entries:Array<{path:string;direc
   folders.value=[base==='.'?'':base,kind==='folder'?current:current.split('/').slice(0,-1).join('/')].filter(Boolean).join('/')||'.';
   if(folders.selectedIndex<0)folders.value='.';label.append(folders);
   const nameLabel=document.createElement('label');nameLabel.textContent='ファイル名';const name=document.createElement('input');name.value=current.split('/').at(-1)||'';name.required=kind==='file';nameLabel.append(name);nameLabel.hidden=kind==='folder';
+  const validation=document.createElement('p');validation.role='alert';validation.className='path-picker-error';validation.hidden=true;
   const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
   const accept=document.createElement('button');accept.type='submit';accept.textContent='選択';
-  form.append(label,nameLabel,cancel,accept);dialog.append(heading,form);document.body.append(dialog);dialog.showModal();
-  return new Promise(resolve=>{let result:string|null=null;form.onsubmit=event=>{event.preventDefault();if(kind==='file'&&(/[\\/:]/.test(name.value)||['.','..'].includes(name.value)))return;result=kind==='folder'?folders.value:[folders.value==='.'?'':folders.value,name.value].filter(Boolean).join('/');dialog.close();};dialog.addEventListener('close',()=>{dialog.remove();resolve(result);},{once:true});});
+  form.append(label,nameLabel,validation,cancel,accept);dialog.append(heading,form);document.body.append(dialog);dialog.showModal();
+  return new Promise(resolve=>{let result:string|null=null;form.onsubmit=event=>{event.preventDefault();if(kind==='file'&&(/[\\/:]/.test(name.value)||['.','..'].includes(name.value))){validation.textContent='ファイル名に / \\ : や . .. は使えません。';validation.hidden=false;return;}result=kind==='folder'?folders.value:[folders.value==='.'?'':folders.value,name.value].filter(Boolean).join('/');dialog.close();};dialog.addEventListener('close',()=>{dialog.remove();resolve(result);},{once:true});});
 }

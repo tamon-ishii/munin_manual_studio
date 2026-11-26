@@ -305,7 +305,11 @@ body.detached .app-layout{height:calc(100dvh - 28px)!important}
 .operation-progress,.progress-compact{z-index:7}
 /* Keep disclosure content in a full-width grid row: WebKit details does not reliably flatten with display:contents. */
 
-#workspace-dialog .folder-picker{display:flex;align-items:center;gap:8px;margin-top:6px}#workspace-dialog .folder-picker input{flex:1;min-width:0}#workspace-dialog .folder-picker button{flex:none}
+.folder-picker{display:flex;align-items:center;gap:8px;width:100%;min-width:0;margin:6px 0 12px}.folder-picker input{flex:1 1 0;min-width:0;width:0}.folder-picker button{flex:none}
+#workspace-dialog .folder-picker{margin-bottom:0}
+#html-output-settings>input[type="text"]{display:block;width:100%;margin:6px 0 12px}
+#site-export-controls label[for],#html-output-settings label[for]{margin-bottom:0}
+#site-working-directory-help{margin:0 0 12px}
 .path-picker-row{display:flex;align-items:center;gap:8px;min-width:0;width:100%}
 .path-picker-row>input{flex:1 1 0;min-width:0;width:0}
 .path-picker-row>.path-browse{flex:none;margin:0}
@@ -675,3 +679,13 @@ body[aria-busy="true"] .status-busy-dot{display:inline-block;animation:status-bu
 .asset-organizer-item-actions{display:flex;align-items:center;gap:6px;flex:none}
 .asset-organizer-item-actions button{padding:5px 10px;font-size:12px}
 .asset-organizer-delete-one{color:var(--danger,#b03932);border-color:color-mix(in srgb,var(--danger,#b03932) 45%,var(--border-color))}
+.dialog-error{color:var(--danger,#b03932);font-size:12px;margin:6px 0;line-height:1.4}
+.workspace-history-row{display:flex;align-items:stretch;gap:4px}
+.workspace-history-row>.workspace-history-entry{flex:1 1 auto;min-width:0}
+.workspace-history-remove{flex:0 0 auto;min-width:28px;padding:4px 8px;border-radius:var(--radius-sm,6px)}
+.site-build-recovery{margin-top:8px;flex-wrap:wrap;gap:8px}
+.ai-hub-path-row{display:flex;gap:6px;align-items:center;width:100%}
+.ai-hub-path-row>input{flex:1 1 auto;min-width:0;width:100%}
+.ai-hub-path-row>button{flex:0 0 auto;white-space:nowrap}
+.ai-hub-inline-filename{display:flex;align-items:center;gap:6px;font-size:12px}
+.ai-hub-inline-filename>input{min-width:180px}

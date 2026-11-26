@@ -48,10 +48,21 @@ pub fn set_page_audience(root: &Path, page: &str, audiences: &[String]) -> Resul
             format!("{}/{}", config.docs.trim_end_matches('/'), clean)
         }
     };
+    let _lock = crate::workflow::page_lock(root, &rel)?;
     let path = project_path(root, &rel)?;
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let pattern = Regex::new(r"(?m)^<!--\s*ai:audience\s+[^>]+?\s*-->\r?\n?").unwrap();
-    let stripped = pattern.replace(&content, "").into_owned();
+    let fences = get_code_block_ranges(&content);
+    let mut stripped = String::with_capacity(content.len());
+    let mut last = 0usize;
+    for m in pattern.find_iter(&content) {
+        if is_inside_ranges(&(m.start()..m.end()), &fences) {
+            continue;
+        }
+        stripped.push_str(&content[last..m.start()]);
+        last = m.end();
+    }
+    stripped.push_str(&content[last..]);
 
     let mut unique = Vec::new();
     for a in audiences {
@@ -84,6 +95,7 @@ pub fn build_for_audience(
     engine: &str,
     output_override: Option<&str>,
     draft: bool,
+    working_directory_override: Option<&str>,
 ) -> Result<Value, String> {
     if !VALID_AUDIENCES.contains(&target_audience) {
         return Err("対象読者は user / developer / maintainer から選んでください。".into());
@@ -102,7 +114,19 @@ pub fn build_for_audience(
         "single-html" | "build-single-html" => builder::SiteEngine::SingleHtml,
         _ => builder::SiteEngine::MkDocs,
     };
-    let summary = audience::build_with_engine(root, &docs, &generated, &output, draft, target_audience, site_engine)?;
+    let summary = audience::build_with_engine_in(
+        root,
+        &docs,
+        &generated,
+        &output,
+        draft,
+        target_audience,
+        site_engine,
+        working_directory_override,
+    )?;
+    if site_engine == builder::SiteEngine::MkDocs && summary.contains("MkDocs site build skipped:") {
+        return Err("MkDocsが見つかりません。プロジェクトまたは親フォルダーの .venv に mkdocs-material をインストールするか、HTML出力の「ワーキングフォルダ」でPython環境（.venvを含むフォルダー）を指定してください。HTMLは作成されていません。".into());
+    }
     Ok(json!({
         "audience": target_audience,
         "output": output_rel,
@@ -246,12 +270,22 @@ pub fn overview(root: &Path) -> Result<Value, String> {
 
     // Attach incoming link counts & run cross-page diagnostics.
     let mut diagnostics = Vec::new();
+    let nav_pages: BTreeSet<String> = config
+        .mkdocs
+        .nav
+        .iter()
+        .filter(|entry| !entry.hidden)
+        .map(|entry| entry.page.trim().replace('\\', "/"))
+        .collect();
     for entry in &mut page_entries {
         let p = entry["page"].as_str().unwrap_or("").to_string();
         let incoming = *incoming_counts.get(&p).unwrap_or(&0);
         entry["incoming_count"] = json!(incoming);
         let is_index = p.ends_with("/index.md") || p == "index.md" || p.eq_ignore_ascii_case("README.md");
-        if incoming == 0 && !is_index && all_rel_pages.len() > 1 {
+        let in_nav = nav_pages.contains(&p)
+            || p.strip_prefix(&format!("{}/", config.docs.trim_end_matches('/')))
+                .is_some_and(|stripped| nav_pages.contains(stripped));
+        if incoming == 0 && !is_index && !in_nav && all_rel_pages.len() > 1 {
             diagnostics.push(json!({
                 "kind": "orphan_page",
                 "severity": "warning",

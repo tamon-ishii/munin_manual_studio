@@ -36,7 +36,7 @@ pub(crate) fn search(root: &Path, options: &Value) -> Result<Value, String> {
                 || (!e.file_name().to_string_lossy().starts_with('.')
                     && !matches!(
                         e.file_name().to_str(),
-                        Some("node_modules" | "target" | "dist" | "__pycache__")
+                        Some("node_modules" | "target" | "dist" | "__pycache__" | "venv")
                     ))
         })
     {
@@ -47,7 +47,13 @@ pub(crate) fn search(root: &Path, options: &Value) -> Result<Value, String> {
                 continue;
             }
         };
-        if !entry.file_type().is_file() || entry.path().extension().is_none_or(|e| e != "md") {
+        if !entry.file_type().is_file()
+            || !entry
+                .path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        {
             continue;
         }
         examined += 1;

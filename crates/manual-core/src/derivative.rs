@@ -238,8 +238,13 @@ pub fn translation_diff_plan(
         .filter(|s| !s.is_empty())
         .unwrap_or("English");
 
-    let git_diff = Command::new("git")
-        .args(["diff", "-U2", base, "--", &src_rel])
+    let git_bin = crate::agent::which_binary("git")
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "git".to_string());
+    let mut git_cmd = Command::new(git_bin);
+    crate::platform::no_window(&mut git_cmd);
+    let git_diff = git_cmd
+        .args(["-c", "core.quotepath=false", "diff", "-U2", base, "--", &src_rel])
         .current_dir(root)
         .output()
         .ok()

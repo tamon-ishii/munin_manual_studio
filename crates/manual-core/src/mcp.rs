@@ -16,8 +16,10 @@ pub(crate) fn terminal_args(
     if !matches!(agent, "codex" | "claude") {
         return Ok(Vec::new());
     }
-    let root = root.canonicalize().map_err(|error| error.to_string())?;
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let root = crate::platform::canonical_clean(root).map_err(|error| error.to_string())?;
+    let executable = std::env::current_exe()
+        .map(|p| crate::platform::strip_windows_verbatim(&p))
+        .map_err(|error| error.to_string())?;
     let command = executable
         .to_str()
         .ok_or("Studio executable path is not UTF-8")?;

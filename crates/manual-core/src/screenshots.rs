@@ -276,15 +276,34 @@ pub fn list(root: &Path) -> Result<Value, String> {
             if !dir.path().join("manifest.json").exists() {
                 continue;
             }
-            let shot = recovered(root, load(root, &id)?)?;
+            let shot = match load(root, &id).and_then(|s| recovered(root, s)) {
+                Ok(shot) => shot,
+                Err(error) => {
+                    items.push(json!({
+                        "id": id,
+                        "name": id,
+                        "output": "",
+                        "usage": [],
+                        "thumbnail": Value::Null,
+                        "missing": true,
+                        "error": error,
+                        "created_at": ""
+                    }));
+                    continue;
+                }
+            };
             let mut value = serde_json::to_value(&shot).map_err(|e| e.to_string())?;
             value["usage"] = json!(indexed_usages(&usage, &shot));
             value["thumbnail"] = if let Some(revision) = &shot.adopted {
-                json!(crate::resources::thumbnail_from_bytes(
-                    root,
-                    &shot.output,
-                    &read_render(root, &shot, revision)?
-                )?)
+                match read_render(root, &shot, revision).and_then(|bytes| {
+                    crate::resources::thumbnail_from_bytes(root, &shot.output, &bytes)
+                }) {
+                    Ok(thumb) => json!(thumb),
+                    Err(error) => {
+                        value["error"] = json!(error);
+                        Value::Null
+                    }
+                }
             } else {
                 Value::Null
             };
@@ -713,7 +732,7 @@ pub fn reference(root: &Path, id: &str, page: &str) -> Result<String, String> {
     let from: Vec<_> = from.components().collect();
     let to: Vec<_> = output.components().collect();
     let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
-    let relative = format!(
+    let raw_relative = format!(
         "{}{}",
         "../".repeat(from.len() - common),
         to[common..]
@@ -722,6 +741,10 @@ pub fn reference(root: &Path, id: &str, page: &str) -> Result<String, String> {
             .collect::<Vec<_>>()
             .join("/")
     );
+    let relative = raw_relative
+        .replace(' ', "%20")
+        .replace('(', "%28")
+        .replace(')', "%29");
     let name = if shot.name.is_empty() {
         "スクリーンショット"
     } else {

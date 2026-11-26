@@ -40,7 +40,44 @@ pub struct AgentInfo {
 }
 
 pub fn which_binary(name: &str) -> Option<PathBuf> {
-    env::var_os("PATH").and_then(|path| which_binary_in_path(name, &path))
+    if let Some(found) = env::var_os("PATH").and_then(|path| which_binary_in_path(name, &path)) {
+        return Some(found);
+    }
+    let extra = extra_tool_search_dirs();
+    if let Ok(joined) = env::join_paths(extra) {
+        return which_binary_in_path(name, &joined);
+    }
+    None
+}
+
+fn extra_tool_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = env::var_os("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(profile) = env::var_os("USERPROFILE") {
+            let home = PathBuf::from(profile);
+            dirs.push(home.join(".local").join("bin"));
+            dirs.push(home.join(".cargo").join("bin"));
+            dirs.push(home.join("scoop").join("shims"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        if let Some(home) = env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            dirs.push(home.join(".local/bin"));
+            dirs.push(home.join(".cargo/bin"));
+            dirs.push(home.join(".npm-global/bin"));
+            dirs.push(home.join(".volta/bin"));
+        }
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+            dirs.push(PathBuf::from(dir));
+        }
+    }
+    dirs.into_iter().filter(|dir| dir.is_dir()).collect()
 }
 
 fn which_binary_in_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
@@ -48,12 +85,15 @@ fn which_binary_in_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
         #[cfg(windows)]
         {
             // npm installs a Unix shell script beside its Windows .cmd shim.
-            // Never select that extensionless script as a Win32 executable.
+            // Never select that extensionless script as a Win32 executable,
+            // and never execute .ps1 directly as a Win32 binary.
             let extension = Path::new(name).extension().and_then(|value| value.to_str());
             if extension.is_some_and(|ext| ["exe", "com", "cmd", "bat"].iter().any(|known| ext.eq_ignore_ascii_case(known))) {
                 let candidate = dir.join(name);
                 if candidate.is_file() { return Some(candidate); }
-            } else if extension.is_none() {
+            } else if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("ps1")) {
+                continue;
+            } else {
                 for ext in ["exe", "com", "cmd", "bat"] {
                     let candidate = dir.join(format!("{name}.{ext}"));
                     if candidate.is_file() { return Some(candidate); }
@@ -205,7 +245,9 @@ pub(crate) fn stop_cli_tree(child: &mut std::process::Child) {
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
+        let mut kill = Command::new("taskkill");
+        crate::platform::no_window(&mut kill);
+        let _ = kill
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -390,8 +432,19 @@ fn run_codex(
         let log_path = stdout_log_path;
         let mut stdout_text = String::new();
         let mut first_output = true;
-        for line in BufReader::new(stdout).lines() {
-            let line = line.map_err(|error| format!("Failed to read Codex output: {error}"))?;
+        let mut reader = BufReader::new(stdout);
+        let mut raw_line = Vec::new();
+        loop {
+            raw_line.clear();
+            let read = reader
+                .read_until(b'\n', &mut raw_line)
+                .map_err(|error| format!("Failed to read Codex output: {error}"))?;
+            if read == 0 {
+                break;
+            }
+            let line = String::from_utf8_lossy(&raw_line)
+                .trim_end_matches(['\r', '\n'])
+                .to_string();
             if first_output {
                 append_progress(
                     &log_path,
@@ -748,8 +801,10 @@ fn agent_json_in(root: &Path, prompt: &str, schema: &Value, agent: &str, model: 
     });
     let mut stdout = child.stdout.take().ok_or("Failed to read AI output")?;
     let stdout_reader = thread::spawn(move || {
-        let mut text = String::new();
-        stdout.read_to_string(&mut text).map(|_| text)
+        let mut bytes = Vec::new();
+        stdout
+            .read_to_end(&mut bytes)
+            .map(|_| String::from_utf8_lossy(&bytes).into_owned())
     });
     let exit_status = wait_for_cli(&mut child, root, &checkpoint, operation_timeout(300));
     let stderr_text = stderr_reader.join().unwrap_or_default();
@@ -1598,7 +1653,6 @@ pub fn get_models(root: &Path, agent: &str) -> Result<Value, String> {
 
         let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
-        let mut reader = BufReader::new(stdout);
 
         let messages = [
             json!({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "moduleloom", "version": "1.0.6"}, "capabilities": {}}}),
@@ -1612,60 +1666,84 @@ pub fn get_models(root: &Path, agent: &str) -> Result<Value, String> {
         }
         let _ = stdin.flush();
 
-        let mut line_buf = String::new();
-        let start = std::time::Instant::now();
-        while start.elapsed() < Duration::from_secs(10) {
-            line_buf.clear();
-            if reader.read_line(&mut line_buf).unwrap_or(0) == 0 {
-                break;
-            }
-            if let Ok(item) = serde_json::from_str::<Value>(&line_buf) {
-                if item.get("id").and_then(|id| id.as_i64()) == Some(2) {
-                    if let Some(err) = item.get("error") {
-                        let _ = child.kill();
-                        return Err(err.to_string());
-                    }
-                    if let Some(result) = item.get("result").and_then(|r| r.as_object()) {
-                        if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
-                            for entry in data {
-                                if !entry
-                                    .get("hidden")
-                                    .and_then(|h| h.as_bool())
-                                    .unwrap_or(false)
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Value>, String>>();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut raw = Vec::new();
+            let mut items = Vec::new();
+            loop {
+                raw.clear();
+                match reader.read_until(b'\n', &mut raw) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&raw);
+                        if let Ok(item) = serde_json::from_str::<Value>(line.trim()) {
+                            if item.get("id").and_then(|id| id.as_i64()) == Some(2) {
+                                if let Some(err) = item.get("error") {
+                                    let _ = tx.send(Err(err.to_string()));
+                                    return;
+                                }
+                                if let Some(data) = item
+                                    .get("result")
+                                    .and_then(|r| r.get("data"))
+                                    .and_then(|d| d.as_array())
                                 {
-                                    if let Some(model_id) =
-                                        entry.get("model").and_then(|m| m.as_str())
-                                    {
-                                        let label = entry
-                                            .get("displayName")
-                                            .and_then(|d| d.as_str())
-                                            .unwrap_or(model_id);
-                                        found.push(json!({
-                                            "id": model_id,
-                                            "label": label
-                                        }));
+                                    for entry in data {
+                                        if !entry.get("hidden").and_then(|h| h.as_bool()).unwrap_or(false) {
+                                            if let Some(model_id) = entry.get("model").and_then(|m| m.as_str()) {
+                                                let label = entry
+                                                    .get("displayName")
+                                                    .and_then(|d| d.as_str())
+                                                    .unwrap_or(model_id);
+                                                items.push(json!({ "id": model_id, "label": label }));
+                                            }
+                                        }
                                     }
                                 }
+                                break;
                             }
                         }
                     }
-                    break;
                 }
             }
-        }
-        let _ = child.kill();
-        let _ = child.wait();
-    } else {
-        let output = cli_command(&binary.to_string_lossy(), &["models".into()], root)
-            .output()
-            .map_err(|e| e.to_string())?;
+            let _ = tx.send(Ok(items));
+        });
 
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
+        let result = rx.recv_timeout(Duration::from_secs(10));
+        stop_cli_tree(&mut child);
+        let _ = child.wait();
+        match result {
+            Ok(Ok(items)) => found = items,
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err("Codex モデル一覧の取得がタイムアウトしました。".into()),
+        }
+    } else {
+        let mut child = cli_command(&binary.to_string_lossy(), &["models".into()], root)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        let mut stdout = child.stdout.take().ok_or("No process stdout")?;
+        let mut stderr = child.stderr.take().ok_or("No process stderr")?;
+        let out_handle = thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes);
+            bytes
+        });
+        let err_handle = thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stderr.read_to_end(&mut bytes);
+            bytes
+        });
+        let checkpoint = cancellation_checkpoint(root);
+        let status = wait_for_cli(&mut child, root, &checkpoint, Duration::from_secs(15))?;
+        let stdout_bytes = out_handle.join().unwrap_or_default();
+        let stderr_bytes = err_handle.join().unwrap_or_default();
+
+        if !status.success() {
+            let err = String::from_utf8_lossy(&stderr_bytes);
             return Err(err.trim().to_string());
         }
 
-        let out = String::from_utf8_lossy(&output.stdout);
+        let out = String::from_utf8_lossy(&stdout_bytes);
         let re = regex::Regex::new(r"^\s*([a-z][a-zA-Z0-9._-]*)\s+(.+)$").unwrap();
         for line in out.lines() {
             if let Some(cap) = re.captures(line) {

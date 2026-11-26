@@ -28,7 +28,7 @@ pub fn save_paths(root: &Path, options: &Value) -> Result<Value, String> {
     let asset_path = config::project_path(root, &assets)?;
     let docs_path = config::project_path(root, &docs)?;
     let output_path = config::validate_output_path(root, &docs, &docs_path, &output)?;
-    if asset_path.starts_with(&output_path) || output_path.starts_with(&asset_path) {
+    if asset_path.starts_with(&output_path) || (output_path.starts_with(&asset_path) && assets.trim() != ".") {
         return Err("画像保存先とHTML出力先は重ならない場所にしてください。".into());
     }
     let cfg = config::read_config(root);

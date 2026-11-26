@@ -27,8 +27,18 @@ fn read_workspace_history(path: &std::path::Path) -> Result<Vec<String>, String>
     if !path.exists() {
         return Ok(Vec::new());
     }
-    serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
-        .map_err(|error| format!("ワークスペース履歴を読み込めません: {error}"))
+    let raw: Vec<String> = serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("ワークスペース履歴を読み込めません: {error}"))?;
+    let mut cleaned = Vec::with_capacity(raw.len());
+    for entry in raw {
+        let clean = manual_core::platform::strip_windows_verbatim(std::path::Path::new(&entry))
+            .to_string_lossy()
+            .into_owned();
+        if !clean.is_empty() && !cleaned.contains(&clean) {
+            cleaned.push(clean);
+        }
+    }
+    Ok(cleaned)
 }
 
 #[tauri::command]
@@ -44,7 +54,8 @@ fn record_workspace_history(app: tauri::AppHandle, root: String) -> Result<Vec<S
     let _guard = WORKSPACE_HISTORY_LOCK
         .lock()
         .map_err(|error| error.to_string())?;
-    let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let root = manual_core::platform::canonical_clean(std::path::Path::new(&root))
+        .map_err(|error| error.to_string())?;
     if !root.is_dir() {
         return Err("ワークスペースのフォルダーがありません。".into());
     }
@@ -54,6 +65,27 @@ fn record_workspace_history(app: tauri::AppHandle, root: String) -> Result<Vec<S
     history.retain(|entry| entry != &root);
     history.insert(0, root);
     history.truncate(20);
+    fs::create_dir_all(path.parent().ok_or("設定フォルダーを取得できません。")?)
+        .map_err(|error| error.to_string())?;
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&history).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(history)
+}
+
+#[tauri::command]
+fn remove_workspace_history(app: tauri::AppHandle, root: String) -> Result<Vec<String>, String> {
+    let _guard = WORKSPACE_HISTORY_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let target = manual_core::platform::strip_windows_verbatim(std::path::Path::new(&root))
+        .to_string_lossy()
+        .into_owned();
+    let path = workspace_history_path(&app)?;
+    let mut history = read_workspace_history(&path)?;
+    history.retain(|entry| entry != &target && entry != &root);
     fs::create_dir_all(path.parent().ok_or("設定フォルダーを取得できません。")?)
         .map_err(|error| error.to_string())?;
     fs::write(
@@ -74,7 +106,10 @@ fn hide_manual_studio(
 ) -> Result<(), String> {
     let mut hidden = state.0.lock().map_err(|error| error.to_string())?;
     for (label, window) in app.webview_windows() {
-        if (label == "main" || label.starts_with("editor-"))
+        if (label == "main"
+            || label.starts_with("editor-")
+            || label.starts_with("dialog-")
+            || label.starts_with("proofreading-"))
             && window.is_visible().map_err(|error| error.to_string())?
         {
             window.hide().map_err(|error| error.to_string())?;
@@ -208,19 +243,49 @@ async fn choose_project(initial_directory: Option<String>) -> Result<Option<Stri
 }
 
 #[tauri::command]
-async fn choose_path(initial_path: String, folder: bool, project_root: Option<String>) -> Result<Option<String>, String> {
+async fn choose_path(
+    initial_path: String,
+    folder: bool,
+    project_root: Option<String>,
+    base_directory: Option<String>,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = project_root.as_deref().map(std::path::Path::new);
         let path = if let Some(root) = root {
             manual_core::config::project_path(root, &initial_path).unwrap_or_else(|_| root.to_path_buf())
         } else {
-            PathBuf::from(initial_path)
+            let trimmed = initial_path.trim();
+            if trimmed.is_empty() {
+                base_directory
+                    .as_deref()
+                    .filter(|base| !base.trim().is_empty())
+                    .map(PathBuf::from)
+                    .unwrap_or_default()
+            } else {
+                let candidate = PathBuf::from(trimmed);
+                if candidate.is_absolute() {
+                    candidate
+                } else if let Some(base) = base_directory.as_deref().filter(|base| !base.trim().is_empty()) {
+                    PathBuf::from(base).join(candidate)
+                } else {
+                    candidate
+                }
+            }
         };
         let mut directory = if folder { path.as_path() } else { path.parent().unwrap_or(path.as_path()) };
         while !directory.is_dir() {
             match directory.parent() { Some(parent) => directory = parent, None => break }
         }
-        let mut dialog = rfd::FileDialog::new().set_title(if folder { "出力フォルダーを選択" } else { "出力ファイルを指定" }).set_directory(directory);
+        let dialog_title = title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(if folder { "出力フォルダーを選択" } else { "出力ファイルを指定" });
+        let mut dialog = rfd::FileDialog::new().set_title(dialog_title);
+        if directory.is_dir() {
+            dialog = dialog.set_directory(directory);
+        }
         if !folder { if let Some(name) = path.file_name() { dialog = dialog.set_file_name(name.to_string_lossy()); } }
         let selected = if folder { dialog.pick_folder() } else { dialog.save_file() };
         selected.map(|path| {
@@ -463,19 +528,28 @@ async fn write_clipboard_text(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_output(root: String) -> Result<(), String> {
+fn open_output(root: String, output: Option<String>) -> Result<(), String> {
     let root = PathBuf::from(root);
-    let output =
-        manual_core::config::project_path(&root, &manual_core::config::read_config(&root).output)?;
-    if !output.is_dir() {
-        return Err("先に下書きビルドを実行してください。".into());
+    let target = output
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| manual_core::config::read_config(&root).output);
+    let output_dir = manual_core::platform::strip_windows_verbatim(
+        &manual_core::config::project_path(&root, &target)?,
+    );
+    if !output_dir.is_dir() {
+        return Err("出力先フォルダーがまだありません。先に「HTMLを作成」を実行してください。".into());
     }
-    open::that(output).map_err(|error| error.to_string())
+    open::that(output_dir).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn open_project_file(root: String, path: String) -> Result<(), String> {
-    let target = manual_core::config::project_path(std::path::Path::new(&root), &path)?;
+    let target = manual_core::platform::strip_windows_verbatim(
+        &manual_core::config::project_path(std::path::Path::new(&root), &path)?,
+    );
     if !target.is_file() {
         return Err("ファイルが見つかりません。".into());
     }
@@ -485,7 +559,9 @@ fn open_project_file(root: String, path: String) -> Result<(), String> {
 #[tauri::command]
 async fn open_output_html(root: String, output: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let page = manual_core::builder::published_entry(std::path::Path::new(&root), &output)?;
+        let page = manual_core::platform::strip_windows_verbatim(
+            &manual_core::builder::published_entry(std::path::Path::new(&root), &output)?,
+        );
         open::that(page).map_err(|error| error.to_string())
     }).await.map_err(|error| error.to_string())?
 }
@@ -579,16 +655,23 @@ fn open_editor(app: tauri::AppHandle, root: String, page: String) -> Result<(), 
         .append_pair("root", &root)
         .append_pair("page", &page)
         .finish();
-    tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         label,
         tauri::WebviewUrl::App(format!("index.html?{query}").into()),
     )
     .title(format!("{page} — Munin Manual Studio"))
     .disable_drag_drop_handler()
-    .inner_size(1250.0, 850.0)
-    .build()
-    .map_err(|error| error.to_string())?;
+    .inner_size(1250.0, 850.0);
+    if let Some(main) = app.config().app.windows.iter().find(|window| window.label == "main") {
+        if let Some(directory) = &main.data_directory {
+            builder = builder.data_directory(directory.clone());
+        }
+        if let Some(arguments) = &main.additional_browser_args {
+            builder = builder.additional_browser_args(arguments);
+        }
+    }
+    builder.build().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -675,6 +758,7 @@ fn main() {
             manual_request,
             load_workspace_history,
             record_workspace_history,
+            remove_workspace_history,
             hide_manual_studio,
             restore_manual_studio,
             choose_project,

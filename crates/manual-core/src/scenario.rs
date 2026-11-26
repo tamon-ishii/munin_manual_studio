@@ -86,9 +86,12 @@ fn run_mode(
         let script = temporary.path().join("scenario_runner.mjs");
         fs::write(&script, include_str!("scenario_runner.mjs"))
             .map_err(|error| error.to_string())?;
+        let node = super::agent::which_binary("node")
+            .map(|p| p.to_string_lossy().into_owned())
+            .ok_or_else(|| "Node.jsが見つかりません。Webシナリオの実行には Node.js をインストールしてください。".to_string())?;
         let result = super::agent::run_process(
             root,
-            "node",
+            &node,
             &[
                 script.to_string_lossy().into_owned(),
                 input_path.to_string_lossy().into_owned(),
@@ -174,9 +177,12 @@ pub fn capture_asset(root: &Path, recipe: &serde_json::Value, id: &str) -> Resul
         .map_err(|e| e.to_string())?;
         let script = temporary.path().join("scenario_runner.mjs");
         fs::write(&script, include_str!("scenario_runner.mjs")).map_err(|e| e.to_string())?;
+        let node = super::agent::which_binary("node")
+            .map(|p| p.to_string_lossy().into_owned())
+            .ok_or_else(|| "Node.jsが見つかりません。Webシナリオの実行には Node.js をインストールしてください。".to_string())?;
         let result = super::agent::run_process(
             root,
-            "node",
+            &node,
             &[
                 script.to_string_lossy().into_owned(),
                 input.to_string_lossy().into_owned(),
@@ -301,10 +307,11 @@ pub(crate) fn save_with_tasks(
     json: &str,
     selected: &[super::task::Task],
 ) -> Result<String, String> {
-    if !(input.starts_with(".munin/scenarios/") || input.starts_with("manual/scenarios/")) || !input.ends_with(".json") {
+    let clean = input.replace('\\', "/");
+    if !(clean.starts_with(".munin/scenarios/") || clean.starts_with("manual/scenarios/")) || !clean.ends_with(".json") {
         return Err("Scenario files must be under .munin/scenarios/ or manual/scenarios/ with a .json extension".into());
     }
-    let destination = project_path(root, input)?;
+    let destination = project_path(root, &clean)?;
     let scenario: Scenario =
         serde_json::from_str(json).map_err(|error| format!("Invalid scenario JSON: {error}"))?;
     let docs = project_path(root, &read_config(root).docs)?;
@@ -331,10 +338,11 @@ pub(crate) fn validate_json_with_tasks(
 }
 
 pub fn load(root: &Path, input: &str) -> Result<String, String> {
-    if !(input.starts_with(".munin/scenarios/") || input.starts_with("manual/scenarios/")) || !input.ends_with(".json") {
+    let clean = input.replace('\\', "/");
+    if !(clean.starts_with(".munin/scenarios/") || clean.starts_with("manual/scenarios/")) || !clean.ends_with(".json") {
         return Err("Scenario files must be under .munin/scenarios/ or manual/scenarios/ with a .json extension".into());
     }
-    let path = project_path(root, input)?;
+    let path = project_path(root, &clean)?;
     fs::read_to_string(&path)
         .map_err(|error| format!("Failed to read scenario {}: {error}", path.display()))
 }
@@ -366,10 +374,11 @@ pub(crate) fn validate_capture_task_with_tasks(
 }
 
 pub fn link(root: &Path, input: &str, page: &str) -> Result<String, String> {
-    if !(input.starts_with(".munin/scenarios/") || input.starts_with("manual/scenarios/")) || !input.ends_with(".json") {
+    let clean = input.replace('\\', "/");
+    if !(clean.starts_with(".munin/scenarios/") || clean.starts_with("manual/scenarios/")) || !clean.ends_with(".json") {
         return Err("Scenario files must be under .munin/scenarios/ or manual/scenarios/ with a .json extension".into());
     }
-    let scenario = project_path(root, input)?;
+    let scenario = project_path(root, &clean)?;
     if !scenario.is_file() {
         return Err(format!("Scenario does not exist: {input}"));
     }

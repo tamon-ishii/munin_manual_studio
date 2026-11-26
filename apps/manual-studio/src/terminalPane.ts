@@ -392,7 +392,7 @@ export function setupTerminalPane(
   // Terminal resize handler -> pty-resize
   terminal.onResize(({ cols, rows }) => {
     if (!sessionId) return;
-    void options.rpc("pty-resize", { sessionId, cols, rows }, options.getProjectRoot()).catch(() => {});
+    void options.rpc("pty-resize", { sessionId, cols, rows }, sessionRoot || options.getProjectRoot()).catch(() => {});
   });
 
   let lastInsertion: { sessionId: string; id: string; result: Record<string, unknown> } | undefined;
@@ -503,10 +503,13 @@ export function setupTerminalPane(
         terminal.focus();
         void pollOutput();
       } else {
-        updateStatus("stopped", "セッションIDの取得に失敗しました");
+        ownerId = null;
+        updateStatus("error", "セッションIDの取得に失敗しました");
       }
     } catch (error) {
       if (generation !== sessionGeneration) return;
+      ownerId = null;
+      sessionId = null;
       updateStatus("error", String(error));
       terminal.writeln(`\r\n\x1b[31m起動に失敗しました: ${String(error)}\x1b[0m\r\n`);
     }
