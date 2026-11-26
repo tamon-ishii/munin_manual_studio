@@ -69,13 +69,14 @@ try {
   assert.equal(requests.some(r=>r.action==='resources-list'),false);
   await page.locator('#application-settings').click();
   await page.locator('#settings-tab-text-ai').click();
-  const skillSettings=page.locator('section').filter({has:page.getByRole('heading',{name:'推敲スキルのインストール',exact:true})});
-  const installSkill=skillSettings.getByRole('button',{name:'インストール',exact:true});
+  const skillSettings=page.locator('details.settings-advanced-details');
+  await skillSettings.locator('summary').click();
+  const installSkill=skillSettings.getByRole('button',{name:'プロジェクトへインストール',exact:true});
   for(const [agent,skill,folder] of [['codex','yomiyasu','.agents'],['agy','natural-japanese','.agents'],['claude','japanese-tech-writing','.claude']]){
-    await skillSettings.getByRole('combobox',{name:'AI クライアント'}).selectOption(agent);
+    await skillSettings.getByRole('combobox',{name:'対象のAI CLI'}).selectOption(agent);
     await skillSettings.getByRole('combobox',{name:'推敲スキル'}).selectOption(skill);
     const path=`${folder}/skills/${skill}`;
-    await skillSettings.getByText(`現在のプロジェクトに配置します（${path}）。`,{exact:true}).waitFor();
+    await skillSettings.getByText(`配置先: ${path}`,{exact:true}).waitFor();
     const requested=page.waitForRequest(req=>req.url().endsWith('/__manual/rpc')&&req.postDataJSON().action==='proofreading-skill-install');
     await installSkill.click();
     assert.deepEqual((await requested).postDataJSON(),{root:'test-project',action:'proofreading-skill-install',options:{agent,skill}});
@@ -84,7 +85,7 @@ try {
   await installSkill.click();
   await skillSettings.getByRole('status').filter({hasText:'配置済みです'}).waitFor();
   await page.getByRole('textbox',{name:'Codexのモデル',exact:true}).fill('codex-custom');
-  await page.getByRole('textbox',{name:'Claudeのモデル',exact:true}).fill('claude-custom');
+  await page.getByRole('textbox',{name:'Claude Codeのモデル',exact:true}).fill('claude-custom');
   await page.getByRole('textbox',{name:'Agyのモデル',exact:true}).fill('agy-custom');
   await page.waitForFunction(()=>document.querySelector('#ai-save-state').textContent==='保存済み');
   assert.deepEqual(state.config.cli_models,{codex:'codex-custom',claude:'claude-custom',agy:'agy-custom'});
@@ -101,7 +102,7 @@ try {
   await page.locator('#terminal-container .xterm').waitFor();
   assert.equal(await page.locator('.terminal-guidance').count(),0);
   assert.equal(await page.locator('#terminal-badge').isVisible(),false);
-  assert.equal(await page.locator('#terminal-state-note').isVisible(),false);
+  assert.equal(await page.locator('#terminal-state-note').isVisible(),true);
   assert.ok(await page.evaluate(()=>document.querySelector('#terminal-container').getBoundingClientRect().height/document.querySelector('#panel-terminal').getBoundingClientRect().height)>0.7,'terminal output gets most of the panel height');
   assert.equal(await page.locator('#panel-editor').isVisible(),true,'editor remains visible beside terminal dock');
   assert.equal(await page.locator('#terminal-working-directory').isVisible(),false,'directory settings do not take terminal space');
@@ -278,8 +279,7 @@ try {
   assert.equal(await localCheck.locator('#quality-check').isVisible(),true);
   assert.equal(await localCheck.locator('#site-engine, #build-site').count(),0);
   assert.equal(await page.locator('#reader-review-options').count(),0);
-  await localCheck.getByRole('button',{name:'AIターミナルを開く',exact:true}).click();
-  await page.locator('#panel-terminal').waitFor();
+  await localCheck.getByRole('button',{name:'閉じる',exact:true}).click();
   const exportButton=page.getByRole('button',{name:'HTML出力',exact:true});
   await exportButton.click();
   const exportDialog=page.locator('#site-export-dialog');

@@ -246,7 +246,7 @@ export function setupTerminalPane(
     try {
       if (restart) {
         const confirmed = await confirmAction(
-          `自動承認を${enable ? 'オン' : 'オフ'}にするため、${label}に再接続します。現在のターミナルセッションは終了します。`,
+          `自動審査を${enable ? 'オン' : 'オフ'}にするため、${label}に再接続します。現在のターミナルセッションは終了します。`,
           '変更して再接続',
         );
         if (!confirmed || disposed || generation !== sessionGeneration || root !== options.getProjectRoot()) return;
@@ -371,7 +371,10 @@ export function setupTerminalPane(
       connectBtn.setAttribute('aria-label',label);
       connectBtn.setAttribute('aria-pressed',String(disconnect));
     }
-    if (stateNote) stateNote.textContent = message || (status === "stopped" ? "接続ボタンでAI CLIを起動します。" : status==='connected'?'質問には文字を入力し、選択肢には矢印キーとEnterで回答できます。':labels[status]);
+    if (stateNote) {
+      stateNote.textContent = message || (status === "stopped" ? "「接続」を押すとAIターミナルを起動します。" : status==='connected'?'質問には文字を入力し、選択肢には矢印キーとEnterで回答できます。':labels[status]);
+      stateNote.hidden = status === "connected" && !message;
+    }
     options.onStatusChange?.(status, message);
   }
 
@@ -384,7 +387,7 @@ export function setupTerminalPane(
       if(disposed||generation!==sessionGeneration||id!==sessionId)return;
       await options.rpc("pty-write", { sessionId:id, data }, root);
     }).catch(err=>{
-      if(stateNote)stateNote.textContent=`入力を送信できませんでした: ${String(err)}`;
+      if(stateNote){stateNote.textContent=`入力を送信できませんでした: ${String(err)}`;stateNote.hidden=false;}
       console.warn("Failed to write to terminal:",err);
     });
   });

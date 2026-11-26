@@ -339,6 +339,8 @@ export function setupMilkdownEditor(
     hideOverlay(true);
     sourceMode = true; host.hidden = false; host.dataset.sourceMode = 'true'; source.hidden = false;
     toggle.setAttribute('aria-pressed', 'true');
+    toggle.textContent = 'リッチ編集へ';
+    toggle.title = 'リッチ編集表示に戻す';
     source.dispatchEvent(new Event('editor-mode-change'));
   }
   function showRich() {
@@ -349,6 +351,8 @@ export function setupMilkdownEditor(
     host.hidden = false;
     source.hidden = true;
     toggle.setAttribute('aria-pressed', 'false');
+    toggle.textContent = 'Markdownソース';
+    toggle.title = 'Markdownソース表示を切り替え';
     instance?.action(ctx => ctx.get(editorViewCtx).focus());
     source.dispatchEvent(new Event('editor-mode-change'));
   }
@@ -543,9 +547,25 @@ export function setupMilkdownEditor(
           const advancedKeys = new Set(['strikethrough', 'code', 'code-block', 'math', 'quote', 'hr', 'task-list']);
           const advanced = builder.build().flatMap(group => group.items).filter(item => advancedKeys.has(item.key) && item.onRun);
           for (const group of builder.build()) group.items = group.items.filter(item => !advancedKeys.has(item.key));
+          const aiMenuItems = [
+            { key: 'ai-note-insert', label: 'AIメモを挿入', action: 'insert-ai-note' },
+            { key: 'ai-note-manage', label: 'AIメモ一覧・依頼', action: 'manage-ai-notes' },
+            { key: 'ai-send-terminal', label: 'AIターミナルへ送る', action: 'send-to-terminal' },
+          ] as const;
           builder.addGroup('extras', 'その他').addItem('insert', {
             icon: '', active: () => false,
-            selector: { activeLabel: () => '挿入・その他', options: advanced.map(item => ({ label: labels[item.key] || item.key, onSelect: ctx => item.onRun!(ctx) })) },
+            selector: {
+              activeLabel: () => '挿入・その他',
+              options: [
+                ...advanced.map(item => ({ label: labels[item.key] || item.key, onSelect: (ctx: Ctx) => item.onRun!(ctx) })),
+                ...aiMenuItems.map(entry => ({
+                  label: entry.label,
+                  onSelect: () => {
+                    source.dispatchEvent(new CustomEvent('editor-ai-action', { detail: { action: entry.action } }));
+                  },
+                })),
+              ],
+            },
           });
           builder.addGroup('gfm-alerts','注釈').addItem('gfm-alert',{icon:'',active:()=>false,selector:{activeLabel:()=> '注釈',options:alertKinds.map(([kind,label])=>({label:`${label} (${kind})`,onSelect:(ctx:Ctx)=>insert(alertMarkdown(kind))(ctx)}))}});
           const groups = builder.build();
@@ -580,7 +600,10 @@ export function setupMilkdownEditor(
                 if (!sourceMode) {select(ctx); return;}
                 if (item.key === 'heading-selector') sourceAction('heading', {level:index});
                 else if (item.key === 'gfm-alert') sourceAction('alert', {markdown:alertMarkdown(alertKinds[index][0])});
-                else if (item.key === 'insert') sourceAction(formats[advanced[index].key] || advanced[index].key);
+                else if (item.key === 'insert') {
+                  if (index < advanced.length) sourceAction(formats[advanced[index].key] || advanced[index].key);
+                  else select(ctx);
+                }
               }};
             });
           }

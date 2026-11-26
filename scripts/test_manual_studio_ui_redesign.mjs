@@ -124,14 +124,15 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('#shortcut-help-dialog'));
 
-  // 4. AI Collab Hub reachable from top bar even without opening AI terminal, with arrow-key tabs and grouped toolbar.
+  // 4. Draft Assist dialog reachable from top bar even without opening AI terminal, with 3 focused arrow-key tabs.
   await page.locator('#workspace-ai-hub-open').click();
   const hubDialog = page.locator('#ai-collab-hub-dialog');
   await hubDialog.waitFor({ state: 'visible' });
-  assert.equal(await hubDialog.locator('.ai-hub-toolbar-group').count(), 2, 'Dashboard toolbar is organized into 2 groups');
-  await hubDialog.locator('#ai-hub-tab-dashboard').focus();
+  await hubDialog.locator('#ai-hub-tab-recording-draft').focus();
   await page.keyboard.press('ArrowRight');
-  assert.equal(await hubDialog.locator('#ai-hub-tab-fact-check').getAttribute('aria-selected'), 'true');
+  assert.equal(await hubDialog.locator('#ai-hub-tab-derivative').getAttribute('aria-selected'), 'true');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await hubDialog.locator('#ai-hub-tab-translation').getAttribute('aria-selected'), 'true');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('#ai-collab-hub-dialog'));
 

@@ -10,10 +10,8 @@
     </div>
   </header>
   <nav class="workspace-tabs" aria-label="作業">
-    <button type="button" id="assets-organizer-open" data-ui-icon="image" aria-haspopup="dialog">アセットの整理</button>
-    <button type="button" id="target-application-open" data-ui-icon="application" aria-haspopup="dialog">対象アプリケーションの設定</button>
-    <button type="button" id="workspace-ai-hub-open" data-ui-icon="hub" aria-haspopup="dialog" title="構成ダッシュボード・目次順・事実裏取り・読者別出力">AI協業</button>
-    <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影して撮影リソース一覧へ登録">撮影</button><button type="button" id="reader-review" data-ui-icon="review" aria-haspopup="dialog">原稿チェック</button><button type="button" id="site-export-open" data-ui-icon="export" aria-haspopup="dialog">HTML出力</button></div>
+    <div class="workspace-nav-group workspace-ai-group" role="group" aria-label="原稿の操作"><button type="button" id="save-page" data-ui-icon="save" title="原稿を保存 (Ctrl/Cmd+S)">保存</button><button type="button" id="editor-screenshot-ai" data-ui-icon="camera" title="画面を撮影して登録（原稿を開いている場合はカーソル位置へ挿入）">撮影</button><button type="button" id="workspace-ai-hub-open" data-ui-icon="hub" aria-haspopup="dialog" title="操作記録から手順書・FAQ/要約の作成・多言語の差分翻訳">原稿作成支援</button><button type="button" id="reader-review" data-ui-icon="review" aria-haspopup="dialog">原稿チェック</button><button type="button" id="site-export-open" data-ui-icon="export" aria-haspopup="dialog">HTML出力</button></div>
+    <div class="workspace-nav-group workspace-manage-group" role="group" aria-label="プロジェクト管理"><button type="button" id="assets-organizer-open" data-ui-icon="image" aria-haspopup="dialog" title="プロジェクト内の未使用画像を確認・削除">画像の整理</button><button type="button" id="target-application-open" data-ui-icon="application" aria-haspopup="dialog" title="撮影・変更影響の対象アプリを設定">対象アプリ設定</button></div>
   </nav>
   <div class="app-layout" id="app-layout"></div>
   <div id="layout-panel-pool" style="display:none">
@@ -21,8 +19,8 @@
       <div class="capture-resource-toolbar"><button type="button" id="capture-resource-import-button" title="画像を登録" aria-label="画像を登録">登録</button><input type="file" id="capture-resource-import" accept="image/png" hidden /><select id="capture-resource-usage" aria-label="撮影リソースの使用状況"><option value="all">すべて</option><option value="used">使用中</option><option value="unused">未使用</option></select><span id="capture-resource-count">0件</span><button type="button" id="capture-resource-cleanup-btn" title="未使用の撮影リソースを .munin/trash へ退避して整理" disabled>未使用を整理</button><button type="button" id="capture-resource-restore-trash-btn" title="直前に退避した未使用の撮影リソースを元に戻す" hidden>整理を戻す</button></div>
       <div id="capture-resource-list" class="capture-resource-list"></div>
     </section>
-    <aside id="panel-outline" class="panel panel-outline" aria-label="目次（アウトライン）">
-      <div class="page-heading"><p class="eyebrow">見出し・目次</p><span class="muted outline-hint">ドラッグで節を移動</span></div>
+    <aside id="panel-outline" class="panel panel-outline" aria-label="見出し一覧（アウトライン）">
+      <div class="page-heading"><p class="eyebrow">見出し一覧</p><span class="muted outline-hint">ドラッグで節を移動</span></div>
       <div id="manuscript-outline-list" class="manuscript-outline-list"><p class="muted">原稿を選択すると見出しが表示されます。</p></div>
     </aside>
     <aside id="panel-tree" class="sidebar">
@@ -33,7 +31,7 @@
       <div id="page-list" class="page-list file-tree" role="tree" aria-label="選択したフォルダーのファイル"><p class="muted">フォルダーを開くとファイルが表示されます。</p></div>
     </aside>
     <section id="panel-editor" class="panel panel-editor-standalone">
-      <div class="document-heading"><h1 id="editor-title">Markdownを編集する</h1><div class="document-tabs-wrap"><button type="button" id="document-tabs-scroll-left" class="document-tabs-scroll" aria-label="左のタブへスクロール" hidden>‹</button><div id="document-tabs" class="document-tabs" role="tablist" aria-label="開いている原稿" hidden></div><button type="button" id="document-tabs-scroll-right" class="document-tabs-scroll" aria-label="右のタブへスクロール" hidden>›</button></div><div class="editor-view-controls" role="toolbar" aria-label="原稿の表示と操作"><button type="button" id="document-image-retry" data-ui-icon="refresh" hidden>画像の編集保存を再試行</button><span id="ai-workflow-status" class="ai-workflow-status" role="status" aria-live="polite" hidden></span></div><div class="editor-mode-controls"></div><div class="editor-display-group" role="group" aria-label="編集画面の表示"><button type="button" data-editor-view="edit" data-ui-icon="file" aria-label="編集のみ" title="編集のみ"></button><button type="button" data-editor-view="split" data-ui-icon="library" aria-label="編集＋プレビュー" title="編集＋プレビュー"></button><button type="button" data-editor-view="preview" data-ui-icon="eye" aria-label="プレビューのみ" title="プレビューのみ"></button></div></div>
+      <div class="document-heading"><h1 id="editor-title">Markdownを編集する</h1><div class="document-tabs-wrap"><button type="button" id="document-tabs-scroll-left" class="document-tabs-scroll" aria-label="左のタブへスクロール" hidden>‹</button><div id="document-tabs" class="document-tabs" role="tablist" aria-label="開いている原稿" hidden></div><button type="button" id="document-tabs-scroll-right" class="document-tabs-scroll" aria-label="右のタブへスクロール" hidden>›</button></div><div class="editor-view-controls" role="toolbar" aria-label="原稿の表示と操作"><button type="button" id="editor-find-open" data-ui-icon="search" aria-label="この原稿内を検索" title="この原稿内を検索 (Ctrl/Cmd+F)"></button><button type="button" id="document-image-retry" data-ui-icon="refresh" hidden>画像の編集保存を再試行</button><span id="ai-workflow-status" class="ai-workflow-status" role="status" aria-live="polite" hidden></span></div><div class="editor-mode-controls"></div><div class="editor-display-group" role="group" aria-label="編集画面の表示"><button type="button" data-editor-view="edit" data-ui-icon="file" aria-label="編集のみ" title="編集のみ"></button><button type="button" data-editor-view="split" data-ui-icon="split" aria-label="編集＋プレビュー" title="編集＋プレビュー"></button><button type="button" data-editor-view="preview" data-ui-icon="eye" aria-label="プレビューのみ" title="プレビューのみ"></button></div></div>
       <section id="editor-empty-state" class="editor-empty-state"><h2 id="editor-empty-title">フォルダーを開いて始める</h2><p id="editor-empty-description">原稿と画像を保存しているフォルダーを選択してください。</p><div class="actions"><button type="button" id="empty-open-folder" class="primary">フォルダーを開く</button><button type="button" id="empty-select-page" hidden>原稿を選択</button><button type="button" id="empty-create-page" hidden>原稿を作成</button></div><div id="empty-recent-workspaces" class="empty-recent-workspaces" hidden></div></section>
       <section id="image-tab-view" class="image-tab-view" hidden><div class="actions"><button type="button" id="image-tab-zoom" data-ui-icon="zoom">実寸表示</button><span id="image-tab-size" class="muted"></span></div><div class="image-tab-canvas"><img id="image-tab-preview" alt="画像" /></div></section>
       <details id="execution-result" class="execution-result" hidden></details>
@@ -103,26 +101,25 @@
         <div hidden><span id="terminal-badge">未接続</span><span id="terminal-agent-name">AI CLI</span></div>
         <div class="actions">
           <span id="terminal-status-indicator" class="terminal-status-indicator" data-state="stopped" title="AIターミナル: 未接続"><span class="terminal-status-dot" aria-hidden="true"></span><span id="terminal-cwd-chip" class="terminal-cwd-chip"></span></span>
-          <select id="terminal-cli-agent" aria-label="ターミナルのAI"><option value="codex">Codex</option><option value="claude">Claude</option><option value="agy">Agy</option></select>
+          <select id="terminal-cli-agent" aria-label="ターミナルのAI"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="agy">Agy</option></select>
           <button type="button" id="terminal-connect-btn" data-ui-icon="connect">接続</button>
-          <button type="button" id="terminal-auto-review" aria-pressed="false" title="AIが承認依頼を自動審査します。次の接続から有効です。">自動承認</button>
+          <button type="button" id="terminal-auto-review" aria-pressed="false" title="AIが承認依頼を自動審査します。次の接続から有効です。">自動審査</button>
           <button type="button" id="terminal-send-editor-btn" title="編集中の原稿や選択範囲を文脈付きでAIターミナルへ送る">編集箇所を送る</button>
-          <button type="button" id="open-ai-collab-hub" title="構成ダッシュボード・事実裏取り・アプリ影響抽出・操作記録ドラフト・派生生成">AI協業ツール</button>
           <button type="button" id="terminal-external-changes-btn" hidden title="AIターミナル稼働中の外部変更をDiffで確認・復元">外部変更を確認</button>
-          <button type="button" id="terminal-directory-settings" data-ui-icon="open" aria-haspopup="dialog">作業フォルダ設定</button>
+          <button type="button" id="terminal-directory-settings" data-ui-icon="open" aria-haspopup="dialog" title="AIターミナルの起動フォルダーを設定">作業フォルダー</button>
           <button type="button" id="terminal-clear-btn" data-ui-icon="clear">クリア</button>
 
         </div>
       </div>
-      <span id="terminal-state-note" hidden></span>
+      <p id="terminal-state-note" class="terminal-state-note muted" role="status" aria-live="polite">「接続」を押すとAIターミナルを起動します。</p>
       <div id="terminal-container" class="terminal-container"></div>
     </section>
   </div>
   <dialog id="terminal-directory-dialog" class="panel-dialog" aria-labelledby="terminal-directory-title">
-    <div class="panel-header"><h1 id="terminal-directory-title">作業フォルダ設定</h1><button type="button" data-close-dialog="terminal-directory-dialog">閉じる</button></div>
+    <div class="panel-header"><h1 id="terminal-directory-title">AIターミナルの作業フォルダー</h1><button type="button" data-close-dialog="terminal-directory-dialog">閉じる</button></div>
     <form id="terminal-directory-form">
       <p class="muted">初期値はプロジェクトルートです。変更は次の接続から使います。</p>
-      <label for="terminal-working-directory">作業フォルダ</label>
+      <label for="terminal-working-directory">作業フォルダー</label>
       <div class="terminal-directory-picker"><input id="terminal-working-directory" type="text" placeholder="プロジェクトルート" /><button type="button" id="terminal-choose-directory">選択</button></div>
       <p id="terminal-directory-error" class="dialog-error" role="alert" hidden></p>
       <button type="button" id="terminal-project-directory">プロジェクトルートに戻す</button>
@@ -140,6 +137,21 @@
     <div class="card display-settings"><h2>表示設定</h2><label for="editor-font-size">編集画面の文字サイズ（px）<input id="editor-font-size" type="number" min="12" max="28" step="1" value="14" /></label><label for="preview-font-size">プレビューの文字サイズ（px）<input id="preview-font-size" type="number" min="12" max="32" step="1" value="16" /></label><label for="terminal-font-size">AIターミナルの文字サイズ（px）<input id="terminal-font-size" type="number" min="11" max="24" step="1" value="13" /></label><label for="terminal-font-family">AIターミナルのフォント<select id="terminal-font-family"><option value="jetbrains">JetBrains Mono（推奨・美しい等幅コードフォント）</option><option value="noto">Noto Sans Mono（標準等幅）</option><option value="system">システム等幅フォント</option></select></label><label for="ui-theme">カラーテーマ<select id="ui-theme"><optgroup label="白ベース"><option value="forest">フォレスト</option><option value="blue">ブルー</option><option value="warm">ウォーム</option></optgroup><optgroup label="黒ベース"><option value="charcoal">チャコール</option><option value="midnight">ミッドナイト</option><option value="dark-forest">ダークフォレスト</option></optgroup></select></label></div>
   </dialog>
   <dialog id="panel-settings" class="panel-dialog"><div class="panel-header"><h1>設定</h1><button type="button" data-close-dialog="panel-settings">閉じる</button></div>
+    <div class="card" id="project-general-settings">
+      <h2>プロジェクト構成・対象アプリ</h2>
+      <p class="muted">現在のプロジェクトの保存先フォルダー、対象アプリ、撮影・処理の計測履歴を管理します。</p>
+      <div class="actions">
+        <button type="button" id="settings-open-workspace-paths">原稿・画像の保存先を設定…</button>
+        <button type="button" id="settings-open-target-app">対象アプリを設定…</button>
+        <button type="button" id="settings-open-timings">撮影・挿入の処理時間を見る</button>
+      </div>
+    </div>
+    <div class="card" id="project-brief-settings">
+      <h2>執筆方針（AIへの前提共有）</h2>
+      <p class="muted">想定読者、文書の目的、説明する操作をまとめておくと、AIによるレビューや文章作成の参考に自動で参照されます。</p>
+      <label for="manual-brief">AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label>
+      <div class="actions"><span id="brief-save-state" role="status" aria-live="polite" class="muted"></span><button type="button" id="brief-save-retry" hidden>保存を再試行</button></div>
+    </div>
     <div class="card" id="keyboard-shortcut-settings"></div>
     <div class="card" id="html-output-settings">
       <label for="settings-site-name">サイト名</label>
@@ -149,20 +161,19 @@
         <input id="settings-site-output" type="text">
         <button id="settings-site-browse" type="button" data-ui-icon="folder" hidden>参照…</button>
       </div>
-      <label for="settings-site-working-directory">ワーキングフォルダ（MkDocs / Zensical の .venv 探索元・省略可）</label>
+      <label for="settings-site-working-directory">Python仮想環境（.venv）の探索元フォルダー（省略可）</label>
       <div class="folder-picker">
         <input id="settings-site-working-directory" type="text" placeholder="空欄時はプロジェクトと親フォルダーの .venv を自動探索">
         <button id="settings-site-working-directory-browse" type="button" data-ui-icon="folder" hidden>参照…</button>
       </div>
       <label class="setting-checkbox"><input type="checkbox" id="settings-site-exclude-unused" /> <span>未使用の画像をHTML出力に含めない</span></label>
       <div id="settings-site-theme-picker" class="html-theme-picker-host"></div>
-      <div class="actions"><button id="settings-site-save" type="button">保存</button><span id="settings-site-result" role="status" aria-live="polite"></span></div>
+      <div class="actions"><button id="settings-site-save" type="button" class="primary">保存</button><span id="settings-site-result" role="status" aria-live="polite"></span></div>
     </div>
-    <div class="card" id="markits-shortcut-settings"><h2>MarkItsの撮影設定</h2><label><input type="checkbox" id="capture-default-include-cursor" /> 新規撮影でカーソルを含める</label><p id="capture-default-include-cursor-status" role="status"></p><p>アプリ外でも使う撮影ショートカットです。キーを選ぶと自動保存します。初期値はCtrl+Shift+Eです。</p><label>キーの組み合わせ<input id="markits-capture-key" readonly placeholder="ここを選んでキーを押す" /></label><button type="button" id="markits-capture-key-save">撮影キーを保存</button><button type="button" id="markits-capture-key-reset">Ctrl+Shift+Eに戻す</button><p id="markits-capture-key-status" role="status" aria-live="polite"></p></div>
+    <div class="card" id="markits-shortcut-settings"><h2>MarkItsの撮影設定</h2><label class="setting-checkbox"><input type="checkbox" id="capture-default-include-cursor" /> <span>新規撮影でカーソルを含める</span></label><p id="capture-default-include-cursor-status" role="status" class="muted"></p><p class="muted">アプリ外でも使える撮影ショートカットです。下の欄でキーを押すと自動で保存されます（初期値: Ctrl+Shift+E）。</p><label>キーの組み合わせ<input id="markits-capture-key" readonly placeholder="ここを選んでキーを押す" /></label><div class="actions"><button type="button" id="markits-capture-key-reset">Ctrl+Shift+Eに戻す</button></div><p id="markits-capture-key-status" role="status" aria-live="polite" class="muted"></p></div>
     <div class="card"><h2>文章・図の生成</h2><div class="settings-grid"><label for="ai-connection-type">接続方式<select id="ai-connection-type"><option value="none">後で設定する（AI未設定）</option><option value="cli">CLIツール</option><option value="local_llm">ローカルLLM (Ollama / LM Studio)</option><option value="api">クラウドAPI (OpenAI互換)</option></select></label><label id="ai-agent-label" for="ai-agent">AIエージェント<select id="ai-agent"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="grok">Grok Build</option><option value="agy">Agy</option></select></label><label id="ai-endpoint-url-label" for="ai-endpoint-url">エンドポイントURL<input id="ai-endpoint-url" placeholder="http://localhost:11434/v1" /></label><label id="ai-api-key-label" for="ai-api-key">APIキー<input id="ai-api-key" type="password" placeholder="sk-... (ローカル保存)" autocomplete="off" /></label><label id="ai-model-label" for="ai-model">AIモデル（省略可）<input id="ai-model" placeholder="（省略時は既定モデル）" /></label></div><p class="muted">AI設定は変更すると自動保存します。APIキーはこの端末でプロジェクト・接続先ごとに保存します。</p><button id="ai-key-migrate" type="button" hidden title="接続先URLを確認してから引き継いでください">以前のAPIキーをこの接続先へ引き継ぐ</button><div class="actions"><span id="ai-save-state" role="status" aria-live="polite"></span><button type="button" id="ai-save-retry" hidden>保存を再試行</button></div><p id="ai-cli-status" role="status"></p></div>
 
   </dialog>
-  <dialog id="panel-brief" class="panel-dialog"><div class="panel-header"><h1>執筆方針</h1><button type="button" data-close-dialog="panel-brief">閉じる</button></div><p>想定読者、文書の目的、説明する操作をまとめます。AIレビューや文章作成の参考に使います。</p><label>AIに伝える読者・目的・操作<textarea id="manual-brief" rows="5"></textarea></label><p class="muted">執筆方針は変更すると自動保存します。</p><button type="button" id="brief-save-retry" hidden>保存を再試行</button><p id="brief-save-state" role="status" aria-live="polite"></p></dialog>
   <section id="manuscript-check-host" hidden><section id="manuscript-check" aria-label="原稿チェック">
     <h2>原稿チェック</h2>
     <div class="card"><p>ローカルリンク、見出し参照、画像の欠落に加え、MarkIts注釈（番号・UI名）と本文の整合、用語集違反、未解決のAIメモを確認します。</p><button id="quality-check" data-ui-icon="review" class="primary">原稿をチェック</button></div>
@@ -171,13 +182,15 @@
   <section id="site-export-host" hidden>
     <div id="site-export-controls">
       <label>HTML出力ツール <select id="site-engine"><option value="build-mkdocs">MkDocs</option><option value="build-zensical">Zensical</option><option value="build-single-html">単一HTML（Python不要・PDF印刷対応）</option></select></label>
+      <label for="site-name-input">サイト名</label>
+      <input id="site-name-input" type="text" placeholder="マニュアルのタイトル">
       <label for="site-output-path">出力先フォルダー</label>
       <div class="folder-picker">
         <input id="site-output-path" type="text" aria-describedby="site-output-path-help">
         <button id="browse-site-output" type="button" data-ui-icon="folder">参照…</button>
       </div>
       <div id="site-working-directory-group">
-        <label for="site-working-directory">ワーキングフォルダ（.venv 探索元・省略可）</label>
+        <label for="site-working-directory">Python仮想環境（.venv）の探索元フォルダー（省略可）</label>
         <div class="folder-picker">
           <input id="site-working-directory" type="text" placeholder="空欄時はプロジェクトと親フォルダーの .venv を自動探索" aria-describedby="site-working-directory-help">
           <button id="browse-site-working-directory" type="button" data-ui-icon="folder">参照…</button>
@@ -186,8 +199,8 @@
       </div>
       <label class="setting-checkbox"><input type="checkbox" id="site-exclude-unused-assets" /> <span>未使用の画像をHTML出力に含めない</span></label>
       <div id="site-export-theme-picker" class="html-theme-picker-host"></div>
-      <p id="site-output-path-help" class="muted">プロジェクト内のフォルダーを指定します。絶対パスは保存時に相対パスに変換します。出力先・未使用画像の除外・テーマは「設定 → HTML出力」と連動します。</p>
-      <div class="site-export-settings-row"><span id="site-export-settings-summary" class="muted"></span><button type="button" id="site-export-open-settings">サイト名・詳細設定を開く</button></div>
+      <p id="site-output-path-help" class="muted">プロジェクト内のフォルダーを指定します。絶対パスは保存時に相対パスに変換します。</p>
+      <div class="site-export-settings-row"><span id="site-export-settings-summary" class="muted"></span><button type="button" id="site-export-open-settings">設定画面で編集</button></div>
       <div class="actions">
         <button id="save-site-output" type="button">設定を保存</button>
         <button id="build-site" type="button" class="primary" data-ui-icon="export">HTMLを作成</button>

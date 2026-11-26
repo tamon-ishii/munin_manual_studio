@@ -53,16 +53,21 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
     return existing;
   }
 
-  const { dialog, body } = featureDialog('アセットの整理');
+  const { dialog, body } = featureDialog('画像の整理');
   dialog.id = 'asset-organizer-dialog';
   dialog.dataset.dialogInitialWidth = '760';
   dialog.dataset.dialogInitialHeight = '840';
   body.className = 'asset-organizer-body';
 
+  const guide = document.createElement('p');
+  guide.className = 'hub-guide-banner';
+  guide.textContent =
+    'プロジェクト内の画像ファイル（PNG/JPEG/WebP等）の使用状況を確認し、未使用画像をバックアップ（.munin/file-deletions/）のうえ削除できます。MarkItsの元画像や再撮影の管理は左パネルの「撮影リソース一覧」で行います。';
+
   const summary = document.createElement('p');
   summary.id = 'asset-organizer-summary';
   summary.className = 'asset-organizer-summary muted';
-  summary.textContent = 'アセット一覧を読み込んでいます…';
+  summary.textContent = '画像一覧を読み込んでいます…';
 
   const toolbar = document.createElement('div');
   toolbar.className = 'asset-organizer-toolbar';
@@ -111,7 +116,7 @@ export function openAssetOrganizerDialog(options: AssetOrganizerOptions): HTMLDi
   list.id = 'asset-organizer-list';
   list.className = 'asset-organizer-list';
 
-  body.append(summary, toolbar, feedback, list);
+  body.append(guide, summary, toolbar, feedback, list);
 
   let items: ProjectAssetItem[] = [];
   let loading = false;

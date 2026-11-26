@@ -1,4 +1,4 @@
-﻿type SettingsCategory = 'keyboard' | 'capture' | 'text-ai' | 'glossary' | 'html-output' | 'appearance';
+﻿type SettingsCategory = 'appearance' | 'project' | 'text-ai' | 'glossary' | 'capture' | 'html-output' | 'keyboard';
 export function setupSettingsTabs(extraNodes?: { glossary?: Element[] }): (category: SettingsCategory) => void {
   const dialog = document.getElementById('panel-settings')!;
   const tabs = document.createElement('div');
@@ -6,13 +6,18 @@ export function setupSettingsTabs(extraNodes?: { glossary?: Element[] }): (categ
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', '設定の種類');
   const glossaryNodes = extraNodes?.glossary ?? (document.getElementById('glossary-settings') ? [document.getElementById('glossary-settings')!] : []);
+  const projectNodes = [
+    document.getElementById('project-general-settings'),
+    document.getElementById('project-brief-settings'),
+  ].filter((node): node is HTMLElement => Boolean(node));
   const categories: {id: SettingsCategory;label: string;saveMode: string;nodes: Element[]}[] = [
-    {id:'keyboard',label:'キーボード',saveMode:'ボタンで保存',nodes:[document.getElementById('keyboard-shortcut-settings')!]},
-    {id:'capture',label:'撮影',saveMode:'自動保存',nodes:[document.getElementById('markits-shortcut-settings')!]},
+    {id:'appearance',label:'外観',saveMode:'即時反映・自動保存',nodes:Array.from(document.querySelectorAll('#panel-appearance > .card'))},
+    {id:'project',label:'プロジェクト',saveMode:'自動保存',nodes:projectNodes},
     {id:'text-ai',label:'文章・図のAI',saveMode:'自動保存',nodes:[document.getElementById('ai-connection-type')!.closest('.card')!]},
     {id:'glossary',label:'用語集',saveMode:'操作ごとに自動保存',nodes:glossaryNodes},
+    {id:'capture',label:'撮影',saveMode:'自動保存',nodes:[document.getElementById('markits-shortcut-settings')!]},
     {id:'html-output',label:'HTML出力',saveMode:'ボタンで保存',nodes:[document.getElementById('html-output-settings')!]},
-    {id:'appearance',label:'外観',saveMode:'即時反映・自動保存',nodes:Array.from(document.querySelectorAll('#panel-appearance > .card'))},
+    {id:'keyboard',label:'キーボード',saveMode:'ボタンで保存',nodes:[document.getElementById('keyboard-shortcut-settings')!]},
   ];
   const buttons = new Map<SettingsCategory, HTMLButtonElement>();
   const panels = new Map<SettingsCategory, HTMLElement>();
@@ -51,6 +56,6 @@ export function setupSettingsTabs(extraNodes?: { glossary?: Element[] }): (categ
     });
   }
   dialog.querySelector('.panel-header')!.after(tabs);
-  select('keyboard');
+  select('appearance');
   return select;
 }

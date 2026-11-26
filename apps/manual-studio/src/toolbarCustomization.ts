@@ -10,26 +10,22 @@ export function setupToolbarCustomization():void {
   const hidden=new Set<string>();let order:string[]=[];
   try{const value:unknown=JSON.parse(localStorage.getItem(storageKey)||'[]');if(Array.isArray(value))for(const key of value)if(typeof key==='string')hidden.add(legacyLabels[key]||key);}catch{/* optional preferences */}
   try{const value:unknown=JSON.parse(localStorage.getItem(orderKey)||'[]');if(Array.isArray(value))order=[...new Set(value.filter((key):key is string=>typeof key==='string'))];}catch{/* optional preferences */}
-  const note=document.createElement('p');note.className='toolbar-customization-help';note.textContent='左のチェックで移動する項目を複数選択し、つまみをドラッグして並べ替えます。右の「表示」で表示・非表示を切り替えます。';
-  const selectionStatus=document.createElement('p');selectionStatus.className='toolbar-customization-help';selectionStatus.role='status';
-  list.before(note,selectionStatus);
-  const selected=new Set<string>();let dragging:string[]=[],anchor='';
-  const showSelection=()=>{selectionStatus.textContent=selected.size?`${selected.size}件を移動対象に選択中`:'移動対象は選択されていません';for(const row of list.querySelectorAll<HTMLElement>('[data-toolbar-setting]')){const active=selected.has(row.dataset.toolbarSetting!);row.dataset.selected=String(active);const checkbox=row.querySelector<HTMLInputElement>('.toolbar-setting-select');if(checkbox)checkbox.checked=active;}};
-  const clearDrag=()=>{dragging=[];for(const row of list.querySelectorAll<HTMLElement>('[data-toolbar-setting]')){delete row.dataset.dropPosition;delete row.dataset.dragging;}};
+  const note=document.createElement('p');note.className='toolbar-customization-help';note.textContent='つまみをドラッグするか、左右ボタンで並べ替えます。「表示」で表示・非表示を切り替えられます。';
+  list.before(note);
+  let dragging='';
+  const clearDrag=()=>{dragging='';for(const row of list.querySelectorAll<HTMLElement>('[data-toolbar-setting]')){delete row.dataset.dropPosition;delete row.dataset.dragging;}};
   const saveOrder=(keys:string[])=>{order=keys;localStorage.setItem(orderKey,JSON.stringify(order));update();};
-  const beginDrag=(key:string)=>{if(!selected.has(key)){selected.clear();selected.add(key);}dragging=ordered(controls()).filter(control=>selected.has(control.key)).map(control=>control.key);showSelection();for(const source of list.querySelectorAll<HTMLElement>('[data-toolbar-setting]'))if(dragging.includes(source.dataset.toolbarSetting!))source.dataset.dragging='true';};
-  const markDrop=(row:HTMLElement|undefined,y:number)=>{for(const other of list.querySelectorAll<HTMLElement>('[data-drop-position]'))delete other.dataset.dropPosition;if(row&&!dragging.includes(row.dataset.toolbarSetting!))row.dataset.dropPosition=y<row.getBoundingClientRect().top+row.offsetHeight/2?'before':'after';};
+  const beginDrag=(key:string)=>{dragging=key;for(const source of list.querySelectorAll<HTMLElement>('[data-toolbar-setting]'))if(source.dataset.toolbarSetting===key)source.dataset.dragging='true';};
+  const markDrop=(row:HTMLElement|undefined,y:number)=>{for(const other of list.querySelectorAll<HTMLElement>('[data-drop-position]'))delete other.dataset.dropPosition;if(row&&row.dataset.toolbarSetting!==dragging)row.dataset.dropPosition=y<row.getBoundingClientRect().top+row.offsetHeight/2?'before':'after';};
   const pointerDropTarget=(x:number,y:number)=>{
     const bounds=list.getBoundingClientRect();
     const viewport=list.closest<HTMLElement>('.settings-category-panel')?.getBoundingClientRect()||bounds;
     if(x<bounds.left||x>bounds.right||y<viewport.top||y>viewport.bottom)return;
     const rows=[...list.querySelectorAll<HTMLElement>('[data-toolbar-setting]')];
-    // Pointer capture and scrolling can put a child overlay under the pointer.
-    // Use the actual row rectangles, including the space after the final row.
     return rows.find(row=>{const box=row.getBoundingClientRect();return y>=box.top&&y<box.bottom;})
       ||(y>=bounds.bottom?rows.at(-1):y<bounds.top?rows[0]:undefined);
   };
-  const dropAt=(key:string,after:boolean)=>{const moving=[...dragging];clearDrag();if(!moving.length||moving.includes(key))return;const keys=ordered(controls()).map(control=>control.key).filter(value=>!moving.includes(value));const at=keys.indexOf(key);if(at<0)return;keys.splice(at+(after?1:0),0,...moving);saveOrder(keys);};
+  const dropAt=(key:string,after:boolean)=>{const moving=dragging;clearDrag();if(!moving||moving===key)return;const keys=ordered(controls()).map(control=>control.key).filter(value=>value!==moving);const at=keys.indexOf(key);if(at<0)return;keys.splice(at+(after?1:0),0,moving);saveOrder(keys);};
   let inventory='';
   function controls():Control[]{
     return Array.from(document.querySelectorAll<HTMLElement>('.milkdown-top-bar .top-bar-inner > [data-toolbar-key]')).map(element=>({element,key:element.dataset.toolbarKey!,label:element.dataset.toolbarLabel||''})).filter(item=>!!item.label);
@@ -53,8 +49,6 @@ export function setupToolbarCustomization():void {
   function update():void{
     const items=ordered(controls());
     for(const item of items){const value=String(hidden.has(item.label));if(item.element.dataset.toolbarHidden!==value)item.element.dataset.toolbarHidden=value;}
-    // Retain the same preference on the legacy source fallback, without listing
-    // its duplicate controls as if they were buttons in the active toolbar.
     for(const element of document.querySelectorAll<HTMLElement>('.formatting-toolbar button')){
       const raw=(element.getAttribute('aria-label')||element.title||'').replace(/\s*\([^)]*\)/g,'').trim();
       const label=element.dataset.format==='heading'?'見出し':legacyLabels[raw]||raw;
@@ -65,10 +59,7 @@ export function setupToolbarCustomization():void {
     items.forEach((item,index)=>{
       const row=document.createElement('div');row.className='toolbar-setting-row';row.dataset.toolbarSetting=item.key;
       row.draggable=true;
-      const select=document.createElement('input');select.type='checkbox';select.className='toolbar-setting-select';select.setAttribute('aria-label',`${item.label}を移動対象に選択`);select.onchange=()=>{if(select.checked)selected.add(item.key);else selected.delete(item.key);anchor=item.key;showSelection();};
-      const grip=document.createElement('button');grip.type='button';grip.className='toolbar-setting-grip';grip.textContent='⠿';grip.title='選択した項目をまとめてドラッグ';grip.setAttribute('aria-label',`${item.label}をドラッグして移動`);grip.onclick=event=>{event.preventDefault();event.stopPropagation();};
-      // Pointer capture works in desktop WebViews even when native file-drop
-      // handling intercepts HTML drag events.
+      const grip=document.createElement('button');grip.type='button';grip.className='toolbar-setting-grip';grip.textContent='⠿';grip.title='ドラッグして並べ替え';grip.setAttribute('aria-label',`${item.label}をドラッグして移動`);grip.onclick=event=>{event.preventDefault();event.stopPropagation();};
       let pointer:{id:number;x:number;y:number;moving:boolean}|undefined;
       grip.onpointerdown=event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();pointer={id:event.pointerId,x:event.clientX,y:event.clientY,moving:false};grip.setPointerCapture(event.pointerId);};
       grip.onpointermove=event=>{if(!pointer||event.pointerId!==pointer.id)return;if(!pointer.moving){if(Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)<5)return;pointer.moving=true;beginDrag(item.key);}const scroller=list.closest<HTMLElement>('.settings-category-panel');if(scroller){const box=scroller.getBoundingClientRect();if(event.clientY<box.top+32)scroller.scrollTop-=12;else if(event.clientY>box.bottom-32)scroller.scrollTop+=12;}markDrop(pointerDropTarget(event.clientX,event.clientY),event.clientY);};
@@ -82,18 +73,16 @@ export function setupToolbarCustomization():void {
       const visibility=document.createElement('label');visibility.className='toolbar-setting-visibility';visibility.append(checkbox,document.createTextNode('表示'));
       const moves=document.createElement('div');moves.className='toolbar-setting-moves';
       for(const [offset,title,iconName]of [[-1,'前へ','back'],[1,'後ろへ','forward']]as const){const button=document.createElement('button');button.type='button';button.title=`${item.label}を${title}`;button.setAttribute('aria-label',button.title);button.innerHTML=uiIcon(iconName);button.disabled=index+offset<0||index+offset>=items.length;button.onclick=()=>{const keys=items.map(control=>control.key);[keys[index],keys[index+offset]]=[keys[index+offset],keys[index]];order=keys;localStorage.setItem(orderKey,JSON.stringify(order));update();list.querySelector<HTMLButtonElement>(`[data-toolbar-setting="${item.key}"] button[title="${button.title}"]`)?.focus();};moves.append(button);}
-      row.append(select,grip,label,visibility,moves);
-      row.onclick=event=>{if((event.target as HTMLElement).closest('input,button,label'))return;if(event.shiftKey&&anchor){const start=items.findIndex(control=>control.key===anchor);if(start>=0)for(const control of items.slice(Math.min(start,index),Math.max(start,index)+1))selected.add(control.key);}else if(event.ctrlKey||event.metaKey){if(selected.has(item.key))selected.delete(item.key);else selected.add(item.key);}else{selected.clear();selected.add(item.key);}anchor=item.key;showSelection();};
+      row.append(grip,label,visibility,moves);
       let interactive=false;row.onpointerdown=event=>{interactive=!!(event.target as HTMLElement).closest('input,button,label');};
-      row.ondragstart=event=>{if(interactive||!event.dataTransfer){event.preventDefault();return;}beginDrag(item.key);event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',dragging.join(','));};
-      row.ondragover=event=>{if(!dragging.length)return;event.preventDefault();event.dataTransfer!.dropEffect='move';markDrop(row,event.clientY);};
-      row.ondrop=event=>{if(!dragging.length)return;event.preventDefault();dropAt(item.key,event.clientY>=row.getBoundingClientRect().top+row.offsetHeight/2);};
+      row.ondragstart=event=>{if(interactive||!event.dataTransfer){event.preventDefault();return;}beginDrag(item.key);event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',item.key);};
+      row.ondragover=event=>{if(!dragging)return;event.preventDefault();event.dataTransfer!.dropEffect='move';markDrop(row,event.clientY);};
+      row.ondrop=event=>{if(!dragging)return;event.preventDefault();dropAt(item.key,event.clientY>=row.getBoundingClientRect().top+row.offsetHeight/2);};
       row.ondragend=clearDrag;
       list.append(row);
     });
-    showSelection();
   }
   new MutationObserver(update).observe(document.getElementById('milkdown-editor')!,{childList:true,subtree:true,attributes:true,attributeFilter:['data-toolbar-key','data-toolbar-label']});
-  document.getElementById('reset-toolbar-customization')!.onclick=()=>{hidden.clear();order=[];selected.clear();clearDrag();localStorage.removeItem(storageKey);localStorage.removeItem(orderKey);inventory='';update();};
+  document.getElementById('reset-toolbar-customization')!.onclick=()=>{hidden.clear();order=[];clearDrag();localStorage.removeItem(storageKey);localStorage.removeItem(orderKey);inventory='';update();};
   update();
 }

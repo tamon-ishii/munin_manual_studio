@@ -53,7 +53,7 @@ export function setupGlossarySettings(options: GlossarySettingsOptions): Glossar
   section.className = "card glossary-settings-card";
   section.innerHTML = `
     <h2>用語集・表記ルール</h2>
-    <p class="muted">プロジェクト全体で統一するUI名称や用語・NG表記を登録します。原稿チェック、AI編集・推敲、AIターミナル（MCP: <code>project-glossary</code>）で自動的に参照されます。</p>
+    <p class="muted">プロジェクト全体で統一するUI名称や用語・NG表記を登録します。原稿チェックやAIによる編集・推敲時に自動で参照されます。</p>
     <form class="glossary-form" id="glossary-entry-form">
       <div class="glossary-form-grid">
         <label>正式表記（必須）
@@ -80,7 +80,7 @@ export function setupGlossarySettings(options: GlossarySettingsOptions): Glossar
       <div class="actions">
         <button type="submit" class="primary" id="glossary-submit-btn">用語を追加</button>
         <button type="button" id="glossary-cancel-edit" hidden>編集をキャンセル</button>
-        <button type="button" id="glossary-import-uimap">撮影画像のUIMapから候補を取り込む</button>
+        <button type="button" id="glossary-import-uimap">撮影画像のUI要素から候補を取り込む</button>
       </div>
     </form>
     <div id="glossary-uimap-panel" class="glossary-uimap-panel" hidden></div>

@@ -74,7 +74,13 @@ import {
   type ExternalChangeEntry,
   type GlossaryReplacePlanDoc,
 } from './aiCollaboration';
-import { openAiCollabHubDialog, type HubTabId } from './aiCollabHub';
+import {
+  mountManuscriptCheckTabs,
+  mountSiteExportTabs,
+  openDraftAssistDialog,
+  type AiCollabHubOptions,
+  type DraftAssistTabId,
+} from './aiCollabHub';
 import { copyTextToClipboard } from './clipboardText';
 import { createHtmlThemePicker, htmlThemeEquals, themeStyleLabel } from './htmlThemePicker';
 
@@ -150,7 +156,7 @@ markitsCaptureKey.addEventListener('keydown',event=>{
   markitsKeyEdited=true;markitsKey=key.replace('Mod',/Mac|iPhone|iPad/.test(navigator.platform)?'Super':'Control');displayMarkitsKey();persistMarkitsCaptureKey();
 });
 element('markits-capture-key-reset').addEventListener('click',()=>{markitsKeyEdited=true;markitsKey='Control+Shift+E';displayMarkitsKey();persistMarkitsCaptureKey();});
-element('markits-capture-key-save').addEventListener('click',persistMarkitsCaptureKey);
+document.getElementById('markits-capture-key-save')?.addEventListener('click',persistMarkitsCaptureKey);
 const params = new URLSearchParams(location.search);
 
 const detached = params.get("editor") === "1";
@@ -937,65 +943,66 @@ function updateRichAiNotesBanner(): void {
   banner.append(label, btn);
 }
 
-function openAiCollabHub(initialTab: HubTabId = 'dashboard'): void {
+function createHubOptions(): AiCollabHubOptions {
   const docsPrefix = (workspace?.config.docs || 'docs').replace(/\/$/, '');
   const listPages = (): string[] =>
     (workspace?.pages || []).map((p) => (docsPrefix === '.' ? p : `${docsPrefix}/${p}`));
-  openAiCollabHubDialog(
-    {
-      rpc,
-      getProjectRoot: () => projectRoot,
-      getWorkingDirectory: () => terminalWorkingDirectory || projectRoot,
-      getCurrentPage: () => (documentState && !activeImageTab ? manuscriptPagePath(documentState.page) : null),
-      getCurrentContent: () => editor.value,
-      getPages: listPages,
-      openPage: async (page, line = 1) => {
-        await openResourceUsage({ page, line, start: -1, end: -1, snippet: '' });
-      },
-      insertMarkdownWithDiff: async (markdown, title) => {
-        if (!documentState || activeImageTab || busy) {
-          status('挿入先の原稿を開いてから実行してください。', true);
-          return;
-        }
-        const page = documentState.page;
-        const before = editor.value;
-        const pos = editor.selectionEnd;
-        const gapBefore = pos > 0 && !before.slice(0, pos).endsWith('\n\n') ? '\n\n' : '';
-        const gapAfter = pos < before.length && !before.slice(pos).startsWith('\n\n') ? '\n\n' : '';
-        const after = before.slice(0, pos) + gapBefore + markdown.trim() + gapAfter + before.slice(pos);
-        const decision = await reviewSelection(`${page} — ${title}`, before, after, undefined, '', false);
-        if (decision.action !== 'adopt' || decision.content === before) return;
-        if (!documentState || documentState.page !== page || editor.value !== before) {
-          status('原稿が変更されたため挿入を中止しました。', true);
-          return;
-        }
-        changeImageMarkdown(decision.content, before);
-        status(`${title}を原稿に反映しました。`);
-      },
-      createPageWithContent: async (relativePage, markdown, allowOverwrite = false) => {
-        const root = projectRoot;
-        const target = relativePage.replace(/^\/+/, '');
-        const cleanPage = docsPrefix !== '.' && target.startsWith(`${docsPrefix}/`)
-          ? target.slice(docsPrefix.length + 1)
-          : target;
-        await rpc(
-          'editor-save',
-          { page: cleanPage, json: allowOverwrite ? { content: markdown } : { content: markdown, revision: null } },
-          root,
-        );
-        await refreshWorkspace(false, false);
-        await openPage(cleanPage, false);
-        showDocumentView();
-        chooseTab('editor');
-        status(allowOverwrite ? `${cleanPage} を更新して開きました。` : `${cleanPage} を作成して開きました。`);
-      },
-      sendToTerminal: async (opts) => {
-        await openEditorSendToTerminal(opts);
-      },
-      reportStatus: (message, isError) => status(message, isError),
+  return {
+    rpc,
+    getProjectRoot: () => projectRoot,
+    getWorkingDirectory: () => terminalWorkingDirectory || projectRoot,
+    getCurrentPage: () => (documentState && !activeImageTab ? manuscriptPagePath(documentState.page) : null),
+    getCurrentContent: () => editor.value,
+    getPages: listPages,
+    openPage: async (page, line = 1) => {
+      await openResourceUsage({ page, line, start: -1, end: -1, snippet: '' });
     },
-    initialTab,
-  );
+    insertMarkdownWithDiff: async (markdown, title) => {
+      if (!documentState || activeImageTab || busy) {
+        status('挿入先の原稿を開いてから実行してください。', true);
+        return;
+      }
+      const page = documentState.page;
+      const before = editor.value;
+      const pos = editor.selectionEnd;
+      const gapBefore = pos > 0 && !before.slice(0, pos).endsWith('\n\n') ? '\n\n' : '';
+      const gapAfter = pos < before.length && !before.slice(pos).startsWith('\n\n') ? '\n\n' : '';
+      const after = before.slice(0, pos) + gapBefore + markdown.trim() + gapAfter + before.slice(pos);
+      const decision = await reviewSelection(`${page} — ${title}`, before, after, undefined, '', false);
+      if (decision.action !== 'adopt' || decision.content === before) return;
+      if (!documentState || documentState.page !== page || editor.value !== before) {
+        status('原稿が変更されたため挿入を中止しました。', true);
+        return;
+      }
+      changeImageMarkdown(decision.content, before);
+      status(`${title}を原稿に反映しました。`);
+    },
+    createPageWithContent: async (relativePage, markdown, allowOverwrite = false) => {
+      const root = projectRoot;
+      const target = relativePage.replace(/^\/+/, '');
+      const cleanPage = docsPrefix !== '.' && target.startsWith(`${docsPrefix}/`)
+        ? target.slice(docsPrefix.length + 1)
+        : target;
+      await rpc(
+        'editor-save',
+        { page: cleanPage, json: allowOverwrite ? { content: markdown } : { content: markdown, revision: null } },
+        root,
+      );
+      await refreshWorkspace(false, false);
+      await openPage(cleanPage, false);
+      showDocumentView();
+      chooseTab('editor');
+      status(allowOverwrite ? `${cleanPage} を更新して開きました。` : `${cleanPage} を作成して開きました。`);
+    },
+    sendToTerminal: async (opts) => {
+      await openEditorSendToTerminal(opts);
+    },
+    reportStatus: (message, isError) => status(message, isError),
+  };
+}
+
+function openAiCollabHub(initialTab: DraftAssistTabId = 'recording-draft'): void {
+  openDraftAssistDialog(createHubOptions(), initialTab);
 }
 
 const terminalPanel = element<HTMLElement>("panel-terminal");
@@ -1250,8 +1257,12 @@ function openPanelDialog(panelId: string): void {
       'settings-site-save',
       'settings-site-browse',
       'settings-site-working-directory-browse',
+      'settings-open-workspace-paths',
+      'settings-open-target-app',
+      'settings-open-timings',
+      'manual-brief',
     ]) {
-      element<HTMLInputElement | HTMLButtonElement>(id).disabled = !projectRoot;
+      element<HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement>(id).disabled = !projectRoot;
     }
     settingsSiteThemePicker.setDisabled(!projectRoot);
     settingsSiteThemePicker.setValue(workspace?.config.mkdocs.theme_style);
@@ -2039,7 +2050,8 @@ function showImagePresentation(image?:HTMLImageElement){
   }catch(error){feedback.textContent=String(error);}};
   body.classList.add('image-presentation-fields');
   body.append(widthControls,alignLabel,captionLabel,help,feedback);
-  const actions=document.createElement('div');actions.className='image-presentation-actions';actions.append(apply);dialog.append(actions);
+  const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
+  const actions=document.createElement('div');actions.className='image-presentation-actions';actions.append(cancel,apply);dialog.append(actions);
 }
 async function recaptureDocumentImage(imageSource:string):Promise<void>{
   if(documentImageEditing||!projectRoot)return;
@@ -2625,11 +2637,41 @@ document.querySelectorAll<HTMLDialogElement>('dialog.panel-dialog[id^="panel-"]'
     if (e.key === "Escape") dialog.close();
   });
   dialog.addEventListener("close", () => {
-    if (dialog.id === "panel-settings") void saveAiSettings().catch(() => {});
+    if (dialog.id === "panel-settings") {
+      void saveAiSettings().catch(() => {});
+      void saveBriefSettings().catch(() => {});
+    }
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((button) => {
       button.classList.toggle("active", button.dataset.tab === activeWorkspaceTab);
     });
   });
+});
+
+element("settings-open-workspace-paths").addEventListener("click", () => {
+  if (!projectRoot) return;
+  element<HTMLDialogElement>("panel-settings").close();
+  void showWorkspacePaths({
+    root: () => projectRoot,
+    request: rpc,
+    prepare: async () => {
+      if (busy) throw new Error("処理が終わってから変更してください。");
+      await savedBeforeOperation();
+      return confirmAllDocumentTabs();
+    },
+    changed: async (root) => {
+      if (root === projectRoot) await work(() => openProject(root, false));
+    },
+  }).catch((error) => status(String(error), true));
+});
+element("settings-open-target-app").addEventListener("click", () => {
+  if (!projectRoot) return;
+  element<HTMLDialogElement>("panel-settings").close();
+  void showTargetApplication().catch((error) => status(String(error), true));
+});
+element("settings-open-timings").addEventListener("click", () => {
+  if (!projectRoot) return;
+  element<HTMLDialogElement>("panel-settings").close();
+  void showOperationTimings({ root: () => projectRoot, request: rpc }).catch((error) => status(String(error), true));
 });
 
 element("terminal-cli-agent").addEventListener("change", () => {
@@ -2873,7 +2915,9 @@ function updateEditorEmptyState(): void {
   refreshEmptyRecentWorkspaces();
   element('panel-editor').classList.toggle('editor-is-empty', empty);
   setButtonDisabled(element<HTMLButtonElement>('editor-screenshot-ai'),!projectRoot||captureInsertionRunning);
-  for (const id of ['reader-review','save-page']) setButtonDisabled(element<HTMLButtonElement>(id), !documentState || Boolean(activeImageTab));
+  setButtonDisabled(element<HTMLButtonElement>('save-page'), !documentState || Boolean(activeImageTab));
+  setButtonDisabled(element<HTMLButtonElement>('editor-find-open'), !documentState || Boolean(activeImageTab));
+  setButtonDisabled(element<HTMLButtonElement>('reader-review'), !projectRoot);
   setButtonDisabled(element<HTMLButtonElement>('site-export-open'), !projectRoot);
   setButtonDisabled(element<HTMLButtonElement>('assets-organizer-open'), !projectRoot);
   setButtonDisabled(element<HTMLButtonElement>('target-application-open'), !projectRoot);
@@ -3086,6 +3130,14 @@ editor.addEventListener('source-toolbar-action', event => {
   if (format === 'heading' && level !== undefined) element<HTMLSelectElement>('heading-level').value = String(level);
   applyMarkdownFormat(format);
 });
+editor.addEventListener('editor-ai-action', event => {
+  if (busy) return;
+  const { action } = (event as CustomEvent<{ action: string }>).detail;
+  if (action === 'insert-ai-note') void insertAiNoteAtCursor();
+  else if (action === 'manage-ai-notes') openCurrentAiNotes();
+  else if (action === 'send-to-terminal') void openEditorSendToTerminal();
+});
+element('editor-find-open').addEventListener('click', () => openEditorFindBar(false));
 editor.addEventListener("keydown", (event) => {
   if (busy || !documentState) return;
   if (event.key === "Enter" && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && editor.selectionStart === editor.selectionEnd) {
@@ -3421,17 +3473,33 @@ deleteMenuItem.onclick=()=>{
   });
 };treeContextMenu.append(deleteMenuItem);
 document.body.append(treeContextMenu);
+function openTreeContextMenuAt(x: number, y: number, filePath: string | null, folderPath?: string): void {
+  if (!workspace || busy) return;
+  contextMoveSource = filePath;
+  moveMenuItem.hidden = !contextMoveSource;
+  deleteMenuItem.hidden = !contextMoveSource;
+  const rawParent = filePath ? filePath.split('/').slice(0, -1).join('/') : folderPath || workspace.config.docs;
+  contextCreateParent = rawParent.replace(/\\/g, '/').split('/').filter(part => part && part !== '.').join('/');
+  treeContextMenu.hidden = false;
+  const box = treeContextMenu.getBoundingClientRect();
+  treeContextMenu.style.left = `${Math.max(0, Math.min(x, innerWidth - box.width))}px`;
+  treeContextMenu.style.top = `${Math.max(0, Math.min(y, innerHeight - box.height))}px`;
+  treeContextMenu.querySelector<HTMLButtonElement>('button')!.focus();
+}
+element('page-list').addEventListener('click', event => {
+  const menuBtn = (event.target as HTMLElement).closest<HTMLButtonElement>('.tree-file-menu-btn');
+  if (!menuBtn || !workspace || busy) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = menuBtn.getBoundingClientRect();
+  openTreeContextMenuAt(rect.right, rect.bottom + 2, menuBtn.dataset.treeMenu || null);
+}, true);
 element('page-list').addEventListener('contextmenu', event => {
   if (!workspace || busy) return; event.preventDefault();
   const target = event.target as HTMLElement;
   const file = target.closest<HTMLElement>('[data-page],[data-image],[data-file]');
-  contextMoveSource=file?(file.dataset.page||file.dataset.image||file.dataset.file||null):null;moveMenuItem.hidden=!contextMoveSource;
-  deleteMenuItem.hidden=!contextMoveSource;
-  contextCreateParent = file ? (file.dataset.page || file.dataset.image || file.dataset.file || '').split('/').slice(0,-1).join('/') : target.closest<HTMLElement>('[data-folder]')?.dataset.folder || workspace.config.docs;
-  contextCreateParent = contextCreateParent.replace(/\\/g, '/').split('/').filter(part => part && part !== '.').join('/');
-  treeContextMenu.hidden = false;
-  const box = treeContextMenu.getBoundingClientRect(); treeContextMenu.style.left = `${Math.max(0,Math.min(event.clientX,innerWidth-box.width))}px`; treeContextMenu.style.top = `${Math.max(0,Math.min(event.clientY,innerHeight-box.height))}px`;
-  treeContextMenu.querySelector<HTMLButtonElement>('button')!.focus();
+  const filePath = file ? (file.dataset.page || file.dataset.image || file.dataset.file || null) : null;
+  openTreeContextMenuAt(event.clientX, event.clientY, filePath, target.closest<HTMLElement>('[data-folder]')?.dataset.folder);
 });
 document.addEventListener('pointerdown',event=>{ if (!treeContextMenu.contains(event.target as Node)) treeContextMenu.hidden = true; });
 document.addEventListener('keydown',event=>{if(event.key==='Escape')treeContextMenu.hidden=true;});
@@ -4081,7 +4149,6 @@ function actionButton(id: string, action: string, options: () => Record<string, 
 }
 element("manual-brief").addEventListener("input", scheduleBriefSave);
 element("brief-save-retry").addEventListener("click", () => { void saveBriefSettings().catch(() => {}); });
-element("panel-brief").addEventListener("close", () => { void saveBriefSettings().catch(() => {}); });
 element("ai-connection-type").addEventListener("change", () => {
   if(element<HTMLSelectElement>('ai-connection-type').value==='cli')input('ai-model').value=cliAiSettings.get(element<HTMLSelectElement>('ai-agent').value);
   updateAiSettingsVisibility();
@@ -4172,11 +4239,20 @@ const settingsSiteThemePicker = createHtmlThemePicker(element('settings-site-the
 });
 input('settings-site-name').addEventListener('input', () => {
   const name = input('settings-site-name').value;
+  input('site-name-input').value = name;
   settingsSiteThemePicker.setSiteName(name);
   siteExportThemePicker.setSiteName(name);
+  updateSiteExportSettingsSummary();
+});
+input('site-name-input').addEventListener('input', () => {
+  const name = input('site-name-input').value;
+  input('settings-site-name').value = name;
+  settingsSiteThemePicker.setSiteName(name);
+  siteExportThemePicker.setSiteName(name);
+  updateSiteExportSettingsSummary();
 });
 function updateSiteExportSettingsSummary(themeStyle?: HtmlThemeStyle | null): void {
-  const siteName = workspace?.config.mkdocs.site_name ?? '';
+  const siteName = input('site-name-input').value.trim() || workspace?.config.mkdocs.site_name || '';
   const theme = themeStyle ?? siteExportThemePicker.getValue();
   element('site-export-settings-summary').textContent =
     `サイト名: ${siteName || '（未設定）'} · テーマ: ${themeStyleLabel(theme)}`;
@@ -4241,6 +4317,7 @@ function syncHtmlOutputControls(): void {
   const siteName = workspace?.config.mkdocs.site_name ?? '';
   const workingDirectory = workspace?.config.mkdocs.working_directory ?? '';
   const themeStyle = workspace?.config.mkdocs.theme_style;
+  input('site-name-input').value = siteName;
   input('site-output-path').value = outputPath;
   input('site-working-directory').value = workingDirectory;
   input('site-exclude-unused-assets').checked = excludeUnused;
@@ -4261,17 +4338,17 @@ element('site-export-open').addEventListener('click', () => {
   if (busy || !projectRoot || document.querySelector('#site-export-dialog[open]')) return;
   const {dialog, body} = featureDialog('HTML出力');
   dialog.id = 'site-export-dialog';
-  dialog.dataset.dialogInitialWidth = '760';
   const controls = element('site-export-controls');
   element<HTMLButtonElement>('browse-site-output').hidden = !native;
   element<HTMLButtonElement>('browse-site-working-directory').hidden = !native;
   syncHtmlOutputControls();
   clearSiteBuildRecovery();
   element('site-build-result').textContent = '';
-  body.append(controls);
+  mountSiteExportTabs(dialog, body, controls, createHubOptions(), 'build');
   dialog.addEventListener('close', () => element('site-export-host').append(controls), {once: true});
 });
 element('site-export-open-settings').addEventListener('click', () => {
+  const draftSiteName = input('site-name-input').value;
   const draftOutput = input('site-output-path').value;
   const draftWorkingDir = input('site-working-directory').value;
   const draftExcludeUnused = input('site-exclude-unused-assets').checked;
@@ -4280,11 +4357,13 @@ element('site-export-open-settings').addEventListener('click', () => {
   selectSettingsCategory('html-output');
   const dialog = element<HTMLDialogElement>('panel-settings');
   if (!dialog.open) openPanelDialog('panel-settings');
+  input('settings-site-name').value = draftSiteName;
   input('settings-site-output').value = draftOutput;
   input('settings-site-working-directory').value = draftWorkingDir;
   input('settings-site-exclude-unused').checked = draftExcludeUnused;
   syncingHtmlThemePickers = true;
   settingsSiteThemePicker.setValue(draftTheme);
+  settingsSiteThemePicker.setSiteName(draftSiteName);
   syncingHtmlThemePickers = false;
 });
 function browseSiteOutput(dialogId: string, fieldId: string, resultId: string): void {
@@ -4414,10 +4493,11 @@ element('settings-site-save').addEventListener('click', () => {
 element('save-site-output').addEventListener('click', () => {
   void work(async () => {
     clearSiteBuildRecovery();
+    const siteName = input('site-name-input').value.trim();
     const output = await saveSiteOutput(
       'site-output-path',
       'site-build-result',
-      undefined,
+      siteName || undefined,
       input('site-exclude-unused-assets').checked,
       siteExportThemePicker.getValue(),
       input('site-working-directory').value.trim(),
@@ -4437,10 +4517,11 @@ element('build-site').addEventListener('click', () => {
   void work(async () => {
     clearSiteBuildRecovery();
     const workingDirectory = input('site-working-directory').value.trim();
+    const siteName = input('site-name-input').value.trim();
     const output = await saveSiteOutput(
       'site-output-path',
       'site-build-result',
-      undefined,
+      siteName || undefined,
       input('site-exclude-unused-assets').checked,
       siteExportThemePicker.getValue(),
       action === 'build-single-html' ? undefined : workingDirectory,
@@ -4551,28 +4632,24 @@ function installReaderReport(root:string,page:string,expected:string,result:Read
   };
 }
 element('reader-review').addEventListener('click',()=>{
-  if(busy||!documentState||activeImageTab)return;
+  if(busy||!projectRoot||document.querySelector('#manuscript-check-dialog[open]'))return;
   const {dialog,body}=featureDialog('原稿チェック');
   const checks=element('manuscript-check');
-  body.append(checks);
+  const qualityElements:HTMLElement[]=[checks];
   const actionsRow=document.createElement('div');
   actionsRow.className='actions';
-  const terminal=document.createElement('button');
-  terminal.type='button';
-  terminal.textContent='AIターミナルを開く';
-  terminal.onclick=()=>{
-    dialog.close();
-    showTerminalPanel();
-  };
-  const notesBtn=document.createElement('button');
-  notesBtn.type='button';
-  const noteCount=extractAiNotes(editor.value).length;
-  notesBtn.textContent=noteCount>0?`AIメモ一覧・依頼 (${noteCount})`:'AIメモを挿入';
-  notesBtn.onclick=()=>{
-    dialog.close();
-    if(noteCount>0)openCurrentAiNotes();
-    else void insertAiNoteAtCursor();
-  };
+  if(documentState&&!activeImageTab){
+    const notesBtn=document.createElement('button');
+    notesBtn.type='button';
+    const noteCount=extractAiNotes(editor.value).length;
+    notesBtn.textContent=noteCount>0?`AIメモ一覧・依頼 (${noteCount})`:'AIメモを挿入';
+    notesBtn.onclick=()=>{
+      dialog.close();
+      if(noteCount>0)openCurrentAiNotes();
+      else void insertAiNoteAtCursor();
+    };
+    actionsRow.append(notesBtn);
+  }
   const glossaryBtn=document.createElement('button');
   glossaryBtn.type='button';
   glossaryBtn.textContent='用語集を設定';
@@ -4582,15 +4659,8 @@ element('reader-review').addEventListener('click',()=>{
     chooseTab('settings');
     void glossarySettings.reload();
   };
-  const hubBtn=document.createElement('button');
-  hubBtn.type='button';
-  hubBtn.textContent='AI協業ツール';
-  hubBtn.onclick=()=>{
-    dialog.close();
-    openAiCollabHub('dashboard');
-  };
-  actionsRow.append(terminal,notesBtn,glossaryBtn,hubBtn);
-  body.append(actionsRow);
+  actionsRow.append(glossaryBtn);
+  qualityElements.push(actionsRow);
   if(reopenReaderReview){
     const previous=document.createElement('button');
     previous.type='button';
@@ -4599,8 +4669,9 @@ element('reader-review').addEventListener('click',()=>{
       dialog.close();
       if(!reopenReaderReview?.())status('現在の原稿と一致するレビュー結果がありません。',true);
     };
-    body.append(previous);
+    qualityElements.push(previous);
   }
+  mountManuscriptCheckTabs(dialog, body, qualityElements, createHubOptions(), 'quality');
   dialog.addEventListener('close',()=>element('manuscript-check-host').append(checks),{once:true});
 });
 
@@ -4608,9 +4679,9 @@ element('insert-ai-note')?.addEventListener('click',()=>{void insertAiNoteAtCurs
 element('manage-ai-notes')?.addEventListener('click',()=>{openCurrentAiNotes();});
 element('send-to-terminal')?.addEventListener('click',()=>{void openEditorSendToTerminal();});
 element('terminal-send-editor-btn')?.addEventListener('click',()=>{void openEditorSendToTerminal();});
-element('open-ai-collab-hub')?.addEventListener('click',()=>{openAiCollabHub('dashboard');});
-element('workspace-ai-hub-open')?.addEventListener('click',()=>{openAiCollabHub('dashboard');});
-element('shortcut-help-open')?.addEventListener('click',()=>{showShortcutHelp();});
+element('open-ai-collab-hub')?.addEventListener('click',()=>{openAiCollabHub('recording-draft');});
+element('workspace-ai-hub-open')?.addEventListener('click',()=>{openAiCollabHub('recording-draft');});
+element('shortcut-help-open')?.addEventListener('click',()=>{showShortcutHelp(()=>{selectSettingsCategory('keyboard');chooseTab('settings');});});
 element('terminal-external-changes-btn')?.addEventListener('click',()=>{void openExternalChangeTray();});
 
 let captureInsertionRunning=false;

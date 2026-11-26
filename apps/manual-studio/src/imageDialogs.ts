@@ -21,7 +21,11 @@ export function confirmAction(message:string,acceptLabel='続ける'):Promise<bo
 }
 export function requestText(label:string,initial=''):Promise<string|null>{
   const {dialog,body}=featureDialog(label);dialog.dataset.requestText='true';dialog.style.maxWidth='560px';
-  const form=document.createElement('form');const field=document.createElement('label');field.textContent=label;const input=document.createElement('input');input.value=initial;input.setAttribute('aria-label',label);field.append(input);const save=document.createElement('button');save.type='submit';save.className='primary';save.textContent='保存';form.append(field,save);body.append(form);input.focus();input.select();
+  const form=document.createElement('form');const field=document.createElement('label');field.textContent=label;const input=document.createElement('input');input.value=initial;input.setAttribute('aria-label',label);field.append(input);
+  const actions=document.createElement('div');actions.className='actions dialog-actions';
+  const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
+  const save=document.createElement('button');save.type='submit';save.className='primary';save.textContent='保存';
+  actions.append(cancel,save);form.append(field,actions);body.append(form);input.focus();input.select();
   return new Promise(resolve=>{let value:string|null=null;form.onsubmit=event=>{event.preventDefault();value=input.value;dialog.close();};dialog.addEventListener('close',()=>resolve(value),{once:true});});
 }
 export function headings(markdown: string): Array<{label:string;offset:number;index:number}> {
@@ -49,8 +53,12 @@ export function chooseDestination(options:DestinationOptions):Promise<boolean> {
   page.value=options.current()?.page||(recent?.page&&options.pages.includes(recent.page)?recent.page:options.pages[0]||'');
   pageLabel.append(page);
   const headingLabel=document.createElement('label');headingLabel.textContent='位置';const position=document.createElement('select');position.setAttribute('aria-label','挿入先の位置');headingLabel.append(position);
-  const status=document.createElement('p');status.role='status';const confirm=document.createElement('button');confirm.type='button';confirm.className='primary';confirm.textContent='ここに挿入';
-  body.append(pageLabel,headingLabel,status,confirm);
+  const status=document.createElement('p');status.role='status';
+  const actions=document.createElement('div');actions.className='actions dialog-actions';
+  const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
+  const confirm=document.createElement('button');confirm.type='button';confirm.className='primary';confirm.textContent='ここに挿入';
+  actions.append(cancel,confirm);
+  body.append(pageLabel,headingLabel,status,actions);
   let version=0,targets:ReturnType<typeof headings>=[],accepted=false,loaded='';
   async function load(){
     const id=++version;confirm.disabled=true;

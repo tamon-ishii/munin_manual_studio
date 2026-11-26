@@ -1,7 +1,7 @@
 ﻿import {bindingLabel,currentBindings,shortcutCommands} from './keyboardShortcuts';
 import {featureDialog} from './imageDialogs';
 
-export function showShortcutHelp(): void {
+export function showShortcutHelp(onOpenSettings?: () => void): void {
   const existing = document.getElementById('shortcut-help-dialog') as HTMLDialogElement | null;
   if (existing?.open) { existing.focus(); return; }
   const { dialog, body } = featureDialog('キーボード操作一覧');
@@ -27,8 +27,22 @@ export function showShortcutHelp(): void {
     }
     list.append(label, keys);
   }
+  const footer = document.createElement('div');
+  footer.className = 'actions dialog-actions';
   const note = document.createElement('p');
   note.className = 'muted';
-  note.textContent = '上部の「設定 → キーボード」からキー割り当てを変更できます。';
+  note.textContent = 'キー割り当ては設定画面から自由に変更できます。';
   body.append(list, note);
+  if (onOpenSettings) {
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'primary';
+    editBtn.textContent = 'キー割り当てを変更…';
+    editBtn.onclick = () => {
+      dialog.close();
+      onOpenSettings();
+    };
+    footer.append(editBtn);
+    body.append(footer);
+  }
 }

@@ -87,7 +87,8 @@ export function setupCaptureResources(options:Options) {
         const pendingBadge=document.createElement('span');pendingBadge.className='capture-pending-badge';pendingBadge.textContent='再撮影候補あり';
         header.append(pendingBadge);
       }
-      const state=document.createElement('p');state.textContent=`${r.missing?'元画像が欠落':r.recorded?'操作記録あり':r.window_recapture?'ウィンドウを再撮影可能':'操作記録なし'} · 派生 ${r.derived.length}件 · 使用 ${r.usages.length}箇所`;
+      const derivedNote = r.derived.length > 0 ? ` · 編集済み画像 ${r.derived.length}件` : '';
+      const state=document.createElement('p');state.textContent=`${r.missing?'元画像が欠落':r.recorded?'操作記録あり':r.window_recapture?'ウィンドウを再撮影可能':'操作記録なし'}${derivedNote} · 使用 ${r.usages.length}箇所`;
       const controls=document.createElement('div');controls.className='capture-resource-actions';
       const button=(label:string,icon:UiIconName,action:()=>Promise<void>,disabled=false,shortLabel?:string,className='')=>{const b=document.createElement('button');b.type='button';b.className=`icon-control${className?` ${className}`:''}`;b.innerHTML=shortLabel?`${uiIcon(icon)}<span>${shortLabel}</span>`:uiIcon(icon);b.title=label;b.setAttribute('aria-label',label);b.disabled=disabled;b.onclick=()=>void run(action);controls.append(b);};
       button('MarkItsで編集','annotation',async()=>{await options.edited(await generate(r.id));await refresh();},r.missing,'編集');
@@ -100,7 +101,7 @@ export function setupCaptureResources(options:Options) {
         for(const [pending,label] of [[false,'現在'],[true,'再撮影候補']] as const){const figure=document.createElement('figure');const caption=document.createElement('figcaption');caption.textContent=label;const image=document.createElement('img');image.alt=label;image.src=await rpc('capture-resources-thumbnail',{id:r.id,pending},root);figure.append(caption,image);images.append(figure);}
         const feedback=document.createElement('p');feedback.role='status';
         const actions=document.createElement('div');actions.className='actions dialog-actions';
-        const cancel=document.createElement('button');cancel.type='button';cancel.textContent='閉じる';cancel.onclick=()=>dialog.close();
+        const cancel=document.createElement('button');cancel.type='button';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();
         const adopt=document.createElement('button');adopt.type='button';adopt.className='primary';adopt.textContent='候補を採用して画像を更新';adopt.onclick=()=>{adopt.disabled=true;void invoke('adopt_capture_resource',{root,id:r.id}).then(async()=>{if(root===options.root()){await refresh();await options.changed();}dialog.close();}).catch(e=>{feedback.textContent=String(e);adopt.disabled=false;});};
         actions.append(cancel,adopt);
         body.append(images,feedback,actions);

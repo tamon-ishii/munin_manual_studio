@@ -88,9 +88,10 @@ export function renderFileTree(
     const fileHtml = node.files.sort((a, b) => a.localeCompare(b, "ja")).map((path) => {
       const name = path.split("/").at(-1)!;
       const isPage = pagePaths.has(path) || /\.md$/i.test(name);
+      const menuBtn = `<button type="button" class="tree-file-menu-btn" data-tree-menu="${escapeHtml(path)}" title="移動・削除などの操作" aria-label="${escapeHtml(name)} の操作メニュー">⋯</button>`;
       return isPage
-        ? `<div class="tree-file-row"><button type="button" role="treeitem" draggable="true" data-page="${escapeHtml(path)}" class="tree-file ${activePath === path ? "selected" : ""}" title="${escapeHtml(path)}" ${activePath === path ? 'aria-current="page"' : ""}><span class="tree-icon">${uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></button></div>`
-        : `<div role="treeitem" tabindex="0" draggable="true" data-file="${escapeHtml(path)}" ${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? `data-image="${escapeHtml(path)}"` : ""} class="tree-file tree-static" title="${escapeHtml(path)}"><span class="tree-icon">${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? uiIcon("image") : uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></div>`;
+        ? `<div class="tree-file-row"><button type="button" role="treeitem" draggable="true" data-page="${escapeHtml(path)}" class="tree-file ${activePath === path ? "selected" : ""}" title="${escapeHtml(path)}" ${activePath === path ? 'aria-current="page"' : ""}><span class="tree-icon">${uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></button>${menuBtn}</div>`
+        : `<div class="tree-file-row"><div role="treeitem" tabindex="0" draggable="true" data-file="${escapeHtml(path)}" ${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? `data-image="${escapeHtml(path)}"` : ""} class="tree-file tree-static" title="${escapeHtml(path)}"><span class="tree-icon">${/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? uiIcon("image") : uiIcon("file")}</span><span class="tree-name">${escapeHtml(name)}</span></div>${menuBtn}</div>`;
     }).join("");
     return folderHtml + fileHtml;
   };

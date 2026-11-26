@@ -379,20 +379,11 @@ try {
   assert.equal(state.config.mkdocs.working_directory, 'C:/shared-venv');
   await page.locator('[data-close-dialog="panel-settings"]').click();
 
-  // 2. AI協業ツール -> 構成・読者: 目次順の並び替え・セクション/表示名・非表示・保存
-  await page.click('#view-menu-button');
-  await page.locator('#view-menu-dropdown').getByRole('checkbox', { name: 'AIターミナル' }).check();
-  await page.click('#view-menu-button');
-  await page.waitForSelector('#open-ai-collab-hub');
-  await page.click('#open-ai-collab-hub');
-  await page.waitForSelector('#ai-collab-hub-dialog[open]');
-  await page.waitForSelector('#hub-dashboard-pages .ai-hub-page-row');
-
-  // Verify single-html is available for audience build too
-  const audienceEngines = await page.$$eval('#hub-audience-build-engine option', (els) =>
-    els.map((e) => e.value),
-  );
-  assert.ok(audienceEngines.includes('single-html'));
+  // 2. HTML出力 -> 目次順・非表示 / 読者別出力: 目次順の並び替え・セクション/表示名・保存 & 読者別単一HTML確認
+  await page.click('#site-export-open');
+  await page.waitForSelector('#site-export-dialog[open]');
+  await page.click('#export-tab-nav');
+  await page.waitForSelector('#hub-nav-pages .ai-hub-page-row');
 
   // Move guide.md up to first position, assign section and title override
   await page.click('button[aria-label="docs/guide.md を上へ移動"]');
@@ -400,14 +391,22 @@ try {
   await page.fill('input[aria-label="docs/guide.md の目次表示名"]', '最初に読むガイド');
   await page.click('#hub-nav-save-btn');
   await page.waitForFunction(() =>
-    document.querySelector('#hub-dashboard-status')?.textContent?.includes('目次順・公開設定'),
+    document.querySelector('#hub-nav-status')?.textContent?.includes('目次順・公開設定'),
   );
   assert.equal(savedNavPayload.length, 2);
   assert.equal(savedNavPayload[0].page, 'docs/guide.md');
   assert.equal(savedNavPayload[0].section, '導入ガイド');
   assert.equal(savedNavPayload[0].title, '最初に読むガイド');
-  await page.locator('#ai-collab-hub-dialog').getByRole('button', { name: '閉じる', exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('#ai-collab-hub-dialog[open]'));
+
+  // Switch to audience export tab and verify single-html is available
+  await page.click('#export-tab-audience');
+  await page.waitForSelector('#hub-audience-pages .audience-page-row');
+  const audienceEngines = await page.$$eval('#hub-audience-build-engine option', (els) =>
+    els.map((e) => e.value),
+  );
+  assert.ok(audienceEngines.includes('single-html'));
+  await page.locator('#site-export-dialog').getByRole('button', { name: '閉じる', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('#site-export-dialog[open]'));
 
   // 3. 原稿チェック -> 用語集違反の一括置換（Diff確認・適用・元に戻す）
   await page.click('#reader-review');

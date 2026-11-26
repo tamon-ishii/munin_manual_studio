@@ -329,7 +329,7 @@ export function openAiNotesManagerDialog(options: {
   const help = document.createElement("p");
   help.className = "muted";
   help.textContent =
-    "チェックしたメモをまとめてAIターミナルへ依頼できます。解決後に preview-edit で反映すると、該当メモが本文へ置き換わります。";
+    "チェックしたメモをまとめてAIターミナルへ依頼できます。解決後に差分確認画面から反映すると、該当メモが本文へ置き換わります。";
   body.append(help);
 
   const list = document.createElement("div");
@@ -374,6 +374,10 @@ export function openAiNotesManagerDialog(options: {
 
   const footer = document.createElement("div");
   footer.className = "actions dialog-actions";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.textContent = "キャンセル";
+  cancelBtn.onclick = () => dialog.close();
   const sendBtn = document.createElement("button");
   sendBtn.type = "button";
   sendBtn.className = "primary";
@@ -384,7 +388,7 @@ export function openAiNotesManagerDialog(options: {
     dialog.close();
     options.onSendSelected(picked);
   };
-  footer.append(sendBtn);
+  footer.append(cancelBtn, sendBtn);
   body.append(footer);
 }
 
@@ -404,7 +408,7 @@ export function openExternalChangeTrayDialog(options: ExternalChangeTrayOptions)
   const intro = document.createElement("p");
   intro.className = "muted";
   intro.textContent =
-    "AIターミナル稼働中にディスク上で変更されたMarkdownファイルです。ハンク単位で採用（チェック維持）または変更前へ戻す（チェック解除）を選べます。";
+    "AIターミナル稼働中に変更されたMarkdownファイルです。変更ブロックごとに採用（チェック維持）または変更前へ戻す（チェック解除）を選べます。";
 
   const topActions = document.createElement("div");
   topActions.className = "actions external-tray-top-actions";

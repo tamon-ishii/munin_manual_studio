@@ -10,7 +10,7 @@ export function setupManuscriptSearch(options:ManuscriptToolsOptions):()=>void {
   return ()=>{
     if(!options.root()){options.report('先にプロジェクトを開いてください。',true);return;}
     const root=options.root();
-    const {dialog,body}=featureDialog('全文検索・選択置換');dialog.dataset.manuscriptSearch='true';
+    const {dialog,body}=featureDialog('全文検索・置換');dialog.dataset.manuscriptSearch='true';
     const form=document.createElement('form');form.className='manuscript-search-form';
     const query=document.createElement('input');query.type='search';query.required=true;query.maxLength=4096;query.setAttribute('aria-label','検索する文字');
     const replacement=document.createElement('input');replacement.setAttribute('aria-label','置換後の文字');

@@ -19,7 +19,7 @@ export interface PanelDef {
 
 export const PANELS: PanelDef[] = [
   { id: "file-tree", name: "ファイルツリー", elementId: "panel-tree" },
-  { id: "outline", name: "目次", elementId: "panel-outline" },
+  { id: "outline", name: "見出し一覧", elementId: "panel-outline" },
   { id: "capture-resources", name: "撮影リソース一覧", elementId: "panel-capture-resources" },
   { id: "editor", name: "原稿を編集", elementId: "panel-editor" },
   { id: "terminal", name: "AIターミナル", elementId: "panel-terminal" },
@@ -56,7 +56,7 @@ export const defaultLayoutJson: IJsonModel = {
           {
             type: "tab",
             id: "outline",
-            name: "目次",
+            name: "見出し一覧",
             component: "outline",
             enableClose: true,
           },
@@ -77,7 +77,7 @@ export const defaultLayoutJson: IJsonModel = {
                 id: "editor",
                 name: "原稿を編集",
                 component: "editor",
-                enableClose: true,
+                enableClose: false,
               },
             ],
           },

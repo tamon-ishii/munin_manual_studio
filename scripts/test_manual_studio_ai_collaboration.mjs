@@ -610,35 +610,51 @@ try {
   await page.keyboard.press('Escape');
   await trayDialog.waitFor({ state: 'hidden' });
 
-  // 6. AI Collaboration Hub (all 5 tabs)
-  await page.locator('#open-ai-collab-hub').click();
+  // 6. Goal-organized dialogs: HTML出力(読者別出力) / 原稿チェック(構成・裏取り・影響) / 原稿作成支援(操作記録・派生・多言語)
+  // 6a. HTML出力 -> 読者別出力
+  await page.locator('#site-export-open').click();
+  const exportDialog = page.locator('#site-export-dialog');
+  await exportDialog.waitFor({ state: 'visible' });
+  await exportDialog.locator('#export-tab-audience').click();
+  await exportDialog.locator('#hub-audience-status').filter({ hasText: '全 2 ページ' }).waitFor();
+  const guideAudienceRow = exportDialog.locator('#hub-audience-pages .audience-page-row').nth(1);
+  await guideAudienceRow.locator('select.audience-scope-select').selectOption('restricted');
+  await guideAudienceRow.locator('input[type="checkbox"][value="user"]').check();
+  await exportDialog.locator('#hub-audience-save-all').click();
+  await exportDialog.locator('#hub-audience-status').filter({ hasText: '読者設定を保存しました' }).waitFor();
+  assert.equal(savedAudiences.length, 1);
+  assert.deepEqual(savedAudiences[0].audiences, ['user']);
+  await exportDialog.locator('#hub-audience-build-btn').click();
+  await exportDialog.locator('#hub-audience-status').filter({ hasText: 'site-user' }).waitFor();
+  assert.equal(audienceBuilt, 1);
+  await page.keyboard.press('Escape');
+  await exportDialog.waitFor({ state: 'hidden' });
+
+  // 6b. 原稿チェック -> ページ構成・孤立診断 / ソースとの裏取り / アプリ変更の影響
+  await page.locator('#reader-review').click();
+  const checkDialog = page.locator('#manuscript-check-dialog');
+  await checkDialog.waitFor({ state: 'visible' });
+  await checkDialog.locator('#check-tab-structure').click();
+  await checkDialog.locator('#hub-dashboard-status').filter({ hasText: '全 2 ページ' }).waitFor();
+  assert.equal(await checkDialog.locator('#hub-dashboard-diagnostics .ai-hub-card').count(), 1);
+
+  await checkDialog.locator('#check-tab-fact-check').click();
+  await checkDialog.locator('#hub-fact-run').click();
+  await checkDialog.locator('#hub-fact-status').filter({ hasText: '根拠あり 1件 / 未確認 1件' }).waitFor();
+  await checkDialog.locator('#hub-fact-filter').selectOption('unverified');
+  assert.equal(await checkDialog.locator('#hub-fact-list .ai-hub-card').count(), 1);
+
+  await checkDialog.locator('#check-tab-impact').click();
+  await checkDialog.locator('#hub-impact-run').click();
+  await checkDialog.locator('#hub-impact-status').filter({ hasText: '影響ページ 1件' }).waitFor();
+  assert.equal(await checkDialog.locator('#hub-impact-list .ai-hub-card').count(), 2);
+  await page.keyboard.press('Escape');
+  await checkDialog.waitFor({ state: 'hidden' });
+
+  // 6c. 原稿作成支援 -> 操作記録から手順書 / FAQ・要約を作成 / 多言語の差分翻訳
+  await page.locator('#workspace-ai-hub-open').click();
   const hubDialog = page.locator('#ai-collab-hub-dialog');
   await hubDialog.waitFor({ state: 'visible' });
-
-  // Tab 1: Dashboard & audience save & audience build
-  await hubDialog.locator('#hub-dashboard-status').filter({ hasText: '全 2 ページ' }).waitFor();
-  assert.equal(await hubDialog.locator('#hub-dashboard-diagnostics .ai-hub-card').count(), 1);
-  await hubDialog.locator('#hub-dashboard-pages .ai-hub-page-row').nth(1).getByRole('button', { name: '読者保存' }).click();
-  assert.equal(savedAudiences.length, 1);
-  await hubDialog.locator('#hub-audience-build-btn').click();
-  await hubDialog.locator('#hub-dashboard-status').filter({ hasText: 'site-user' }).waitFor();
-  assert.equal(audienceBuilt, 1);
-
-  // Tab 2: Source Fact-check
-  await hubDialog.locator('#ai-hub-tab-fact-check').click();
-  await hubDialog.locator('#hub-fact-run').click();
-  await hubDialog.locator('#hub-fact-status').filter({ hasText: '根拠あり 1件 / 未確認 1件' }).waitFor();
-  await hubDialog.locator('#hub-fact-filter').selectOption('unverified');
-  assert.equal(await hubDialog.locator('#hub-fact-list .ai-hub-card').count(), 1);
-
-  // Tab 3: App Diff Impact Analyzer
-  await hubDialog.locator('#ai-hub-tab-impact').click();
-  await hubDialog.locator('#hub-impact-run').click();
-  await hubDialog.locator('#hub-impact-status').filter({ hasText: '影響ページ 1件' }).waitFor();
-  assert.equal(await hubDialog.locator('#hub-impact-list .ai-hub-card').count(), 2);
-
-  // Tab 4: Recording -> Procedural Draft & Diff insert
-  await hubDialog.locator('#ai-hub-tab-recording-draft').click();
   await hubDialog.locator('#hub-rec-resource').selectOption('res-1');
   await hubDialog.locator('#hub-rec-generate').click();
   await hubDialog.locator('#hub-rec-preview').waitFor({ state: 'visible' });
@@ -648,14 +664,14 @@ try {
   await diffDialog.getByRole('button', { name: '選んだ変更を反映', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('#markdown-editor').value.includes('「**設定**」ボタンをクリックします。'));
 
-  // Tab 5: Derivative & Differential Translation Sync
-  await page.locator('#open-ai-collab-hub').click();
+  await page.locator('#workspace-ai-hub-open').click();
   await hubDialog.waitFor({ state: 'visible' });
+  await hubDialog.locator('#ai-hub-tab-translation').click();
+  await hubDialog.locator('#hub-trans-run').click();
+  await hubDialog.locator('#hub-trans-diff').waitFor({ state: 'visible' });
   await hubDialog.locator('#ai-hub-tab-derivative').click();
   await hubDialog.locator('#hub-deriv-run').click();
   await hubDialog.locator('#hub-deriv-preview').waitFor({ state: 'visible' });
-  await hubDialog.locator('#hub-trans-run').click();
-  await hubDialog.locator('#hub-trans-diff').waitFor({ state: 'visible' });
   await hubDialog.locator('#hub-deriv-create').click();
   await hubDialog.waitFor({ state: 'hidden' });
   assert.equal(createdPages.some((p) => p.page === 'faq.md'), true);
